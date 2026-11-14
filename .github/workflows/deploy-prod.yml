@@ -1,0 +1,180 @@
+# Stufe prod: nur von Hand und nur nach Freigabe im Environment prod (Pflicht-Prüfer, nur main).
+#
+# ausrollen: Kern umschalten (prod-kern, 30 Minuten Bewährung, bei Ausfall automatisch zurück), dann die Oberfläche (prod-oberflaeche,
+#            blau/grün mit Bewährung, bei Fehlern automatisch zurück), Rauchtest, Versuch, die alte Kern-Instanz auszuleiten.
+#            Fällt der Rauchtest nach dem Umschalten durch, geht es zurück auf den vorher live gewesenen Stand (rueckweg).
+# ausleiten: die auslaufende Kern-Instanz beenden (nur ohne Sitzung, frühestens 30 Minuten nach dem Schalten)
+# rueckweg:  zurück auf den Stand vor dem letzten prod-Lauf (Oberfläche zuerst, dann Kern)
+# Voraussetzung für ausrollen: derselbe Stand hat die Stufe test bestanden (am Server geprüft).
+name: Ausrollen prod
+
+run-name: "Ausrollen prod: ${{ inputs.aktion }} ${{ inputs.teil }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      aktion:
+        description: "Aktion"
+        type: choice
+        options: [ausrollen, ausleiten, rueckweg]
+        default: ausrollen
+      stand:
+        description: "Für ausrollen: Commit (7 bis 40 Zeichen) oder Release-Name v<version>-<commit7>, in test bestanden"
+        type: string
+        default: ""
+      teil:
+        description: "Teil (für ausrollen und rueckweg)"
+        type: choice
+        options: [beides, kern, oberflaeche]
+        default: beides
+      trocken:
+        description: "Trockenlauf: nur zeigen, was geschähe"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  vorpruefung:
+    name: Schutz von prod und Stand prüfen
+    if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      commit: ${{ steps.stand.outputs.commit }}
+    steps:
+      - name: Hilfsskript holen (nur scripts/wais_deploy_github.py)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/wais_deploy_github.py
+          sparse-checkout-cone-mode: false
+
+      - name: Environment prod hat Pflicht-Prüfer und Regel für Zweige
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/wais_deploy_github.py umgebung --name prod
+
+      - name: Stand auflösen (nur Commits aus main)
+        id: stand
+        if: inputs.aktion == 'ausrollen'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EINGABE: ${{ inputs.stand }}
+        run: |
+          [ -n "$EINGABE" ] || { echo "::error::Für ausrollen ist ein Stand nötig (Commit oder Release-Name)."; exit 1; }
+          python3 scripts/wais_deploy_github.py stand --eingabe "$EINGABE"
+
+  server:
+    name: prod auf Sokrates-2
+    needs: vorpruefung
+    if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
+    runs-on: [self-hosted, linux, ARM64, wais-deploy]
+    environment: prod
+    timeout-minutes: 90
+    concurrency:
+      group: wais-deploy
+      cancel-in-progress: false
+    permissions: {}
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMMIT: ${{ needs.vorpruefung.outputs.commit }}
+      AKTION: ${{ inputs.aktion }}
+      TEIL: ${{ inputs.teil }}
+      TROCKEN: ${{ inputs.trocken }}
+    steps:
+      - name: Eingaben prüfen
+        run: |
+          [[ "$AKTION" =~ ^(ausrollen|ausleiten|rueckweg)$ ]] || { echo "::error::Aktion ungültig"; exit 1; }
+          [[ "$TEIL" =~ ^(beides|kern|oberflaeche)$ ]] || { echo "::error::Teil ungültig"; exit 1; }
+          if [ "$AKTION" = ausrollen ]; then [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Commit ungültig"; exit 1; }; fi
+
+      - name: Kern umschalten, 30 Minuten Bewährung (prod-kern)
+        id: kern
+        if: inputs.aktion == 'ausrollen' && inputs.teil != 'oberflaeche'
+        run: |
+          args=("$COMMIT")
+          if [ "$TROCKEN" = true ]; then args+=(--trocken); fi
+          sudo -n /usr/local/sbin/wais-deploy prod-kern "${args[@]}" | tee "$RUNNER_TEMP/prod-kern.txt"
+
+      - name: Oberfläche umschalten mit Bewährung (prod-oberflaeche)
+        id: oberflaeche
+        if: inputs.aktion == 'ausrollen' && inputs.teil != 'kern'
+        run: |
+          args=("$COMMIT")
+          if [ "$TROCKEN" = true ]; then args+=(--trocken); fi
+          sudo -n /usr/local/sbin/wais-deploy prod-oberflaeche "${args[@]}" | tee "$RUNNER_TEMP/prod-oberflaeche.txt"
+
+      - name: Rauchtest nach dem Umschalten (rauchtest)
+        id: rauchtest
+        if: inputs.aktion == 'ausrollen' && inputs.trocken == false
+        run: sudo -n /usr/local/sbin/wais-deploy rauchtest | tee "$RUNNER_TEMP/rauchtest.txt"
+
+      - name: Rückweg, weil der Rauchtest durchgefallen ist (rueckweg)
+        id: rueckweg_auto
+        if: failure() && inputs.aktion == 'ausrollen' && steps.rauchtest.outcome == 'failure'
+        run: sudo -n /usr/local/sbin/wais-deploy rueckweg "$TEIL" | tee "$RUNNER_TEMP/rueckweg.txt"
+
+      - name: Alte Kern-Instanz ausleiten (Versuch)
+        id: ausleiten_versuch
+        if: inputs.aktion == 'ausrollen' && inputs.teil != 'oberflaeche' && inputs.trocken == false
+        run: |
+          rc=0
+          sudo -n /usr/local/sbin/wais-deploy ausleiten | tee "$RUNNER_TEMP/ausleiten.txt" || rc=$?
+          if [ "$rc" = 3 ]; then
+            echo "::warning::Die alte Kern-Instanz läuft noch (Sitzung oder keine Ruhe). Später: Ausrollen prod mit Aktion ausleiten."
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Ausleiten (Aktion ausleiten)
+        id: ausleiten
+        if: inputs.aktion == 'ausleiten'
+        run: |
+          args=()
+          if [ "$TROCKEN" = true ]; then args+=(--trocken); fi
+          sudo -n /usr/local/sbin/wais-deploy ausleiten "${args[@]}" | tee "$RUNNER_TEMP/ausleiten.txt"
+
+      - name: Rückweg (Aktion rueckweg)
+        id: rueckweg
+        if: inputs.aktion == 'rueckweg'
+        run: |
+          args=("$TEIL")
+          if [ "$TROCKEN" = true ]; then args+=(--trocken); fi
+          sudo -n /usr/local/sbin/wais-deploy rueckweg "${args[@]}" | tee "$RUNNER_TEMP/rueckweg.txt"
+
+      - name: Zusammenfassung
+        if: always()
+        env:
+          S_KERN: ${{ steps.kern.outcome }}
+          S_OBERFLAECHE: ${{ steps.oberflaeche.outcome }}
+          S_RAUCHTEST: ${{ steps.rauchtest.outcome }}
+          S_RUECKWEG_AUTO: ${{ steps.rueckweg_auto.outcome }}
+          S_AUSLEITEN_VERSUCH: ${{ steps.ausleiten_versuch.outcome }}
+          S_AUSLEITEN: ${{ steps.ausleiten.outcome }}
+          S_RUECKWEG: ${{ steps.rueckweg.outcome }}
+        run: |
+          wert() { [ -f "$RUNNER_TEMP/$2.txt" ] && sed -n "s/^WAIS $1=\([A-Za-z0-9._:-]*\)\$/\1/p" "$RUNNER_TEMP/$2.txt" | tail -n 1; }
+          {
+            echo "## Ausrollen prod auf Sokrates-2: $AKTION"
+            echo
+            echo "| Punkt | Ergebnis |"
+            echo "| --- | --- |"
+            echo "| Stand | \`${COMMIT:-keiner}\` |"
+            echo "| Teil, Trockenlauf | $TEIL, $TROCKEN |"
+            echo "| prod-kern | $S_KERN: Release $(wert release prod-kern || true), Slot $(wert slot prod-kern || true), vorher $(wert vorher prod-kern || true), $(wert ergebnis prod-kern || true) |"
+            echo "| prod-oberflaeche | $S_OBERFLAECHE: Farbe $(wert farbe prod-oberflaeche || true), $(wert ergebnis prod-oberflaeche || true) |"
+            echo "| rauchtest | $S_RAUCHTEST |"
+            echo "| Rückweg nach Rauchtest | $S_RUECKWEG_AUTO |"
+            echo "| ausleiten (Versuch, Aktion) | $S_AUSLEITEN_VERSUCH, $S_AUSLEITEN: $(wert ergebnis ausleiten || true) |"
+            echo "| rueckweg (Aktion) | $S_RUECKWEG |"
+            echo
+            echo "Notausgang ohne GitHub: \`sudo /usr/local/sbin/wais-deploy rueckweg beides\` am Server oder der Notanker (\`sudo wamo-anker status\`)."
+          } >> "$GITHUB_STEP_SUMMARY"
