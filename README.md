@@ -371,7 +371,10 @@ keine `.env`.
   „W.A.I.S.“). `%APPDATA%\WAMO` (Anmeldung, Sitzung, Einstellungen, Logs), `%LOCALAPPDATA%\WAMO` (Gerätedaten, Tunnel) und
   `%USERPROFILE%\.ssh` fasst er nicht an, das Löschen der App-Daten ist aus (`deleteAppDataOnUninstall: false`). Eine an die
   Taskleiste angeheftete Verknüpfung behält ihren alten Namen, bis sie neu angeheftet wird. Einen automatischen Updater gibt es
-  in diesem Paket nicht (`publish` ist `null`). Das Audit-Protokoll
+  in diesem Paket nicht (`publish` ist `null`). Weil die Verknüpfung beim Update bleibt, liest Windows den Eintrag der Kennung im
+  App-Zwischenspeicher der Shell sonst nicht neu (nachgestellt am 14.11.2026 mit einer Test-App unter eigener Kennung). Der
+  Installer schreibt die Verknüpfung deshalb neu, meldet Verknüpfung und `WAMO.exe` der Shell als geändert und wartet 3 Sekunden,
+  bevor er die App startet (`desktop/build/installer.nsh`). Das Audit-Protokoll
   des Hosts (`host\wamo_audit.jsonl`) liegt im Installationsordner und geht bei Update oder Deinstallation verloren; ein fester
   Ort per `WAMO_AUDIT_LOG` braucht eine Änderung in `scripts/wamo-tunnel.ps1`.
 - **Electron 44.10.1** (exakt gepinnt, vorher 44.5.1): schließt den Hinweis von `npm audit` zu den Zwischenzertifikaten der
