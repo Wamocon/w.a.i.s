@@ -26,6 +26,7 @@ from persona import sichtbar
 
 # Welches Argument je Werkzeug als kurzer Hinweis in der Zeitleiste stehen darf
 DETAIL_KEYS = {
+    "jira_story_anlegen": "projekt",  # nur das Projekt, nie Titel oder Text
     "webseite_oeffnen": "url", "programm_oeffnen": "name", "oeffnen_mit": "pfad",
     "fenster_fokussieren": "fenster", "tasten_druecken": "kombination", "websuche": "anfrage",
     "canvas_zeigen": "titel", "auf_bildschirm_klicken": "ziel", "bildschirm_ansehen": "frage",

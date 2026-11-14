@@ -359,3 +359,60 @@ class RdAnmeldungStufeTest(unittest.TestCase):
         for name in ("WAMO_RD_ANMELDUNG", "WAMO_RD_ANMELDUNG_MAX", "WAMO_RD_ANMELDUNG_MAX_STUNDEN", "WAMO_RD_SOCKET", "WAMO_RD_ZIELE",
                      "WAMO_RD_ENV", "WAMO_RD_KEY", "WAMO_RD_URL", "WAMO_RD_PASSWORT_SOKRATES2"):
             self.assertFalse(env.erlaubt(name), name)  # nur der Schalter und die Stufe, nie Zugangsdaten oder Pfade
+
+
+# Jira-Stories (jira_client.py, jira_werkzeuge.py), seit 14.11.2026: kommen nur vom Server (core.env, gesetzt mit wamo-core-env per stdin),
+# nie aus der .env des PCs. WAMO_JIRA_TOKEN ist das API-Token des technischen Benutzers nur für W.A.I.S.
+JIRA_NAMEN = ("WAMO_JIRA", "WAMO_JIRA_URL", "WAMO_JIRA_EMAIL", "WAMO_JIRA_TOKEN", "WAMO_JIRA_PROJEKTE", "WAMO_JIRA_STANDARD_PROJEKT")
+
+
+class JiraEinstellungenTest(unittest.TestCase):
+    """Alle WAMO_JIRA*, die der Kern liest, lassen sich auf Sokrates-2 setzen (ERLAUBT), stehen nie in AUS_ENV, sind beschrieben und
+    stehen leer in der Vorlage (leer heißt aus)."""
+
+    def test_der_kern_liest_genau_diese_namen(self):
+        import re
+
+        namen = set()
+        for datei in Path(__file__).resolve().parent.glob("*.py"):
+            if not datei.name.startswith("test_"):
+                namen |= set(re.findall(r"WAMO_JIRA(?:_[A-Z0-9_]*[A-Z0-9])?\b", datei.read_text(encoding="utf-8")))
+        self.assertEqual(namen, set(JIRA_NAMEN))
+        import jira_client
+
+        self.assertEqual(set(jira_client.ALLE_VARIABLEN), set(JIRA_NAMEN))
+
+    def test_alle_stehen_in_erlaubt_und_keiner_in_aus_env(self):
+        env = LaborEinstellungenTest._env()
+        skript = EntwicklungsSchalterNieUebertragenTest._laden(
+            "wamo_kern_sokrates2_jira", Path(__file__).resolve().parent.parent / "scripts" / "wamo_kern_sokrates2.py")
+        for name in JIRA_NAMEN:
+            self.assertTrue(env.erlaubt(name), name)
+            self.assertNotIn(name, skript.AUS_ENV, f"{name} darf nicht aus der .env des PCs auf den Server gehen")
+        self.assertFalse([p for p in skript.AUS_ENV_PRAEFIX if p.startswith("WAMO_JIRA")])
+        self.assertFalse([p for p in env.ERLAUBT_PRAEFIX if p.startswith("WAMO_JIRA")])
+        for name in ("WAMO_JIRA_", "WAMO_JIRA_TOKEN2", "WAMO_JIRA_ADMIN", "JIRA_API_KEY", "wamo_jira_token"):
+            self.assertFalse(env.erlaubt(name), name)
+
+    def test_beschrieben_und_leer_in_der_vorlage(self):
+        text = (Path(__file__).resolve().parent / ".env.example").read_text(encoding="utf-8")
+        for name in JIRA_NAMEN:
+            self.assertIn(name, env_schalter.__doc__)
+            self.assertRegex(text, rf"(?m)^{name}=$", f"{name} fehlt oder hat einen Wert in voice-core/.env.example")
+
+    def test_leer_heisst_aus(self):
+        import jira_client
+
+        with mock.patch.dict(os.environ, {"WAMO_JIRA": ""}):
+            self.assertFalse(jira_client.jira_an())
+
+    def test_das_token_wird_uebernommen_und_nie_angezeigt(self):
+        env = LaborEinstellungenTest._env()
+        token = "ATATT3xFfGF0" + "Ab9_-=" * 30  # Form eines Atlassian-API-Tokens
+        code, ausgabe, geschrieben = LaborEinstellungenTest()._ausfuehren(env, env.setzen, f"WAMO_JIRA_TOKEN={token}\nWAMO_JIRA=aus\n")
+        self.assertEqual(code, 0)
+        self.assertEqual(geschrieben[0]["WAMO_JIRA_TOKEN"], token)
+        self.assertNotIn(token, ausgabe)
+        code, ausgabe, _ = LaborEinstellungenTest()._ausfuehren(env, env.liste, bestand=geschrieben[0])
+        self.assertIn("WAMO_JIRA_TOKEN: gesetzt", ausgabe)
+        self.assertNotIn(token, ausgabe)
