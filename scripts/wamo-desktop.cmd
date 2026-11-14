@@ -1,5 +1,5 @@
 @echo off
-rem WAMO-Desktop starten: Hauptfenster, Stimmen-Rand ueber allen Monitoren, Tray-Symbol.
+rem WAMO-Desktop starten: Hauptfenster, Tray-Symbol, Markierung am Zielfenster.
 rem Startet Voice-Core und Oberflaeche selbst, falls sie noch nicht laufen.
 rem VS Code setzt ELECTRON_RUN_AS_NODE=1 in seinen Terminals; dann wuerde Electron nur als Node laufen.
 set "ELECTRON_RUN_AS_NODE="

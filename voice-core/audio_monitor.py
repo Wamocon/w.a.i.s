@@ -202,7 +202,7 @@ class SpeakerTracker(FrameProcessor):
 
     Soniox liefert pro Wort eine Sprecher-Kennung ("1", "2", ...). Ohne Stimmabdruck gilt: wer in der
     Sitzung zuerst spricht, ist die angemeldete Person (Index 0), weitere Stimmen bekommen Index 1, 2, ...
-    Der Stimmen-Rand der Desktop-App faerbt sich danach.
+    Kern und Stimmlinie der Oberflaeche faerben sich danach.
     """
 
     def __init__(self, **kwargs):

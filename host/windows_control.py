@@ -21,7 +21,7 @@ from collections.abc import Callable
 from ctypes import wintypes
 
 MAX_TYPE_CHARS = 2000
-OVERLAY_TITLE = "WAMO Stimmen-Rand"  # Fenstertitel aus desktop/overlay.html (Namensvertrag)
+OVERLAY_TITLE = "WAMO Stimmen-Rand"  # Titel der Markierungsfenster (desktop/overlay.html, Namensvertrag)
 
 BLOCKED_TARGET_EXES = {
     "powershell.exe", "pwsh.exe", "powershell_ise.exe", "cmd.exe", "windowsterminal.exe", "wt.exe",
@@ -192,7 +192,7 @@ def list_windows() -> list[dict]:
         title = _title(hwnd)
         if not title.strip() or win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOOLWINDOW:
             return True
-        if title == OVERLAY_TITLE:  # eigene Rand-Fenster der Desktop-App
+        if title == OVERLAY_TITLE:  # eigene Markierungsfenster der Desktop-App
             return True
         found.append({"hwnd": hwnd, "titel": title[:200], "programm": _exe_of(hwnd)})
         return True

@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'" />
+    <!-- Markierungsfenster: Lichtrahmen ums Zielfenster und Klickwelle (markierung.js). Der Titel stammt vom früheren
+         Stimmen-Rand und bleibt, weil der Host diese Fenster daran erkennt (host/windows_control.py, Namensvertrag). -->
     <title>WAMO Stimmen-Rand</title>
     <link rel="stylesheet" href="overlay.css" />
   </head>
   <body>
-    <canvas id="edge"></canvas>
     <div id="rahmen" hidden></div>
     <div id="welle" hidden></div>
-    <script src="overlay.js"></script>
     <script src="markierung.js"></script>
   </body>
 </html>

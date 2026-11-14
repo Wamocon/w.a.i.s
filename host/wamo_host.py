@@ -1023,7 +1023,7 @@ def _anfrage(tool: str, art: str, daten: dict, aktion: str, grund: str, detail: 
 
 
 def _markierung(hwnd: object = None, klick: tuple[int, int] | None = None) -> dict:
-    """Für den Lichtrahmen am PC (Stimmen-Rand der Desktop-App): {"markierung": {...}} oder {}. Das Ergebnis eines
+    """Für den Lichtrahmen am PC (Markierungsfenster der Desktop-App): {"markierung": {...}} oder {}. Das Ergebnis eines
     Werkzeugs trägt nur ganze Zahlen mit Obergrenzen: das sichtbare Rechteck des Zielfensters ("fenster"), bei einem
     Klick der Punkt ("punkt") und der Monitor ("monitor"), auf den das Fenster zugeschnitten ist. Nie ein Titel, ein
     Programmname oder ein Inhalt. Nur nach gelungenen Aktionen aufrufen (Sperre, offene Freigabe und Ablehnung liefern

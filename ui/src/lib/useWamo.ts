@@ -31,7 +31,6 @@ import {
 } from "@/lib/stillStart";
 import { parseServerMessage, type Auftrag, type Markierung, type ModellModus } from "@/lib/nachrichten";
 import type { SchluesselArt } from "@/lib/schluesselhilfe";
-import { overlayFarben, type OverlayFarben } from "@/lib/stimmfarben";
 import { abdruckGestartet, abdruckLaeuft, kannEinlernen, kannLoeschen, STIMME_LEER } from "@/lib/stimme";
 import { HAENGT_HINWEIS, HAENGT_NACH_MS, textAbschicken, unterstuetztText } from "@/lib/textEingabe";
 import { vorgaengeBeenden } from "@/lib/vorgaenge";
@@ -82,6 +81,7 @@ import {
   abdruckAnsichtSchliessen,
   applyServerMessage,
   beginneNutzerZug,
+  desktopZustand,
   entferneAblauf,
   entferneMemo,
   gesprochen,
@@ -93,7 +93,6 @@ import {
   logEintrag,
   nachrichtAbgelehnt,
   nimmeTextAuf,
-  overlayZustand,
   reduceBotOutput,
   reduceBotTranscript,
   resetWamo,
@@ -103,7 +102,6 @@ import {
   type Approval,
   type Caption,
   type Fehler,
-  type LevelSample,
   type Memo,
   type Presence,
 } from "@/lib/wamo";
@@ -116,9 +114,8 @@ declare global {
     /** Nur in der Desktop-App (desktop/preload.js) vorhanden. */
     wamoDesktop?: {
       isDesktop: boolean;
-      levels: (sample: LevelSample & { zustand: string }) => void;
-      /** Farben des Stimmen-Rands einmalig übergeben (ältere Desktop-Versionen kennen das nicht). */
-      farben?: (farben: OverlayFarben) => void;
+      /** Zustand bei jedem Wechsel melden (Energiesparschutz, Markierung am Zielfenster); der Name stammt aus der Zeit der Pegel. */
+      levels: (meldung: { zustand: string }) => void;
       /** Lichtrahmen ums Zielfenster und Welle am Klickpunkt (nur Zahlen und Gerätekennung); die Desktop-App zeichnet nur auf
        *  dem Laptop, der handelt. Ältere Desktop-Versionen kennen das nicht. */
       markierung?: (markierung: Markierung) => void;
@@ -580,15 +577,9 @@ export function useWamo(): WamoAktionen {
     };
   }, [teardown]);
 
-  // Desktop-App: Farben des Stimmen-Rands einmalig übergeben (Quelle: CSS-Variablen)
+  // 20 Hz Abtastung der Pegel für Stimmlinie und Kern. Bewusst ohne React-State.
+  // An die Desktop-App geht nur ein Wechsel des Zustands, keine Pegel.
   useEffect(() => {
-    window.wamoDesktop?.farben?.(overlayFarben());
-  }, []);
-
-  // 20 Hz Abtastung der Pegel für Stimmlinie, Kern und Rand. Bewusst ohne React-State.
-  // An die Desktop-App geht nur etwas, solange es etwas zu zeigen gibt (sonst einmal Ruhe melden).
-  useEffect(() => {
-    let ruheGemeldet = false;
     let letzterZustand = "";
     const id = setInterval(() => {
       const meter = botMeter.current;
@@ -642,11 +633,10 @@ export function useWamo(): WamoAktionen {
       }
       const s = { ...lv };
       lv.cut = false; // cutAt bleibt für den Kern stehen
-      const zustand = overlayZustand(wamo.get());
-      const ruhe = (zustand === "offline" || zustand === "idle") && s.user < 0.003 && s.bot < 0.003 && !s.cut;
-      // jeder Zustandswechsel geht raus (die Desktop-App schaltet daran z. B. den Energiesparschutz)
-      if (!ruhe || !ruheGemeldet || zustand !== letzterZustand) window.wamoDesktop?.levels({ ...s, zustand });
-      ruheGemeldet = ruhe;
+      // Die Desktop-App schaltet am Zustand den Energiesparschutz und lässt bei offener Freigabe oder ohne Gespräch keine
+      // Markierung am Zielfenster stehen
+      const zustand = desktopZustand(wamo.get());
+      if (zustand !== letzterZustand) window.wamoDesktop?.levels({ zustand });
       letzterZustand = zustand;
       const h = historyRef.current;
       h.samples.push(s);
@@ -945,7 +935,7 @@ export function useWamo(): WamoAktionen {
             audioRef.current.play().catch(() => {
               setFehler({ art: "hinweis", text: "Die Wiedergabe wurde vom Browser blockiert. Bitte einmal in die Seite klicken." });
             });
-            // Pegel für Kern, Stimmlinie und den Rand der Desktop-App
+            // Pegel für Kern und Stimmlinie
             const alt = botMeter.current;
             if (alt) void alt.ctx.close().catch(() => undefined);
             const ctx = new AudioContext();

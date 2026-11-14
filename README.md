@@ -21,7 +21,7 @@ und der Repo-Name heißen weiter `wamo`. In den technischen Abschnitten dieser D
 | `ui/` | Next.js 16: Präsenzkern, Live-Untertitel, Stimmlinie, Werkzeug-Zeitleiste, Canvas, Freigabe-Karten, Anmeldung mit zweitem Faktor | PC (Desktop-App oder Browser) oder als Container `wamo-ui` auf Sokrates-2 (Browser jedes Büro-Geräts) |
 | `voice-core/` | Pipecat 1.12: Soniox STT, Claude Haiku 5.5, Soniox TTS; Mehrprofil-Anmeldung, Gedächtnis, Werkzeugkarte für ECC und REA | PC (Unterwegs) oder Sokrates-2 als Dienst `wamo-core` (Büro) |
 | `host/` | MCP-Werkzeugserver für Windows mit Risikoklassen und Audit-Log; lokal über stdio, im Büro über den SSH-Rücktunnel mit Bearer-Token | PC (angemeldete Sitzung) |
-| `desktop/` | Electron 44: App-Fenster, roter Stimmen-Rand je Monitor, Tray, Autostart, Betriebsart Büro/Unterwegs | PC |
+| `desktop/` | Electron 44: App-Fenster, Markierung am Zielfenster, Tray, Autostart, Betriebsart Büro/Unterwegs | PC |
 | `supabase/` | Migrationen mit `__SCHEMA__`-Platzhalter | eigener WAMO-Supabase auf Sokrates-2 |
 | `infra/sokrates2/` | Einrichtung von Supabase-Stack, TLS (eigene CA, Caddy), Firewall und Benutzer `wamo` (Claude Code, ECC, REA, gh, Vercel, Supabase-CLI) | Sokrates-2 |
 | `scripts/` | Start der Desktop-App, Datenbankzugang, Nutzerverwaltung, Migrationen, Versionsskript `wamo_version.py` | PC |
@@ -683,10 +683,15 @@ Der Router bleibt ausschließlich lesbar. Mögliche Schreibaktionen stehen nur a
   Desktop 7 Tage, Browser `NEXT_PUBLIC_WAMO_ANMELDUNG_MAX_STUNDEN_BROWSER` (Standard 24 Stunden). Unterschieden wird über
   `window.wamoDesktop`, nicht über die Adresse. GoTrue begrenzt Sitzungen zusätzlich (Zeitbox 168 Stunden,
   Inaktivität 72 Stunden; `infra/sokrates2/supabase-wamo-einrichten.sh`, Schritt 3b).
-- **Stimmen-Rand bei Vollbild** (`desktop/vollbild.js`): Ein PowerShell-Wächter fragt alle 1,5 s
-  `SHQueryUserNotificationState` ab; bei Vollbild-Programm, Direct3D-Vollbild und Präsentation (Werte 2, 3, 4) blendet
-  sich der Rand aus, erst nach zwei gleichen Werten. Wert 7 (Store-App) zählt nicht, weil Store-Apps unter Windows 10
-  und 11 auch im Fenster laufen. Der Wächter endet mit der App und startet nach einem Absturz nach 5 s neu.
+- **Vollbild-Wächter** (`desktop/vollbild.js`): Ein PowerShell-Wächter fragt alle 1,5 s
+  `SHQueryUserNotificationState` ab; bei Vollbild-Programm, Direct3D-Vollbild und Präsentation (Werte 2, 3, 4) zeichnet
+  die App keine Markierung am Zielfenster, und der rote Rahmen des Live-Bilds gilt als verdeckt, erst nach zwei gleichen
+  Werten. Wert 7 (Store-App) zählt nicht, weil Store-Apps unter Windows 10 und 11 auch im Fenster laufen. Der Wächter
+  endet mit der App und startet nach einem Absturz nach 5 s neu.
+- **Kein Stimmen-Rand mehr** (14.11.2026): Den Saum an allen Monitorkanten (rotes Band bei Sprache, Licht von unten,
+  Lauflicht, Eckwinkel, Haarlinie, Blitz) gibt es nicht mehr, ebenso den Tray-Haken „Stimmen-Rand“ und `WAMO_VEIL_CM`
+  (eine gesetzte Variable bewirkt nichts). Die Oberfläche meldet der Desktop-App nur noch ihren Zustand bei einem Wechsel
+  (Energiesparschutz, Markierung), keine Pegel und keine Randfarben (`--overlay-*` entfällt).
 - **Lichtrahmen und Klickwelle** (31.10.2026): Handelt WAMO am Laptop (Fenster nach vorne, Element klicken, Text setzen,
   Klicken, Scrollen, Tippen, Tasten, auch nach einer Freigabe), liegt ein roter Rahmen (`#F40E0E`) ums Zielfenster, bei
   Klicks läuft eine Welle vom Klickpunkt aus; nach etwa 1,5 s verschwindet er. Der Host liefert im Ergebnis nur ganze
@@ -696,8 +701,10 @@ Der Router bleibt ausschließlich lesbar. Mögliche Schreibaktionen stehen nur a
   Gerätekennung des Laptops an (Tunnel je Gerät, sonst den Rechnernamen) und schickt `markierung` an die Oberfläche
   (`ui/src/lib/nachrichten.ts`), die sie bei gesperrtem Bildschirm oder offener Freigabe verwirft und sonst über
   `window.wamoDesktop.markierung` an die App gibt. `desktop/lichtrahmen.js` prüft erneut und zeichnet nur auf dem Laptop,
-  dessen Kennung in `geraet.json` steht (ohne Kennung: gleicher Rechnername, ohne Namen nie); bei allen anderen Profilen und Geräten passiert nichts. Gezeichnet wird in `desktop/markierung.js` im
-  Stimmen-Rand: nicht anklickbar, nicht in Bildschirmfotos für das Bildmodell (Inhaltsschutz der Rand-Fenster), aus bei Vollbild (`vollbild.js`) und bei ausgeschaltetem Rand-Haken, aus bei offener
+  dessen Kennung in `geraet.json` steht (ohne Kennung: gleicher Rechnername, ohne Namen nie); bei allen anderen Profilen und Geräten passiert nichts. Gezeichnet wird in `desktop/markierung.js` in
+  einem Markierungsfenster je Monitor (`overlay.html`, Titel `WAMO Stimmen-Rand` für den Filter im Host): nicht anklickbar, nicht in
+  Bildschirmfotos für das Bildmodell (Inhaltsschutz), nur sichtbar, solange eine Markierung steht (etwa 2 s nach der letzten,
+  sonst ausgeblendet, `erzeugeMarkierungsAnzeige` in `lichtrahmen.js`), aus bei Vollbild (`vollbild.js`), bei offener
   Freigabe und ohne Gespräch. Bei `prefers-reduced-motion` gibt es kein Ein- und Ausblenden und keine wachsende Welle,
   nur einen stillen Rahmen und einen ruhenden Ring. Das Sprachmodell sieht die Zahlen im Werkzeugergebnis, mehr nicht.
 - **Live-Bild des eigenen Laptops** (31.10.2026, Paket E, Entscheidung des Nutzers mit Auflagen): Admin sieht den Bildschirm

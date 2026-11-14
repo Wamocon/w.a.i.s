@@ -20,7 +20,7 @@ die Labor-Daten dazu liegen unter `infra/sokrates2/labor-daten/`, auf dem Server
 | DB-Rolle Verwaltung | `wamo_admin` (Verbindung über `WAMO_ADMIN_DATABASE_URL`, nur `voice-core/wamo_admin.py`) |
 | Host | `host/wamo_host.py`, FastMCP-Name `wamo-host`, Audit `host/wamo_audit.jsonl` |
 | Desktop-Brücke | `window.wamoDesktop` (preload.js und ui/src/lib/useWamo.ts) |
-| Overlay-Fenstertitel | `WAMO Stimmen-Rand` (desktop/overlay.html und Filter in host/windows_control.py) |
+| Overlay-Fenstertitel | `WAMO Stimmen-Rand` (desktop/overlay.html und Filter in host/windows_control.py; Titel der Markierungsfenster, den früheren Stimmen-Rand gibt es nicht mehr) |
 | UI-Hook | `ui/src/lib/useWamo.ts`, Komponente `Wamo` |
 | Skripte | `scripts/wamo-desktop.cmd`, `scripts/wamo-app.cmd`, Chrome-Profil `%LOCALAPPDATA%\wamo-chrome` |
 | Oberfläche auf Sokrates-2 | Container `wamo-ui-blau` und `wamo-ui-gruen` (Images `wamo-ui:blau`, `wamo-ui:gruen`), Farbe in `etc/kern/wamo-ui-aktiv.inc`, Skript `wamo-ui-umschalten.sh`, Gesundheitsprobe `GET /version.json` |

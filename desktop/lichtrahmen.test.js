@@ -6,7 +6,16 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
-const { fuerRandFenster, pruefeMarkierung, pruefePunkt, pruefeRechteck, ruhezustand, sollZeichnen } = require("./lichtrahmen");
+const {
+  SICHTBAR_MS,
+  erzeugeMarkierungsAnzeige,
+  fuerRandFenster,
+  pruefeMarkierung,
+  pruefePunkt,
+  pruefeRechteck,
+  ruhezustand,
+  sollZeichnen,
+} = require("./lichtrahmen");
 const { ABBLENDEN_MS, HALTEN_MS, WELLE_ABSTAND_MS, WELLE_MS, rahmenGeometrie, welleGeometrie } = require("./markierung");
 
 const FENSTER = { x: 100, y: 50, b: 800, h: 600 };
@@ -96,7 +105,7 @@ test("offene Freigabe und kein Gespräch: kein Rahmen", () => {
   for (const z of ["idle", "acting", "thinking", "speaking", "listening"]) assert.equal(ruhezustand(z), false);
 });
 
-// ---------- Umrechnung auf die Rand-Fenster ----------
+// ---------- Umrechnung auf die Markierungsfenster ----------
 /** Bildschirm mit Skalierung 1,25 (Bildschirmpixel = DIP * 1,25), links daneben ein zweiter ohne Skalierung. */
 function bildschirm(faktor = 1) {
   return {
@@ -106,7 +115,7 @@ function bildschirm(faktor = 1) {
 }
 const RAND = [{ x: 0, y: 0, width: 1536, height: 864 }];
 
-test("Umrechnung: Bildschirmpixel werden DIP in Koordinaten des Rand-Fensters", () => {
+test("Umrechnung: Bildschirmpixel werden DIP in Koordinaten des Markierungsfensters", () => {
   const m = pruefeMarkierung(gut({ punkt: { x: 500, y: 400 } }));
   const aus = fuerRandFenster(m, bildschirm(1.25), RAND);
   assert.equal(aus.length, 1);
@@ -114,7 +123,7 @@ test("Umrechnung: Bildschirmpixel werden DIP in Koordinaten des Rand-Fensters", 
   assert.deepEqual(aus[0].punkt, { x: 400, y: 320 });
 });
 
-test("Umrechnung: ein Fenster auf dem zweiten Monitor trifft nur dessen Rand-Fenster", () => {
+test("Umrechnung: ein Fenster auf dem zweiten Monitor trifft nur dessen Markierungsfenster", () => {
   const zwei = [{ x: 0, y: 0, width: 1920, height: 1080 }, { x: 1920, y: 0, width: 1920, height: 1080 }];
   const m = pruefeMarkierung(gut({ fenster: { x: 2000, y: 100, b: 500, h: 400 }, monitor: { x: 1920, y: 0, b: 1920, h: 1080 },
     punkt: { x: 2100, y: 200 } }));
@@ -140,7 +149,7 @@ test("Umrechnung: Fehler der Bildschirm-Schnittstelle oder unsinnige Werte zeich
 });
 
 // ---------- Zeichnen (markierung.js, ohne DOM) ----------
-test("Geometrie im Rand-Fenster: einpassen, winzige und ungültige Rechtecke weglassen", () => {
+test("Geometrie im Markierungsfenster: einpassen, winzige und ungültige Rechtecke weglassen", () => {
   assert.deepEqual(rahmenGeometrie({ x: 10, y: 20, b: 300, h: 200 }, 1920, 1080), { x: 10, y: 20, b: 300, h: 200 });
   assert.deepEqual(rahmenGeometrie({ x: -20, y: -20, b: 3000, h: 2000 }, 1920, 1080), { x: 0, y: 0, b: 1920, h: 1080 });
   assert.equal(rahmenGeometrie({ x: 0, y: 0, b: 4, h: 400 }, 1920, 1080), null);
@@ -161,13 +170,143 @@ test("Zeiten: der Rahmen verschwindet nach kurzer Zeit von selbst, Wellen höchs
   assert.match(lies("overlay.css"), /transition-duration:\s*120ms/);
 });
 
-test("Rand-Fenster sind aus Bildschirmfotos ausgenommen und main.js merkt den Bereich je Monitor", () => {
+// ---------- Sichtbarkeit der Markierungsfenster (erzeugeMarkierungsAnzeige) ----------
+/** Attrappe eines BrowserWindow: zählt, was mit ihm geschieht, in der Reihenfolge der Aufrufe. */
+function fenster() {
+  const w = { sichtbar: false, zerstoert: false, spur: [] };
+  w.isDestroyed = () => w.zerstoert;
+  w.isVisible = () => w.sichtbar;
+  w.showInactive = () => {
+    w.sichtbar = true;
+    w.spur.push("zeigen");
+  };
+  w.hide = () => {
+    w.sichtbar = false;
+    w.spur.push("verbergen");
+  };
+  w.webContents = { send: (kanal, wert) => w.spur.push([kanal, wert]) };
+  return w;
+}
+
+/** Anzeige mit falschen Timern: uhr.laufen() löst alle noch geplanten aus. */
+function anzeige() {
+  const geplant = new Map();
+  let nr = 0;
+  const a = erzeugeMarkierungsAnzeige({
+    setTimeoutFn: (fn, ms) => {
+      nr += 1;
+      geplant.set(nr, { fn, ms });
+      return nr;
+    },
+    clearTimeoutFn: (id) => geplant.delete(id),
+  });
+  const uhr = {
+    geplant,
+    laufen() {
+      for (const [id, t] of [...geplant]) {
+        geplant.delete(id);
+        t.fn();
+      }
+    },
+  };
+  return { a, uhr };
+}
+
+const RAHMEN = { art: "fokus", fenster: { x: 10, y: 20, b: 300, h: 200 } };
+
+test("Markierungsfenster: ohne Markierung bleibt jedes Fenster ausgeblendet", () => {
+  const { a } = anzeige();
+  const w = fenster();
+  a.leeren(w);
+  a.alleLeeren();
+  assert.deepEqual(w.spur, [], "kein Einblenden und keine Nachricht ohne Markierung");
+  assert.equal(w.sichtbar, false);
+  assert.equal(a.istSichtbar(w), false);
+});
+
+test("Markierungsfenster: mit Markierung sichtbar, die Markierung kommt vor dem Einblenden an", () => {
+  const { a, uhr } = anzeige();
+  const w = fenster();
+  a.zeigen(w, RAHMEN);
+  assert.deepEqual(w.spur, [["markierung", RAHMEN], "zeigen"]);
+  assert.equal(w.sichtbar, true);
+  assert.equal(a.istSichtbar(w), true);
+  assert.deepEqual([...uhr.geplant.values()].map((t) => t.ms), [SICHTBAR_MS]);
+});
+
+test("Markierungsfenster: nach Ablauf leer und ausgeblendet, ein späteres Einblenden zeigt keinen alten Rahmen", () => {
+  const { a, uhr } = anzeige();
+  const w = fenster();
+  a.zeigen(w, RAHMEN);
+  uhr.laufen();
+  assert.deepEqual(w.spur, [["markierung", RAHMEN], "zeigen", ["markierung", null], "verbergen"]);
+  assert.equal(w.sichtbar, false);
+  assert.equal(a.istSichtbar(w), false);
+  assert.equal(uhr.geplant.size, 0);
+});
+
+test("Markierungsfenster: eine neue Markierung verlängert die Anzeige, ohne erneut einzublenden", () => {
+  const { a, uhr } = anzeige();
+  const w = fenster();
+  a.zeigen(w, RAHMEN);
+  const zweite = { ...RAHMEN, art: "klick", punkt: { x: 50, y: 60 } };
+  a.zeigen(w, zweite);
+  assert.deepEqual(w.spur, [["markierung", RAHMEN], "zeigen", ["markierung", zweite]]);
+  assert.equal(uhr.geplant.size, 1, "der erste Timer ist aufgehoben");
+  uhr.laufen();
+  assert.equal(w.sichtbar, false);
+});
+
+test("Markierungsfenster: leeren und alleLeeren blenden sofort aus, nur sichtbare Fenster bekommen Nachrichten", () => {
+  const { a, uhr } = anzeige();
+  const eins = fenster();
+  const zwei = fenster();
+  const drei = fenster();
+  a.zeigen(eins, RAHMEN);
+  a.zeigen(zwei, RAHMEN);
+  a.leeren(eins);
+  assert.equal(eins.sichtbar, false);
+  assert.deepEqual(eins.spur.slice(-2), [["markierung", null], "verbergen"]);
+  a.alleLeeren();
+  assert.equal(zwei.sichtbar, false);
+  assert.deepEqual(drei.spur, []);
+  assert.equal(uhr.geplant.size, 0);
+  const vorher = eins.spur.length;
+  a.leeren(eins); // schon leer: nichts mehr
+  assert.equal(eins.spur.length, vorher);
+});
+
+test("Markierungsfenster: zerstörte Fenster werden übersprungen, vergessen hebt alle Timer auf", () => {
+  const { a, uhr } = anzeige();
+  const tot = fenster();
+  tot.zerstoert = true;
+  a.zeigen(tot, RAHMEN);
+  assert.deepEqual(tot.spur, []);
+  const w = fenster();
+  a.zeigen(w, RAHMEN);
+  w.zerstoert = true; // Bildschirmwechsel: Fenster weg, bevor der Timer läuft
+  uhr.laufen();
+  assert.deepEqual(w.spur, [["markierung", RAHMEN], "zeigen"]);
+  const neu = fenster();
+  a.zeigen(neu, RAHMEN);
+  a.vergessen();
+  assert.equal(uhr.geplant.size, 0);
+  assert.equal(a.istSichtbar(neu), false);
+});
+
+test("Markierungsfenster: sichtbar, bis Rahmen und Welle ganz verschwunden sind, und nicht viel länger", () => {
+  assert.ok(SICHTBAR_MS >= HALTEN_MS + ABBLENDEN_MS);
+  assert.ok(SICHTBAR_MS >= WELLE_MS);
+  assert.ok(SICHTBAR_MS <= HALTEN_MS + ABBLENDEN_MS + 500);
+});
+
+test("Markierungsfenster sind aus Bildschirmfotos ausgenommen und main.js merkt den Bereich je Monitor", () => {
   const js = lies("main.js");
   assert.match(js, /win\.setContentProtection\(true\)/);
   assert.match(js, /win\.wamoBereich = display\.bounds/);
 });
 
-// ---------- Rand-Fenster: klick-durchlässig, WMC-Rot, reduzierte Bewegung (Quelltext-Prüfung) ----------
+// ---------- Markierungsfenster: klick-durchlässig, WMC-Rot, reduzierte Bewegung (Quelltext-Prüfung) ----------
 const lies = (datei) => fs.readFileSync(path.join(__dirname, datei), "utf8");
 
 test("overlay.html und overlay.css: nicht anklickbar, WMC-Rot, respektiert prefers-reduced-motion", () => {
@@ -181,21 +320,19 @@ test("overlay.html und overlay.css: nicht anklickbar, WMC-Rot, respektiert prefe
   assert.doesNotMatch(html, /<style>|unsafe-inline/); // Stil nur aus der Datei
 });
 
-test("markierung.js: berücksichtigt reduzierte Bewegung und räumt bei Freigabe oder Ende auf", () => {
+test("markierung.js: berücksichtigt reduzierte Bewegung und räumt bei null sofort auf", () => {
   const js = lies("markierung.js");
   assert.match(js, /prefers-reduced-motion/);
-  assert.match(js, /approval/);
-  assert.match(js, /offline/);
+  assert.match(js, /alleWeg\(\); \/\/ null/);
 });
 
-test("main.js: Markierungen nur von der eigenen Oberfläche, nur bei sichtbarem Rand und ohne offene Freigabe", () => {
+test("main.js: Markierungen nur von der eigenen Oberfläche, ohne Vollbild und ohne offene Freigabe", () => {
   const js = lies("main.js");
   const start = js.indexOf('ipcMain.on("markierung"');
   assert.ok(start > 0);
   const koerper = js.slice(start, js.indexOf("});", start));
   assert.ok(koerper.indexOf("fromMainUi(event)") > 0 && koerper.indexOf("fromMainUi(event)") < koerper.indexOf("pruefeMarkierung"));
-  assert.match(koerper, /randSoll\(\)/);
-  assert.match(koerper, /ruhezustand\(letzterZustand\)/);
+  assert.match(koerper, /if \(vollbild \|\| ruhezustand\(letzterZustand\)\) return;/);
   assert.match(koerper, /sollZeichnen\(/);
 });
 

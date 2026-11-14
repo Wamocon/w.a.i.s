@@ -4,9 +4,16 @@
 // Ergebnis ein Rechteck (Zielfenster), bei Klicks einen Punkt und den Monitor: nur ganze Zahlen mit Obergrenzen, nie einen
 // Titel oder Inhalt. Der Kern gibt sie mit der Gerätekennung des Laptops an die Oberfläche weiter, die Oberfläche über die
 // Brücke window.wamoDesktop.markierung an main.js. Hier wird noch einmal streng geprüft, entschieden, OB auf diesem Laptop
-// gezeichnet wird (nur wenn er der ist, der handelt), und von Bildschirmpixeln in Fensterkoordinaten der Rand-Fenster
-// umgerechnet. Gezeichnet wird in overlay.html (markierung.js).
+// gezeichnet wird (nur wenn er der ist, der handelt), und von Bildschirmpixeln in Fensterkoordinaten der Markierungsfenster
+// umgerechnet. Gezeichnet wird in overlay.html (markierung.js). Die Markierungsfenster (je Monitor eines) sind nur sichtbar,
+// solange sie eine Markierung zeigen (erzeugeMarkierungsAnzeige).
 "use strict";
+
+const { ABBLENDEN_MS, HALTEN_MS, WELLE_MS } = require("./markierung");
+
+// So lange bleibt ein Markierungsfenster nach der letzten Markierung sichtbar: bis Rahmen (halten und abblenden) und Welle
+// verschwunden sind, dazu ein kleiner Puffer, damit das Ausblenden nie in das Abblenden fällt
+const SICHTBAR_MS = Math.max(HALTEN_MS + ABBLENDEN_MS, WELLE_MS) + 150;
 
 const POS_MIN = -32768; // Bildschirmpixel, wie host/windows_control.py (Windows rechnet Koordinaten mit 16 Bit)
 const POS_MAX = 32767;
@@ -90,9 +97,9 @@ function schnitt(a, b) {
 }
 
 /**
- * Markierung in Fensterkoordinaten der Rand-Fenster umrechnen. screenApi: electron.screen (screenToDipRect,
- * screenToDipPoint); rechtecke: Bereiche der Rand-Fenster in DIP (getBounds). Rückgabe: je Rand-Fenster mit Treffer
- * { index, fenster, punkt? } in Koordinaten dieses Fensters. Schlägt die Umrechnung fehl, wird nichts gezeichnet.
+ * Markierung in Fensterkoordinaten der Markierungsfenster umrechnen. screenApi: electron.screen (screenToDipRect,
+ * screenToDipPoint); rechtecke: Bereiche der Markierungsfenster in DIP (getBounds). Rückgabe: je Markierungsfenster mit
+ * Treffer { index, fenster, punkt? } in Koordinaten dieses Fensters. Schlägt die Umrechnung fehl, wird nichts gezeichnet.
  */
 function fuerRandFenster(m, screenApi, rechtecke) {
   let dipFenster;
@@ -128,11 +135,57 @@ function fuerRandFenster(m, screenApi, rechtecke) {
   return aus;
 }
 
+/**
+ * Sichtbarkeit der Markierungsfenster (overlay.html): Ein Fenster ist nur sichtbar, solange es eine Markierung zeigt, sonst
+ * ausgeblendet (hide). So liegt kein unsichtbares Fenster dauerhaft über allen Programmen. fenster: BrowserWindow
+ * (isDestroyed, isVisible, showInactive, hide, webContents.send). Die Markierung geht vor dem Einblenden an das Fenster, beim
+ * Ausblenden geht null hinterher: Ein später wieder eingeblendetes Fenster zeigt nie einen alten Rahmen.
+ * setTimeoutFn und clearTimeoutFn nur für Tests.
+ */
+function erzeugeMarkierungsAnzeige({ dauerMs = SICHTBAR_MS, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {}) {
+  const timer = new Map(); // sichtbares Fenster -> Timer bis zum Ausblenden
+
+  function ausblenden(win) {
+    if (timer.has(win)) clearTimeoutFn(timer.get(win));
+    timer.delete(win);
+    if (win.isDestroyed()) return;
+    win.webContents.send("markierung", null);
+    win.hide();
+  }
+
+  return {
+    /** Markierung zeigen; eine neue Markierung verlängert die Anzeige. */
+    zeigen(win, markierung) {
+      if (win.isDestroyed()) return;
+      if (timer.has(win)) clearTimeoutFn(timer.get(win));
+      win.webContents.send("markierung", markierung);
+      if (!win.isVisible()) win.showInactive(); // nie den Fokus nehmen
+      timer.set(win, setTimeoutFn(() => ausblenden(win), dauerMs));
+    },
+    /** Dieses Fenster sofort leeren und ausblenden (nur wenn es gerade etwas zeigt). */
+    leeren(win) {
+      if (timer.has(win)) ausblenden(win);
+    },
+    /** Alle Fenster sofort leeren und ausblenden (offene Freigabe, Gesprächsende, Vollbild). */
+    alleLeeren() {
+      for (const win of [...timer.keys()]) ausblenden(win);
+    },
+    /** Alle Timer aufheben, bevor die Fenster neu gebaut werden (Bildschirmwechsel). */
+    vergessen() {
+      for (const t of timer.values()) clearTimeoutFn(t);
+      timer.clear();
+    },
+    istSichtbar: (win) => timer.has(win),
+  };
+}
+
 module.exports = {
   ARTEN,
   GROESSE_MAX,
   POS_MAX,
   POS_MIN,
+  SICHTBAR_MS,
+  erzeugeMarkierungsAnzeige,
   fuerRandFenster,
   pruefeMarkierung,
   pruefePunkt,
