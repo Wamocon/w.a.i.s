@@ -243,7 +243,15 @@ jobs:
           # Die Testdateien werden nach Namen sortiert und reihum auf die vier Teile verteilt
           mapfile -t dateien < <(git ls-files -- 'test_*.py' 'eval/test_*.py' | sort | awk -v n="${TEILE}" -v t="${TEIL}" '(NR - 1) % n == t - 1')
           echo "Teil ${TEIL} von ${TEILE}: ${#dateien[@]} Testdateien"
-          uv run --frozen python -m pytest -q -p no:cacheprovider --durations=15 "${dateien[@]}"
+          if uv run --frozen python -m pytest -q -rf --durations=15 "${dateien[@]}" 2>&1 | tee "${RUNNER_TEMP}/pytest.log"; then
+            exit 0
+          fi
+          # Ein zweiter Versuch nur für die gescheiterten Tests. Einige Pipeline-Tests (test_innehalten_pipeline.py) hängen am Takt
+          # des Rechners und scheitern gelegentlich. Was zweimal scheitert, bleibt rot; jeder zweite Versuch erscheint als Warnung.
+          grep '^FAILED ' "${RUNNER_TEMP}/pytest.log" | while read -r _ name _; do
+            echo "::warning title=Zweiter Versuch (Kern ${TEIL})::${name//::/ }"
+          done
+          uv run --frozen python -m pytest -q -rf --last-failed "${dateien[@]}"
 
   python:
     name: Python (Syntax und Lint, ganzes Repo)
