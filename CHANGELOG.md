@@ -54,6 +54,15 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Hinzugefügt
 
+- Prüfungen auf GitHub (README Abschnitt „Prüfungen auf GitHub“): Workflow `Prüfungen` (`.github/workflows/ci.yml`) bei jedem Push, jedem
+  Pull Request und manuell mit Wahl des Teils, mit Jobs für Oberfläche (ESLint, `tsc`, `node --test`, vitest, `next build`), Kern (pytest in
+  vier Teilen), Python (`compileall`, ruff mit Grundregeln), Labor-Dienst, Gerätedienst, Skripte, Desktop und Host (Windows), Infra
+  (`bash -n`, shellcheck, PowerShell-Syntax), Migrationen, Version und Abhängigkeiten (Audit als Hinweis) sowie dem Sammel-Check `Ergebnis`.
+  Workflow `CodeQL` (`.github/workflows/codeql.yml`) für Actions, JavaScript/TypeScript und Python. Alle fremden Actions sind auf Commit-SHAs
+  festgenagelt, auch im Secret Scan; nur Leserechte, keine Geheimnisse.
+- `scripts/wamo_migrationen_pruefen.py`: das Migrations-Lint der Prüfstrecke auf die Migrationen, die ein Zweig gegenüber einer Basis ändert
+  (`--basis origin/main`), mit Tests.
+
 - Innehalten statt Abbrechen (`voice-core/wiedergabe.py`, Schalter `WAMO_INNEHALTEN`, `WAMO_INNEHALTEN_WEITER_SECS` und `WAMO_INNEHALTEN_MAX_SECS`, Standard an): Ein einzelnes echtes
   Wort der Person, während WAMO spricht ("Danke", "Du"), lässt WAMO an der nächsten Wortgrenze innehalten (der Tonausgang pausiert in `write_audio_frame`, je Sitzung ein eigener
   `AusgabeHalt`). Kommt nach 0,7 Sekunden Stille nichts nach (höchstens 2,5 Sekunden Pause, nie über 4 Sekunden), spricht WAMO genau dort weiter. Zwei Wörter oder ein Stoppwort
@@ -337,6 +346,16 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   Antwort von GitHub zu Token und Installation zusätzlich auf die GitHub-ID des Repos (`SELF_REPO_IDS`, bleibt bei jeder Umbenennung
   gleich), ein Eintrag ohne lesbaren Namen sperrt. `wamo-job-kern-einrichten.sh kanal --repos` sperrt dieselben Namen. Der Vertragstest
   `voice-core/test_kernkanal_vertrag.py` hält alle drei Seiten gleich. Keine Migration.
+- Löschlauf des Testlabors (`infra/sokrates2/wamo-labor-loeschlauf.sh`): `HERE` war nie gesetzt, mit `set -u` brach der Lauf am Server vor dem
+  ersten Schritt ab („HERE: unbound variable“). Gefunden vom Test des Herkunftsschutzes, der nur unter Linux läuft.
+- Tests laufen auch unter Linux und in jedem Checkout: Tokendateien der Labor-Tests mit 0600, Node-Tests des Labor-Dienstes einzeln statt als
+  Ordner (Node 22), Warnung von Node 22 zum Modultyp in den Logiktests der Oberfläche aus, Attrappe für `ssh` mit Ausführungsrecht,
+  `JOURNAL_STREAM` des Test-Prozesses gelangt nicht in die Skripte, Temp-Ordner mit Git-Spiegel räumen trotz Wartung im Hintergrund auf,
+  tiefes JSON ohne Abhängigkeit von der Rekursionsgrenze, Plattformfälle (Python unter Linux, Rechte im erhöhten Prozess) mit Bedingung.
+- Altfehler der Kern-Suite: Tests des Wächters ohne festen Repo-Namen, Caddy-Tests mit den Kern-Slots aus Schritt 2.2, Moduswechsel nur
+  dort geprüft, wo es ihn gibt, ein verdeckter Test in `test_boss.py` läuft wieder. Die Eingabe-Erweiterung des Gateways checkt auch unter
+  Windows mit LF aus (`.gitattributes`).
+
 - Auth (Befund des Token-Tests vom 12.11.2026): Ein Konto mit aal2-Token konnte sein Passwort ohne erneute Anmeldung ändern, ein Laborbesucher
   hätte den Platz für den Nächsten sperren können. `docker-compose.wamo-sitzungen.yml` setzt jetzt
   `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true`, am Server wird nur der Auth-Container neu erstellt. Der Vergleichslauf

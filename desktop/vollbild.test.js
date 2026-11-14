@@ -209,13 +209,15 @@ test("viele Zeilen auf einmal: vollständige Zeilen zählen, nur der Rest ist be
 });
 
 test("echter Wächter liefert einen Zustand und endet mit seinem Elternprozess (nur Windows)", { skip: process.platform !== "win32" }, async () => {
-  // kurzlebiger Elternprozess: der Wächter muss kurz nach dessen Ende selbst aufhören
-  const eltern = spawn(process.execPath, ["-e", "setTimeout(() => {}, 4000)"], { stdio: "ignore" });
+  // Elternprozess, den der Test nach der ersten Zeile selbst beendet: der Wächter muss kurz danach selbst aufhören. Er lebt
+  // bewusst lange (60 s), weil PowerShell auf langsamen Rechnern (GitHub-Runner) mehrere Sekunden zum Starten braucht und der
+  // Wächter bei schon beendetem Elternprozess zu Recht ohne Ausgabe aufhört.
+  const eltern = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
   const kind = spawn(powershellPfad(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
     kodiert(waechterSkript(eltern.pid))], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
   try {
     const zeile = await new Promise((resolve, reject) => {
-      const frist = setTimeout(() => reject(new Error("keine Ausgabe nach 20 s")), 20000);
+      const frist = setTimeout(() => reject(new Error("keine Ausgabe nach 45 s")), 45000);
       let puffer = "";
       kind.stdout.setEncoding("utf8");
       kind.stdout.on("data", (d) => {

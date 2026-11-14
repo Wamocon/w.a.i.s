@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from wamo_labor_dienst.modell import Antwort, Aufruf, fingerabdruck
 from wamo_labor_dienst.regeln import PRUEFER
@@ -84,3 +86,10 @@ def schreib_kopf(durchlauf: str, platz: int | str = 3, schluessel: str | None = 
 
 def anlegen_http(client, durchlauf: str, platz: int = 3, **felder):
     return client.post("/api/kern/tickets", json={**ANLEGEN, **felder}, headers=schreib_kopf(durchlauf, platz))
+
+
+def token_datei(pfad: Path | str, text: str) -> None:
+    """Schreibt eine Tokendatei wie im Betrieb: nur für den Besitzer lesbar (0600). Unter Linux nimmt der Dienst sonst keinen Token an
+    (konfig.token_aus_datei), unter Windows prüft er die Rechte nicht."""
+    Path(pfad).write_text(text, encoding="utf-8")
+    os.chmod(pfad, 0o600)

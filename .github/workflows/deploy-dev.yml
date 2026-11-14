@@ -1,0 +1,126 @@
+# Stufe dev: Bau und Prüfungen. Die Prüf-Workflows selbst (Lint, Typen, Tests, Build) stehen in eigenen Dateien; hier sind sie
+# Vorbedingung: der Lauf wartet, bis alle für diesen Commit fertig und grün sind (Pflichtliste in der Repository-Variable
+# WAIS_PRUEF_WORKFLOWS, kommagetrennte Pfade wie .github/workflows/ci.yml). Danach am Server: pruefen-stand und verteilen.
+# Aufgerufen von deploy.yml oder von Hand.
+name: Ausrollen dev
+
+on:
+  workflow_call:
+    inputs:
+      stand:
+        type: string
+        required: true
+      trocken:
+        type: boolean
+        default: false
+    outputs:
+      commit:
+        description: "aufgelöster Commit (40 Zeichen)"
+        value: ${{ jobs.server.outputs.commit }}
+      release:
+        description: "Name des Kern-Release v<version>-<commit7>"
+        value: ${{ jobs.server.outputs.release }}
+  workflow_dispatch:
+    inputs:
+      stand:
+        description: "Commit (7 bis 40 Zeichen) oder Release-Name v<version>-<commit7>; leer = Kopf von main"
+        type: string
+        default: ""
+      trocken:
+        description: "Trockenlauf: nur zeigen, was geschähe"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  pruefungen:
+    name: Stand auflösen und Prüf-Workflows abwarten
+    if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      commit: ${{ steps.stand.outputs.commit }}
+    steps:
+      - name: Hilfsskript holen (nur scripts/wais_deploy_github.py)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/wais_deploy_github.py
+          sparse-checkout-cone-mode: false
+
+      - name: Stand auflösen (nur Commits aus main)
+        id: stand
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EINGABE: ${{ inputs.stand }}
+        run: python3 scripts/wais_deploy_github.py stand --eingabe "$EINGABE"
+
+      - name: Prüf-Workflows des Standes abwarten
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.stand.outputs.commit }}
+          PFLICHT: ${{ vars.WAIS_PRUEF_WORKFLOWS }}
+        run: python3 scripts/wais_deploy_github.py pruefungen --commit "$COMMIT" --pflicht "$PFLICHT" --frist 60
+
+  server:
+    name: Stand am Server prüfen und verteilen
+    needs: pruefungen
+    if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
+    runs-on: [self-hosted, linux, ARM64, wais-deploy]
+    environment: dev
+    timeout-minutes: 20
+    concurrency:
+      group: wais-deploy
+      cancel-in-progress: false
+    permissions: {}
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      commit: ${{ steps.verteilen.outputs.commit }}
+      release: ${{ steps.verteilen.outputs.release }}
+    env:
+      COMMIT: ${{ needs.pruefungen.outputs.commit }}
+      TROCKEN: ${{ inputs.trocken }}
+    steps:
+      - name: Stand am Server prüfen (pruefen-stand, nur origin/main)
+        id: pruefen
+        run: |
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Commit ungültig"; exit 1; }
+          sudo -n /usr/local/sbin/wais-deploy pruefen-stand "$COMMIT" | tee "$RUNNER_TEMP/pruefen-stand.txt"
+
+      - name: Stand auf Sokrates-2 verteilen (verteilen)
+        id: verteilen
+        run: |
+          args=("$COMMIT")
+          if [ "$TROCKEN" = true ]; then args+=(--trocken); fi
+          sudo -n /usr/local/sbin/wais-deploy verteilen "${args[@]}" | tee "$RUNNER_TEMP/verteilen.txt"
+          release="$(sed -n 's/^WAIS release=\(v[0-9.]*-[0-9a-f]\{7\}\)$/\1/p' "$RUNNER_TEMP/verteilen.txt" | tail -n 1)"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Zusammenfassung
+        if: always()
+        env:
+          S_PRUEFEN: ${{ steps.pruefen.outcome }}
+          S_VERTEILEN: ${{ steps.verteilen.outcome }}
+          RELEASE: ${{ steps.verteilen.outputs.release }}
+        run: |
+          [[ "$RELEASE" =~ ^v[0-9.]+-[0-9a-f]{7}$ ]] || RELEASE="nicht ermittelt"
+          {
+            echo "## Ausrollen dev auf Sokrates-2"
+            echo
+            echo "| Punkt | Ergebnis |"
+            echo "| --- | --- |"
+            echo "| Stand | \`$COMMIT\` |"
+            echo "| Kern-Release | $RELEASE |"
+            echo "| Trockenlauf | $TROCKEN |"
+            echo "| pruefen-stand (nur origin/main) | $S_PRUEFEN |"
+            echo "| verteilen | $S_VERTEILEN |"
+          } >> "$GITHUB_STEP_SUMMARY"

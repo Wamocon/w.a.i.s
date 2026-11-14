@@ -771,7 +771,9 @@ def test_absurd_tief_verschachtelte_ergebnisse_bleiben_unveraendert(ausgaben):
     tief = _tief(5000)
     assert ausgaben.kuerzen(tief).inhalt is tief
     assert ausgaben.verarbeiten("powershell_lesen", tief) is tief
-    als_text = "[" * 5000 + "]" * 5000 + " " + "z " * 3000
+    # Wie tief json.loads kommt, hängt von Plattform und Python-Version ab (unter Linux mit Python 3.12 gehen 5000 Ebenen noch durch,
+    # dann wäre es nur ungültiges JSON). 100 000 Ebenen liegen überall über der Grenze.
+    als_text = "[" * 100_000 + "]" * 100_000 + " " + "z " * 3000
     assert ausgaben.kuerzen(als_text).inhalt is als_text  # json.loads wirft RecursionError, nicht ValueError
     mit_marke = {"a": _tief(5000), "notiz": '[... 1 Zeilen, Nachladen: ausgabe_nachladen("deadbeefdeadbeef")]'}
     assert ausgaben.kuerzen(mit_marke).inhalt is mit_marke  # auch das Säubern von Marken wirft nie
