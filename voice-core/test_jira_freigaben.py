@@ -133,7 +133,7 @@ async def test_anfrage_schickt_die_karte_und_protokolliert_ohne_texte():
     angebot = await a.f.anfrage(STORY)
     assert angebot.karte is not None and angebot.grund is None
     karte = a.karte()
-    assert karte["job"] == "jira" and karte["projekt"] == "Jira"
+    assert karte["job"] == "jira" and karte["projekt"] == ""  # die Überschrift der Karte sagt schon "Jira-Story"
     item = karte["items"][0]
     assert re.fullmatch(r"[0-9a-f]{32}", item["id"])
     assert item["grund"] == "Jira-Story anlegen" and item["von"] == "Niko" and item["gueltig_s"] == 300

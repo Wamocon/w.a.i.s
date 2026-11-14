@@ -219,7 +219,7 @@ class JiraFreigaben:
         self._offen[aid] = antrag
         self._protokoll[aid] = self._protokollieren(antrag)
         logger.info("Jira-Freigabe {} angefragt (Projekt {})", aid[:8], story.projekt)
-        karte = {"type": "freigaben", "job": JOB, "projekt": "Jira", "items": [{
+        karte = {"type": "freigaben", "job": JOB, "projekt": "", "items": [{
             "id": aid, "grund": grund, "detail": detail, "von": self._von, "ziel": ziel, "gueltig_s": self.frist_secs}]}
         try:
             await self._senden(karte)

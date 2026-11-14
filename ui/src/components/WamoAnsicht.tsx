@@ -8,6 +8,7 @@ import { Einstellungen } from "@/components/einstellungen/Einstellungen";
 import { EINSTELLUNGEN_KNOPF_ID } from "@/components/einstellungen/EinstellungenLink";
 import { Auftraege, Freigaben } from "@/components/Freigaben";
 import { GemerktHinweis } from "@/components/GemerktHinweis";
+import { JiraErgebnisHinweis } from "@/components/JiraStory";
 import { Bedienung } from "@/components/kommando/Bedienung";
 import { BueroKarte } from "@/components/kommando/BueroKarte";
 import { useBueroStandHalten } from "@/components/kommando/useBueroStand";
@@ -185,7 +186,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
       canvas={
         <>
           {aktionen.liveBild && <BildschirmAnsicht aktionen={aktionen.liveBild} />}
-          <CanvasBereich />
+          <CanvasBereich jiraStory={aktionen.jiraStory} />
         </>
       }
       hinweise={
@@ -197,6 +198,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
       auftraege={
         <>
           <Freigaben onDecide={aktionen.decide} />
+          <JiraErgebnisHinweis />
           <Auftraege onDecide={aktionen.entscheideAuftrag} />
           <AuftraegeLeer />
         </>

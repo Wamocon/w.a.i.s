@@ -62,6 +62,8 @@
 }
 .canvas-chip[data-art="fehler"] { background: var(--accent); color: var(--on-accent); }
 .canvas-chip:empty { padding: 0; margin-right: -8px; } /* leer ohne Breite, der Abstand zum Knopf fällt mit weg */
+/* Knopf "Als User Story in Jira" im Kopf eines eigenen Dokuments (components/JiraStory.tsx), mit Chip daneben */
+.canvas-jira { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-self: start; }
 .canvas-code pre { margin: 0; padding: 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.6; }
 .canvas-code code, .canvas-doc code { font-family: var(--hud); }
 

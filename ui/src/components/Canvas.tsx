@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { JiraStoryKnopf } from "@/components/JiraStory";
 import { TeilenKnopf } from "@/components/Teilen";
 import { canvasIndex, canvasWunsch } from "@/lib/canvasWahl";
 import { KOPIERT_MS, kopierChipText, type KopierStatus } from "@/lib/kopieren";
@@ -42,11 +43,11 @@ const BEISPIELE = [
  * Ergebnisfläche: abonniert nur den eigenen Store-Ausschnitt (canvas) und rendert deshalb nicht
  * neu, wenn sich Untertitel oder Zeitleiste ändern. Leer zeigt sie eine ruhige Beispielliste.
  */
-export const CanvasBereich = memo(function CanvasBereich() {
+export const CanvasBereich = memo(function CanvasBereich({ jiraStory }: { jiraStory?: (canvasId: string) => boolean }) {
   const items = useSelect(wamo, (s) => s.canvas);
   // PC-Werkzeuge gibt es vorerst nur für admin; Mitgliedern den Hinweis darauf ersparen
   const mitglied = useSelect(wamo, (s) => s.profil?.rolle === "mitglied");
-  if (items.length) return <Canvas items={items} />;
+  if (items.length) return <Canvas items={items} jiraStory={jiraStory} />;
   return (
     <div className="canvas-empty">
       <p className="eyebrow">Canvas</p>
@@ -64,7 +65,7 @@ export const CanvasBereich = memo(function CanvasBereich() {
   );
 });
 
-function Canvas({ items }: { items: CanvasItem[] }) {
+function Canvas({ items, jiraStory }: { items: CanvasItem[]; jiraStory?: (canvasId: string) => boolean }) {
   const [picked, setPicked] = useState<number | null>(null);
   // "Ergebnis ansehen" in der Tafel Vorgänge (lib/canvasWahl.ts): ein neuer Wunsch wählt das Element mit dieser Kennung, noch im
   // selben Render (kein Zwischenbild mit dem alten Element). Ein Wunsch, der schon galt, bevor dieses Canvas entstand, zählt nicht.
@@ -106,6 +107,7 @@ function Canvas({ items }: { items: CanvasItem[] }) {
             </p>
           )}
           <CanvasTeilen item={item} />
+          <JiraStoryKnopf item={item} anfragen={jiraStory} />
         </header>
         <CanvasBody item={item} />
       </article>
