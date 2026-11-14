@@ -1077,7 +1077,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         context.set_tools(ToolsSchema(standard_tools=standard_tools))
 
     # Die Grenze der Laborsitzung: Namen im Kontext und am LLM müssen der Erlaubnisliste entsprechen, sonst entsteht keine Sitzung. Sie gilt für das
-    # Endergebnis und steht deshalb hinter dem letzten Block, der Werkzeuge einhängt (labor_werkzeuge, Bürogeräte). Heute hält zusätzlich die
+    # Endergebnis und steht deshalb hinter dem letzten Block, der Werkzeuge einhängt (labor_werkzeuge, Bürogeräte, Jira). Heute hält zusätzlich die
     # Bedingung "not labor_sitzung" den Bürogeräte-Block aus der Laborsitzung heraus; hängt später jemand dort oder davor etwas ein, scheitert
     # die Sitzung hier (test_bot_geraete.py prüft die Reihenfolge, test_labor_sitzung.py das Verhalten).
     if labor_sitzung:
