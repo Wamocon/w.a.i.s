@@ -338,6 +338,14 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Behoben
 
+- Selbstschutz der Entwicklungsaufträge nach der Umbenennung des Repos (Zweig `fix/selbstschutz-neuer-reponame`): Seit dem 14.11.2026 heißt
+  das Repo auf GitHub `Wamocon/w.a.i.s`, der Selbstschutz erkannte es nur am Namen `wamo`. Ein Auftrag mit `w.a.i.s` wäre nicht als eigenes
+  Repo abgelehnt worden. Kern (`voice-core/dev_guard.py`), Dispatcher und Kern-Kanal halten jetzt je eine Liste `SELF_REPOS = ("wamo",
+  "w.a.i.s")` und prüfen nur noch mit `ist_eigenes_repo`: Groß- und Kleinschreibung, Besitzer, `.git`, Punkte, Bindestriche und
+  Unterstriche zählen nicht (`wais`, `W-A-I-S`, `Wamocon/wamo.git`), was kein Text ist, gilt als eigenes Repo. Der Dispatcher prüft jede
+  Antwort von GitHub zu Token und Installation zusätzlich auf die GitHub-ID des Repos (`SELF_REPO_IDS`, bleibt bei jeder Umbenennung
+  gleich), ein Eintrag ohne lesbaren Namen sperrt. `wamo-job-kern-einrichten.sh kanal --repos` sperrt dieselben Namen. Der Vertragstest
+  `voice-core/test_kernkanal_vertrag.py` hält alle drei Seiten gleich. Keine Migration.
 - Löschlauf des Testlabors (`infra/sokrates2/wamo-labor-loeschlauf.sh`): `HERE` war nie gesetzt, mit `set -u` brach der Lauf am Server vor dem
   ersten Schritt ab („HERE: unbound variable“). Gefunden vom Test des Herkunftsschutzes, der nur unter Linux läuft.
 - Tests laufen auch unter Linux und in jedem Checkout: Tokendateien der Labor-Tests mit 0600, Node-Tests des Labor-Dienstes einzeln statt als

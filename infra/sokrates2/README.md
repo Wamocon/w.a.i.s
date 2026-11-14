@@ -1387,7 +1387,8 @@ Dispatcher **nicht widerrufen**. Darum ist ein API-Schlüssel mit Ausgabenlimit 
 bei dem der Zugang erzeugt wurde (API-Schlüssel: Schlüsselverwaltung des Workspaces, Claude-Code-Token: Kontoeinstellungen). Niko notiert den Weg dorthin vor Stufe 3a (Arbeitsliste N4), nie einen Wert; im Repo
 und auf dem Server steht kein Zugangswert im Klartext.
 
-**Was bleibt gesperrt:** Selbständerung (`SELF_REPO = "wamo"` im Kern und im Dispatcher, dazu die Fork-Prüfung), Supabase und `deployment` in der Sandbox, der Befehl `pruefen` im Kern-Kanal (auch mit
+**Was bleibt gesperrt:** Selbständerung (`SELF_REPOS = ("wamo", "w.a.i.s")` mit `ist_eigenes_repo` im Kern, im Dispatcher und im Kern-Kanal,
+im Dispatcher zusätzlich die GitHub-ID `SELF_REPO_IDS`, dazu die Fork-Prüfung), Supabase und `deployment` in der Sandbox, der Befehl `pruefen` im Kern-Kanal (auch mit
 `WAMO_PRUEFEN=an`), Jira und Vercel, bis ein enges Konto in `DIENSTE` steht. `PARALLEL_MAX = 1` gilt für beide Kanäle.
 
 ## 19. Labor-Dienst (Test-Jira des Testlabors, Betrieb, vorbereitet am 12.11.2026, noch nicht ausgerollt)

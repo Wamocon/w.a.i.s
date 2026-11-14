@@ -98,12 +98,21 @@ class SwitchTests(unittest.TestCase):
             aus("https://github.com/a/b und https://github.com/c/d")
         self.assertIn("ausdrücklich", str(ctx.exception))
         self.assertIsNone(aus("Lesen/Schreiben im Repo rezepte"))  # ohne GitHub-Adresse kein Raten
-        for eigen in ("wamocon/wamo", "Wamocon/WAMO", "https://github.com/wamocon/wamo.git"):  # Selbstschutz
-            with self.subTest(eigen=eigen), self.assertRaises(ValueError):
+        for eigen in ("wamocon/wamo", "Wamocon/WAMO", "https://github.com/wamocon/wamo.git",  # Selbstschutz
+                      "Wamocon/w.a.i.s", "wamocon/W.A.I.S", "https://github.com/Wamocon/w.a.i.s.git", "Wamocon/wamo.git",
+                      "x/wais", "x/w-a-i-s"):  # seit dem 14.11.2026 heißt das Repo w.a.i.s
+            with self.subTest(eigen=eigen), self.assertRaises(ValueError) as ctx:
                 dev_agent.repo_pruefen(eigen)
-        with self.assertRaises(ValueError) as ctx:  # nie stillschweigend übergehen: sonst Token für die ganze Installation
-            aus("Siehe https://github.com/wamocon/wamo für den Hintergrund.")
-        self.assertIn("Feld repo", str(ctx.exception))
+            self.assertIn("WAMO-Repo", str(ctx.exception))
+        for text in ("Siehe https://github.com/wamocon/wamo für den Hintergrund.", "Siehe https://github.com/Wamocon/w.a.i.s.",
+                     "Siehe github.com/Wamocon/W.A.I.S.git und so weiter"):
+            with self.subTest(text=text), self.assertRaises(ValueError) as ctx:  # nie stillschweigend übergehen: sonst Token für die ganze Installation
+                aus(text)
+            self.assertIn("Feld repo", str(ctx.exception))
+        for projekt in ("wamo", "wais", "w-a-i-s", "WAIS"):
+            with self.subTest(projekt=projekt), self.assertRaises(ValueError):
+                dev_agent.project_slug(projekt)
+        self.assertEqual(dev_agent.project_slug("wais-docs"), "wais-docs")
         for gross in ("https://GitHub.com/a/b", "HTTP://GITHUB.COM/a/b/", "GitHub.com/a/b.git"):  # Groß-/Kleinschreibung
             with self.subTest(gross=gross):
                 self.assertEqual(dev_agent.repo_pruefen(gross), "a/b")
