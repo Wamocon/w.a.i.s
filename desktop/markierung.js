@@ -1,13 +1,14 @@
-// Lichtrahmen und Klickwelle im Stimmen-Rand: Wenn WAMO an diesem Laptop handelt, liegt ein roter Rahmen um das Zielfenster,
-// bei Klicks läuft eine Welle vom Klickpunkt aus. Beides ist nicht anklickbar (das Rand-Fenster ignoriert die Maus, die
-// Elemente zusätzlich pointer-events: none), WMC-Rot (#F40E0E), und verschwindet kurz nach der Aktion von selbst.
-// main.js hat die Werte geprüft und auf dieses Fenster umgerechnet; hier wird nur gezeichnet.
+// Lichtrahmen und Klickwelle im Markierungsfenster (overlay.html): Wenn W.A.I.S. an diesem Laptop handelt, liegt ein roter
+// Rahmen um das Zielfenster, bei Klicks läuft eine Welle vom Klickpunkt aus. Beides ist nicht anklickbar (das Fenster ignoriert
+// die Maus, die Elemente zusätzlich pointer-events: none), WMC-Rot (#F40E0E), und verschwindet kurz nach der Aktion von selbst.
+// main.js hat die Werte geprüft und auf dieses Fenster umgerechnet; hier wird nur gezeichnet. Das Fenster selbst ist nur
+// sichtbar, solange eine Markierung steht (erzeugeMarkierungsAnzeige in lichtrahmen.js).
 //
 // * Rahmen: bleibt HALTEN_MS stehen und blendet dann in ABBLENDEN_MS aus; eine neue Markierung verlängert ihn.
 // * Welle: ein einzelner Ring, WELLE_MS lang (höchstens ein Puls je Klick, nie ein Blitzen: WCAG 2.3.1).
 // * Bei reduzierter Bewegung (prefers-reduced-motion): kein Einblenden, kein Ausblenden, keine wachsende Welle. Der
 //   Rahmen steht still, die Welle ist ein ruhender Ring am Klickpunkt, beides verschwindet nach der gleichen Zeit.
-// * Bei offener Freigabe oder ohne Gespräch (Zustand approval oder offline) verschwindet alles sofort.
+// * Bei offener Freigabe, ohne Gespräch oder bei Vollbild schickt main.js null und blendet das Fenster aus: alles sofort weg.
 (function () {
   "use strict";
 
@@ -92,10 +93,5 @@
       welle.classList.add("an");
       welleTimer = setTimeout(welleWeg, WELLE_MS);
     }
-  });
-
-  // Offene Freigabe oder kein Gespräch: nichts zeigen (die Zustände kommen mit den Pegeln wie bei overlay.js)
-  window.overlay.onLevels((s) => {
-    if (s && (s.zustand === "approval" || s.zustand === "offline")) alleWeg();
   });
 })();

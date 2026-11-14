@@ -1,19 +1,20 @@
-// Vollbild-Wächter für den Stimmen-Rand (nur Windows, Hauptprozess der Desktop-App).
+// Vollbild-Wächter (nur Windows, Hauptprozess der Desktop-App).
 //
-// Bei Spielen, Vollbild-Videos und Präsentationen stört der Rand und kann Spiele aus dem schnellen
-// Darstellungsmodus drängen. Windows meldet den Zustand über SHQueryUserNotificationState (shell32):
+// Bei Spielen, Vollbild-Videos und Präsentationen zeichnet die App keine Markierung am Zielfenster (ein Fenster über dem
+// Spiel kann es aus dem schnellen Darstellungsmodus drängen), und der rote Rahmen des Live-Bilds gilt als verdeckt.
+// Windows meldet den Zustand über SHQueryUserNotificationState (shell32):
 //   1 kein Benutzer, 2 Vollbild-Programm (BUSY), 3 Direct3D-Vollbild (Spiele), 4 Präsentationsmodus,
 //   5 Benachrichtigungen erlaubt (normal), 6 ruhige Zeit nach der Einrichtung, 7 Store-App läuft (APP).
-// Ausgeblendet wird bei 2, 3 und 4. Wert 7 zählt bewusst nicht: Microsoft beschreibt ihn nur als "eine Store-App
-// läuft", nicht als Vollbild. Mitzählen hieße, der Rand verschwände womöglich bei jedem Store-Fenster im Vordergrund
-// (Rechner, Einstellungen). Ob Vollbild in Store-Apps 2 oder 3 meldet, ist nicht gemessen: Mit WAMO_VOLLBILD_LOG=1
+// Vollbild heißt 2, 3 und 4. Wert 7 zählt bewusst nicht: Microsoft beschreibt ihn nur als "eine Store-App
+// läuft", nicht als Vollbild. Mitzählen hieße, jedes Store-Fenster im Vordergrund (Rechner, Einstellungen) gälte als
+// Vollbild. Ob Vollbild in Store-Apps 2 oder 3 meldet, ist nicht gemessen: Mit WAMO_VOLLBILD_LOG=1
 // schreibt der Wächter jeden Rohwert ins Log (desktop/logs/vollbild.log), damit sich das prüfen lässt.
 //
 // Electron kann den Wert nicht selbst abfragen. Ein kleiner PowerShell-Wächter (voller Pfad im Windows-Ordner) gibt
 // ihn alle 1,5 s aus; der Befehl geht als -EncodedCommand (UTF-16LE, Base64) ohne Quoting-Probleme und ohne
 // Skriptdatei. Er wartet über das Prozess-Handle der App (WaitForExit) und endet kurz nach ihr. Stirbt er, startet er
 // nach 5 s neu, bei Dauerfehlern mit wachsender Pause (bis 60 s); nach mehreren schnellen Fehlschlägen in Folge gibt
-// er auf, schreibt den Grund ins Log und zeigt den Rand wieder (lieber sichtbar als für immer weg). Umgeschaltet wird
+// er auf, schreibt den Grund ins Log und meldet wieder "kein Vollbild" (nicht für immer im Vollbild). Umgeschaltet wird
 // erst nach zwei gleichen Werten hintereinander (kein Flackern). In den Befehl gelangt nur die eigene PID als Ganzzahl.
 "use strict";
 
@@ -115,7 +116,7 @@ function starteVollbildWaechter({
     if (beendet || timer) return;
     if (fehlschlaege >= AUFGEBEN_NACH) {
       beendet = true;
-      log(`Vollbild-Wächter aufgegeben nach ${fehlschlaege} Fehlschlägen; der Rand bleibt sichtbar`);
+      log(`Vollbild-Wächter aufgegeben nach ${fehlschlaege} Fehlschlägen; es gilt wieder kein Vollbild`);
       if (entpreller.vollbild) entpreller.setzen(false);
       return;
     }

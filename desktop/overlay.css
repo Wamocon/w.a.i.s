@@ -1,5 +1,4 @@
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-canvas { display: block; width: 100vw; height: 100vh; }
 /* Lichtrahmen und Klickwelle (markierung.js): WMC-Rot, nie anklickbar */
 #rahmen, #welle { position: fixed; box-sizing: border-box; pointer-events: none; }
 #rahmen[hidden], #welle[hidden] { display: none; }

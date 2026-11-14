@@ -1,4 +1,4 @@
-// Tests für den Vollbild-Wächter des Stimmen-Rands (vollbild.js). Ausführen im Ordner desktop/:  npm test
+// Tests für den Vollbild-Wächter (vollbild.js). Ausführen im Ordner desktop/:  npm test
 "use strict";
 
 const assert = require("node:assert/strict");
@@ -92,7 +92,7 @@ test("erst nach zwei gleichen Werten wird umgeschaltet", () => {
   e.wert("5");
   assert.deepEqual(wechsel, [true, false]);
   e.wert("7");
-  e.wert("7"); // Store-App: Rand bleibt
+  e.wert("7"); // Store-App: kein Vollbild
   assert.deepEqual(wechsel, [true, false]);
 });
 
@@ -141,9 +141,9 @@ test("Startfehler führt zum Neustart statt zum Absturz", () => {
   assert.equal(timer[0].ms, 5000);
 });
 
-test("Dauerfehler: wachsende Pause, Diagnose ins Log, dann aufgeben und den Rand wieder zeigen", () => {
+test("Dauerfehler: wachsende Pause, Diagnose ins Log, dann aufgeben und wieder kein Vollbild melden", () => {
   const { kinder, timer, wechsel, logs, jetzt } = aufbau();
-  kinder[0].stdout.emit("data", "3\n3\n"); // Vollbild, Rand aus
+  kinder[0].stdout.emit("data", "3\n3\n"); // Vollbild
   assert.deepEqual(wechsel, [true]);
   for (let i = 0; i < AUFGEBEN_NACH; i++) {
     const k = kinder[kinder.length - 1];
@@ -156,9 +156,9 @@ test("Dauerfehler: wachsende Pause, Diagnose ins Log, dann aufgeben und den Rand
   assert.deepEqual(timer.map((t) => t.ms), [5000, 10000, 20000, 40000, 60000].slice(0, AUFGEBEN_NACH - 1));
   assert.ok(timer.every((t) => t.ms <= NEUSTART_MAX_MS));
   assert.equal(kinder.length, AUFGEBEN_NACH);
-  assert.deepEqual(wechsel, [true, false]); // aufgegeben: Rand nicht für immer weg
+  assert.deepEqual(wechsel, [true, false]); // aufgegeben: nicht für immer im Vollbild
   assert.ok(logs.some((l) => l.includes("Code 1") && l.includes("eingeschränkt")));
-  assert.ok(logs.some((l) => l.includes("aufgegeben")));
+  assert.ok(logs.some((l) => l.includes("aufgegeben") && l.includes("kein Vollbild") && !l.includes("Rand")));
 });
 
 test("gültige Ausgabe setzt die Fehlerzählung zurück", () => {

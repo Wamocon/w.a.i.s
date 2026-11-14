@@ -4,12 +4,11 @@
 //   Mikrofon und Sprachausgabe laufen weiter, auch wenn Chrome, Amazon & Co. vorne sind.
 //   Beim Start zeigt es sofort eine Ladeseite (start.html), bei Ladefehlern eine Fehlerseite mit
 //   "Wiederholen".
-// * Stimmen-Rand "Rote Kante": pro Monitor ein durchsichtiges, nicht anklickbares Fenster ganz oben.
-//   Im Ruhezustand unsichtbar; WAMO spricht rot, der Mensch als Licht von unten, dazu Denken, Handeln
-//   und wartende Freigaben (Zustand kommt mit den Pegeln). Die Farben kommen einmalig aus den
-//   CSS-Variablen der Oberfläche (ui/src/lib/stimmfarben.ts), sie sind nur dort definiert.
-//   Bei Vollbild-Programmen (Spiele, Videos, Präsentationen) blendet sich der Rand aus (vollbild.js); sichtbar ist er
-//   nur, wenn der Tray-Haken "Stimmen-Rand" an ist und kein Vollbild läuft (randSichtbarkeit).
+// * Markierung am Zielfenster (lichtrahmen.js, markierung.js): Handelt W.A.I.S. an diesem Laptop, liegt kurz ein roter
+//   Rahmen um das Zielfenster, bei Klicks eine Welle am Klickpunkt. Gezeichnet wird in einem durchsichtigen, nicht
+//   anklickbaren Fenster je Monitor (overlay.html), das nur sichtbar ist, solange eine Markierung steht, sonst ausgeblendet.
+//   Bei Vollbild-Programmen (Spiele, Videos, Präsentationen, vollbild.js), offener Freigabe und ohne Gespräch gibt es keine.
+//   Einen Saum an den Monitorkanten (früher "Stimmen-Rand") gibt es nicht mehr.
 // * Live-Bild (livebild.js): ein Schalter im Tray-Menü, Standard aus, nur die Person am Laptop schaltet ihn ein (nach einer
 //   Einwilligung). Solange er an ist, zeigt dieser Laptop einen roten Rahmen mit Plakette (nicht vor Bildschirmfotos
 //   geschützt) und das Tray-Symbol ist rot. Der Host liefert nur Bilder, wenn der Schalter an ist und dieser Hinweis lebt.
@@ -33,14 +32,14 @@
 //   --ignore-certificate-errors.
 //
 // Umgebung: WAMO_UI_URL, WAMO_VOICE_CORE_URL (http oder https), WAMO_MANAGE_SERVICES, WAMO_UI_DEV,
-// WAMO_VEIL_CM, WAMO_LOG_LEVEL (an den Voice-Core; Standard INFO, nie DEBUG), WAMO_VOLLBILD_LOG=1 (Rohwerte des
+// WAMO_LOG_LEVEL (an den Voice-Core; Standard INFO, nie DEBUG), WAMO_VOLLBILD_LOG=1 (Rohwerte des
 // Vollbild-Wächters in logs/vollbild.log), WAMO_BERECHTIGUNG_LOG=1 (jede Berechtigungsanfrage und -prüfung in
 // logs/berechtigungen.log; abgelehnte Mikrofon-Anfragen stehen immer dort). Mikrofon-Meldungen der Oberfläche
 // ("[WAMO] ...", z. B. "Mikrofon liefert Ton: Gerät, Spitze -52 dBFS" oder "liefert nur Stille") und der
 // Windows-Mikrofonzugriff beim Start landen in logs/oberflaeche.log.
 //
-// Sicherheit: contextIsolation + sandbox, keine nodeIntegration. Die Seite darf nur Pegel mit Zustand,
-// einmalig die Randfarben und die Zahlen des Lichtrahmens (lichtrahmen.js) melden; alles wird hier geprüft. Navigation und
+// Sicherheit: contextIsolation + sandbox, keine nodeIntegration. Die Seite darf nur ihren Zustand und die Zahlen des
+// Lichtrahmens (lichtrahmen.js) melden; alles wird hier geprüft. Navigation und
 // Weiterleitungen bleiben auf dem UI-Origin, keine Webviews, Mikrofon (nur Audio) nur für das
 // Hauptfenster mit der eigenen Oberfläche, fremde Seiten öffnen im normalen Browser.
 // Prozesse aus PID-Dateien werden nur beendet, wenn Programmname, Befehlszeile und Startzeit passen.
@@ -68,7 +67,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { GeraetFehler, erzeugeGeraet } = require("./geraet");
 const { erzeugeLiveBild, EINWILLIGUNG } = require("./livebild");
-const { fuerRandFenster, pruefeMarkierung, ruhezustand, sollZeichnen } = require("./lichtrahmen");
+const { erzeugeMarkierungsAnzeige, fuerRandFenster, pruefeMarkierung, ruhezustand, sollZeichnen } = require("./lichtrahmen");
 const { entladenBehandeln } = require("./entladen");
 const { erzeugeHostUmgebung } = require("./host-umgebung");
 const { adressen, loeseAuf, wirksameBetriebsart } = require("./installation");
@@ -154,15 +153,14 @@ if (process.platform === "win32") app.setAppUserModelId("de.wamocon.wamo");
 
 let mainWin = null;
 let tray = null;
-let overlays = [];
+let overlays = []; // je Monitor ein Markierungsfenster (overlay.html), nur sichtbar, solange es eine Markierung zeigt
+const markierungen = erzeugeMarkierungsAnzeige(); // zeigt und verbirgt die Markierungsfenster (lichtrahmen.js)
 let liveHinweise = []; // roter Rahmen mit Plakette am Laptop, solange das Live-Bild läuft (livebild.js)
 let liveBis = 0;
 let liveIcon = null;
-let borderOn = true;
 let vollbild = false; // Vollbild-Programm vorne (vollbild.js, entprellt)
 let vollbildWaechter = null;
 let quitting = false;
-let farben = null; // Randfarben aus der Oberfläche, geprüft (siehe ipcMain "farben")
 let energieId = null; // powerSaveBlocker nur während eines Gesprächs
 const children = [];
 const kinder = {}; // Dienstname -> laufender Kindprozess aus diesem Lauf
@@ -613,14 +611,11 @@ function createMainWindow() {
   zeigeStart("laden");
 }
 
-// Schleierbreite in geräteunabhängigen Pixeln: 96 DIP entsprechen nominal 2,54 cm (Windows rechnet
-// Skalierung schon ein). Standard 4,55 cm; WAMO_VEIL_CM ändert das (2 bis 12 cm).
-function veilWidthDip() {
-  const cm = Math.min(12, Math.max(2, Number(process.env.WAMO_VEIL_CM) || 4.55));
-  return Math.round((cm * 96) / 2.54);
-}
-
+// Markierungsfenster: je Monitor ein durchsichtiges, nicht anklickbares Fenster über allen Programmen, in dem markierung.js
+// den Lichtrahmen und die Klickwelle zeichnet. Es startet ausgeblendet; eingeblendet wird es nur von der Markierungsanzeige
+// (lichtrahmen.js), solange eine Markierung steht.
 function createOverlays() {
+  markierungen.vergessen();
   overlays.forEach((w) => !w.isDestroyed() && w.destroy());
   overlays = screen.getAllDisplays().map((display) => {
     const { x, y, width, height } = display.bounds;
@@ -649,37 +644,16 @@ function createOverlays() {
     win.wamoBereich = display.bounds; // Bereich in DIP, aus dem die Markierung umgerechnet wird (getBounds rundet anders)
     win.setAlwaysOnTop(true, "screen-saver");
     win.setVisibleOnAllWorkspaces(true);
-    // Der Rand lädt nur seine lokale Datei, nie etwas anderes
+    // Das Markierungsfenster lädt nur seine lokale Datei, nie etwas anderes
     win.webContents.on("will-navigate", (event) => event.preventDefault());
     win.webContents.on("will-redirect", (event) => event.preventDefault());
     win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    win.webContents.on("did-finish-load", () => {
-      if (farben) win.webContents.send("farben", farben);
-    });
-    void win.loadFile(path.join(__dirname, "overlay.html"), { query: { veil: String(veilWidthDip()) } });
-    win.once("ready-to-show", () => {
-      if (randSoll()) win.showInactive();
-    });
+    void win.loadFile(path.join(__dirname, "overlay.html"));
     return win;
   });
 }
 
-/** Soll der Rand zu sehen sein? Tray-Haken an und kein Vollbild-Programm vorne. */
-function randSoll() {
-  return borderOn && !vollbild;
-}
-
-/** Gemeinsamer Weg für Tray-Haken und Vollbild-Zustand: alle Rand-Fenster zeigen oder ausblenden. */
-function randSichtbarkeit() {
-  const zeigen = randSoll();
-  for (const w of overlays) {
-    if (w.isDestroyed()) continue;
-    if (zeigen) w.showInactive();
-    else w.hide();
-  }
-}
-
-// Bildschirmwechsel kommen oft in Schüben (Dock, Skalierung): Ränder erst nach 300 ms Ruhe neu bauen
+// Bildschirmwechsel kommen oft in Schüben (Dock, Skalierung): Markierungsfenster erst nach 300 ms Ruhe neu bauen
 let overlayTimer = null;
 function overlaysSpaeter() {
   if (overlayTimer) clearTimeout(overlayTimer);
@@ -872,15 +846,6 @@ function aktualisiereTray() {
         ],
       },
       {
-        label: "Stimmen-Rand",
-        type: "checkbox",
-        checked: borderOn,
-        click: (item) => {
-          borderOn = item.checked;
-          randSichtbarkeit();
-        },
-      },
-      {
         // Standard aus; nur die Person am Laptop schaltet es ein (mit Einwilligung), nur auf dem Laptop eines Admins
         label: live.an ? "Live-Bild ausschalten (läuft)" : "Live-Bild einschalten …",
         click: () => void liveBildUmschalten(),
@@ -907,7 +872,7 @@ function aktualisiereTray() {
   );
 }
 
-// ---------- Brücke von der Oberfläche zu den Rand-Fenstern ----------
+// ---------- Brücke von der Oberfläche zum Hauptprogramm ----------
 // Nur das Hauptfenster mit der eigenen Oberfläche darf senden.
 function fromMainUi(event) {
   return Boolean(mainWin) && event.sender === mainWin.webContents && sameOrigin(event.senderFrame?.url ?? "");
@@ -961,7 +926,7 @@ ipcMain.handle(
 ipcMain.handle("geraet:aktivieren", geraetHandler((antwort) => geraet.aktivieren(antwort)));
 ipcMain.handle("geraet:status", geraetHandler(async () => ({ ok: true, ...geraet.status() }), false));
 
-// Zustände, die der Rand kennt (alles andere wird "idle")
+// Zustände der Oberfläche (alles andere wird "idle")
 const ZUSTAENDE = new Set(["offline", "idle", "listening", "thinking", "speaking", "acting", "approval"]);
 
 /** Energiesparschutz nur während eines Gesprächs (Zustand nicht offline). */
@@ -977,35 +942,20 @@ function energieschutz(an) {
 
 let letzterZustand = "idle"; // zuletzt gemeldeter Zustand der Oberfläche (Markierungen kommen mit Bezug darauf)
 
+// Zustand der Oberfläche: Energiesparschutz während eines Gesprächs und Bezug für die Markierung. Der Kanal heißt aus
+// Verträglichkeit mit der Oberfläche weiter "levels"; Pegel, die ältere Oberflächen mitschicken, wertet die App nicht aus.
 ipcMain.on("levels", (event, sample) => {
   if (!fromMainUi(event)) return;
-  const s = {
-    user: clamp(Number(sample?.user)),
-    bot: clamp(Number(sample?.bot)),
-    cut: Boolean(sample?.cut),
-    speaker: Math.max(0, Math.min(7, Math.trunc(Number(sample?.speaker)) || 0)),
-    zustand: ZUSTAENDE.has(sample?.zustand) ? sample.zustand : "idle",
-  };
-  letzterZustand = s.zustand;
-  energieschutz(s.zustand !== "offline");
-  if (!borderOn) return; // Rand ausgeschaltet: nichts weiterreichen
-  for (const w of overlays) if (!w.isDestroyed()) w.webContents.send("levels", s);
-});
-
-// Farben des Randes (einmalig beim Laden der Oberfläche, aus deren CSS-Variablen --overlay-*):
-// { wamo: [r,g,b], mensch: [r,g,b], andere: [r,g,b] }
-ipcMain.on("farben", (event, value) => {
-  if (!fromMainUi(event)) return;
-  const geprueft = checkFarben(value);
-  if (!geprueft) return;
-  farben = geprueft;
-  for (const w of overlays) if (!w.isDestroyed()) w.webContents.send("farben", farben);
+  const zustand = ZUSTAENDE.has(sample?.zustand) ? sample.zustand : "idle";
+  letzterZustand = zustand;
+  energieschutz(zustand !== "offline");
+  if (ruhezustand(zustand)) markierungen.alleLeeren(); // offene Freigabe oder Gesprächsende: Markierung sofort weg
 });
 
 // Lichtrahmen ums Zielfenster und Welle am Klickpunkt (lichtrahmen.js, markierung.js): Der Kern meldet nach gelungenen
 // Aktionen am Bildschirm Zahlen (Fensterrechteck, Klickpunkt, Monitor) mit der Gerätekennung des Laptops, der handelt. Hier
-// wird gezeichnet, wenn der Absender die eigene Oberfläche ist, die Werte stimmen, dieser Laptop der ist, der handelt, der
-// Rand sichtbar ist (Tray-Haken an, kein Vollbild) und keine Freigabe offen ist. Ohne eines davon passiert nichts.
+// wird gezeichnet, wenn der Absender die eigene Oberfläche ist, die Werte stimmen, dieser Laptop der ist, der handelt, kein
+// Vollbild-Programm vorne ist und keine Freigabe offen ist. Ohne eines davon passiert nichts.
 const markierungRate = ratenGrenze(20, 5_000);
 
 let kennungCache = { wert: null, bis: 0 };
@@ -1023,34 +973,19 @@ function eigeneKennung() {
 
 ipcMain.on("markierung", (event, roh) => {
   if (!fromMainUi(event) || !markierungRate()) return;
-  if (!randSoll() || ruhezustand(letzterZustand)) return;
+  if (vollbild || ruhezustand(letzterZustand)) return;
   const m = pruefeMarkierung(roh);
   if (!m || !sollZeichnen(m, { eigeneKennung: eigeneKennung(), hostname: os.hostname() })) return;
   const lebende = overlays.filter((w) => !w.isDestroyed());
   const ziele = fuerRandFenster(m, screen, lebende.map((w) => w.wamoBereich ?? w.getBounds()));
-  // Rand-Fenster ohne Treffer bekommen null: ein Rahmen vom vorigen Ziel auf einem anderen Monitor verschwindet sofort
+  // Fenster mit Treffer zeigen die Markierung; die übrigen leeren sich und blenden aus (ein Rahmen vom vorigen Ziel auf
+  // einem anderen Monitor verschwindet sofort)
   lebende.forEach((w, index) => {
     const z = ziele.find((t) => t.index === index);
-    w.webContents.send("markierung", z ? { art: m.art, fenster: z.fenster, ...(z.punkt ? { punkt: z.punkt } : {}) } : null);
+    if (z) markierungen.zeigen(w, { art: m.art, fenster: z.fenster, ...(z.punkt ? { punkt: z.punkt } : {}) });
+    else markierungen.leeren(w);
   });
 });
-
-function checkRgb(c) {
-  if (!Array.isArray(c) || c.length !== 3) return null;
-  const out = c.map((v) => Math.round(Number(v)));
-  return out.every((v) => Number.isFinite(v) && v >= 0 && v <= 255) ? out : null;
-}
-
-function checkFarben(value) {
-  const wamo = checkRgb(value?.wamo);
-  const mensch = checkRgb(value?.mensch);
-  const andere = checkRgb(value?.andere);
-  return wamo && mensch && andere ? { wamo, mensch, andere } : null;
-}
-
-function clamp(v) {
-  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
-}
 
 // Keine Webviews, keine neuen Fenster aus irgendeinem Inhalt
 app.on("web-contents-created", (_event, contents) => {
@@ -1121,7 +1056,7 @@ app.whenReady().then(async () => {
       pid: process.pid,
       onWechsel: (an) => {
         vollbild = an;
-        randSichtbarkeit();
+        if (an) markierungen.alleLeeren(); // Vollbild vorne: keine Markierung über Spiel, Video oder Präsentation
       },
       log: (text) => vollbildLog.schreiben(`${new Date().toISOString()} ${text}\n`),
       rohwerte: process.env.WAMO_VOLLBILD_LOG === "1", // Rohwerte von SHQueryUserNotificationState mitschreiben

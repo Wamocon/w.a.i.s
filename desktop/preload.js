@@ -1,7 +1,7 @@
-// Hauptfenster: die Oberfläche darf nur Pegel an den Stimmen-Rand melden, einmalig die Stimmfarben
-// (ui/src/lib/stimmfarben.ts) übergeben, die Betriebsart (buero oder unterwegs) lesen und setzen und den
-// Rechnernamen, den Windows-Datenschutzstatus des Mikrofons erfragen, (nur Büro) den Laptop einrichten und die Markierung für
-// den Lichtrahmen melden (Zahlen und Gerätekennung, nie Titel), sonst nichts. main.js prüft Absender und Werte.
+// Hauptfenster: die Oberfläche darf nur ihren Zustand melden (Kanal "levels", für Energiesparschutz und Markierung), die
+// Betriebsart (buero oder unterwegs) lesen und setzen und den Rechnernamen, den Windows-Datenschutzstatus des Mikrofons
+// erfragen, (nur Büro) den Laptop einrichten und die Markierung für den Lichtrahmen melden (Zahlen und Gerätekennung, nie
+// Titel), sonst nichts. main.js prüft Absender und Werte.
 const { contextBridge, ipcRenderer } = require("electron");
 
 // Nur Text und ganze Zahlen gehen über die Brücke; main.js und geraet.js prüfen die Werte danach streng.
@@ -42,8 +42,8 @@ function schmaleAntwort(a) {
 
 contextBridge.exposeInMainWorld("wamoDesktop", {
   isDesktop: true,
-  levels: (sample) => ipcRenderer.send("levels", sample),
-  farben: (farben) => ipcRenderer.send("farben", farben),
+  // Nur der Zustand geht hinaus; Pegel, die ältere Oberflächen mitschicken, bleiben hier
+  levels: (meldung) => ipcRenderer.send("levels", { zustand: text(meldung?.zustand) }),
   // Lichtrahmen ums Zielfenster und Welle am Klickpunkt: nur Zahlen, Art und Gerätekennung; gezeichnet wird nur auf dem
   // Laptop, der handelt (main.js vergleicht die Kennung mit geraet.json)
   markierung: (m) => ipcRenderer.send("markierung", schmaleMarkierung(m)),
