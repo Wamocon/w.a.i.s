@@ -113,6 +113,19 @@ class CommandValidationTests(unittest.TestCase):
             with self.subTest(schlecht=schlecht), self.assertRaises(D.Abgewiesen):
                 D.check_repo(schlecht)
         self.assertEqual(D.check_repo("wamocon/wamo-extra"), "wamocon/wamo-extra")  # nur der genaue Name ist gesperrt
+        self.assertEqual(D.check_repo("Wamocon/wais-docs"), "Wamocon/wais-docs")
+
+    def test_jeder_name_des_eigenen_repos_ist_gesperrt(self):
+        """Seit dem 14.11.2026 heißt das Repo w.a.i.s (vorher wamo): beide Namen in jeder Schreibweise, als Repo und als Projekt."""
+        for eigen in ("Wamocon/w.a.i.s", "wamocon/W.A.I.S", "x/w.a.i.s", "x/wais", "x/w-a-i-s", "x/W_A_I_S", "Wamocon/wamo", "x/WaMo"):
+            with self.subTest(eigen=eigen), self.assertRaises(D.Abgewiesen) as ctx:
+                D.check_repo(eigen)
+            self.assertEqual(str(ctx.exception), D.WAMO_REPO_GESPERRT)
+        for projekt in ("wamo", "wais", "w-a-i-s"):
+            with self.subTest(projekt=projekt), self.assertRaises(D.Abgewiesen) as ctx:
+                D.check_project(projekt)
+            self.assertEqual(str(ctx.exception), D.WAMO_REPO_GESPERRT)
+        self.assertEqual(D.check_project("wais-docs"), "wais-docs")
 
 
 class SecretsAndEnvTests(unittest.TestCase):
@@ -754,9 +767,9 @@ class FakeGithub:
             return self.widerruf, b""
         if methode == "GET" and pfad.startswith("/installation/repositories"):
             seite = int(pfad.rsplit("page=", 1)[1]) if "page=" in pfad else 1
-            teil = self.repos[(seite - 1) * 100:seite * 100]
+            teil = self.repos[(seite - 1) * 100:seite * 100]  # Namen oder ganze Einträge (etwa mit id)
             return self.repo_status, json.dumps({"total_count": len(self.repos),
-                                                 "repositories": [{"full_name": n} for n in teil]}).encode()
+                                                 "repositories": [n if isinstance(n, dict) else {"full_name": n} for n in teil]}).encode()
         return 404, b"{}"
 
     def widerrufe(self):
@@ -972,6 +985,13 @@ class GithubAppTests(unittest.TestCase):
             "Auswahl fehlt": {"token": self.fake.token, "permissions": rechte},
             "WAMO-Repo dabei": {"token": self.fake.token, "permissions": rechte, "repository_selection": "selected",
                                 "repositories": [{"full_name": "wamocon/app"}, {"full_name": "Wamocon/WAMO"}]},
+            "W.A.I.S. dabei": {"token": self.fake.token, "permissions": rechte, "repository_selection": "selected",
+                               "repositories": [{"full_name": "wamocon/app"}, {"full_name": "Wamocon/w.a.i.s"}]},
+            "eigene ID unter neuem Namen": {"token": self.fake.token, "permissions": rechte, "repository_selection": "selected",
+                                            "repositories": [{"full_name": "wamocon/app"},
+                                                             {"full_name": "Wamocon/assistent", "id": min(D.SELF_REPO_IDS)}]},
+            "Eintrag ohne Namen": {"token": self.fake.token, "permissions": rechte, "repository_selection": "selected",
+                                   "repositories": [{"full_name": "wamocon/app"}, {"id": 5}]},
         }
         for name, antwort in faelle.items():
             self.fake.anfragen.clear()
@@ -988,6 +1008,9 @@ class GithubAppTests(unittest.TestCase):
     def test_ohne_repo_prueft_die_liste_der_installation(self):
         """Die echte Antwort zählt die Repos nicht auf: erst /installation/repositories zeigt das WAMO-Repo."""
         faelle = {"WAMO-Repo in der Liste": dict(repos=["wamocon/app", "wamocon/WAMO"]),
+                  "W.A.I.S. in der Liste": dict(repos=["wamocon/app", "Wamocon/w.a.i.s"]),
+                  "eigene ID in der Liste": dict(repos=["wamocon/app", {"full_name": "Wamocon/assistent", "id": min(D.SELF_REPO_IDS)}]),
+                  "Eintrag ohne Namen in der Liste": dict(repos=["wamocon/app", {"id": 5}]),
                   "Liste nicht lesbar": dict(repo_status=500),
                   "mehr als 500 Repos": dict(repos=[f"wamocon/r{i}" for i in range(501)])}
         for name, einstellung in faelle.items():
@@ -1007,6 +1030,21 @@ class GithubAppTests(unittest.TestCase):
         self.fake.anfragen.clear()
         D.installations_token(self.app(), "umsetzung", "wamocon/rezepte-app")  # mit Ziel-Repo keine Liste nötig
         self.assertEqual([a for a in self.fake.anfragen if a[0] == "GET"], [])
+
+    def test_mit_ziel_repo_sperrt_die_id_des_eigenen_repos_auch_unter_einem_neuen_namen(self):
+        """Die GitHub-ID bleibt bei jeder Umbenennung gleich: ein Token, das für das eigene Repo gilt, wird sofort widerrufen."""
+        self.assertEqual(D.SELF_REPO_IDS, frozenset({1425139508}))
+        rechte = wk.GITHUB_APP_RECHTE["schreiben"]
+        self.fake.antwort = {"token": self.fake.token, "permissions": rechte, "repository_selection": "selected",
+                             "repositories": [{"full_name": "wamocon/rezepte-app", "id": 1425139508}]}
+        with self.assertRaises(D.GithubAppFehler) as ctx:
+            D.installations_token(self.app(), "umsetzung", "wamocon/rezepte-app")
+        self.assertIn("WAMO-Repo", str(ctx.exception))
+        self.assertEqual(len(self.fake.widerrufe()), 1)
+        self.fake.anfragen.clear()
+        self.fake.antwort["repositories"] = [{"full_name": "wamocon/rezepte-app", "id": 77}]  # eine andere ID: in Ordnung
+        self.assertEqual(D.installations_token(self.app(), "umsetzung", "wamocon/rezepte-app")[0], self.fake.token)
+        self.assertEqual(self.fake.widerrufe(), [])
 
     def test_echte_token_sind_lang_und_haben_punkte(self):
         lang = "ghs_" + "Ab1_" * 40 + "." + "Cd-2" * 50  # Form der echten Token: rund 390 Zeichen mit Punkten
@@ -2465,6 +2503,12 @@ class KernKanalDispatchTests(unittest.TestCase):
     def test_ein_start_mit_dem_wamo_repo_im_kern_kanal_meldet_repo(self):
         code, _ = self.start({"repo": "wamocon/wamo"}, art="review", projekt="kern-wamo")
         self.assertEqual((code, self.gesperrt()), (D.EXIT_ABGEWIESEN, ["repo"]))
+        self.konfig(MAX_START_STUNDE="60", MAX_START_TAG="200")
+        for repo, projekt in (("Wamocon/w.a.i.s", "kern-w-a-i-s"), ("Wamocon/W.A.I.S", "kern-w-a-i-s"), ("acme/wais", "kern-wais")):
+            with self.subTest(repo=repo):
+                self.ereignisse.clear()
+                code, aufrufe = self.start({"repo": repo}, art="review", projekt=projekt, job=uuid.uuid4().hex[:16])
+                self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["repo"]))
 
     def test_ein_gueltiger_start_laeuft_mit_den_grenzen_aus_der_konfiguration(self):
         code, aufrufe = self.start()
@@ -2794,6 +2838,8 @@ class KernKanalDispatchTests(unittest.TestCase):
     def test_ein_fork_ein_repo_aus_vorlage_und_eine_unklare_antwort_stoppen_den_lauf_und_widerrufen_das_token(self):
         antworten = ({"full_name": "acme/test-repo", "fork": True}, {"full_name": "acme/test-repo", "fork": False, "template_repository": {"full_name": "a/v"}},
                      {"full_name": "acme/test-repo", "fork": False, "source": {"full_name": "wamocon/wamo"}},
+                     {"full_name": "acme/test-repo", "fork": False, "source": {"full_name": "Wamocon/w.a.i.s"}},
+                     {"full_name": "acme/test-repo", "fork": False, "parent": {"full_name": "Wamocon/W.A.I.S"}},
                      {"full_name": "acme/test-repo"}, [], None)
         self.konfig(MAX_START_STUNDE="60", MAX_START_TAG="200")  # auch ein abgewiesener Start zählt als Start
         for antwort in antworten:
@@ -2822,7 +2868,8 @@ class KernKanalDispatchTests(unittest.TestCase):
 
     # ---- Eigenschaften der Datei
     def test_selbstschutz_und_parallelitaet_bleiben_und_das_modul_wird_erst_bei_bedarf_geladen(self):
-        self.assertEqual(D.SELF_REPO, "wamo")
+        self.assertEqual(D.SELF_REPOS, ("wamo", "w.a.i.s"))
+        self.assertEqual(D.SELF_REPO, "wamo")  # nur noch Alias
         self.assertEqual(D.PARALLEL_MAX, 1)
         self.assertEqual(D.VERSION, "7")
         import ast

@@ -575,7 +575,8 @@ class ProjektnameTests(unittest.TestCase):
                 self.assertEqual(eb.kern_projektname(repo, wort), erwartet)
 
     def test_das_repo_wamo_wird_abgelehnt_in_jeder_schreibweise(self):
-        for repo in ("acme/wamo", "acme/WAMO", "Acme/Wamo", "acme/wamo_", "acme/-wamo-"):
+        for repo in ("acme/wamo", "acme/WAMO", "Acme/Wamo", "acme/wamo_", "acme/-wamo-", "Wamocon/wamo.git",
+                     "Wamocon/w.a.i.s", "Wamocon/W.A.I.S", "acme/wais", "acme/w-a-i-s", "acme/W_A_I_S"):  # w.a.i.s seit 14.11.2026
             with self.subTest(repo=repo), self.assertRaises(eb.ProjektnameFehler) as ctx:
                 eb.kern_projektname(repo, None)
             self.assertEqual(ctx.exception.grund, "repo")
@@ -613,10 +614,18 @@ class ProjektnameTests(unittest.TestCase):
     def test_selbstschutz_bleibt(self):
         import dev_guard
 
-        self.assertEqual(dev_guard.SELF_REPO, "wamo")
-        self.assertEqual(dev_agent.SELF_REPO, "wamo")
-        with self.assertRaises(ValueError):
-            dev_agent.repo_pruefen("acme/wamo")
+        self.assertEqual(dev_guard.SELF_REPOS, ("wamo", "w.a.i.s"))
+        self.assertIs(dev_agent.ist_eigenes_repo, dev_guard.ist_eigenes_repo)
+        for repo in ("acme/wamo", "Wamocon/w.a.i.s", "Wamocon/W.A.I.S", "Wamocon/wamo.git"):
+            with self.subTest(repo=repo), self.assertRaises(ValueError):
+                dev_agent.repo_pruefen(repo)
+
+    def test_ein_projektwort_mit_dem_namen_des_eigenen_repos_wird_abgelehnt(self):
+        for wort in ("wamo", "W.A.I.S", "wais", "w-a-i-s", "W A I S"):
+            with self.subTest(wort=wort), self.assertRaises(eb.ProjektnameFehler) as ctx:
+                eb.kern_projektname(None, wort)
+            self.assertEqual(ctx.exception.grund, "projekt")
+        self.assertEqual(eb.kern_projektname(None, "wais-docs"), "kern-wais-docs")
 
 
 class GrundSaetzeTests(unittest.TestCase):
@@ -708,7 +717,8 @@ class RepoPflichtTests(BueroFlow):
         self.assertEqual(self.agent._jobs[ergebnis["auftrag_id"]].repo, "acme/testrepo")
 
     async def test_das_repo_wamo_und_zu_lange_namen_gehen_nicht(self):
-        for repo in ("acme/wamo", "acme/WAMO", "https://github.com/acme/wamo.git", "acme/" + "x" * 46):
+        for repo in ("acme/wamo", "acme/WAMO", "https://github.com/acme/wamo.git", "acme/" + "x" * 46, "Wamocon/w.a.i.s",
+                     "W.A.I.S", "https://github.com/Wamocon/w.a.i.s.git", "Wamocon/wamo.git"):
             with self.subTest(repo=repo):
                 self.assertFalse((await self.vorbereiten(repo=repo))["ok"])
         self.assertEqual(self.agent._jobs, {})

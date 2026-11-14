@@ -304,6 +304,11 @@ FEHLER_FAELLE = [
     pytest.param(konfig_text(REPOS="acme/wamo"), {}, id="repo_wamo"),
     pytest.param(konfig_text(REPOS="Acme/WAMO"), {}, id="repo_wamo_gross"),
     pytest.param(konfig_text(REPOS="acme/a,acme/wamo"), {}, id="repo_wamo_in_liste"),
+    pytest.param(konfig_text(REPOS="Wamocon/w.a.i.s"), {}, id="repo_wais"),
+    pytest.param(konfig_text(REPOS="Wamocon/W.A.I.S"), {}, id="repo_wais_gross"),
+    pytest.param(konfig_text(REPOS="acme/a,acme/wais"), {}, id="repo_wais_ohne_punkte_in_liste"),
+    pytest.param(konfig_text(REPOS="acme/w-a-i-s"), {}, id="repo_wais_mit_bindestrichen"),
+    pytest.param(konfig_text(REPOS="acme/Wamo_"), {}, id="repo_wamo_mit_unterstrich"),
     pytest.param(konfig_text(REPOS="acme/*"), {}, id="repo_platzhalter"),
     pytest.param(konfig_text(REPOS="*"), {}, id="repo_stern"),
     pytest.param(konfig_text(REPOS="acme"), {}, id="repo_ohne_owner"),
@@ -464,6 +469,8 @@ def test_wertetabelle_i5_gute_zeilen(repo, wort, erwartet):
 
 @pytest.mark.parametrize("repo, wort, grund", [
     ("acme/wamo", None, "repo"), ("acme/WAMO", None, "repo"), ("acme/Wamo", None, "repo"), ("acme/wamo.", None, "repo"),
+    ("Wamocon/w.a.i.s", None, "repo"), ("Wamocon/W.A.I.S", None, "repo"), ("acme/wais", None, "repo"), ("acme/w-a-i-s", None, "repo"),
+    ("Wamocon/wamo.git", None, "repo"), (None, "W.A.I.S", "projekt"), (None, "wais", "projekt"), (None, "w a i s", "projekt"),
     ("acme/" + "a" * 46, None, "projekt"), ("acme/" + "a" * 100, None, "projekt"),
     (None, None, "projekt"), (None, "", "projekt"), (None, "äöü", "projekt"), (None, "---", "projekt"), (None, "a" * 46, "projekt"),
     ("acme/..", None, "projekt"), ("acme/___", None, "projekt"), ("kein-repo", None, "repo"), ("a/b/c", None, "repo"), ("", None, "projekt"),
@@ -482,6 +489,8 @@ def test_wertetabelle_i5_abgelehnte_zeilen(repo, wort, grund):
     ("kern-Markt", None, "projekt"), ("kern-a--b", None, "projekt"), ("kern--a", None, "projekt"), ("kern-a-", None, "projekt"),
     ("kern-" + "a" * 46, None, "projekt"), ("kern-" + "a" * 45, None, None), ("kern-markt_studie", None, "projekt"),
     ("kern-x", "acme/wamo", "repo"),
+    ("kern-wais", None, "projekt"), ("kern-w-a-i-s", None, "projekt"), ("kern-x", "Wamocon/w.a.i.s", "repo"),
+    ("kern-w-a-i-s", "Wamocon/W.A.I.S", "repo"), ("kern-wais-docs", None, None), ("kern-wais-docs", "Wamocon/wais-docs", None),
 ])
 def test_projekt_im_kern_kanal_nach_i5(projekt, repo, erwartet):
     assert K.projekt_pruefen(projekt, repo) == erwartet
@@ -703,6 +712,9 @@ def test_ein_normales_repo_besteht_die_fork_pruefung():
     repo_antwort(source={"full_name": "wamocon/WAMO"}),
     repo_antwort(fork=True, source={"full_name": "x/Wamo"}),
     repo_antwort(template_repository={"full_name": "x/wamo"}),
+    repo_antwort(parent={"full_name": "Wamocon/w.a.i.s"}),  # der Name des eigenen Repos seit dem 14.11.2026
+    repo_antwort(source={"full_name": "wamocon/W.A.I.S"}),
+    repo_antwort(parent={"full_name": "x/wais"}),
     repo_antwort(fork="ja"), repo_antwort(fork=None), repo_antwort(fork=1),
     {"full_name": "acme/test-repo"},  # fork fehlt
     {}, [], None, "text", 5, b"{}",
@@ -781,7 +793,7 @@ def test_das_modul_hat_keinen_zugriff_auf_geheimnisse_netz_oder_prozesse():
     importe = {a.name.split(".")[0] for n in ast.walk(baum) if isinstance(n, ast.Import) for a in n.names}
     importe |= {n.module.split(".")[0] for n in ast.walk(baum) if isinstance(n, ast.ImportFrom) and n.module}
     assert importe <= {"__future__", "base64", "binascii", "dataclasses", "datetime", "errno", "json", "os", "pathlib", "re", "shutil",
-                       "stat", "time", "typing", "collections"}, importe
+                       "stat", "time", "typing", "collections", "unicodedata"}, importe  # unicodedata: NFKC im Selbstschutz
     text = MODUL_PFAD.read_text(encoding="utf-8").lower()
     for verboten in ("geheim.env", "lese_geheimnisse", "gh_token", "os.environ", "getenv", "subprocess", "socket", "popen", "password"):
         assert verboten not in text, verboten
