@@ -105,7 +105,7 @@ Aussage "kein Schutz" (`geraet.ts:17`, `infra/sokrates2/README.md:757` bis `:759
 | Autostart der PC-Steuerung | ja, nur wenn Rechnername zum Gerät passt (`useWamo.ts:1222`) | nein | nein, bewusst | braucht `rechnername` aus der App |
 | Laptop einrichten (Geräteschlüssel, Bindung, Tunnelstart, Datei `geraet.json`) | ja (`desktop/geraet.js`, `preload.js:63` bis `:68`) | nein | nein | privater Schlüssel, Dateien, Aufgabe "WAMO Tunnel" |
 | Tunnel und Host laufen ohne App | ja, geplante Aufgabe bei Anmeldung und alle 5 Minuten (`scripts/wamo-tunnel.ps1`, Kopf) | gleich, unabhängig vom Fenster | gleich | |
-| Stimmen-Rand (`overlay.html`), Welle am Klickpunkt | ja | nein | nein | durchsichtige Fenster auf allen Monitoren |
+| Welle am Klickpunkt (`overlay.html`; den Stimmen-Rand gibt es seit dem 14.11.2026 nicht mehr) | ja | nein | nein | durchsichtige Fenster auf allen Monitoren |
 | Lichtrahmen ums Zielfenster (Markierung) | ja, nur auf dem Laptop, der handelt (`lichtrahmen.js`) | nein | nein, Ersatz über 3.3 (Anzeige am Laptop) | Zeichnen auf dem Laptop |
 | Live-Bild ansehen | ja | ja, schon heute (`BildschirmAnsicht.tsx`) | ja | |
 | Live-Bild einschalten | Tray, Einwilligung am Laptop | Fernstart mit frischem Code vom Handy (`BildschirmAnsicht.tsx:56`) | unverändert, Code bleibt (Q4) | Tray und Einwilligungsdialog |

@@ -886,7 +886,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             *([stimme.pruefer] if stimme else []),  # Stimmabdruck: spricht die eingelernte Stimme? Einlernen auf Klick (stimme_pruefer.py)
             stt,
             SchluesselFilter(),  # zweite Stufe: auch Text, der nicht aus der Spracherkennung kommt
-            SpeakerTracker(),  # wer spricht -> Farbe im Stimmen-Rand
+            SpeakerTracker(),  # wer spricht -> Farbe von Kern und Stimmlinie
             *([stimme.waechter] if stimme else []),  # sicher fremde Äußerungen gehen nicht ans Modell (stimme_waechter.py)
             user_agg,
             soft_gate,

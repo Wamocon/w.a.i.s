@@ -8,6 +8,15 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Geändert
 
+- Desktop-App ohne Stimmen-Rand (Zweig `feat/ohne-schleier`): Den Saum an allen Monitorkanten gibt es nicht mehr, in keinem
+  Zustand (WebGL-Saum `desktop/overlay.js` mit Shader, Schleierbreite `WAMO_VEIL_CM`, Tray-Haken „Stimmen-Rand“ und die
+  Weitergabe von Pegeln und Randfarben an die Monitorfenster entfallen; eine gesetzte `WAMO_VEIL_CM` bewirkt nichts). Die
+  Markierung am Zielfenster bleibt unverändert: Die Fenster je Monitor (`overlay.html`) starten ausgeblendet und sind nur
+  sichtbar, solange ein Rahmen oder eine Klickwelle steht (`erzeugeMarkierungsAnzeige` in `desktop/lichtrahmen.js`), Klicks
+  gehen weiter durch, der Inhaltsschutz bleibt, der Fenstertitel `WAMO Stimmen-Rand` bleibt für den Filter im Host. Die
+  Oberfläche meldet der App nur noch ihren Zustand bei einem Wechsel (Energiesparschutz, Markierung), die CSS-Variablen
+  `--overlay-*` und `overlayFarben` entfallen. Tests in `desktop/overlay.test.js`, `desktop/lichtrahmen.test.js` und
+  `ui/src/lib/desktopBruecke.test.ts`.
 - Neuer Anzeigename **W.A.I.S.** (WAMOCON’s Artificial Intelligence System, deutsch „WAMOCONs künstliches intelligentes System“; Zweig
   `feat/wais-name`). Geschrieben wird er überall, wo Menschen ihn lesen, mit Schlusspunkt: Oberfläche (Texte, `aria-label`, Seitentitel,
   Manifest, Laborkopf, Anmeldeseite mit Langform), Persona und alle Prompts des Kerns, Einwilligungstext der Stimmprüfung (Version
