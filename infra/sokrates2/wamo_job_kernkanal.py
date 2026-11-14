@@ -50,6 +50,7 @@ import re
 import shutil
 import stat
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -65,7 +66,10 @@ BEFEHLE_GESCHLOSSEN = ("ping", "status", "pending", "cancel")  # bei geschlossen
 BEFEHLE_NOTAUS = ("ping", "status")
 
 PRAEFIX = "kern-"
-SELF_REPO = "wamo"
+# Jeder Name, den das eigene Repo je getragen hat (bis 14.11.2026 wamo, seitdem w.a.i.s), nur ergänzen. Dieselbe Liste steht im Kern
+# (voice-core/dev_guard.py) und im Dispatcher; geprüft wird allein mit ist_eigenes_repo, test_kernkanal_vertrag.py hält alle drei gleich.
+SELF_REPOS = ("wamo", "w.a.i.s")
+SELF_REPO = SELF_REPOS[0]  # Alias für ältere Verweise, nie zum Vergleichen
 MAX_PROJEKT_ZEICHEN = 50
 MAX_REPOS = 10
 MAX_ABLAUF_TAGE = 400
@@ -354,7 +358,7 @@ def _repos(wert: str) -> tuple[str, ...]:
     for repo in teile:
         name = repo.split("/", 1)[-1]
         if (not REPO_RE.fullmatch(repo) or repo.count("/") != 1 or name in (".", "..") or name.lower().endswith(".git")
-                or name.lower() == SELF_REPO):
+                or ist_eigenes_repo(name)):
             raise KonfigFehler("REPOS enthält ein ungültiges Repo (owner/name, kein Platzhalter, nie das WAMO-Repo)")
     return tuple(r.lower() for r in teile)
 
@@ -486,6 +490,28 @@ def pruefe_eigener_auftrag(meta: object) -> str | None:
     return "fremd"
 
 
+# ---------------------------------------------------------------- Selbstschutz: das eigene Repo unter jedem Namen
+def repo_vergleichsname(wert: str) -> str:
+    """Vergleichsform eines Repo-Namens: Unicode NFKC, klein (casefold), nur der Teil nach dem letzten Schrägstrich, ohne .git am
+    Ende, nur a-z und 0-9. So sind w.a.i.s, W-A-I-S, w_a_i_s, wais und https://github.com/Wamocon/w.a.i.s.git gleich."""
+    text = unicodedata.normalize("NFKC", wert).casefold().strip().rstrip("/")
+    text = text.rsplit("/", 1)[-1]
+    while text.endswith(".git"):
+        text = text[:-4]
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+SELF_REPO_VERGLEICH = frozenset(repo_vergleichsname(n) for n in SELF_REPOS)
+
+
+def ist_eigenes_repo(wert: object) -> bool:
+    """True, wenn wert das eigene Repo benennt: Name, owner/name oder GitHub-Adresse, in jeder Schreibweise und unter jedem Namen aus
+    SELF_REPOS. Fail-closed: was kein Text ist, gilt als das eigene Repo. Andere Namen mit demselben Anfang (wamo-extra) sind fremd."""
+    if not isinstance(wert, str):
+        return True
+    return repo_vergleichsname(wert) in SELF_REPO_VERGLEICH
+
+
 # ---------------------------------------------------------------- Projektname (I5, Regel 6)
 def _normal(name: str) -> str:
     """klein, Punkt und Unterstrich zu Bindestrich, alles außerhalb a-z0-9- verwerfen, Bindestriche zusammenfassen und am Rand streichen."""
@@ -502,12 +528,12 @@ def kern_projektname(repo: str | None, wort: str | None = None) -> str:
             raise ProjektnameFehler("repo", "Repo ungültig")
         roh = repo.split("/", 1)[1]
         name = _normal(roh)
-        if roh.lower() == SELF_REPO or name == SELF_REPO:
+        if ist_eigenes_repo(roh) or ist_eigenes_repo(name):
             raise ProjektnameFehler("repo", "das WAMO-Repo selbst ist gesperrt")
     else:
         name = _normal(wort or "")
-        if name == SELF_REPO:  # auch ohne Repo kein Projekt kern-wamo (der Kern lehnt es ebenfalls ab)
-            raise ProjektnameFehler("projekt", "der Name wamo ist gesperrt")
+        if ist_eigenes_repo(name):  # auch ohne Repo kein Projekt kern-wamo oder kern-w-a-i-s (der Kern lehnt es ebenfalls ab)
+            raise ProjektnameFehler("projekt", "der Name des eigenen Repos ist gesperrt")
     if not name or len(PRAEFIX) + len(name) > MAX_PROJEKT_ZEICHEN:
         raise ProjektnameFehler("projekt", "Projektname nicht ableitbar")
     return PRAEFIX + name
@@ -524,7 +550,7 @@ def projekt_pruefen(projekt: str, repo: str | None) -> str | None:
             return e.grund
         return None if projekt == erwartet else "projekt"
     rest = projekt[len(PRAEFIX):]
-    if rest and rest != SELF_REPO and _normal(rest) == rest and len(projekt) <= MAX_PROJEKT_ZEICHEN:
+    if rest and not ist_eigenes_repo(rest) and _normal(rest) == rest and len(projekt) <= MAX_PROJEKT_ZEICHEN:
         return None
     return "projekt"
 
@@ -669,10 +695,11 @@ def pruefe_start(anfrage: StartAnfrage, zustand: KernZustand, *, ereignisse: lis
 
 # ---------------------------------------------------------------- Regel 8: Fork-Prüfung
 def _herkunft_wamo(eintrag: object) -> bool | None:
-    """True, wenn ein Eintrag (parent, source, template_repository) das WAMO-Repo benennt; None, wenn er nicht lesbar ist."""
+    """True, wenn ein Eintrag (parent, source, template_repository) das WAMO-Repo benennt (jeder Name aus SELF_REPOS); None, wenn er
+    nicht lesbar ist."""
     if not isinstance(eintrag, dict) or not isinstance(eintrag.get("full_name"), str):
         return None
-    return eintrag["full_name"].rsplit("/", 1)[-1].lower() == SELF_REPO
+    return ist_eigenes_repo(eintrag["full_name"])
 
 
 def fork_pruefen(antwort: object, repo: str | None = None) -> str | None:

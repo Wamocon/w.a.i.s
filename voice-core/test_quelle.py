@@ -30,6 +30,10 @@ import quelle as Q  # noqa: E402
 import stufen_quelle as SQ  # noqa: E402
 from release_stufen import Kontext  # noqa: E402
 
+# git fetch startet danach seine Wartung im Hintergrund (maintenance --auto, bei neuerem Git losgelöst). Räumt der Test den Ordner
+# gleichzeitig weg, scheitert das Löschen sonst mit "Directory not empty". Ein Rest im Temp-Ordner schadet nicht.
+AUFRAEUMEN = {"ignore_cleanup_errors": True}
+
 GIT = shutil.which("git")
 OPENSSL = shutil.which("openssl")
 if GIT:
@@ -74,7 +78,7 @@ def schreibe(repo, rel, inhalt):
 @unittest.skipUnless(GIT, "git nicht vorhanden")
 class SpiegelTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="quelle-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="quelle-", **AUFRAEUMEN)
         self.addCleanup(self.tmp.cleanup)
         self.origin = neues_repo(self.tmp.name)
         schreibe(self.origin, "a.py", "x = 1\n")
@@ -175,7 +179,7 @@ class SpiegelTests(unittest.TestCase):
 @unittest.skipUnless(GIT, "git nicht vorhanden")
 class ArchivTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="quelle-archiv-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="quelle-archiv-", **AUFRAEUMEN)
         self.addCleanup(self.tmp.cleanup)
         self.origin = neues_repo(self.tmp.name)
         self.spiegel = Q.Spiegel(os.path.join(self.tmp.name, "spiegel.git"), self.origin, datei_erlaubt=True)
@@ -312,7 +316,7 @@ class AttrappeApi:
 class AppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory(prefix="quelle-app-")
+        cls.tmp = tempfile.TemporaryDirectory(prefix="quelle-app-", **AUFRAEUMEN)
         cls.pem = os.path.join(cls.tmp.name, "app.pem")
         cls.pub = os.path.join(cls.tmp.name, "pub.pem")
         subprocess.run([OPENSSL, "genrsa", "-out", cls.pem, "2048"], check=True, capture_output=True)
@@ -416,7 +420,7 @@ class AppTests(unittest.TestCase):
 
 class KonfigTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="quelle-konf-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="quelle-konf-", **AUFRAEUMEN)
         self.addCleanup(self.tmp.cleanup)
         self.pfad = os.path.join(self.tmp.name, "quelle.env")
 

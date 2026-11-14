@@ -89,7 +89,7 @@ from dev_agent_regeln import (  # noqa: F401 (alle Namen bleiben über dev_agent
 from dev_agent_weg import (  # noqa: F401 (wie oben)
     REMOTE_ARG_RE, REMOTE_ENDE_STATUS, REMOTE_EREIGNIS_STATUS, REMOTE_EXIT_STATUS, SSH_KNOWN_HOSTS_STANDARD, SSH_ZIEL_RE,
     SSH_ZIEL_STANDARD, _lesbar, remote_status, ssh_argv, ssh_known_hosts, ssh_problem, ssh_schluessel, ssh_ziel)
-from dev_guard import REPO_ROOT, SELF_REPO, _skript_befehl, decide, fingerprint, write_json_atomic
+from dev_guard import REPO_ROOT, _skript_befehl, decide, fingerprint, ist_eigenes_repo, write_json_atomic
 from entwicklung_betrieb import BueroZulassung
 from memory import normalize_uuid, shared_database
 from persona import clean_inline
@@ -277,7 +277,7 @@ def repo_pruefen(value: object) -> str:
     name = repo.split("/", 1)[-1]
     if len(repo) > 140 or not REPO_RE.fullmatch(repo) or repo.count("/") != 1 or name in (".", ".."):
         raise ValueError("Repo: Form owner/name, nur A-Z, a-z, 0-9, Punkt, Unterstrich und Bindestrich")
-    if name.lower() == SELF_REPO:
+    if ist_eigenes_repo(name):  # jeder Name des eigenen Repos (wamo, w.a.i.s), in jeder Schreibweise
         raise ValueError("Das WAMO-Repo selbst ist für Aufträge gesperrt")
     return repo
 
@@ -292,7 +292,7 @@ def repo_aus_auftrag(auftrag: str) -> str | None:
         name = name.rstrip(".,;:!?)")
         if name.lower().endswith(".git"):
             name = name[:-4]
-        if name.lower() == SELF_REPO:  # nie stillschweigend übergehen: sonst bekäme der Auftrag ein Token ohne Repo
+        if ist_eigenes_repo(name):  # nie stillschweigend übergehen: sonst bekäme der Auftrag ein Token ohne Repo
             raise ValueError("Der Auftrag nennt das WAMO-Repo, das für Aufträge gesperrt ist; bitte das Repo, "
                              "an dem gearbeitet wird, ausdrücklich im Feld repo angeben")
         try:
@@ -328,7 +328,7 @@ def project_slug(name: object) -> str:
     slug = name.strip().lower().replace(" ", "-").replace("_", "-")
     if not PROJECT_NAME.fullmatch(slug) or "--" in slug:
         raise ValueError("Projektname: 3 bis 50 Zeichen, nur a-z, 0-9 und Bindestrich")
-    if slug == SELF_REPO:
+    if ist_eigenes_repo(slug):
         raise ValueError("Das WAMO-Repo selbst ist für Aufträge gesperrt")
     return slug
 

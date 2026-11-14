@@ -6,6 +6,7 @@ echten Laptop: das Schreiben der .lnk-Datei über die Shell (COM), der echte Zer
 from __future__ import annotations
 
 import http.client
+import os
 import socket
 import ssl
 import subprocess
@@ -239,6 +240,8 @@ def test_echte_umgebung_ist_vollstaendig_und_nutzt_den_festen_port(monkeypatch, 
     monkeypatch.setitem(sys.modules, "winreg", FakeWinreg())  # statt der Falle: der Aufbau holt das Modul, ändert aber nichts
     umg = be.echte_umgebung()
     assert isinstance(umg.reg, rg.WinRegistrierung) and umg.weiter_port == adr.WEITER_PORT
-    assert umg.desktop == tmp_path / "desktop" and umg.skript.name == "wamo_labor_platz.py" and umg.python.lower().endswith("python.exe")
+    assert umg.desktop == tmp_path / "desktop" and umg.skript.name == "wamo_labor_platz.py"
+    # unter Windows python.exe (nie pythonw.exe); unter Linux, wo nur die Tests laufen, bleibt der Interpreter, wie er ist
+    assert umg.python.lower().endswith("python.exe") if os.name == "nt" else umg.python == sys.executable
     assert str(umg.lokal) == str(tmp_path / "echt" / "heim") and umg.profil.name == "wamo-chrome-labor"
     assert callable(umg.abruf) and callable(umg.verknuepfung) and callable(umg.token_eingabe)

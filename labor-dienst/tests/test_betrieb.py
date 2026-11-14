@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from hilfen import BETREUER_TOKEN, KERN_TOKEN, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen
+from hilfen import BETREUER_TOKEN, KERN_TOKEN, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen, token_datei
 
 from wamo_labor_dienst.app import create_app
 from wamo_labor_dienst.konfig import Konfig
@@ -108,8 +108,8 @@ def test_einstieg_mit_unbrauchbarem_datenordner_meldet_klar_und_startet_nicht(tm
     datei = tmp_path / "ist-eine-datei"
     datei.write_text("x", encoding="utf-8")
     kern, betreuer = tmp_path / "kern.token", tmp_path / "betreuer.token"
-    kern.write_text(KERN_TOKEN, encoding="utf-8")
-    betreuer.write_text(BETREUER_TOKEN, encoding="utf-8")
+    token_datei(kern, KERN_TOKEN)
+    token_datei(betreuer, BETREUER_TOKEN)
     r = subprocess.run([sys.executable, "-m", "wamo_labor_dienst"], cwd=PAKET_ORDNER, capture_output=True, text=True, timeout=30,
                        env={"PATH": "", "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""), "WAMO_LABOR_DIENST_DATEN": str(datei), "WAMO_LABOR_DIENST_KERN_TOKEN_DATEI": str(kern),
                             "WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI": str(betreuer)})

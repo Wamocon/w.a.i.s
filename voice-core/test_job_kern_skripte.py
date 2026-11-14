@@ -845,6 +845,9 @@ FP_FORM = "SHA256:" + "A" * 43
     ["kanal", "--arten", "recherche", "--max-budget-usd", "20.01"], ["kanal", "--arten", "recherche", "--max-budget-usd", "2.001"],
     ["kanal", "--arten", "recherche", "--max-budget-usd", "0"], ["kanal", "--arten", "recherche", "--max-budget-usd", "2,00"],
     ["kanal", "--arten", "recherche", "--repos", "acme/wamo"], ["kanal", "--arten", "recherche", "--repos", "acme/WAMO"],
+    ["kanal", "--arten", "recherche", "--repos", "Wamocon/w.a.i.s"], ["kanal", "--arten", "recherche", "--repos", "acme/x,Wamocon/W.A.I.S"],
+    ["kanal", "--arten", "recherche", "--repos", "acme/wais"], ["kanal", "--arten", "recherche", "--repos", "acme/w-a-i-s"],
+    ["kanal", "--arten", "recherche", "--repos", "acme/Wamo_"],
     ["kanal", "--arten", "recherche", "--repos", ",".join(f"acme/r{i}" for i in range(11))], ["kanal", "--arten", "recherche", "--repos", "acme"],
     ["kanal", "--arten", "recherche", "--repos", "acme/a,acme/a"], ["kanal", "--arten", "recherche", "--dienste", "supabase"],
     ["kanal", "zu", "--arten", "recherche"], ["kanal", "--unfug"],
@@ -969,6 +972,7 @@ def test_jede_vorbedingung_von_schluessel_endet_mit_exit_3_und_nichts_ist_geschr
         (a / "timers.txt").write_text("Wed 12:05 4min left wamo-sshd-rueckfall-1762859000.timer wamo-sshd-rueckfall-1762859000.service\n")
     elif fall == "openssh_alt":
         (a / "ssh").write_text('#!/usr/bin/env bash\n[ "$1" = -V ] && echo "OpenSSH_7.4p1, OpenSSL 1.0.2" >&2\nexit 0\n')
+        (a / "ssh").chmod(0o755)  # unter Linux nimmt die Shell sonst das echte ssh aus /usr/bin
     elif fall == "fail2ban_ohne_ausnahme":
         (a / "fail2ban_aktiv").write_text("")
         (a / "ignoreip.txt").write_text("These IP addresses/networks are ignored:\n`- 10.0.0.0/8\n")

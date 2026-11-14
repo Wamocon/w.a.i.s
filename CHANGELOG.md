@@ -6,19 +6,6 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
-### Hinzugefügt
-
-- Canvas als Datei am PC (Paket 1 aus `docs/office-und-versand.md`, Zweig `feat/office-export`): Ein Canvas-Element wird auf Zuruf
-  (Werkzeug `canvas_exportieren`) oder per Klick („Als Word speichern“ usw. im Kopf des Canvas) zur Word-, Excel-, PowerPoint-, PDF-, CSV-
-  oder Markdown-Datei in `Dokumente\WAIS` (bekannter Ordner, folgt OneDrive) und öffnet sich danach; ein Hinweis nennt Datei und Pfad und
-  hat „Öffnen“. Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=dateien` (Standard leer, also aus) und eingeschalteter PC-Steuerung; das
-  Werkzeug läuft durch das Stimmabdruck-Gate. Speichern braucht keine Freigabekarte, nichts verlässt den PC. Der Kern liest nur eigene
-  Elemente aus `canvas_items` (`voice-core/canvas_quelle.py`) und schickt dem Host nur die feste Struktur; der Host prüft selbst, baut die
-  Datei mit `python-docx`, `openpyxl` und `python-pptx` im WMC-Design, PDF über eine eigene, unsichtbare Word-Instanz
-  (`host/office_dateien.py`, `host/office_com.py`), legt sie nie überschreibend ab und führt ein Register ohne Inhalte
-  (`host/office_ablage.py`, `%LOCALAPPDATA%\WAMO\ablage.json`). Excel-Zellen sind immer Text, CSV-Zellen mit `=`, `+`, `-`, `@` bekommen
-  ein Hochkomma. Die Datei `%LOCALAPPDATA%\WAMO\office.aus` sperrt alles sofort. Die Host-Werkzeuge stehen nie in `LLM_TOOLS`.
-
 ### Geändert
 
 - Desktop-App ohne Stimmen-Rand (Zweig `feat/ohne-schleier`): Den Saum an allen Monitorkanten gibt es nicht mehr, in keinem
@@ -66,6 +53,26 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   der früheren Präsenzspalte entfallen.
 
 ### Hinzugefügt
+
+- Canvas als Datei am PC (Paket 1 aus `docs/office-und-versand.md`, Zweig `feat/office-export`): Ein Canvas-Element wird auf Zuruf
+  (Werkzeug `canvas_exportieren`) oder per Klick („Als Word speichern“ usw. im Kopf des Canvas) zur Word-, Excel-, PowerPoint-, PDF-, CSV-
+  oder Markdown-Datei in `Dokumente\WAIS` (bekannter Ordner, folgt OneDrive) und öffnet sich danach; ein Hinweis nennt Datei und Pfad und
+  hat „Öffnen“. Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=dateien` (Standard leer, also aus) und eingeschalteter PC-Steuerung; das
+  Werkzeug läuft durch das Stimmabdruck-Gate. Speichern braucht keine Freigabekarte, nichts verlässt den PC. Der Kern liest nur eigene
+  Elemente aus `canvas_items` (`voice-core/canvas_quelle.py`) und schickt dem Host nur die feste Struktur; der Host prüft selbst, baut die
+  Datei mit `python-docx`, `openpyxl` und `python-pptx` im WMC-Design, PDF über eine eigene, unsichtbare Word-Instanz
+  (`host/office_dateien.py`, `host/office_com.py`), legt sie nie überschreibend ab und führt ein Register ohne Inhalte
+  (`host/office_ablage.py`, `%LOCALAPPDATA%\WAMO\ablage.json`). Excel-Zellen sind immer Text, CSV-Zellen mit `=`, `+`, `-`, `@` bekommen
+  ein Hochkomma. Die Datei `%LOCALAPPDATA%\WAMO\office.aus` sperrt alles sofort. Die Host-Werkzeuge stehen nie in `LLM_TOOLS`.
+
+- Prüfungen auf GitHub (README Abschnitt „Prüfungen auf GitHub“): Workflow `Prüfungen` (`.github/workflows/ci.yml`) bei jedem Push, jedem
+  Pull Request und manuell mit Wahl des Teils, mit Jobs für Oberfläche (ESLint, `tsc`, `node --test`, vitest, `next build`), Kern (pytest in
+  vier Teilen), Python (`compileall`, ruff mit Grundregeln), Labor-Dienst, Gerätedienst, Skripte, Desktop und Host (Windows), Infra
+  (`bash -n`, shellcheck, PowerShell-Syntax), Migrationen, Version und Abhängigkeiten (Audit als Hinweis) sowie dem Sammel-Check `Ergebnis`.
+  Workflow `CodeQL` (`.github/workflows/codeql.yml`) für Actions, JavaScript/TypeScript und Python. Alle fremden Actions sind auf Commit-SHAs
+  festgenagelt, auch im Secret Scan; nur Leserechte, keine Geheimnisse.
+- `scripts/wamo_migrationen_pruefen.py`: das Migrations-Lint der Prüfstrecke auf die Migrationen, die ein Zweig gegenüber einer Basis ändert
+  (`--basis origin/main`), mit Tests.
 
 - Innehalten statt Abbrechen (`voice-core/wiedergabe.py`, Schalter `WAMO_INNEHALTEN`, `WAMO_INNEHALTEN_WEITER_SECS` und `WAMO_INNEHALTEN_MAX_SECS`, Standard an): Ein einzelnes echtes
   Wort der Person, während WAMO spricht ("Danke", "Du"), lässt WAMO an der nächsten Wortgrenze innehalten (der Tonausgang pausiert in `write_audio_frame`, je Sitzung ein eigener
@@ -341,6 +348,24 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   `/etc/guacamole` ein (zwei Einbindungen im Webcontainer, der Rauchtest erwartet jetzt zwei).
 
 ### Behoben
+
+- Selbstschutz der Entwicklungsaufträge nach der Umbenennung des Repos (Zweig `fix/selbstschutz-neuer-reponame`): Seit dem 14.11.2026 heißt
+  das Repo auf GitHub `Wamocon/w.a.i.s`, der Selbstschutz erkannte es nur am Namen `wamo`. Ein Auftrag mit `w.a.i.s` wäre nicht als eigenes
+  Repo abgelehnt worden. Kern (`voice-core/dev_guard.py`), Dispatcher und Kern-Kanal halten jetzt je eine Liste `SELF_REPOS = ("wamo",
+  "w.a.i.s")` und prüfen nur noch mit `ist_eigenes_repo`: Groß- und Kleinschreibung, Besitzer, `.git`, Punkte, Bindestriche und
+  Unterstriche zählen nicht (`wais`, `W-A-I-S`, `Wamocon/wamo.git`), was kein Text ist, gilt als eigenes Repo. Der Dispatcher prüft jede
+  Antwort von GitHub zu Token und Installation zusätzlich auf die GitHub-ID des Repos (`SELF_REPO_IDS`, bleibt bei jeder Umbenennung
+  gleich), ein Eintrag ohne lesbaren Namen sperrt. `wamo-job-kern-einrichten.sh kanal --repos` sperrt dieselben Namen. Der Vertragstest
+  `voice-core/test_kernkanal_vertrag.py` hält alle drei Seiten gleich. Keine Migration.
+- Löschlauf des Testlabors (`infra/sokrates2/wamo-labor-loeschlauf.sh`): `HERE` war nie gesetzt, mit `set -u` brach der Lauf am Server vor dem
+  ersten Schritt ab („HERE: unbound variable“). Gefunden vom Test des Herkunftsschutzes, der nur unter Linux läuft.
+- Tests laufen auch unter Linux und in jedem Checkout: Tokendateien der Labor-Tests mit 0600, Node-Tests des Labor-Dienstes einzeln statt als
+  Ordner (Node 22), Warnung von Node 22 zum Modultyp in den Logiktests der Oberfläche aus, Attrappe für `ssh` mit Ausführungsrecht,
+  `JOURNAL_STREAM` des Test-Prozesses gelangt nicht in die Skripte, Temp-Ordner mit Git-Spiegel räumen trotz Wartung im Hintergrund auf,
+  tiefes JSON ohne Abhängigkeit von der Rekursionsgrenze, Plattformfälle (Python unter Linux, Rechte im erhöhten Prozess) mit Bedingung.
+- Altfehler der Kern-Suite: Tests des Wächters ohne festen Repo-Namen, Caddy-Tests mit den Kern-Slots aus Schritt 2.2, Moduswechsel nur
+  dort geprüft, wo es ihn gibt, ein verdeckter Test in `test_boss.py` läuft wieder. Die Eingabe-Erweiterung des Gateways checkt auch unter
+  Windows mit LF aus (`.gitattributes`).
 
 - Auth (Befund des Token-Tests vom 12.11.2026): Ein Konto mit aal2-Token konnte sein Passwort ohne erneute Anmeldung ändern, ein Laborbesucher
   hätte den Platz für den Nächsten sperren können. `docker-compose.wamo-sitzungen.yml` setzt jetzt

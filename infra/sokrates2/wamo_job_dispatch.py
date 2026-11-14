@@ -129,7 +129,12 @@ MANAGED = APP / "claude-code" / "managed-settings.json"
 GEHEIM = Path("/etc/wamo/geheim.env")
 CLAUDE = HEIM / ".local" / "bin" / "claude"  # derselbe Pfad in der Sandbox
 NPM_GLOBAL = HEIM / ".npm-global"  # in der Sandbox nur lesbar
-SELF_REPO = "wamo"
+# Jeder Name, den das eigene Repo je getragen hat (bis 14.11.2026 wamo, seitdem w.a.i.s), nur ergänzen. Dieselbe Liste steht im Kern
+# (voice-core/dev_guard.py) und im Kern-Kanal; geprüft wird allein mit ist_eigenes_repo, test_kernkanal_vertrag.py hält alle drei gleich.
+SELF_REPOS = ("wamo", "w.a.i.s")
+SELF_REPO = SELF_REPOS[0]  # Alias für ältere Verweise, nie zum Vergleichen
+# GitHub-ID des eigenen Repos: bleibt bei jeder Umbenennung gleich, geprüft an jeder Antwort von GitHub zu Token und Installation
+SELF_REPO_IDS = frozenset({1425139508})
 PARALLEL_MAX = 1  # Aufträge teilen sich Loopback (kein eigener Netz-Namensraum): nur einer gleichzeitig
 LAN_PROBE = "192.168.178.1"  # Ziel der Firewall-Probe im Selbsttest (Router, Port 443)
 ENTWICKLUNGS_PORTS = range(20000, 21000)  # 127.0.0.1:20000-20999 lässt der Ausgangsfilter für eigene Server zu
@@ -285,6 +290,38 @@ def modul_sha256(name: str) -> str | None:
         return None
 
 
+def repo_vergleichsname(wert: str) -> str:
+    """Vergleichsform eines Repo-Namens: Unicode NFKC, klein (casefold), nur der Teil nach dem letzten Schrägstrich, ohne .git am
+    Ende, nur a-z und 0-9. So sind w.a.i.s, W-A-I-S, w_a_i_s, wais und https://github.com/Wamocon/w.a.i.s.git gleich."""
+    text = unicodedata.normalize("NFKC", wert).casefold().strip().rstrip("/")
+    text = text.rsplit("/", 1)[-1]
+    while text.endswith(".git"):
+        text = text[:-4]
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+SELF_REPO_VERGLEICH = frozenset(repo_vergleichsname(n) for n in SELF_REPOS)
+
+
+def ist_eigenes_repo(wert: object) -> bool:
+    """True, wenn wert das eigene Repo benennt: Name, owner/name oder GitHub-Adresse, in jeder Schreibweise und unter jedem Namen aus
+    SELF_REPOS. Fail-closed: was kein Text ist, gilt als das eigene Repo. Andere Namen mit demselben Anfang (wamo-extra) sind fremd."""
+    if not isinstance(wert, str):
+        return True
+    return repo_vergleichsname(wert) in SELF_REPO_VERGLEICH
+
+
+def github_eintrag_ist_eigenes_repo(eintrag: object) -> bool:
+    """True, wenn ein Repo-Eintrag einer Antwort von GitHub das eigene Repo ist (ID aus SELF_REPO_IDS oder ein Name aus SELF_REPOS).
+    Fail-closed: ein Eintrag ohne lesbaren full_name zählt als das eigene Repo."""
+    if not isinstance(eintrag, dict):
+        return True
+    kennung = eintrag.get("id")
+    if isinstance(kennung, int) and not isinstance(kennung, bool) and kennung in SELF_REPO_IDS:
+        return True
+    return ist_eigenes_repo(eintrag.get("full_name"))
+
+
 def check_job(value: str) -> str:
     if not JOB_RE.fullmatch(value):
         raise Abgewiesen("Auftrags-ID ungültig")
@@ -294,7 +331,7 @@ def check_job(value: str) -> str:
 def check_project(value: str) -> str:
     if not PROJECT_RE.fullmatch(value) or "--" in value:
         raise Abgewiesen("Projektname ungültig (3 bis 50 Zeichen, a-z, 0-9, Bindestrich)")
-    if value == SELF_REPO:
+    if ist_eigenes_repo(value):
         raise Abgewiesen(WAMO_REPO_GESPERRT)
     return value
 
@@ -353,7 +390,7 @@ def check_repo(value: object) -> str:
     name = value.split("/", 1)[1]
     if name in (".", "..") or name.lower().endswith(".git"):
         raise Abgewiesen("Kopfzeile: repo ungültig (Name . oder .. oder mit .git)")
-    if name.lower() == SELF_REPO:
+    if ist_eigenes_repo(name):
         raise Abgewiesen(WAMO_REPO_GESPERRT)
     return value
 
@@ -830,16 +867,19 @@ def _antwort_pruefen(obj: dict, rechte: dict[str, str], repo: str | None) -> str
                 or STUFEN_RANG.get(stufe, 99) > STUFEN_RANG[rechte[bereich]]:
             return f"GitHub vergab mehr Rechte als angefragt ({_clean(str(bereich))[:40]})"
     repos = obj.get("repositories")
-    namen = [r.get("full_name") for r in repos if isinstance(r, dict)] if isinstance(repos, list) else []
+    eintraege = repos if isinstance(repos, list) else []
+    namen = [r.get("full_name") for r in eintraege if isinstance(r, dict)]
     if repo:
-        if len(namen) != 1 or not isinstance(namen[0], str) or namen[0].lower() != repo.lower():
+        if len(eintraege) != 1 or len(namen) != 1 or not isinstance(namen[0], str) or namen[0].lower() != repo.lower():
             return f"Token gilt nicht genau für {repo} (gehört das Repo zur Installation?)"
+        if github_eintrag_ist_eigenes_repo(eintraege[0]):  # die ID bleibt bei einer Umbenennung gleich
+            return "Das Token gilt für das WAMO-Repo (für Aufträge gesperrt)"
         return None
     # Ohne Ziel-Repo gilt das Token für die ganze Installation: sie muss auf ausgewählte Repos beschränkt sein, und
-    # das WAMO-Repo selbst (für Aufträge gesperrt) darf nicht dazugehören
+    # das WAMO-Repo selbst (für Aufträge gesperrt) darf nicht dazugehören, unter keinem Namen und mit seiner ID nicht
     if obj.get("repository_selection") != "selected":
         return "Installation ist nicht auf ausgewählte Repos beschränkt (Only select repositories einstellen)"
-    if any(isinstance(n, str) and n.rsplit("/", 1)[-1].lower() == SELF_REPO for n in namen):
+    if any(github_eintrag_ist_eigenes_repo(r) for r in eintraege):
         return "Das WAMO-Repo gehört zur Installation (aus der Auswahl der App entfernen)"
     return None
 
@@ -847,17 +887,18 @@ def _antwort_pruefen(obj: dict, rechte: dict[str, str], repo: str | None) -> str
 MAX_REPO_SEITEN = 5  # 500 Repos; mehr gelten als nicht prüfbar
 
 
-def _repos_der_installation(token: str) -> list[str]:
-    """Namen (owner/name) aller Repos, die das Token sieht. GithubAppFehler, wenn die Liste nicht lesbar ist."""
-    namen: list[str] = []
+def _repos_der_installation(token: str) -> list[object]:
+    """Einträge (wie von GitHub, mit full_name und id) aller Repos, die das Token sieht. GithubAppFehler, wenn die Liste nicht
+    lesbar ist. Die Einträge werden nicht gefiltert: einen unlesbaren wertet github_eintrag_ist_eigenes_repo als das eigene Repo."""
+    eintraege: list[object] = []
     for seite in range(1, MAX_REPO_SEITEN + 1):
         status, obj = _github("GET", f"/installation/repositories?per_page=100&page={seite}", token)
         repos = obj.get("repositories") if isinstance(obj, dict) else None
         if status != 200 or not isinstance(repos, list):
             raise GithubAppFehler(f"Repos der Installation nicht lesbar (GitHub antwortet {status})")
-        namen += [r["full_name"] for r in repos if isinstance(r, dict) and isinstance(r.get("full_name"), str)]
+        eintraege += repos
         if len(repos) < 100:
-            return namen
+            return eintraege
     raise GithubAppFehler(f"Installation hat mehr als {MAX_REPO_SEITEN * 100} Repos, die Prüfung auf das WAMO-Repo "
                           "ist nicht möglich")
 
@@ -890,8 +931,8 @@ def installations_token(app: GithubApp, art: str, repo: str | None) -> tuple[str
         grund = _antwort_pruefen(obj, rechte, repo)
         if grund:
             raise GithubAppFehler(grund)
-        if not repo and any(n.rsplit("/", 1)[-1].lower() == SELF_REPO for n in _repos_der_installation(token)):
-            # die Antwort zählt die Repos nicht auf: erst die Liste der Installation zeigt, ob das WAMO-Repo dabei ist
+        if not repo and any(github_eintrag_ist_eigenes_repo(e) for e in _repos_der_installation(token)):
+            # die Antwort zählt die Repos nicht auf: erst die Liste der Installation zeigt, ob das WAMO-Repo dabei ist (Name oder ID)
             raise GithubAppFehler("Das WAMO-Repo gehört zur Installation (aus der Auswahl der App entfernen)")
         ablauf = obj.get("expires_at")
         ablauf = ablauf if isinstance(ablauf, str) and re.fullmatch(r"[0-9TZ:.+-]{10,40}", ablauf) else "?"

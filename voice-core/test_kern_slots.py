@@ -352,8 +352,9 @@ class AltpfadeAufgeraeumt(unittest.TestCase):
     # Skripte, die die alte Unit nur im Betrieb ohne Slots neu starten (hinter dem Slot-Schutz slot_betrieb)
     BEDINGT = {"infra/sokrates2/wamo-core-einrichten.sh", "infra/sokrates2/wamo-rd-einrichten.sh", "infra/sokrates2/wamo-ui-einrichten.sh",
                "infra/sokrates2/wamo-ui-rueckweg.sh"}
-    # Bewusste Treffer: das Slot-Skript startet die Instanzen der Vorlage, der Aufruf vom PC prüft den Slot-Betrieb selbst (Paket R6)
-    BEWUSST = {"infra/sokrates2/wamo-core-slots.sh", "scripts/wamo_kern_sokrates2.py"}
+    # Bewusste Treffer: das Slot-Skript startet die Instanzen der Vorlage, der Aufruf vom PC prüft den Slot-Betrieb selbst (Paket R6);
+    # die Runner-Einrichtung nennt den Befehl nur als Gegenprobe (sudoers darf ihn dem Runner-Benutzer gerade NICHT erlauben)
+    BEWUSST = {"infra/sokrates2/wamo-core-slots.sh", "scripts/wamo_kern_sokrates2.py", "infra/sokrates2/wais-runner-einrichten.sh"}
     MUSTER = re.compile(r"systemctl (restart|start) wamo-core")
 
     def treffer(self) -> dict[str, list[int]]:

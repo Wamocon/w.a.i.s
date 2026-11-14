@@ -249,7 +249,7 @@ pruefe_betrag() {   # name wert klein gross: Punkt als Dezimaltrenner, höchsten
 }
 
 pruefe_repos() {
-  local r name n=0 gesehen=" "
+  local r name vergleich n=0 gesehen=" "
   [ -n "$1" ] || return 0
   [[ "$1" =~ ^[A-Za-z0-9._/,-]+$ ]] || aufruf "--repos: nur Buchstaben, Ziffern, Punkt, Unterstrich, Bindestrich, Schrägstrich und Komma (eine Zeile)"
   local -a liste
@@ -258,7 +258,11 @@ pruefe_repos() {
     n=$((n + 1))
     [[ "$r" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$ ]] || aufruf "--repos: $r ist kein Repo der Form owner/name"
     name="${r#*/}"
-    case "${name,,}" in wamo|.|..|*.git) aufruf "--repos: $r ist nicht zulässig (nie das WAMO-Repo)" ;; esac
+    case "${name,,}" in .|..|*.git) aufruf "--repos: $r ist nicht zulässig" ;; esac
+    # das eigene Repo unter jedem Namen (bis 14.11.2026 wamo, seitdem w.a.i.s): Vergleich wie ist_eigenes_repo, klein und nur a-z, 0-9
+    vergleich="${name,,}"
+    vergleich="${vergleich//[!a-z0-9]/}"
+    case "$vergleich" in wamo|wais) aufruf "--repos: $r ist nicht zulässig (nie das WAMO-Repo, unter keinem Namen)" ;; esac
     case "$gesehen" in *" ${r,,} "*) aufruf "--repos: $r steht doppelt" ;; esac
     gesehen="$gesehen${r,,} "
   done

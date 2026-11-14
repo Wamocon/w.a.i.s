@@ -9,7 +9,8 @@ bewusst als Wortlaut im Test: Weicht eine Seite ab, wird dieser Test rot, nicht 
     I5  Projektname (Kern und Dispatcher, dieselbe Wertetabelle)
     I6  Grund-Codes des Ereignisses kanal_gesperrt (Dispatcher und Kern)
     ssh-Optionen des Rauchtests gegen dev_agent.ssh_argv
-    unveränderte Dateien (Prüfsummen von Slot-Skript, Vorprüfung und Slot-Vorlage), SELF_REPO, Namensvertrag
+    unveränderte Dateien (Prüfsummen von Slot-Skript, Vorprüfung und Slot-Vorlage), Namensvertrag
+    Selbstschutz: jeder Name des eigenen Repos (SELF_REPOS, ist_eigenes_repo) auf allen drei Seiten gleich
 
 Alles läuft ohne Netz, ohne Server, ohne ssh und ohne git. Ausführen (im Ordner voice-core/):  python -m pytest -q test_kernkanal_vertrag.py
 """
@@ -190,6 +191,11 @@ I5_ABGELEHNT = (
     (None, "", "projekt"),
     (None, None, "projekt"),
     (None, "wamo", "projekt"),
+    ("acme/w.a.i.s", None, "repo"),  # der Name des eigenen Repos seit dem 14.11.2026
+    ("Wamocon/W.A.I.S", None, "repo"),
+    ("acme/wais", None, "repo"),
+    (None, "W.A.I.S", "projekt"),
+    (None, "wais", "projekt"),
 )
 
 
@@ -229,8 +235,9 @@ def _zufaellige_eingaben(anzahl: int = 2500) -> list[tuple[str | None, str | Non
     wort_zeichen = "abcxyzABCXYZ0189-._ /!äöüÄÖÜßéñ\t €"
     repo_zeichen = "abcxyzABCXYZ0189-._"
     laengen = (1, 2, 3, 5, 8, 20, 44, 45, 46, 47, 60)
-    eingaben: list[tuple[str | None, str | None]] = [(None, wort) for wort in ("wamo", "WAMO", "wamo_", "-wamo-", "Wamo-Extra", "wamo.")]
-    eingaben += [(f"acme/{name}", None) for name in ("wamo", "WAMO", "-wamo-", "wamo_", "Wamo-Extra", "a.b-c_d", "..", "___", "-")]
+    eigene = ("wamo", "WAMO", "wamo_", "-wamo-", "Wamo-Extra", "wamo.", "w.a.i.s", "W.A.I.S", "wais", "w-a-i-s", "W_A_I_S", "w.a.i.s.2")
+    eingaben: list[tuple[str | None, str | None]] = [(None, wort) for wort in (*eigene, "W A I S")]
+    eingaben += [(f"acme/{name}", None) for name in (*eigene, "a.b-c_d", "..", "___", "-")]
     for _ in range(anzahl):
         if zufall.random() < 0.5:
             name = "".join(zufall.choice(repo_zeichen) for _ in range(zufall.choice(laengen)))
@@ -502,7 +509,7 @@ def test_die_schluesselzeile_hat_in_skript_und_rauchtest_dieselbe_form():
     assert f"startswith('{kopf}')" in pruefung and 'endswith(" wamo-kern-jobs")' in pruefung
 
 
-# ================================================================== unveränderte Dateien (Prüfsummen), SELF_REPO
+# ================================================================== unveränderte Dateien (Prüfsummen)
 # SHA256 der Dateien, die dieses Vorhaben nicht ändert: Der Anker prüft die Prüfsumme des Slot-Skripts (wamo_anker.py), Vorprüfung und
 # Slot-Vorlage gehören zum selben Vertrag. Zeilenenden sind auf LF vereinheitlicht (ein Checkout unter Windows ändert die Summe nicht).
 # Es gibt keinen Vergleich mit einem Git-Zweig: Nach dem Merge bliebe er leer, und jede spätere Änderung würde ihn rot färben.
@@ -539,9 +546,124 @@ def test_die_vorpruefung_und_die_slot_vorlage_kennen_den_buero_schalter_nicht():
     assert "WAMO_ENTWICKLUNG_BUERO" not in vorpruefung + einheit
 
 
-def test_self_repo_bleibt_wamo_ueberall():
-    assert [z for z in _text(VOICE_CORE / "dev_guard.py").split("\n") if z.startswith("SELF_REPO")] == ['SELF_REPO = "wamo"']
-    assert dev_guard.SELF_REPO == dev_agent.SELF_REPO == K.SELF_REPO == "wamo"
+# ================================================================== Selbstschutz: jeder Name des eigenen Repos
+# Das Repo hieß bis zum 14.11.2026 wamo und heißt seitdem w.a.i.s (GitHub leitet den alten Namen weiter). Kern (dev_guard.py), Dispatcher
+# (wamo_job_dispatch.py) und Kern-Kanal (wamo_job_kernkanal.py) sind getrennt installierte Dateien und halten darum je eine Liste SELF_REPOS
+# und eine Prüfung ist_eigenes_repo. Dieser Test hält alle drei gleich. SELF_REPO bleibt nur als Alias ("wamo"), verglichen wird nie damit.
+SELF_REPOS = ("wamo", "w.a.i.s")
+SELBST_SEITEN = {"kern": dev_guard, "dispatcher": D, "kern_kanal": K}
+SELBST_DATEIEN = (VOICE_CORE / "dev_guard.py", INFRA / "wamo_job_dispatch.py", INFRA / "wamo_job_kernkanal.py")
+EIGENE_NAMEN = (
+    "wamo", "WAMO", "Wamo", "w.a.i.s", "W.A.I.S", "W.A.I.S.", "wais", "WAIS", "w-a-i-s", "W_A_I_S", "w.a.i.s.git", "Wamocon/w.a.i.s",
+    "wamocon/W.A.I.S", "Wamocon/wamo", "Wamocon/wamo.git", "Wamocon/WAMO.GIT", "https://github.com/Wamocon/w.a.i.s",
+    "https://github.com/Wamocon/w.a.i.s.git", "github.com/wamocon/wamo/", " Wamocon/w.a.i.s ", "x/Wamo", "acme/-wamo-", "acme/wamo_",
+    "ｗａｉｓ",  # wais in Vollbreite: NFKC macht daraus wais
+)
+FREMDE_NAMEN = ("acme/test-repo", "Wamocon/wamo-extra", "wamocon/wamo-docs", "Wamocon/wais-docs", "acme/w.a.i.s.2", "acme/wamos",
+                "acme/a.b-c_d", "wamo/app")  # nur der Name nach dem Schrägstrich zählt, nie der Besitzer
+UNKLARE_WERTE = (None, 5, b"wamo", ["w.a.i.s"], {"name": "x"})
+
+
+def test_self_repos_ist_auf_allen_drei_seiten_gleich_und_steht_je_datei_genau_einmal():
+    for datei in SELBST_DATEIEN:
+        zeilen = [z for z in _text(datei).split("\n") if re.match(r"SELF_REPOS?\s*=", z)]
+        assert len(zeilen) == 2, (datei.name, zeilen)
+        assert zeilen[0].startswith('SELF_REPOS = ("wamo", "w.a.i.s")'), (datei.name, zeilen)
+        assert zeilen[1].startswith("SELF_REPO = SELF_REPOS[0]"), (datei.name, zeilen)
+    for seite, modul in SELBST_SEITEN.items():
+        assert modul.SELF_REPOS == SELF_REPOS, seite
+        assert modul.SELF_REPO == "wamo", seite  # Alias für ältere Verweise
+    assert dev_agent.ist_eigenes_repo is dev_guard.ist_eigenes_repo  # der Kern prüft nur über dev_guard
+
+
+def test_kein_vergleich_mehr_mit_dem_alias_self_repo():
+    """Nur ist_eigenes_repo entscheidet. Ein Vergleich mit SELF_REPO kennt den neuen Namen nicht (die Lücke vom 14.11.2026)."""
+    dateien = (*SELBST_DATEIEN, VOICE_CORE / "dev_agent.py", VOICE_CORE / "entwicklung_betrieb.py", INFRA / "wamo_job_rauchtest.py")
+    for datei in dateien:
+        treffer = [z.strip() for z in _text(datei).split("\n") if re.search(r"\bSELF_REPO\b", z) and not z.startswith("SELF_REPO = SELF_REPOS[0]")]
+        assert treffer == [], (datei.name, treffer)
+
+
+@pytest.mark.parametrize("seite", SELBST_SEITEN)
+@pytest.mark.parametrize("name", EIGENE_NAMEN)
+def test_jeder_name_des_eigenen_repos_ist_auf_jeder_seite_das_eigene_repo(seite, name):
+    assert SELBST_SEITEN[seite].ist_eigenes_repo(name) is True
+
+
+@pytest.mark.parametrize("seite", SELBST_SEITEN)
+@pytest.mark.parametrize("name", FREMDE_NAMEN)
+def test_fremde_repos_sind_nie_das_eigene_repo(seite, name):
+    assert SELBST_SEITEN[seite].ist_eigenes_repo(name) is False
+
+
+@pytest.mark.parametrize("seite", SELBST_SEITEN)
+@pytest.mark.parametrize("wert", UNKLARE_WERTE, ids=repr)
+def test_im_zweifel_gilt_ein_wert_als_das_eigene_repo(seite, wert):
+    assert SELBST_SEITEN[seite].ist_eigenes_repo(wert) is True
+
+
+def test_alle_drei_seiten_entscheiden_bei_jeder_eingabe_gleich():
+    zufall = random.Random(20261114)
+    zeichen = "wamoisWAMOISxg.-_/ "
+    eingaben = [*EIGENE_NAMEN, *FREMDE_NAMEN, *UNKLARE_WERTE]
+    eingaben += ["".join(zufall.choice(zeichen) for _ in range(zufall.randint(1, 14))) for _ in range(3000)]
+    gesperrt = 0
+    for eingabe in eingaben:
+        ergebnisse = {seite: modul.ist_eigenes_repo(eingabe) for seite, modul in SELBST_SEITEN.items()}
+        assert len(set(ergebnisse.values())) == 1, (eingabe, ergebnisse)
+        gesperrt += ergebnisse["kern"]
+    assert 0 < gesperrt < len(eingaben)
+
+
+# Aufträge, wie sie ankommen: der Kern prüft das Feld repo und Adressen im Auftragstext, der Dispatcher die Kopfzeile, der Kern-Kanal den Projektnamen
+AUFTRAG_EIGEN = ("Wamocon/w.a.i.s", "Wamocon/W.A.I.S", "acme/w.a.i.s", "acme/wais", "acme/w-a-i-s", "Wamocon/wamo", "Wamocon/wamo.git")
+
+
+@pytest.mark.parametrize("repo", AUFTRAG_EIGEN)
+def test_ein_auftrag_mit_dem_eigenen_repo_wird_im_kern_abgelehnt(repo):
+    with pytest.raises(ValueError, match="WAMO-Repo"):
+        dev_agent.repo_pruefen(repo)
+    with pytest.raises(ValueError, match="WAMO-Repo"):
+        dev_agent.repo_pruefen(f"https://github.com/{repo}")
+    with pytest.raises(ValueError, match="WAMO-Repo"):
+        dev_agent.repo_aus_auftrag(f"Bitte https://github.com/{repo} prüfen.")
+    assert seite_kern(repo, None) == ("abgelehnt", "repo")
+
+
+@pytest.mark.parametrize("repo", AUFTRAG_EIGEN)
+def test_ein_auftrag_mit_dem_eigenen_repo_wird_im_dispatcher_und_im_kern_kanal_abgelehnt(repo):
+    with pytest.raises(D.Abgewiesen) as info:
+        D.check_repo(repo)
+    assert str(info.value) == D.WAMO_REPO_GESPERRT or repo.endswith(".git")  # .git lehnt die Form schon vorher ab
+    assert seite_dispatcher(repo, None) == ("abgelehnt", "repo")
+    assert K.projekt_pruefen("kern-x", repo) == "repo"
+
+
+@pytest.mark.parametrize("name", ("wamo", "wais", "w-a-i-s"))
+def test_ein_projekt_mit_dem_namen_des_eigenen_repos_wird_auf_allen_seiten_abgelehnt(name):
+    with pytest.raises(ValueError, match="WAMO-Repo"):
+        dev_agent.project_slug(name)
+    with pytest.raises(D.Abgewiesen):
+        D.check_project(name)
+    assert K.projekt_pruefen(f"kern-{name}", None) == "projekt"
+    for wort in (name, name.upper(), "W.A.I.S", "W A I S"):
+        assert seite_kern(None, wort) == seite_dispatcher(None, wort) == ("abgelehnt", "projekt"), wort
+
+
+@pytest.mark.parametrize("repo, projekt", [("Acme/Test-Repo", "kern-test-repo"), ("Wamocon/wamo-extra", "kern-wamo-extra"),
+                                           ("Wamocon/wais-docs", "kern-wais-docs"), ("acme/w.a.i.s.2", "kern-w-a-i-s-2")])
+def test_fremde_repos_bleiben_auf_allen_seiten_erlaubt(repo, projekt):
+    assert dev_agent.repo_pruefen(repo) == repo
+    assert D.check_repo(repo) == repo
+    assert seite_kern(repo, None) == seite_dispatcher(repo, None) == projekt
+    assert K.projekt_pruefen(projekt, repo) is None
+
+
+def test_das_einrichtungsskript_des_kern_kanals_sperrt_dieselben_namen():
+    """pruefe_repos in wamo-job-kern-einrichten.sh bildet dieselbe Vergleichsform (klein, nur a-z und 0-9) und sperrt dieselben Namen."""
+    treffer = re.search(r'case "\$vergleich" in ([a-z0-9|]+)\)', SKRIPT)
+    assert treffer, "die Prüfung auf das eigene Repo steht nicht mehr im Skript"
+    assert set(treffer.group(1).split("|")) == {K.repo_vergleichsname(n) for n in SELF_REPOS} == {"wamo", "wais"}
 
 
 # ================================================================== Namensvertrag (CLAUDE.md)
