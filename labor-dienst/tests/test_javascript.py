@@ -12,6 +12,9 @@ ORDNER = Path(__file__).resolve().parents[1]
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node ist nicht installiert")
 def test_node_tests_der_oberflaechen_sind_gruen():
-    r = subprocess.run(["node", "--test", "--test-reporter=tap", "tests/js"], cwd=ORDNER, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    # die Dateien einzeln: einen Ordner als Argument nimmt erst neueres Node an, Node 22 sucht dort ein Modul namens tests/js
+    dateien = sorted(p.relative_to(ORDNER).as_posix() for p in (ORDNER / "tests" / "js").glob("*.test.mjs"))
+    assert dateien, "keine Node-Tests gefunden"
+    r = subprocess.run(["node", "--test", "--test-reporter=tap", *dateien], cwd=ORDNER, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-1500:]
     assert "# fail 0" in r.stdout and "# pass" in r.stdout
