@@ -143,8 +143,7 @@ class OfficeDateien:
         if not isinstance(fmt, str) or fmt not in self.formate:
             verfuegbar = ", ".join(FORMAT_NAMEN[f] for f in self.formate) or "keins"
             return {"status": "rejected", "summary": f"Dieses Format geht an diesem PC nicht (möglich: {verfuegbar})."}
-        gefunden = await canvas_lesen(self.memory, canvas_id=canvas_id, titel=titel) if canvas_id is not None or titel else \
-            await canvas_lesen(self.memory)
+        gefunden = await canvas_lesen(self.memory, canvas_id=canvas_id, titel=titel)
         if gefunden is None:
             return {"status": "rejected", "summary": KEIN_CANVAS}
         inhalt = gefunden["inhalt"]
