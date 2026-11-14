@@ -316,7 +316,7 @@ node ..\scripts\wamo-dist-pruefen.cjs D:\tmp\wamo-dist\win-unpacked --liste   # 
 
 Was der Installer enthält (Größe etwa 117 MB, entpackt 340 MB): die App in `app.asar` (ohne Tests und Testdaten), in
 `resources\` den Host (`host\*.py`, `pyproject.toml`, `uv.lock`, ohne `.venv` und Tests), die drei Tunnelskripte
-(`scripts\wamo-tunnel*.ps1`), die WAMO-CA (`wamo-ca.crt`) und `uv.exe` mit Lizenztext. Kein Voice-Core, kein Oberflächen-Build,
+(`scripts\wamo-tunnel*.ps1`) und das Reparaturskript für das Taskleisten-Symbol (`scripts\wamo-symbol-reparieren.ps1`), die WAMO-CA (`wamo-ca.crt`) und `uv.exe` mit Lizenztext. Kein Voice-Core, kein Oberflächen-Build,
 keine `.env`.
 
 - **Namen** (`desktop/package.json`, Test `desktop/dist.test.js`): Sichtbar heißt die App **W.A.I.S.**: Eintrag im Startmenü
@@ -377,6 +377,15 @@ keine `.env`.
   bevor er die App startet (`desktop/build/installer.nsh`). Das Audit-Protokoll
   des Hosts (`host\wamo_audit.jsonl`) liegt im Installationsordner und geht bei Update oder Deinstallation verloren; ein fester
   Ort per `WAMO_AUDIT_LOG` braucht eine Änderung in `scripts/wamo-tunnel.ps1`.
+- **Leeres Symbol in der Taskleiste**: Zeigt die Taskleiste für W.A.I.S. nur ein leeres Datei-Symbol, obwohl Startmenü und
+  Fenster das richtige Symbol haben, hängt ein alter Eintrag im App-Zwischenspeicher der Shell. Neustart des Explorers, Löschen
+  von `iconcache_*.db` und `ie4uinit` helfen dann nicht. Abhilfe: im Tray „Taskleisten-Symbol reparieren …“ wählen und bestätigen.
+  Die App beendet den Explorer geordnet, löscht nur `%LOCALAPPDATA%\Microsoft\Windows\Caches\*.db` (Windows legt die Dateien neu
+  an) und startet den Explorer wieder; die Taskleiste verschwindet dabei für einige Sekunden, offene Explorer-Fenster schließen
+  sich. Ohne App geht dasselbe von Hand mit
+  `powershell -NoProfile -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Programs\wamo-desktop\resources\scripts\wamo-symbol-reparieren.ps1"`
+  (fragt vorher nach, `-Trocken` zeigt nur, was gelöscht würde). Bleibt eine Datei gesperrt, bei Windows ab- und wieder anmelden
+  und die Reparatur wiederholen. Code: `desktop/symbol-reparatur.js`, `scripts/wamo-symbol-reparieren.ps1`.
 - **Electron 44.10.1** (exakt gepinnt, vorher 44.5.1): schließt den Hinweis von `npm audit` zu den Zwischenzertifikaten der
   Web-PKI (Fix ab 44.9.1). Die Linie 44.x hat keine neuere Version; die Notizen der Versionen 44.6 bis 44.10 nennen keine
   Breaking Changes, 44.9.0 behebt zusätzlich, dass `setCertificateVerifyProc` bei gleichzeitigen ersten Anfragen an einen Host

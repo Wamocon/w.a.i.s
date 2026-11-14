@@ -108,7 +108,12 @@ test("Bau-Konfiguration: Kennung, pro Benutzer ohne Admin, Fuses, Host ohne Test
   const host = b.extraResources.find((e) => e.to === "host");
   assert.ok(host.filter.includes("!**/test_*.py") && host.filter.includes("!.venv/**") && host.filter.includes("uv.lock"));
   const skripte = b.extraResources.find((e) => e.to === "scripts");
-  assert.deepEqual([...skripte.filter].sort(), ["wamo-tunnel-einrichten.ps1", "wamo-tunnel-entfernen.ps1", "wamo-tunnel.ps1"]);
+  assert.deepEqual([...skripte.filter].sort(), [
+    "wamo-symbol-reparieren.ps1",
+    "wamo-tunnel-einrichten.ps1",
+    "wamo-tunnel-entfernen.ps1",
+    "wamo-tunnel.ps1",
+  ]);
   assert.ok(b.files.includes("!**/*.test.js") && b.files.includes("!testdaten/**"));
 });
 
@@ -172,7 +177,7 @@ test("Versionen: electron und electron-builder sind exakt gepinnt", () => {
 });
 
 test("Der Paketname des Skripts und die Gerätedatei zeigen auf vorhandene Skripte im Repository", () => {
-  for (const s of ["wamo-tunnel.ps1", "wamo-tunnel-einrichten.ps1", "wamo-tunnel-entfernen.ps1"]) {
+  for (const s of ["wamo-tunnel.ps1", "wamo-tunnel-einrichten.ps1", "wamo-tunnel-entfernen.ps1", "wamo-symbol-reparieren.ps1"]) {
     assert.ok(fs.existsSync(path.join(__dirname, "..", "scripts", s)), s);
   }
 });
