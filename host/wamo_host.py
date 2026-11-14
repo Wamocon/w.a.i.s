@@ -9,7 +9,8 @@ Werkzeuge per MCP. Zwei Betriebsarten:
 Sicherheitsmodell (wird HIER erzwungen, nicht im Prompt). Alles, was ein Modell schickt, ist
 untrusted: auch Text aus Websuche, Mails oder Dateien kann im Modell als Anweisung wirken.
   read      sofort                (system_info, powershell_lesen mit reinen Get-/Test-Befehlen)
-  change    sofort, protokolliert (webseite_oeffnen, programm_oeffnen, dark_mode, git_klonen)
+  change    sofort, protokolliert (webseite_oeffnen, programm_oeffnen, dark_mode, git_klonen; nur für den Kern:
+            office_datei_erstellen und office_datei_oeffnen, Dateien nur in Dokumente\\WAIS, Schalter office.aus)
   critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung durch einen Admin in der UI (auch github_repo_anlegen)
   blocked   nie
 Freigaben kann das Modell NICHT selbst erteilen. Solange eine Anfrage offen ist oder eine freigegebene Aktion läuft,
@@ -48,6 +49,9 @@ from urllib.parse import urlsplit
 from mcp.server.fastmcp import FastMCP
 
 import live_bild
+import office_ablage
+import office_com
+import office_dateien
 import uia_control
 import windows_control as wc
 
@@ -2059,6 +2063,134 @@ def _github_anlegen_ausfuehren(eintrag: dict) -> dict:
         return {"status": "error", "summary": _gh_fehlertext(rc, err)}
     return {"status": "success", "summary": f"Repository {org}/{name} angelegt ({'privat' if eintrag['privat'] else 'öffentlich'}). "
             "Zum Arbeiten daran git_klonen.", "url": f"https://github.com/{org}/{name}"}
+
+
+# ---------- Office-Dateien aus dem Canvas (office_dateien.py, office_ablage.py, office_com.py) ----------
+# Nur für den Kern, nie in LLM_TOOLS (voice-core/pc_host.py): Das Sprachmodell ruft canvas_exportieren im Kern, der Kern liest das eigene
+# Canvas-Element aus der Datenbank und schickt hierher nur dessen feste Struktur, nie Dateibytes. Der Host prüft alles selbst (Format,
+# Art, Grenzen, Zeichen), baut die Datei, legt sie in Dokumente\WAIS ab (nie überschreiben) und öffnet sie. Speichern ist change ohne
+# Freigabe (Entscheidung vom 14.11.2026: nichts verlässt den PC). Die Datei %LOCALAPPDATA%\WAMO\office.aus sperrt alle drei Werkzeuge
+# sofort; geprüft wird bei jedem Aufruf. Das Audit nennt Format, Name, Größe und SHA-256, nie den Inhalt.
+OFFICE_AUS = Path(_LOCAL or str(Path.home() / "AppData" / "Local")) / "WAMO" / "office.aus"
+OFFICE_PRO_MINUTE = 10
+OFFICE_AUS_TEXT = ("Office-Dateien sind an diesem PC ausgeschaltet (Datei office.aus im Ordner WAMO). Wieder einschalten kann nur "
+                   "die Person am PC.")
+CANVAS_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_OFFICE_ABLAGE: office_ablage.Ablage | None = None
+
+
+def _office_ablage() -> office_ablage.Ablage:
+    global _OFFICE_ABLAGE
+    if _OFFICE_ABLAGE is None:
+        _OFFICE_ABLAGE = office_ablage.Ablage.standard()
+    return _OFFICE_ABLAGE
+
+
+def _office_aus(tool: str) -> dict | None:
+    """Schalter am PC: Gibt es office.aus, passiert nichts (status=blocked)."""
+    if not OFFICE_AUS.exists():
+        return None
+    _audit({"tool": tool, "risk": "blocked", "grund": "office.aus"})
+    return {"status": "blocked", "summary": OFFICE_AUS_TEXT}
+
+
+def _datei_oeffnen(pfad: Path) -> None:
+    """Öffnet eine selbst erzeugte Datei mit dem Standardprogramm (Word, Excel, PowerPoint, PDF-Anzeige)."""
+    if platform.system() != "Windows":
+        raise RuntimeError("Host laeuft nicht unter Windows")
+    os.startfile(str(pfad))  # noqa: S606 (nur Dateien aus dem Register im Ordner WAIS, Endung fest)
+
+
+@mcp.tool()
+def office_faehigkeiten() -> dict:
+    """Nur für den Kern: welche Dateiformate dieser PC aus Canvas-Inhalten erzeugt (PDF nur mit Word) und wohin (read)."""
+    if aus := _office_aus("office_faehigkeiten"):
+        return {**aus, "formate": []}
+    faehig = office_com.faehigkeiten()
+    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"]})
+    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE}
+
+
+@mcp.tool()
+async def office_datei_erstellen(format: str, inhalt: dict, oeffnen: bool = True, canvas_id: str = "") -> dict:  # noqa: A002
+    """Nur für den Kern: baut aus einem Canvas-Inhalt eine Datei (word, excel, powerpoint, pdf, csv, markdown), legt sie in
+    Dokumente\\WAIS ab und öffnet sie (change, ohne Freigabe). inhalt ist die feste Struktur {art, titel, text | spalten, zeilen}."""
+    if aus := _office_aus("office_datei_erstellen"):
+        return aus
+    if not _rate_ok("office_datei_erstellen", OFFICE_PRO_MINUTE):
+        _audit({"tool": "office_datei_erstellen", "risk": "rejected", "grund": "Rate-Grenze"})
+        return {"status": "rejected", "summary": "Zu viele Dateien in kurzer Zeit. Bitte kurz warten."}
+    # Im Thread: PDF über Word dauert bis zu 45 s, eine große Tabelle einige Sekunden; die Probe des Kerns läuft weiter
+    return await asyncio.to_thread(_office_erstellen, format, inhalt, oeffnen, canvas_id)
+
+
+def _office_erstellen(fmt: object, roh: object, oeffnen: object, canvas_id: object) -> dict:
+    tool = "office_datei_erstellen"
+    try:
+        fmt = office_dateien.format_pruefen(fmt)
+        inhalt = office_dateien.pruefen(roh)
+        office_dateien.passt(inhalt, fmt)
+        if fmt == "pdf" and not office_com.word_vorhanden():
+            raise office_dateien.InhaltFehler("PDF geht nur mit installiertem Word")
+    except office_dateien.InhaltFehler as e:
+        _audit({"tool": tool, "risk": "rejected", "format": str(fmt)[:20], "error": str(e)[:200]})
+        return {"status": "rejected", "summary": str(e)}
+    cid = canvas_id if isinstance(canvas_id, str) and CANVAS_ID_RE.fullmatch(canvas_id) else None
+    ablage = _office_ablage()
+    try:
+        daten = office_dateien.erzeugen(inhalt, "word" if fmt == "pdf" else fmt)
+        if fmt == "pdf":
+            daten = office_com.pdf_aus_docx(daten)
+        eintrag = ablage.speichern(daten, inhalt.titel, fmt, cid)
+        pfad = ablage.pfad(eintrag["kennung"])
+    except (office_dateien.InhaltFehler, office_ablage.AblageFehler) as e:
+        _audit({"tool": tool, "risk": "rejected", "format": fmt, "error": str(e)[:200]})
+        return {"status": "rejected", "summary": str(e)}
+    except office_com.PdfFehler as e:
+        _audit({"tool": tool, "risk": "change", "format": fmt, "result": "error", "error": str(e)[:200]})
+        return {"status": "error", "summary": str(e)}
+    except Exception as e:  # noqa: BLE001 (Bibliothek oder Dateisystem: nur melden, nichts weiter versuchen)
+        _audit({"tool": tool, "risk": "change", "format": fmt, "result": "error", "error": type(e).__name__})
+        return {"status": "error", "summary": f"Die Datei ließ sich nicht erzeugen ({type(e).__name__})."}
+    _audit({"tool": tool, "risk": "change", "format": fmt, "name": eintrag["name"][:120], "groesse": eintrag["groesse"],
+            "sha256": eintrag["sha256"], "kennung": eintrag["kennung"], "canvas_id": cid})
+    geoeffnet, hinweis = False, ""
+    if oeffnen is True:
+        if _ist_gesperrt():
+            hinweis = " Der Bildschirm ist gesperrt, deshalb ist sie noch nicht geöffnet."
+        else:
+            try:
+                _datei_oeffnen(pfad)
+                geoeffnet = True
+            except (OSError, RuntimeError) as e:
+                hinweis = f" Öffnen hat nicht geklappt ({type(e).__name__})."
+    return {"status": "success", "geoeffnet": geoeffnet,
+            "summary": f"{eintrag['name']} liegt in {office_ablage.ORDNER_ANZEIGE}" + (" und ist geöffnet." if geoeffnet else ".")
+            + hinweis,
+            "datei": {"kennung": eintrag["kennung"], "name": eintrag["name"], "format": fmt, "groesse": eintrag["groesse"],
+                      "ordner": office_ablage.ORDNER_ANZEIGE, "pfad": str(pfad)}}
+
+
+@mcp.tool()
+def office_datei_oeffnen(kennung: str) -> dict:
+    """Nur für den Kern: öffnet eine Datei, die W.A.I.S. selbst erzeugt hat (Kennung aus dem Register, change)."""
+    if aus := _office_aus("office_datei_oeffnen"):
+        return aus
+    if locked := _gesperrt("office_datei_oeffnen"):
+        return locked
+    try:
+        pfad = _office_ablage().pfad(kennung)
+    except office_ablage.AblageFehler as e:
+        _audit({"tool": "office_datei_oeffnen", "kennung": str(kennung)[:20], "risk": "rejected", "error": str(e)[:200]})
+        return {"status": "rejected", "summary": str(e)}
+    if dup := _duplicate("office_datei_oeffnen", kennung=kennung):
+        return dup
+    _audit({"tool": "office_datei_oeffnen", "kennung": kennung, "name": pfad.name[:120], "risk": "change"})
+    try:
+        _datei_oeffnen(pfad)
+    except (OSError, RuntimeError) as e:
+        return {"status": "error", "summary": f"Öffnen hat nicht geklappt ({type(e).__name__})."}
+    return {"status": "success", "summary": f"{pfad.name} ist geöffnet."}
 
 
 UNBEKANNT = {"status": "error", "summary": "Unbekannte oder abgelaufene Freigabe."}
