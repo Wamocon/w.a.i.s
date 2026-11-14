@@ -60,10 +60,15 @@ import shlex
 import sys
 import tempfile
 import threading
+import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
 
-SELF_REPO = "wamo"
+# Jeder Name, den das eigene Repo je getragen hat: bis zum 14.11.2026 wamo, seitdem w.a.i.s (GitHub leitet den alten Namen weiter).
+# Nur ergänzen, nie kürzen. Geprüft wird allein mit ist_eigenes_repo; dieselbe Liste steht im Dispatcher und im Kern-Kanal
+# (infra/sokrates2/wamo_job_dispatch.py, wamo_job_kernkanal.py), test_kernkanal_vertrag.py hält alle drei gleich.
+SELF_REPOS = ("wamo", "w.a.i.s")
+SELF_REPO = SELF_REPOS[0]  # Alias für ältere Verweise, nie zum Vergleichen
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXIT_BLOCK = 2  # Claude Code: Exit 2 blockiert den Werkzeugaufruf
 WATCHDOG_SECS = 5.0
@@ -507,6 +512,28 @@ def _mcp_parts(tool_name: str) -> tuple[str, str] | None:
 
 def _is_rea(server: str) -> bool:
     return server == "rea" or server.endswith("_rea")
+
+
+# ---------- Repo-Selbstschutz über den Namen (Aufträge, Projekte, GitHub) ----------
+def repo_vergleichsname(wert: str) -> str:
+    """Vergleichsform eines Repo-Namens: Unicode NFKC, klein (casefold), nur der Teil nach dem letzten Schrägstrich, ohne .git am
+    Ende, nur a-z und 0-9. So sind w.a.i.s, W-A-I-S, w_a_i_s, wais und https://github.com/Wamocon/w.a.i.s.git gleich."""
+    text = unicodedata.normalize("NFKC", wert).casefold().strip().rstrip("/")
+    text = text.rsplit("/", 1)[-1]
+    while text.endswith(".git"):
+        text = text[:-4]
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+SELF_REPO_VERGLEICH = frozenset(repo_vergleichsname(n) for n in SELF_REPOS)
+
+
+def ist_eigenes_repo(wert: object) -> bool:
+    """True, wenn wert das eigene Repo benennt: Name, owner/name oder GitHub-Adresse, in jeder Schreibweise und unter jedem Namen aus
+    SELF_REPOS. Fail-closed: was kein Text ist, gilt als das eigene Repo. Andere Namen mit demselben Anfang (wamo-extra) sind fremd."""
+    if not isinstance(wert, str):
+        return True
+    return repo_vergleichsname(wert) in SELF_REPO_VERGLEICH
 
 
 # ---------- Repo-Selbstschutz über aufgelöste Pfade ----------

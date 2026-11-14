@@ -253,18 +253,18 @@ def kern_projektname(repo: str | None, wort: str | None = None) -> str:
     """Projektname eines Büro-Auftrags: kern- plus Name. Der Name kommt aus dem Repo (Teil nach dem Schrägstrich), sonst aus dem
     Projektwort des Modells. Ein Repo hat Vorrang. Dieselbe Regel erzwingt der Dispatcher (Wertetabelle in der Arbeitsliste).
     ProjektnameFehler: grund "repo" (kein brauchbares Repo, das WAMO-Repo) oder "projekt" (leer oder länger als 50 Zeichen)."""
-    from dev_guard import SELF_REPO  # erst hier: dev_guard lädt viel, der Selbstschutz bleibt dort
+    from dev_guard import ist_eigenes_repo  # erst hier: dev_guard lädt viel, der Selbstschutz bleibt dort
 
     if isinstance(repo, str) and repo.strip():
         owner, _, name = repo.strip().partition("/")
         if not owner or not name or "/" in name:
             raise ProjektnameFehler("repo", "Repo: Form owner/name")
         teil = _projekt_teil(name)
-        if name.lower() == SELF_REPO or teil == SELF_REPO:
+        if ist_eigenes_repo(name) or ist_eigenes_repo(teil):
             raise ProjektnameFehler("repo", "Das WAMO-Repo selbst ist für Aufträge gesperrt")
     else:
         teil = _projekt_teil(wort if isinstance(wort, str) else "")
-        if teil == SELF_REPO:
+        if ist_eigenes_repo(teil):
             raise ProjektnameFehler("projekt", "Das WAMO-Repo selbst ist für Aufträge gesperrt")
     if not teil:
         raise ProjektnameFehler("projekt", "Aus den Angaben lässt sich kein Projektname bilden")

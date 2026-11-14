@@ -29,6 +29,7 @@
 # Probelauf ohne root (nur für Tests): WAMO_LABOR_WURZEL=/pfad/zu/einem/wegwerf/ordner, dazu WAMO_LABOR_HEUTE=JJJJMMTT für das Datum.
 set -euo pipefail
 
+HERE="$(cd "$(dirname "$0")" && pwd)"   # für den Herkunftsschutz (pruefe_ordner); fehlte, set -u brach den Löschlauf sonst ab
 W="${WAMO_LABOR_WURZEL:-}"
 ETC="$W/etc/wamo-labor"
 DATEN="$W/var/lib/wamo-labor"

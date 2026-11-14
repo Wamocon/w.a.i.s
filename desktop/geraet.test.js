@@ -200,7 +200,23 @@ test("Schlüssel: ssh-keygen liest die Datei und meldet dieselbe öffentliche Ze
   assert.ok(lPub.includes(r.fingerprint), lPub);
 });
 
-test("Zugriff: das echte icacls lässt auf Schlüssel und Datenordner nur den Benutzer übrig", { skip: process.platform !== "win32" && "nur unter Windows" }, async () => {
+// Ein erhöhter Prozess (Administrator mit vollem Token, so laufen zum Beispiel die Windows-Runner von GitHub) legt Dateien in einem
+// Ordner ohne vererbbare Einträge mit der Standard-DACL seines Tokens an: eigene Einträge für SYSTEM und Administratoren, die
+// "/inheritance:r" nicht entfernt. Die App läuft nie erhöht (asInvoker, ohne Elevation), und beide Konten können jede Datei ohnehin lesen.
+function laeuftErhoeht() {
+  if (process.platform !== "win32") return false;
+  try {
+    const gruppen = execFileSync(path.join(process.env.SystemRoot, "System32", "whoami.exe"), ["/groups", "/fo", "csv", "/nh"], { encoding: "utf8", windowsHide: true });
+    return /S-1-16-(12288|16384)/.test(gruppen); // hohe oder System-Integritätsstufe
+  } catch {
+    return false;
+  }
+}
+
+const ICACLS_UEBERSPRINGEN =
+  process.platform !== "win32" ? "nur unter Windows" : laeuftErhoeht() ? "erhöhter Prozess: die Standard-DACL des Tokens bringt eigene Einträge mit" : false;
+
+test("Zugriff: das echte icacls lässt auf Schlüssel und Datenordner nur den Benutzer übrig", { skip: ICACLS_UEBERSPRINGEN }, async () => {
   const u = umgebung({ echt: true });
   await u.geraet.vorbereiten();
   const sig = await u.geraet.signiere({ nonce: NONCE, userId: USER });

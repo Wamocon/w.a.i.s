@@ -1,4 +1,4 @@
-"""Startet die Node-Tests des Browser-Workers (scripts/wamo-last-browser.test.cjs) im Rahmen von pytest.
+r"""Startet die Node-Tests des Browser-Workers (scripts/wamo-last-browser.test.cjs) im Rahmen von pytest.
 
 Aufruf (aus scripts, mit der Python-Umgebung von voice-core):
   D:\IDEA\Projekt\wamo\voice-core\.venv\Scripts\python.exe -m pytest -q test_wamo_labor_last_node.py

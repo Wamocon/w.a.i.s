@@ -1387,7 +1387,8 @@ Dispatcher **nicht widerrufen**. Darum ist ein API-Schlüssel mit Ausgabenlimit 
 bei dem der Zugang erzeugt wurde (API-Schlüssel: Schlüsselverwaltung des Workspaces, Claude-Code-Token: Kontoeinstellungen). Niko notiert den Weg dorthin vor Stufe 3a (Arbeitsliste N4), nie einen Wert; im Repo
 und auf dem Server steht kein Zugangswert im Klartext.
 
-**Was bleibt gesperrt:** Selbständerung (`SELF_REPO = "wamo"` im Kern und im Dispatcher, dazu die Fork-Prüfung), Supabase und `deployment` in der Sandbox, der Befehl `pruefen` im Kern-Kanal (auch mit
+**Was bleibt gesperrt:** Selbständerung (`SELF_REPOS = ("wamo", "w.a.i.s")` mit `ist_eigenes_repo` im Kern, im Dispatcher und im Kern-Kanal,
+im Dispatcher zusätzlich die GitHub-ID `SELF_REPO_IDS`, dazu die Fork-Prüfung), Supabase und `deployment` in der Sandbox, der Befehl `pruefen` im Kern-Kanal (auch mit
 `WAMO_PRUEFEN=an`), Jira und Vercel, bis ein enges Konto in `DIENSTE` steht. `PARALLEL_MAX = 1` gilt für beide Kanäle.
 
 ## 19. Labor-Dienst (Test-Jira des Testlabors, Betrieb, vorbereitet am 12.11.2026, noch nicht ausgerollt)
@@ -1656,6 +1657,22 @@ kein solches Release (der Lab-Release des Kerns muss zuerst angelegt sein), bric
 
 Probelauf ohne root in einem Wegwerf-Ordner: `WAMO_LABOR_DATEN_WURZEL=/tmp/labor-probe WAMO_LABOR_DATEN_LADER=<voice-core> WAMO_LABOR_DATEN_PYTHON=<python mit loguru> bash wamo-labor-daten-einrichten.sh einrichten`. Tests im Ordner
 `voice-core`: `python -m pytest -q test_labor_daten_inhalt.py test_labor_daten_skript.py`. Was echte Besitzer und den Benutzer `wamo-core` braucht (Herkunftsschutz mit fremdem Besitzer, Lader als `wamo-core`), ist nur am Server prüfbar.
+
+## 21. Ausrollen über GitHub mit eigenem Runner (vorbereitet am 14.11.2026, nicht eingerichtet)
+
+Die Workflows `Ausrollen` (dev und test nach jedem Merge auf `main`) und `Ausrollen prod` (nur von Hand, Freigabe im Environment `prod`)
+laufen auf einem eigenen Runner im Büro: Benutzer `wais-deploy` ohne root, Dienst `wais-runner.service`, Software in `/opt/wais-runner`.
+Am Server gibt es dafür genau einen Einstieg, `/usr/local/sbin/wais-deploy` (aus `wais-deploy.sh`), den der Runner per sudo mit festen
+Unterbefehlen aufrufen darf (`/etc/sudoers.d/wais-deploy`). Er holt `origin/main` in einen eigenen Spiegel (`/var/lib/wais-deploy/repo.git`,
+Lese-Schlüssel `/etc/wais-deploy/deploy_key`), nimmt nur dort enthaltene Commits, legt den Stand unter `/var/lib/wais-deploy/staende/<commit>`
+ab und ruft genau die Befehle dieses Handbuchs in der bekannten Reihenfolge auf: `wamo-core-slots.sh release`, `bereiten`, `schalten`,
+`bewaehren 30`, `ausleiten`, `rueckweg-kern` und `wamo-ui-umschalten.sh bauen`, `umschalten --ohne-bau`, `zurueck` (als `wamocon`),
+dazu `wamo-labor-einrichten.sh pruefen`. Er hält die Sperre `/run/wais-deploy/lock` und zum Schalten von Caddy die gemeinsame Sperre
+`/run/wamo-labor-geraete/lock`, und er schreibt alles nach `/var/log/wais-deploy/protokoll.log`.
+
+Einrichten, Environments, Token und Rückweg: `docs/runner-einrichten.md` (Einrichtung mit `sudo bash ~/wamo-infra/wais-runner-einrichten.sh
+einrichten`, Zustand mit `status`, Rückweg mit `rueckweg`). Das Ausrollen von Hand (Abschnitte 12 und 14) bleibt möglich, nimmt aber die Sperre
+des Einstiegs nicht: nie gleichzeitig mit einem laufenden Workflow.
 
 ---
 

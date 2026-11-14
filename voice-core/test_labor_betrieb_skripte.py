@@ -646,6 +646,9 @@ class Werkstatt(unittest.TestCase):
 
     def lauf(self, skript: Path, *args: str, extra: dict | None = None, wurzel: bool = True) -> subprocess.CompletedProcess:
         env = dict(os.environ)
+        # Läuft der Test selbst unter systemd (zum Beispiel auf einem Runner von GitHub), steht JOURNAL_STREAM in der Umgebung, und die
+        # Skripte hielten sich für einen Dienst (kein logger). Tests, die das prüfen, setzen die Variable selbst über extra.
+        env.pop("JOURNAL_STREAM", None)
         env.update({"PATH": f"{self.bin}{os.pathsep}{system_pfad()}", "ATTRAPPE_LOG": posix(self.log), "ATTRAPPE_DIR": posix(self.att),
                     "HOME": posix(self.t), "LC_ALL": "C.UTF-8", "WAMO_LABOR_CADDY_DIR": posix(self.caddy), "WAMO_LABOR_QUELLE": posix(self.quelle),
                     "WAMO_LABOR_CA": posix(self.t / "wamo-ca.crt"), "WAMO_LABOR_WARTE_RUNDEN": "2", "WAMO_LABOR_WARTE_SEKUNDEN": "0"})

@@ -8,7 +8,7 @@ from datetime import date
 import pytest
 from echter_dienst import laufender_dienst
 from fastapi.testclient import TestClient
-from hilfen import BETREUER_TOKEN, KERN_TOKEN, LABORTAG, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen
+from hilfen import BETREUER_TOKEN, KERN_TOKEN, LABORTAG, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen, token_datei
 
 from wamo_labor_dienst import browser_api, server, sicherheit
 from wamo_labor_dienst.app import create_app
@@ -206,8 +206,8 @@ def test_hinter_vertrautem_proxy_zaehlt_die_adresse_aus_dem_weitergabekopf(konfi
 
 def test_proxys_aus_der_umgebung(tmp_path):
     kern, betreuer = tmp_path / "k", tmp_path / "b"
-    kern.write_text(KERN_TOKEN, encoding="utf-8")
-    betreuer.write_text(BETREUER_TOKEN, encoding="utf-8")
+    token_datei(kern, KERN_TOKEN)
+    token_datei(betreuer, BETREUER_TOKEN)
     env = {"WAMO_LABOR_DIENST_KERN_TOKEN_DATEI": str(kern), "WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI": str(betreuer)}
     assert aus_umgebung(env).proxys == frozenset()
     assert aus_umgebung({**env, "WAMO_LABOR_DIENST_PROXYS": "172.18.0.2, ::1"}).proxys == frozenset({"172.18.0.2", "::1"})
