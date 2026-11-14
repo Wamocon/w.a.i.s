@@ -105,7 +105,7 @@ test("offene Freigabe und kein Gespräch: kein Rahmen", () => {
   for (const z of ["idle", "acting", "thinking", "speaking", "listening"]) assert.equal(ruhezustand(z), false);
 });
 
-// ---------- Umrechnung auf die Rand-Fenster ----------
+// ---------- Umrechnung auf die Markierungsfenster ----------
 /** Bildschirm mit Skalierung 1,25 (Bildschirmpixel = DIP * 1,25), links daneben ein zweiter ohne Skalierung. */
 function bildschirm(faktor = 1) {
   return {
@@ -115,7 +115,7 @@ function bildschirm(faktor = 1) {
 }
 const RAND = [{ x: 0, y: 0, width: 1536, height: 864 }];
 
-test("Umrechnung: Bildschirmpixel werden DIP in Koordinaten des Rand-Fensters", () => {
+test("Umrechnung: Bildschirmpixel werden DIP in Koordinaten des Markierungsfensters", () => {
   const m = pruefeMarkierung(gut({ punkt: { x: 500, y: 400 } }));
   const aus = fuerRandFenster(m, bildschirm(1.25), RAND);
   assert.equal(aus.length, 1);
@@ -123,7 +123,7 @@ test("Umrechnung: Bildschirmpixel werden DIP in Koordinaten des Rand-Fensters", 
   assert.deepEqual(aus[0].punkt, { x: 400, y: 320 });
 });
 
-test("Umrechnung: ein Fenster auf dem zweiten Monitor trifft nur dessen Rand-Fenster", () => {
+test("Umrechnung: ein Fenster auf dem zweiten Monitor trifft nur dessen Markierungsfenster", () => {
   const zwei = [{ x: 0, y: 0, width: 1920, height: 1080 }, { x: 1920, y: 0, width: 1920, height: 1080 }];
   const m = pruefeMarkierung(gut({ fenster: { x: 2000, y: 100, b: 500, h: 400 }, monitor: { x: 1920, y: 0, b: 1920, h: 1080 },
     punkt: { x: 2100, y: 200 } }));
@@ -149,7 +149,7 @@ test("Umrechnung: Fehler der Bildschirm-Schnittstelle oder unsinnige Werte zeich
 });
 
 // ---------- Zeichnen (markierung.js, ohne DOM) ----------
-test("Geometrie im Rand-Fenster: einpassen, winzige und ungültige Rechtecke weglassen", () => {
+test("Geometrie im Markierungsfenster: einpassen, winzige und ungültige Rechtecke weglassen", () => {
   assert.deepEqual(rahmenGeometrie({ x: 10, y: 20, b: 300, h: 200 }, 1920, 1080), { x: 10, y: 20, b: 300, h: 200 });
   assert.deepEqual(rahmenGeometrie({ x: -20, y: -20, b: 3000, h: 2000 }, 1920, 1080), { x: 0, y: 0, b: 1920, h: 1080 });
   assert.equal(rahmenGeometrie({ x: 0, y: 0, b: 4, h: 400 }, 1920, 1080), null);
@@ -300,13 +300,13 @@ test("Markierungsfenster: sichtbar, bis Rahmen und Welle ganz verschwunden sind,
   assert.ok(SICHTBAR_MS <= HALTEN_MS + ABBLENDEN_MS + 500);
 });
 
-test("Rand-Fenster sind aus Bildschirmfotos ausgenommen und main.js merkt den Bereich je Monitor", () => {
+test("Markierungsfenster sind aus Bildschirmfotos ausgenommen und main.js merkt den Bereich je Monitor", () => {
   const js = lies("main.js");
   assert.match(js, /win\.setContentProtection\(true\)/);
   assert.match(js, /win\.wamoBereich = display\.bounds/);
 });
 
-// ---------- Rand-Fenster: klick-durchlässig, WMC-Rot, reduzierte Bewegung (Quelltext-Prüfung) ----------
+// ---------- Markierungsfenster: klick-durchlässig, WMC-Rot, reduzierte Bewegung (Quelltext-Prüfung) ----------
 const lies = (datei) => fs.readFileSync(path.join(__dirname, datei), "utf8");
 
 test("overlay.html und overlay.css: nicht anklickbar, WMC-Rot, respektiert prefers-reduced-motion", () => {
