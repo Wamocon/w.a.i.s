@@ -121,6 +121,18 @@ test("Bau-Konfiguration: Kennung, pro Benutzer ohne Admin, Fuses, Host ohne Test
 //     getWindowsInstallationDirName), beim Update den gespeicherten InstallLocation. productName ändert ihn nicht.
 //   * executableName WAMO: Der Autostart-Eintrag (HKCU\...\Run, Name de.wamocon.wamo) zeigt auf ...\wamo-desktop\WAMO.exe, der Host
 //     erkennt die eigene Oberfläche an wamo.exe, und der Installer findet die laufende App über diesen Dateinamen.
+test("Das Logo für die Office-Dateien kommt mit dem Host ins Paket, sonst nichts Neues aus vorlagen/", () => {
+  // host/office_dateien.py braucht vorlagen/wmc-logo.png für Kopfzeile und Folien; fehlt es, erzeugt der Host keine Datei
+  const host = paket.build.extraResources.find((e) => e.to === "host");
+  assert.ok(host.filter.includes("vorlagen/*.png"), "vorlagen/*.png fehlt im Filter des Hosts");
+  assert.ok(!host.filter.some((f) => /vorlagen\/\*\*|vorlagen\/\*\.(?!png)/.test(f)), "nur PNG aus vorlagen/");
+  const vorlagen = fs.readdirSync(path.join(__dirname, "..", "host", "vorlagen"));
+  assert.deepEqual(vorlagen, ["wmc-logo.png"]);
+  const logo = fs.readFileSync(path.join(__dirname, "..", "host", "vorlagen", "wmc-logo.png"));
+  assert.equal(logo.subarray(1, 4).toString("ascii"), "PNG");
+  assert.deepEqual(pruefePfade(["host/vorlagen/wmc-logo.png"]), []);
+});
+
 test("Namen der Installation: sichtbar W.A.I.S., technisch wie in 0.1.0", () => {
   const b = paket.build;
   assert.equal(b.productName, "W.A.I.S.");
