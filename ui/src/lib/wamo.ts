@@ -33,15 +33,15 @@ import { createStore } from "./store.ts"; // relativ, damit node:test diese Date
 import { vorgangAnsage, vorgangEinordnen } from "./vorgaenge.ts";
 
 /**
- * Zustand der Hauptansicht als Store (lib/store.ts). Die Pegel für Kern, Stimmlinie und
- * Stimmen-Rand liegen bewusst NICHT im Store, sondern in levelsRef und historyRef: sie ändern
+ * Zustand der Hauptansicht als Store (lib/store.ts). Die Pegel für Kern und Stimmlinie
+ * liegen bewusst NICHT im Store, sondern in levelsRef und historyRef: sie ändern
  * sich 20-mal pro Sekunde und werden pro Bild gelesen, ohne React-Render.
  */
 
 export type Presence = "offline" | "connecting" | "idle" | "listening" | "thinking" | "speaking";
 
-/** Ein Abtastwert: user = Mikrofon, bot = WAMO. cut markiert eine Unterbrechung (für Stimmlinie
- * und Rand), cutAt bleibt stehen, damit der Kern sie nicht verpasst. */
+/** Ein Abtastwert: user = Mikrofon, bot = WAMO. cut markiert eine Unterbrechung (für die
+ * Stimmlinie), cutAt bleibt stehen, damit der Kern sie nicht verpasst. */
 export type LevelSample = { user: number; bot: number; cut: boolean; speaker: number; cutAt?: number };
 
 /** Verlauf der Stimmlinie; seq zählt jeden neuen Abtastwert (VoiceLine zeichnet nur dann neu). */
@@ -225,11 +225,12 @@ export const istOnline = (s: WamoState) => s.presence !== "offline" && s.presenc
 export const laeuftWerkzeug = (s: WamoState) => s.activities.some((a) => a.status === "laeuft");
 export const laufendesWerkzeug = (s: WamoState) => s.activities.find((a) => a.status === "laeuft")?.name ?? null;
 
-/** Zustand für den Stimmen-Rand der Desktop-App (main.js prüft die Werte). */
 /** Wartet etwas auf eine Entscheidung des Profils (Freigabe oder Auftrag)? */
 export const wartetAufEntscheidung = (s: WamoState) => s.approvals.length > 0 || s.auftraege.length > 0;
 
-export function overlayZustand(s: WamoState) {
+/** Zustand für die Desktop-App: Energiesparschutz während eines Gesprächs, keine Markierung am Zielfenster bei offener
+ *  Freigabe oder ohne Gespräch (desktop/main.js prüft die Werte). */
+export function desktopZustand(s: WamoState) {
   if (wartetAufEntscheidung(s)) return "approval";
   if (laeuftWerkzeug(s) && istOnline(s)) return "acting";
   return s.presence === "connecting" ? "idle" : s.presence;

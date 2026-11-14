@@ -31,8 +31,7 @@
    Zähler, Atkinson Hyperlegible für Fließtext (app/fonts).
    Kontrast: #F40E0E auf dem Hintergrund 4,7:1. Schrift auf roten Flächen fast schwarz (#140202, 4,9:1).
    Kein Blau. Neben Rot gibt es Bernstein für "wartet" und Pink für Fehler, damit sich beides vom Marken-Rot abhebt.
-   Farbwerte als Hex lassen: Kern (WebGL) und Stimmlinie lesen sie per getComputedStyle,
-   der Stimmen-Rand der Desktop-App bekommt --overlay-* über die Desktop-Brücke.
+   Farbwerte als Hex lassen: Kern (WebGL) und Stimmlinie lesen sie per getComputedStyle.
    ===================================================================== */
 :root {
   /* WMC-Grundpalette (verbindlich) */
@@ -84,11 +83,6 @@
   --kern-mensch: #fff1ee; /* Glut hellt auf, wenn die Person spricht */
   --kern-fremd: #cfcdd8; /* dasselbe bei einer weiteren Stimme */
   --logo-plate: transparent; /* dunkel: Logo in Weiß und Rot ohne Platte (wmc-logo-dunkel.png) */
-
-  /* Stimmen-Rand der Desktop-App (liegt über beliebigen Programmen) */
-  --overlay-wamo: #f40e0e;
-  --overlay-user: #f3f3f3;
-  --overlay-other: #8c8c8c;
 
   --display: var(--font-display), "Segoe UI", system-ui, sans-serif;
   --hud: var(--font-hud), ui-monospace, "Cascadia Code", Consolas, monospace;
