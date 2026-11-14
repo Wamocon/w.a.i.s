@@ -236,6 +236,10 @@ def test_grenzen():
     with pytest.raises(od.InhaltFehler):
         od.pruefen({"art": "tabelle", "titel": "x", "spalten": ["a"], "zeilen": [["x" * (od.ZELLE_MAX + 1)]]})
     assert od.pruefen({"art": "dokument", "titel": "x", "text": "a" * od.TEXT_MAX}).text
+    riesig = {"art": "tabelle", "titel": "x", "spalten": ["a"] * od.SPALTEN_MAX,
+              "zeilen": [["x" * od.ZELLE_MAX] * od.SPALTEN_MAX] * 20}  # jede Zelle erlaubt, zusammen zu viel
+    with pytest.raises(od.InhaltFehler, match="insgesamt"):
+        od.pruefen(riesig)
 
 
 def test_steuerzeichen_und_titel_werden_bereinigt():

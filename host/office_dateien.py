@@ -32,6 +32,7 @@ TEXT_MAX = 100_000
 ZEILEN_MAX = 2000
 SPALTEN_MAX = 50
 ZELLE_MAX = 2000
+TABELLE_ZEICHEN_MAX = 1_000_000
 TITEL_EINGABE_MAX = 300
 TITEL_MAX = 200
 DATEI_MAX = 20 * 1024 * 1024
@@ -107,10 +108,14 @@ def pruefen(roh: object) -> Inhalt:
             raise InhaltFehler(f"Tabelle zu groß (höchstens {ZEILEN_MAX} Zeilen und {SPALTEN_MAX} Spalten)")
         kopf = tuple(_text(s, ZELLE_MAX, "Spalte") for s in spalten)
         koerper = []
+        zeichen = sum(len(s) for s in kopf)
         for zeile in zeilen:
             if not isinstance(zeile, list) or len(zeile) > SPALTEN_MAX:
                 raise InhaltFehler("Jede Zeile ist eine Liste von Texten")
             werte = [_text(z, ZELLE_MAX, "Zelle") for z in zeile[: len(kopf)]]
+            zeichen += sum(len(w) for w in werte)
+            if zeichen > TABELLE_ZEICHEN_MAX:  # 2000 Zeilen mal 50 Spalten mal 2000 Zeichen wären 200 Millionen Zeichen
+                raise InhaltFehler(f"Tabelle zu groß (höchstens {TABELLE_ZEICHEN_MAX} Zeichen insgesamt)")
             koerper.append(tuple(werte + [""] * (len(kopf) - len(werte))))
         return Inhalt(art, titel, spalten=kopf, zeilen=tuple(koerper))
     text = _text(roh.get("text"), TEXT_MAX, "text")
