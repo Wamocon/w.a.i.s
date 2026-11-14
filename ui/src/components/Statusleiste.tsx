@@ -1,13 +1,16 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type MouseEvent, type ReactNode } from "react";
 import { KERN, useBetriebsart, type Betriebsart } from "@/lib/betriebsart";
+import { hashFuer } from "@/lib/einstellungenAbschnitte";
+import { zurPcSteuerung } from "@/lib/einstellungenHash";
 import { modellKurzname } from "@/lib/modellKurz";
 import { modusKurz } from "@/lib/modellwahl";
 import type { Betrieb } from "@/lib/nachrichten";
 import { useSelect } from "@/lib/store";
 import { STIMME_LEER, stimmeModul } from "@/lib/stimme";
 import { unverschluesselteDienste } from "@/lib/umgebung";
+import { usePcSchalter } from "@/lib/usePcSchalter";
 import { istOnline, wamo } from "@/lib/wamo";
 
 // Build-Konstanten: auf Server und Client gleich
@@ -32,6 +35,18 @@ function Symbol({ art }: { art: "haus" | "laptop" | "schloss" | "warnung" }) {
       {art === "laptop" && <path d="M3 4h10v7H3zM1 13h14" />}
       {art === "schloss" && <path d="M4 7.5h8V14H4zM5.8 7.5V5.2a2.2 2.2 0 0 1 4.4 0v2.3" />}
     </svg>
+  );
+}
+
+/** Modul PC-Steuerung an: roter Punkt und fetter Text. */
+function PcSteuerungAn() {
+  return (
+    <>
+      <span className="dot dot-rot" aria-hidden="true" />
+      <strong>
+        PC-Steuerung<span className="status-label"> an</span>
+      </strong>
+    </>
   );
 }
 
@@ -91,6 +106,25 @@ function PcText({ betrieb }: { betrieb: Betrieb | null }) {
 }
 
 /**
+ * Weg aus der Kopfzeile zum Schalter "PC-Steuerung" (Einstellungen, Geräte und PC): das ganze Modul ist ein Link, nur für Admins
+ * (lib/pcSchalter.ts, auch ohne Sitzung, nie für Laborkonten). Normaler Klick öffnet ohne Neuladen und fokussiert den Schalter;
+ * Strg, Umschalt und Mittelklick nutzen die Adresse. Der Zweck steht für Screenreader im Text, nicht in einem title.
+ */
+function PcWeg({ children }: { children: ReactNode }) {
+  const klick = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    zurPcSteuerung();
+  };
+  return (
+    <a href={hashFuer("geraete")} className="status-weg" onClick={klick}>
+      {children}
+      <span className="sr-only">, zum Schalter PC-Steuerung</span>
+    </a>
+  );
+}
+
+/**
  * Status als Beschreibungsliste: Verbindung, Betriebsart, Modelle, PC-Host, Mikrofon.
  * "kompakt" für die Kopfzeile (Bezeichnungen nur für Screenreader), sonst ausführlich (Menü).
  * Ohne Meldung "betrieb" vom Kern steht "unbekannt".
@@ -118,6 +152,9 @@ export const StatusDetails = memo(function StatusDetails({ kompakt, stimme = fal
   // Den Stand der Stimmerkennung nur abonnieren, wenn das Modul hier steht; sonst liefert der Selektor eine Konstante (kein Neuzeichnen je Äußerung)
   const stimmeStand = useSelect(wamo, (s) => (stimme ? s.stimme : STIMME_LEER));
   const stimmeAnzeige = stimme && online ? stimmeModul(stimmeStand) : null;
+  // Kopfzeile: die Module PC und PC-Steuerung führen Admins zum Schalter (im ausführlichen Menü und in den Einstellungen nicht)
+  const { admin: pcAdmin } = usePcSchalter();
+  const pcWeg = kompakt && pcAdmin;
 
   return (
     <dl className={kompakt ? "status-items" : "status-list"}>
@@ -193,10 +230,13 @@ export const StatusDetails = memo(function StatusDetails({ kompakt, stimme = fal
         <div data-feld="pcsteuerung">
           <dt className={dt}>PC-Steuerung</dt>
           <dd>
-            <span className="dot dot-rot" aria-hidden="true" />
-            <strong>
-              PC-Steuerung<span className="status-label"> an</span>
-            </strong>
+            {pcWeg ? (
+              <PcWeg>
+                <PcSteuerungAn />
+              </PcWeg>
+            ) : (
+              <PcSteuerungAn />
+            )}
           </dd>
         </div>
       )}
@@ -227,7 +267,13 @@ export const StatusDetails = memo(function StatusDetails({ kompakt, stimme = fal
       <div data-feld="pc" data-pc={betrieb?.pc}>
         <dt className={dt}>PC-Host</dt>
         <dd>
-          <PcText betrieb={betrieb} />
+          {pcWeg ? (
+            <PcWeg>
+              <PcText betrieb={betrieb} />
+            </PcWeg>
+          ) : (
+            <PcText betrieb={betrieb} />
+          )}
         </dd>
       </div>
       {UNSICHER.length > 0 && (

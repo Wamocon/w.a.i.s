@@ -134,22 +134,28 @@ export type GeraeteBlock = "status" | "verwaltung" | "pc" | "fernzugriff" | "bet
 
 /** Kennung der Karte Geräteverwaltung im Dokument: Hinweise und Info springen hierhin (lib/einstellungenHash.ts). */
 export const GERAETEVERWALTUNG_ID = "geraeteverwaltung";
+/** Kennung des Blocks PC-Steuerung: der Weg aus der Kopfzeile springt hierhin (lib/einstellungenHash.ts, zurPcSteuerung). */
+export const PC_STEUERUNG_ID = "pc-steuerung";
 
 /**
  * Blöcke des Abschnitts "Geräte und PC": der Status der Verbindungen sieht jeder. Die Geräteverwaltung (Freigeben,
  * Sperren, Widerrufen), die PC-Steuerung und der Fernzugriff nur der Admin (die PC-Steuerung im
  * Browser auf dem Server mit dem Hinweis, dass sie zur Desktop-App gehört). Die Betriebsart gibt es nur, wo es etwas zu
  * wählen gibt (Büro eingerichtet und kein Browser auf dem Server). Die Einrichtung des Geräts gibt es nur in der
- * Desktop-App.
+ * Desktop-App. pcAdmin (lib/pcSchalter.ts): Admin für die PC-Steuerung, auch ohne Sitzung aus der gemerkten Rolle und nie für
+ * Laborkonten; ohne Angabe gilt die Rolle.
  */
 export function geraeteBloecke(o: {
   rolle: Rolle | null;
   desktop: boolean;
   serverBrowser: boolean;
   bueroVerfuegbar: boolean;
+  pcAdmin?: boolean;
 }): readonly GeraeteBlock[] {
   const bloecke: GeraeteBlock[] = ["status"];
-  if (o.rolle === "admin") bloecke.push("verwaltung", "pc", "fernzugriff");
+  if (o.rolle === "admin") bloecke.push("verwaltung");
+  if (o.pcAdmin ?? o.rolle === "admin") bloecke.push("pc");
+  if (o.rolle === "admin") bloecke.push("fernzugriff");
   if (o.bueroVerfuegbar && !o.serverBrowser) bloecke.push("betriebsart");
   if (o.desktop) bloecke.push("einrichtung");
   return bloecke;

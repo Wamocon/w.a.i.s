@@ -73,6 +73,15 @@
 .status-items [data-feld="pcsteuerung"] { order: 6; }
 .status-items [data-feld="entwicklung"] { order: 7; }
 .status-items [data-feld="netz"] { order: 8; }
+/* Module PC und PC-Steuerung als Weg zum Schalter (nur Admins, components/Statusleiste.tsx): Der Link füllt das ganze Modul (Ziel
+   mindestens 24 px hoch), die Innenabstände wandern dafür vom Modul in den Link; beim Überfahren die rote Kante wie bei den Schaltern */
+.status-items > div:has(.status-weg) { padding: 0; }
+.status-items .status-weg {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px;
+  color: inherit; text-decoration: none; border-radius: 5px; cursor: pointer;
+}
+.status-items > div:has(.status-weg:hover) { border-color: var(--core); }
+.status-items > div:has(.status-weg:hover) .status-weg { color: var(--ink); }
 /* Verbindung steht schon im Abzeichen ONLINE (ab 1100 px) */
 @media (min-width: 1100px) { .status-items [data-feld="verbindung"] { display: none; } }
 /* Modul Stimme: Beschriftung sichtbar, Wert nach Ergebnis gefärbt */
@@ -162,6 +171,7 @@
   .kz-status { gap: 12px; }
   .status-items { gap: 12px 6px; letter-spacing: 0.08em; }
   .status-items > div { padding: 5px 8px; gap: 6px; }
+  .status-items .status-weg { padding: 0 8px; gap: 6px; }
   .status-items [data-feld="modelle"] .tag { display: none; } /* Cloud oder im Haus und der Modus stehen im title und im Menü */
   /* PC verbunden: Punkt und Latenz genügen, Name und "verbunden" bleiben für Screenreader im Text */
   .status-items [data-feld="pc"][data-pc="verbunden"] .status-label {
@@ -209,6 +219,7 @@
 @media (max-width: 520px) {
   .status-items [data-feld="verbindung"] { display: none; }
   .status-items > div { padding: 0 6px; }
+  .status-items .status-weg { padding: 0 6px; }
   .status-items [data-feld="betriebsart"] dd { font-size: 14px; }
   .topbar-end { gap: 4px; }
   .topbar-btn.einstellungen-btn, .menu-btn { width: 40px; }

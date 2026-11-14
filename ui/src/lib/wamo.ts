@@ -17,6 +17,7 @@ import { fristLoeschen } from "./auftragFrist.ts"; // relativ aus demselben Grun
 import { AUFGABE_LEER, naechsteAufgabe, type Aufgabe } from "./aufgabenanzeige.ts"; // relativ aus demselben Grund
 import { auftraegeNachQuittung } from "./auftragStart.ts"; // relativ aus demselben Grund
 import { liveBildLoeschen } from "./liveBild.ts"; // relativ aus demselben Grund
+import { PC_EIN_LEER, type PcEinschalten } from "./pcSchalter.ts"; // relativ aus demselben Grund
 import { STILL_AUS, type StillStand } from "./stillStart.ts"; // relativ aus demselben Grund
 import {
   abdruckAnsage,
@@ -155,6 +156,9 @@ export type WamoState = {
   /** Start beim Tippen (lib/stillStart.ts): still = Sitzung ohne Mikrofon und Stimme, perTippen = von selbst gestartet (nur dann gilt die
    *  Leerlaufregel), uebernommen = eine neuere Sitzung dieses Profils hat die letzte hier abgelöst */
   stillStart: StillStand;
+  /** Schalter "PC-Steuerung" ohne Gespräch (lib/pcSchalter.ts): wartet = ein Klick wartet auf Sitzung und PC, hinweis = warum es
+   *  zuletzt nicht geklappt hat. Zeit und Senden hält useWamo. */
+  pcEinschalten: PcEinschalten;
   /** Stimmerkennung des Kerns (Stand, Modus, Ergebnis der letzten Äußerung), leer bis der Kern etwas meldet (lib/stimme.ts) */
   stimme: StimmeStand;
   /** Einlernen des Stimmabdrucks: null, solange die Ansicht zu ist; sonst die Phase von der Einwilligung bis zum Ergebnis */
@@ -204,6 +208,7 @@ export const initialState: WamoState = {
   textMoeglich: false,
   mikrofon: null,
   stillStart: STILL_AUS,
+  pcEinschalten: PC_EIN_LEER,
   stimme: STIMME_LEER,
   abdruck: null,
   abdruckLokalZu: false,

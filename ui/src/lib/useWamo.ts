@@ -10,11 +10,12 @@ import { abgelaufenHinweis } from "@/lib/laborKarte";
 import { useNeuladenWarnung } from "@/lib/useNeuladenWarnung";
 import { neuladenPlanen } from "@/lib/laborNeuladen";
 import { aktiverSlot, startUrl } from "@/lib/kernSlot";
-import { pcAutoLesen, stillStartLesen } from "@/lib/einstellungen";
+import { pcAutoLesen, rolleGemerktLesen, rolleGemerktSetzen, stillStartLesen } from "@/lib/einstellungen";
 import { einstellungenOeffnen } from "@/lib/einstellungenHash";
-import type { GeraetBruecke } from "@/lib/geraet";
+import { serverBrowser, type GeraetBruecke } from "@/lib/geraet";
 import { bildAnzeigen, liveBildLoeschen } from "@/lib/liveBild";
 import { nutzerLesen, useNutzerHalten } from "@/lib/nutzer";
+import { klickWeg, pcAdmin, PC_EIN_LEER, PC_WUNSCH_NEU, stillNeinHinweis, wunschSchritt, type PcWunsch } from "@/lib/pcSchalter";
 import { StillMedienManager } from "@/lib/stillMedien";
 import {
   HINWEIS_RUHE,
@@ -25,6 +26,7 @@ import {
   startEntscheidung,
   startNotieren,
   STILL_AUS,
+  type Entscheidung,
   type LeerlaufLage,
 } from "@/lib/stillStart";
 import { parseServerMessage, type Auftrag, type Markierung, type ModellModus } from "@/lib/nachrichten";
@@ -423,6 +425,9 @@ export function useWamo(): WamoAktionen {
   // Autostart der PC-Steuerung (Geräte-Einstellung): je Verbindung höchstens einmal senden;
   // aktiv = Einstellung beim Verbindungsstart, manuellAus = Nutzer hat in dieser Sitzung ausgeschaltet
   const pcAuto = useRef({ aktiv: false, gesendet: false, manuellAus: false, wartet: false });
+  // Schalter "PC-Steuerung" ohne Gespräch (lib/pcSchalter.ts): der Wunsch "an" wartet auf Sitzung und PC; uhr prüft zur nächsten Frist.
+  // Ein echtes Trennen verwirft ihn (teardown), der Abbau vor einem neuen Start nicht (der Start gehört ja zum Wunsch).
+  const pcWunsch = useRef<{ w: PcWunsch; frist: number | null; uhr: ReturnType<typeof setTimeout> | null } | null>(null);
   // Rechnername dieses Geräts (nur Desktop-App), Vergleich mit betrieb.pcName im Büro
   const geraet = useRef<string | null>(null);
   // Grund, mit dem der Kern die Sitzung beendet hat (sitzung_beendet, z. B. neue Sitzung dieses Profils): beim
@@ -482,6 +487,9 @@ export function useWamo(): WamoAktionen {
     liveBildLoeschen(); // kein Bild bleibt nach dem Gespräch stehen
     alleFristenLoeschen(); // die Startkarten sind weg, ihre Fristen laufen nicht weiter
     if (grund === "unmount") return;
+    // Ein Wunsch "PC-Steuerung an" gilt nur für die Sitzung, die er gestartet hat: ein späteres Gespräch schaltet nichts von selbst ein
+    if (pcWunsch.current?.uhr) clearTimeout(pcWunsch.current.uhr);
+    pcWunsch.current = null;
     wamo.set((s) => {
       const verfallen = s.approvals.length > 0 || s.auftraege.length > 0;
       const war = s.presence !== "offline";
@@ -522,6 +530,7 @@ export function useWamo(): WamoAktionen {
         mikrofon: null,
         // Eine Übernahme durch ein anderes Fenster merkt sich die Oberfläche: Das Tippen startet hier dann nicht von selbst neu
         stillStart: { ...STILL_AUS, uebernommen: grund === "getrennt" && istUebernommen(vomKern) },
+        pcEinschalten: PC_EIN_LEER, // Wunsch und Hinweis gehören zur beendeten Sitzung
         error,
         ansage:
           grund === "frist"
@@ -1216,24 +1225,152 @@ export function useWamo(): WamoAktionen {
     };
   }, []);
 
-  // PC-Steuerung: nur senden; den Zustand meldet der Kern im Feld betrieb.pc_steuerung zurück
-  const pcSteuerung = useCallback((an: boolean) => {
-    const client = clientRef.current;
-    const s = wamo.get();
-    if (!client || !istOnline(s) || s.profil?.rolle !== "admin") return false;
-    try {
-      senden(client, { type: "pc_steuerung", data: { an } });
-    } catch {
-      setFehler({ art: "sonst", text: "PC-Steuerung konnte nicht umgeschaltet werden." });
-      return false;
-    }
-    // manuell ausgeschaltet: in dieser Sitzung nicht wieder automatisch einschalten
-    if (!an) {
-      pcAuto.current.manuellAus = true;
-      pcAuto.current.wartet = false;
-    }
-    return true;
+  // Start beim Tippen: nur mit Schalter (je Gerät und Person, Standard an), nie für Laborkonten, nie im verdeckten Tab, nie nach einer
+  // Übernahme durch ein anderes Fenster, höchstens 6 Starts je 10 Minuten. Alles Weitere entscheidet lib/stillStart.ts.
+  // Dieselben Regeln gelten für den Schalter "PC-Steuerung" ohne Gespräch (pcSteuerung).
+  const stillPruefen = useCallback((): Entscheidung => {
+    const nutzer = nutzerLesen();
+    return startEntscheidung({
+      schalter: stillStartLesen(nutzer.id),
+      laborKonto: istLaborKonto(nutzer.email),
+      sichtbar: typeof document === "undefined" || document.visibilityState === "visible",
+      presence: wamo.get().presence,
+      uebernommen: wamo.get().stillStart.uebernommen,
+      startZeiten: startZeiten.current,
+      jetzt: Date.now(),
+    });
   }, []);
+  const stillLos = useCallback(() => {
+    const jetzt = Date.now();
+    startZeiten.current = startNotieren(startZeiten.current, jetzt);
+    letzteEingabe.current = jetzt;
+    void connect({ still: true }); // setzt die Präsenz sofort auf "verbindet" (der Aufbau bis zum ersten await läuft synchron)
+  }, [connect]);
+
+  // Wunsch "PC-Steuerung an" ohne Gespräch (lib/pcSchalter.ts): wartet auf Sitzung und PC; prüft bei jeder Änderung im Store und zur Frist
+  const pcWunschPruefen = useCallback(function pruefen() {
+    const pw = pcWunsch.current;
+    if (!pw) return;
+    const s = wamo.get();
+    const r = wunschSchritt(pw.w, { jetzt: Date.now(), presence: s.presence, betrieb: s.betrieb });
+    const ende = (hinweis: string | null) => {
+      if (pw.uhr) clearTimeout(pw.uhr);
+      pcWunsch.current = null;
+      wamo.set((x) => ({ ...x, pcEinschalten: { wartet: false, hinweis } }));
+      if (hinweis) setFehler({ art: "hinweis", text: hinweis });
+    };
+    if (r.art === "ende") {
+      ende(r.hinweis);
+      return;
+    }
+    if (r.art === "senden") {
+      const client = clientRef.current;
+      if (!client) return; // noch kein Client: bei der nächsten Meldung erneut
+      try {
+        senden(client, { type: "pc_steuerung", data: { an: true } });
+        pcAuto.current.gesendet = true; // die Automatik schickt in dieser Sitzung nichts mehr hinterher
+      } catch {
+        ende("PC-Steuerung konnte nicht umgeschaltet werden.");
+        return;
+      }
+    }
+    pw.w = r.wunsch;
+    if (r.frist !== null && r.frist !== pw.frist) {
+      if (pw.uhr) clearTimeout(pw.uhr);
+      pw.frist = r.frist;
+      pw.uhr = setTimeout(pruefen, Math.max(0, r.frist - Date.now()) + 1);
+    }
+  }, []);
+  useEffect(() => {
+    const ab = wamo.subscribe(pcWunschPruefen);
+    return () => {
+      ab();
+      if (pcWunsch.current?.uhr) clearTimeout(pcWunsch.current.uhr);
+      pcWunsch.current = null;
+    };
+  }, [pcWunschPruefen]);
+
+  // Die Rolle, die der Kern meldet, merkt sich die Oberfläche je Person: Der Schalter "PC-Steuerung" steht dann schon vor dem nächsten Gespräch da
+  useEffect(() => {
+    const merken = () => {
+      const rolle = wamo.get().profil?.rolle;
+      if (rolle) rolleGemerktSetzen(nutzerLesen().id, rolle);
+    };
+    merken();
+    return wamo.subscribe(merken);
+  }, []);
+
+  // PC-Steuerung: mit Sitzung nur senden; den Zustand meldet der Kern im Feld betrieb.pc_steuerung zurück. Ohne Sitzung (nur Desktop-App,
+  // nur Admins): "an" startet still eine Sitzung und schaltet ein, sobald der Kern den PC als verbunden meldet; "aus" ist nichts zu tun.
+  const pcSteuerung = useCallback(
+    (an: boolean) => {
+      const client = clientRef.current;
+      const s = wamo.get();
+      const nutzer = nutzerLesen();
+      const weg = klickWeg({
+        an,
+        online: Boolean(client) && istOnline(s),
+        presence: s.presence,
+        admin: pcAdmin({
+          rolleKern: s.profil?.rolle ?? null,
+          rolleGemerkt: rolleGemerktLesen(nutzer.id),
+          laborKonto: istLaborKonto(nutzer.email),
+        }),
+        desktop: typeof window !== "undefined" && Boolean(window.wamoDesktop?.isDesktop),
+        serverBrowser: serverBrowser(),
+      });
+      const wunschBeginnen = () => {
+        if (pcWunsch.current?.uhr) clearTimeout(pcWunsch.current.uhr);
+        pcWunsch.current = { w: PC_WUNSCH_NEU, frist: null, uhr: null };
+        wamo.set((x) => ({ ...x, pcEinschalten: { wartet: true, hinweis: null } }));
+        pcWunschPruefen(); // läuft die Sitzung schon mit verbundenem PC, geht der Wunsch sofort hinaus
+      };
+      switch (weg.art) {
+        case "nein":
+          return false;
+        case "nichts":
+          if (pcWunsch.current?.uhr) clearTimeout(pcWunsch.current.uhr);
+          pcWunsch.current = null;
+          wamo.set((x) => ({ ...x, pcEinschalten: PC_EIN_LEER }));
+          return true;
+        case "wunsch":
+          wunschBeginnen();
+          return true;
+        case "still_starten": {
+          const e = stillPruefen();
+          if (e.art !== "starten") {
+            const hinweis = stillNeinHinweis(e.grund, e.hinweis);
+            wamo.set((x) => ({ ...x, pcEinschalten: { wartet: false, hinweis } }));
+            setFehler({ art: "hinweis", text: hinweis });
+            return false;
+          }
+          stillLos();
+          wunschBeginnen();
+          return true;
+        }
+        case "senden":
+          break;
+      }
+      if (!client) return false;
+      try {
+        senden(client, { type: "pc_steuerung", data: { an } });
+      } catch {
+        setFehler({ art: "sonst", text: "PC-Steuerung konnte nicht umgeschaltet werden." });
+        return false;
+      }
+      // Ein Klick mit Sitzung ersetzt einen wartenden Wunsch; Hinweise von vorher gelten nicht mehr
+      if (pcWunsch.current?.uhr) clearTimeout(pcWunsch.current.uhr);
+      pcWunsch.current = null;
+      wamo.set((x) => (x.pcEinschalten === PC_EIN_LEER ? x : { ...x, pcEinschalten: PC_EIN_LEER }));
+      // manuell ausgeschaltet: in dieser Sitzung nicht wieder automatisch einschalten
+      if (!an) {
+        pcAuto.current.manuellAus = true;
+        pcAuto.current.wartet = false;
+      }
+      return true;
+    },
+    [pcWunschPruefen, stillPruefen, stillLos],
+  );
 
   const modellzugang = useCallback((anfrage: ModellzugangAnfrage) => {
     const client = clientRef.current;
@@ -1286,30 +1423,16 @@ export function useWamo(): WamoAktionen {
     letzteEingabe.current = Date.now();
   }, []);
 
-  // Start beim Tippen: nur mit Schalter (je Gerät und Person, Standard an), nie für Laborkonten, nie im verdeckten Tab, nie nach einer
-  // Übernahme durch ein anderes Fenster, höchstens 6 Starts je 10 Minuten. Alles Weitere entscheidet lib/stillStart.ts.
+  // Start beim Tippen (Regeln in stillPruefen, oben bei der PC-Steuerung)
   const stillStarten = useCallback((): boolean => {
-    const s = wamo.get();
-    const nutzer = nutzerLesen();
-    const jetzt = Date.now();
-    const e = startEntscheidung({
-      schalter: stillStartLesen(nutzer.id),
-      laborKonto: istLaborKonto(nutzer.email),
-      sichtbar: typeof document === "undefined" || document.visibilityState === "visible",
-      presence: s.presence,
-      uebernommen: s.stillStart.uebernommen,
-      startZeiten: startZeiten.current,
-      jetzt,
-    });
+    const e = stillPruefen();
     if (e.art !== "starten") {
       if (e.hinweis) setFehler({ art: "hinweis", text: e.hinweis });
       return false;
     }
-    startZeiten.current = startNotieren(startZeiten.current, jetzt);
-    letzteEingabe.current = jetzt;
-    void connect({ still: true });
+    stillLos();
     return true;
-  }, [connect]);
+  }, [stillPruefen, stillLos]);
 
   // Eine still gestartete Sitzung auf Sprechen umstellen: Mikrofon holt der StillMedienManager erst jetzt (Berechtigungsfrage nur hier),
   // die Spur legt onTrackStarted auf den Sender. Ab jetzt ist es ein Gespräch: Stimme an, keine Leerlaufregel mehr.

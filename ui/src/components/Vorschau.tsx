@@ -13,6 +13,8 @@ import { bueroAttrappeSetzen } from "@/lib/bueroApi";
 import { bildAnzeigen, liveBildLoeschen } from "@/lib/liveBild";
 import { stilleText } from "@/lib/mikrofon";
 import type { Vorgang, VorgangSchritt } from "@/lib/nachrichten";
+import { nutzerSetzen } from "@/lib/nutzer";
+import { PC_EIN_LEER } from "@/lib/pcSchalter";
 import { abdruckGestartet, abdruckOeffnen, STIMME_LEER } from "@/lib/stimme";
 import { bereiteText, schluesselHinweis } from "@/lib/textEingabe";
 import type { WamoAktionen } from "@/lib/useWamo";
@@ -48,6 +50,8 @@ import {
  *   /?vorschau=1&auftrag=1          Entwicklungsauftrag wartet (&entwicklung=aus: gesperrt)
  *   /?vorschau=1&pcsteuerung=an     PC-Steuerung dieser Sitzung an
  *   /?vorschau=1&pcauto=1           Autostart der PC-Steuerung (simuliert, ändert die Geräte-Einstellung nicht)
+ *   /?vorschau=1&desktop=1          wie in der Desktop-App mit angemeldeter Beispielperson: mit &zustand=offline ist der Schalter
+ *                                   PC-Steuerung ohne Gespräch bedienbar (Ablauf simuliert), das Modul PC der Kopfzeile führt zu ihm
  *   /?vorschau=1&fehler=1           offline mit Fehlermeldung
  *   /?vorschau=1&fehler=mikrofon    Mikrofon liefert keinen Ton (Warnung mit Gerätewahl)
  *   /?vorschau=1&rolle=mitglied     Profil als Mitglied
@@ -80,6 +84,7 @@ import {
  *
  * Büro-Karte (Reiter "Büro", Beispieldaten statt Gerätedienst, siehe components/vorschauBuero.ts):
  *   &buero=beispiel                 vierzehn Geräte; auch stoerung, alles, leer, offline (Gerätedienst nicht erreichbar), fehler
+ *   &buerozeit=1500                 jede Antwort des Gerätedienstes kommt so viele Millisekunden später (echte Ladezeit nachstellen)
  */
 
 /** ISO-Zeitpunkt in UTC (YYYY-MM-DDTHH:MM:SSZ) relativ zu jetzt, wie ihn der Kern schickt. */
@@ -308,7 +313,23 @@ const KEINE_AKTIONEN: WamoAktionen = {
     return true;
   },
   pcSteuerung: (an) => {
-    wamo.set((s) => (s.betrieb ? { ...s, betrieb: { ...s.betrieb, pcSteuerung: an ? "an" : "aus" } } : s));
+    if (wamo.get().betrieb) {
+      wamo.set((s) => (s.betrieb ? { ...s, betrieb: { ...s.betrieb, pcSteuerung: an ? "an" : "aus" } } : s));
+      return true;
+    }
+    if (!an) return true;
+    // ohne Sitzung (lib/pcSchalter.ts): stiller Start, nach 1,5 s meldet der Kern den PC als verbunden und die PC-Steuerung als an
+    wamo.set((s) => ({ ...s, presence: "connecting", pcEinschalten: { wartet: true, hinweis: null } }));
+    setTimeout(() => {
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        micOn: false,
+        stillStart: { still: true, perTippen: true, uebernommen: false },
+        pcEinschalten: PC_EIN_LEER,
+        betrieb: { modus: "buero", modelle: { llm: "Claude Haiku 5.5" }, pc: "verbunden", pcName: "WMC-H-04-NS", pcLatenzMs: 12, pcSteuerung: "an" },
+      }));
+    }, 1500);
     return true;
   },
   liveBild: {
@@ -537,6 +558,12 @@ function Hauptvorschau() {
 
   useEffect(() => {
     resetWamo(state);
+    // Desktop-App mit angemeldeter Beispielperson (&desktop=1): Schalter PC-Steuerung ohne Gespräch und Weg aus der Kopfzeile
+    const desktop = param("desktop") === "1" && !window.wamoDesktop;
+    if (desktop) {
+      (window as unknown as { wamoDesktop: unknown }).wamoDesktop = { isDesktop: true, levels: () => undefined };
+      nutzerSetzen({ id: "00000000-0000-4000-8000-000000000001", email: "vorschau@wamocon.com" });
+    }
     // Autostart simulieren: der Kern meldet nach kurzer Zeit "an", dazu der Hinweis
     const autoTimer =
       param("pcauto") === "1" && state.betrieb
@@ -609,8 +636,13 @@ function Hauptvorschau() {
       if (h.samples.length > HISTORY) h.samples.shift();
       h.seq++;
     }, 50);
-    // Büro-Karte: Beispieldaten statt Kern (&buero=beispiel, stoerung, alles, leer, offline, fehler)
-    bueroAttrappeSetzen(bueroBeispiel(param("buero")));
+    // Büro-Karte: Beispieldaten statt Kern (&buero=beispiel, stoerung, alles, leer, offline, fehler); &buerozeit=ms verzögert jede Antwort
+    // wie ein langsamer Gerätedienst (höchstens 10 s)
+    const bueroHoler = bueroBeispiel(param("buero"));
+    const bueroZeit = Math.min(10_000, Math.max(0, Number(param("buerozeit")) || 0));
+    bueroAttrappeSetzen(
+      bueroHoler && bueroZeit > 0 ? () => new Promise((fertig) => setTimeout(() => fertig(bueroHoler()), bueroZeit)) : bueroHoler,
+    );
     return () => {
       clearInterval(id);
       if (autoTimer) clearTimeout(autoTimer);
@@ -618,6 +650,10 @@ function Hauptvorschau() {
       bueroAttrappeSetzen(null);
       einlernenStoppen();
       resetWamo();
+      if (desktop) {
+        delete (window as unknown as { wamoDesktop?: unknown }).wamoDesktop;
+        nutzerSetzen({ id: null, email: null });
+      }
     };
   }, [state, presence]);
 

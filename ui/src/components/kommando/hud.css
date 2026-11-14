@@ -117,6 +117,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .pc-switch[data-an] .pc-switch-knopf { transform: translateX(16px); }
 .pc-switch-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .pc-switch-hint { font-size: 13px; color: var(--ink-soft); }
+/* Grund, warum das Einschalten ohne Gespräch nicht geklappt hat (lib/pcSchalter.ts): Tinte mit roter Kante, nie Rot als Schrift.
+   Leer bleibt der Bereich im Baum (Status für Screenreader), nimmt aber keinen Platz ein */
+.pc-ein-hinweis { margin: 0; padding-left: 8px; border-left: 3px solid var(--accent); color: var(--ink); line-height: 1.35; }
+.pc-ein-hinweis:empty { position: absolute; }
 .pc-steuerung { display: grid; gap: 8px; }
 .pc-auto { display: flex; align-items: flex-start; gap: 8px; min-height: 32px; font-size: 14px; cursor: pointer; }
 .pc-auto input { width: 18px; height: 18px; margin: 2px 0 0; flex: none; cursor: pointer; }
