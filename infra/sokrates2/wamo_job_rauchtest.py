@@ -1275,8 +1275,8 @@ def github_app_echt() -> None:
         gesehen.extend(repos)
         pruefe(f"GitHub-App: Lesetoken (ganze Installation, läuft ab {ablauf}) listet {len(repos)} Repos",
                code == 200 and bool(repos), ", ".join(str(r.get("full_name")) for r in repos[:15]))
-        pruefe("GitHub-App: das WAMO-Repo selbst gehört nicht zur Installation (für Aufträge gesperrt)",
-               not any(str(r.get("full_name")).rsplit("/", 1)[-1].lower() == D.SELF_REPO for r in repos),
+        pruefe("GitHub-App: das WAMO-Repo selbst gehört nicht zur Installation (für Aufträge gesperrt, jeder Name und die ID)",
+               not any(D.github_eintrag_ist_eigenes_repo(r) for r in repos),
                "bitte in den Einstellungen der Installation aus der Auswahl entfernen")
 
     lesetoken("für die ganze Installation", None, alle_repos)
