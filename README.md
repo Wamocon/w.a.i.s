@@ -1511,6 +1511,48 @@ Betrieb `infra/sokrates2/README.md` Abschnitt 16). Das Handy kommt über WireGua
   mit Modus 2770). Beim Ablösen einer eigenen Sitzung kann der alte Tunnel kurz weiterlaufen, wenn das Gateway nicht antwortet. Das
   Gateway ist nur im Büronetz und über WireGuard erreichbar.
 
+## Prüfungen auf GitHub
+
+Drei Workflows unter `.github/workflows/` prüfen jeden Stand. Alle laufen nur mit Leserechten, ohne Geheimnisse und auf Runnern
+von GitHub. Fremde Actions sind auf volle Commit-SHAs festgenagelt (Dependabot hält sie aktuell), ruff und shellcheck kommen als
+Programm mit fester Prüfsumme.
+
+| Workflow | Datei | Wann | Was |
+| --- | --- | --- | --- |
+| Prüfungen | `ci.yml` | jeder Push auf einen Zweig, jeder Pull Request, manuell | die Jobs unten, dazu der Sammel-Check `Ergebnis` |
+| CodeQL | `codeql.yml` | jeder Push, jeder Pull Request, dienstags 04:41 UTC, manuell | Sicherheitsanalyse für `actions`, `javascript-typescript` und `python` ohne Build, Funde unter Security, Code scanning |
+| Secret Scan | `secret-scan.yml` | Push auf main, Pull Request, montags, manuell | gitleaks über die neuen Commits oder die ganze Historie |
+
+Die Jobs des Workflows „Prüfungen“:
+
+| Job | Läuft | Inhalt |
+| --- | --- | --- |
+| Oberfläche | bei Änderungen in `ui/` | Node 22: `npm ci`, ESLint, `tsc --noEmit`, `node --test`, vitest, `next build` |
+| Kern | immer | Python 3.12: `uv sync --frozen`, pytest in vier parallelen Teilen; gescheiterte Tests bekommen einen zweiten Versuch, der als Warnung erscheint (was zweimal scheitert, bleibt rot) |
+| Python | immer | `compileall` und ruff (nur E9, F63, F7 und F82, also Syntaxfehler und echte Fehler) über alle Python-Dateien |
+| Labor-Dienst | bei `labor-dienst/` und dem, was seine Integrationstests nutzen | Python 3.11 wie im Image, `requirements.txt` nur mit Prüfsummen, pytest samt den Node-Tests der Oberflächenlogik |
+| Gerätedienst | bei `geraete/` | `uv sync --frozen`, pytest |
+| Skripte | immer | pytest in `scripts/` und `infra/sokrates2/` mit der Umgebung von voice-core, `node --test` für die beiden Node-Tests |
+| Desktop | bei `desktop/`, `host/` und den eingepackten Skripten | Windows: `npm ci`, `node --test` |
+| Host | bei `host/` | Windows: `uv sync --frozen`, pytest |
+| Infra | bei `infra/` und allen `.sh`- und `.ps1`-Dateien | `bash -n`, shellcheck (Fehler blockieren, Warnungen sind nur ein Hinweis), Syntax der PowerShell-Skripte |
+| Migrationen | bei `supabase/` und beim Lint selbst | `scripts/wamo_migrationen_pruefen.py`: Lint der Prüfstrecke auf die Migrationen, die der Stand gegenüber der Basis ändert |
+| Version | immer | `scripts/wamo_version.py pruefen` |
+| Abhängigkeiten | immer, blockiert nie | `uv lock --check`, pip-audit und npm audit als Hinweis in der Zusammenfassung |
+| Ergebnis | immer | rot, sobald ein Job fehlschlägt oder abbricht; übersprungene Teile zählen als grün |
+
+Ein neuer Zweig, eine Änderung an `ci.yml` und der manuelle Start prüfen alle Teile. Auf Zweigen bricht ein neuer Push den
+älteren Lauf ab, auf main läuft jeder Stand zu Ende.
+
+**Manuell starten:** Reiter Actions, Workflow „Prüfungen“ (oder „CodeQL“), „Run workflow“, Zweig wählen. Bei „Prüfungen“ lässt
+sich unter „Welcher Teil geprüft wird“ ein einzelner Teil wählen, Standard ist `alle`. Auf der Kommandozeile:
+`gh workflow run ci.yml --ref <Zweig> -f teil=kern`, danach `gh run list --workflow ci.yml` und `gh run view <Lauf> --log-failed`.
+
+**Lokal dasselbe prüfen:** Oberfläche `cd ui; npm run lint; npx tsc --noEmit; npm test; npm run test:komponenten; npm run build`,
+Kern `cd voice-core; uv run python -m pytest -q`, Migrationen `python scripts/wamo_migrationen_pruefen.py --basis origin/main`.
+
+Den Windows-Installer baut weiter nur ein Mensch lokal (Abschnitt „Windows-Installer“), dafür gibt es bewusst keinen Workflow.
+
 ## Sicherheitsmodell
 
 - Zugang nur mit Konto im WAMO-Supabase, zweitem Faktor und aktivem Profil; jede Unsicherheit führt zur Ablehnung.
