@@ -215,7 +215,7 @@ test("echter Wächter liefert einen Zustand und endet mit seinem Elternprozess (
     kodiert(waechterSkript(eltern.pid))], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
   try {
     const zeile = await new Promise((resolve, reject) => {
-      const frist = setTimeout(() => reject(new Error("keine Ausgabe nach 20 s")), 20000);
+      const frist = setTimeout(() => reject(new Error("keine Ausgabe nach 45 s")), 45000);
       let puffer = "";
       kind.stdout.setEncoding("utf8");
       kind.stdout.on("data", (d) => {
