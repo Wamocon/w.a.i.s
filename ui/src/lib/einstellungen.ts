@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { serverBrowser } from "@/lib/geraet";
+import { rolleLesen, rolleMerken, ROLLE_PRAEFIX, type Rolle } from "@/lib/pcSchalter";
 import { schalterLesen, schalterSchluessel, schalterSchreiben, SCHALTER_PRAEFIX } from "@/lib/stillStart";
 
 /**
@@ -99,4 +100,34 @@ function stillAbonnieren(h: () => void) {
 /** Wert des Schalters für diese Person auf diesem Gerät (Server: aus). */
 export function useStillStart(userId: string | null | undefined): boolean {
   return useSyncExternalStore(stillAbonnieren, () => stillStartLesen(userId), () => false);
+}
+
+// ---------- Zuletzt gemeldete Rolle (lib/pcSchalter.ts) ----------
+// Der Kern meldet die Rolle erst in einer Sitzung. Damit der Schalter "PC-Steuerung" schon vorher da ist, merkt sich die Oberfläche die
+// zuletzt gemeldete Rolle je Person auf diesem Gerät. Nur eine Anzeigehilfe: Was gilt, prüft der Kern.
+
+export function rolleGemerktLesen(userId: string | null | undefined): Rolle | null {
+  return rolleLesen(lokalerSpeicher(), userId);
+}
+
+export function rolleGemerktSetzen(userId: string | null | undefined, rolle: Rolle) {
+  if (rolleGemerktLesen(userId) === rolle) return;
+  if (rolleMerken(lokalerSpeicher(), userId, rolle)) hoerer.forEach((h) => h());
+}
+
+function rolleAbonnieren(h: () => void) {
+  hoerer.add(h);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === null || e.key.startsWith(ROLLE_PRAEFIX)) h();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    hoerer.delete(h);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+/** Gemerkte Rolle dieser Person auf diesem Gerät (Server: unbekannt). */
+export function useRolleGemerkt(userId: string | null | undefined): Rolle | null {
+  return useSyncExternalStore(rolleAbonnieren, () => rolleGemerktLesen(userId), () => null);
 }

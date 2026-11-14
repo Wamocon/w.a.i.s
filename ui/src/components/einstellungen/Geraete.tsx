@@ -11,35 +11,35 @@ import {
   type Betriebsart,
 } from "@/lib/betriebsart";
 import { pcAutoSetzen, usePcAuto } from "@/lib/einstellungen";
-import { geraeteBloecke, geraeteStandText } from "@/lib/einstellungenAbschnitte";
+import { geraeteBloecke, geraeteStandText, PC_STEUERUNG_ID } from "@/lib/einstellungenAbschnitte";
 import { useDesktopApp, useServerBrowser } from "@/lib/geraet";
 import { nachbar } from "@/lib/modellwahl";
 import { geraeteAnzeige } from "@/lib/geraeteAnzeige";
+import { HINWEIS_OHNE_SITZUNG, SCHALT_WARTEN_MS, TEXT_WARTET } from "@/lib/pcSchalter";
 import { useSelect } from "@/lib/store";
-import { istOnline, wamo, zeigeToast } from "@/lib/wamo";
+import { usePcSchalter } from "@/lib/usePcSchalter";
+import { wamo, zeigeToast } from "@/lib/wamo";
 import { Block } from "./Block";
 import { Fernzugriff } from "./Fernzugriff";
 import { GeraeteVerwaltung } from "./GeraeteVerwaltung";
 
-/** So lange wartet der Schalter auf die Rückmeldung des Kerns, danach ist er wieder bedienbar. */
-const SCHALT_WARTEN_MS = 5000;
-
 /**
- * Schalter "PC-Steuerung" für diese Sitzung: Standard aus, nur für admin und nur bei Verbindung.
- * Gesendet wird nur der Wunsch; was gilt, meldet der Kern in betrieb.pc_steuerung zurück.
+ * Schalter "PC-Steuerung" für diese Sitzung: Standard aus, nur für Admins (lib/pcSchalter.ts, Laborkonten nie). Mit Sitzung geht nur
+ * der Wunsch hinaus; was gilt, meldet der Kern in betrieb.pc_steuerung zurück. Ohne Sitzung ist er in der Desktop-App bedienbar: "an"
+ * startet still eine Sitzung (useWamo.pcSteuerung) und schaltet ein, sobald der Kern den PC als verbunden meldet. Solange das läuft,
+ * ist er gesperrt (pcEinschalten.wartet); klappt es nicht, steht der Grund darunter (pcEinschalten.hinweis, für Screenreader als Status).
  */
 const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { onSchalten: (an: boolean) => boolean }) {
-  const admin = useSelect(wamo, (s) => s.profil?.rolle === "admin");
-  const online = useSelect(wamo, istOnline);
+  const { anzeige } = usePcSchalter();
   const an = useSelect(wamo, (s) => s.betrieb?.pcSteuerung === "an");
   const belegt = useSelect(wamo, (s) => s.betrieb?.pcBelegt === true && s.betrieb?.pcSteuerung !== "an");
   const pcName = useSelect(wamo, (s) => s.betrieb?.pcName ?? null);
+  const ein = useSelect(wamo, (s) => s.pcEinschalten);
   const [ziel, setZiel] = useState<boolean | null>(null);
   const auto = usePcAuto();
-  const serverBrowser = useServerBrowser();
-  const ausstehend = ziel !== null && ziel !== an && !belegt;
-  if (!admin) return null;
-  if (serverBrowser) {
+  const ausstehend = ein.wartet || (ziel !== null && ziel !== an && !belegt);
+  if (anzeige.art === "verborgen") return null;
+  if (anzeige.art === "nur_desktop") {
     // Browser auf dem Server: die PC-Werkzeuge gehören zur Desktop-App (lib/geraet.ts)
     return (
       <div className="pc-steuerung">
@@ -48,18 +48,32 @@ const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { 
     );
   }
   const hinweis = ausstehend
-    ? "wird geschaltet …"
+    ? ein.wartet
+      ? TEXT_WARTET
+      : "wird geschaltet …"
     : belegt
       ? "eine andere Sitzung steuert diesen PC gerade"
-      : online
-        ? `gilt nur für diese Sitzung${pcName ? `, Ziel ${pcName}` : ""}`
-        : "Der Schalter ist während eines Gesprächs bedienbar.";
+      : anzeige.art === "gesperrt"
+        ? anzeige.hinweis
+        : anzeige.ohneSitzung
+          ? HINWEIS_OHNE_SITZUNG
+          : `gilt nur für diese Sitzung${pcName ? `, Ziel ${pcName}` : ""}`;
   return (
-    <div className="pc-steuerung">
+    <div className="pc-steuerung" id={PC_STEUERUNG_ID} tabIndex={-1} role="group" aria-label="PC-Steuerung">
       <div className="pc-switch-row">
-        <PcSchalterKnopf an={an} ausstehend={ausstehend} gesperrt={!online} onSchalten={onSchalten} setZiel={setZiel} />
+        <PcSchalterKnopf
+          an={an}
+          ausstehend={ausstehend}
+          gesperrt={anzeige.art === "gesperrt"}
+          onSchalten={onSchalten}
+          setZiel={setZiel}
+        />
         <span className="pc-switch-hint">{hinweis}</span>
       </div>
+      {/* immer eingehängt, nur der Text wechselt: ein neu eingefügter Bereich wird oft überhört */}
+      <p className="pc-switch-hint pc-ein-hinweis" role="status">
+        {ein.hinweis ?? ""}
+      </p>
       <label className="pc-auto">
         <input type="checkbox" checked={auto} onChange={(e) => pcAutoSetzen(e.target.checked)} />
         <span>PC-Steuerung beim Start automatisch einschalten (dieses Gerät)</span>
@@ -191,7 +205,8 @@ export const GeraeteAbschnitt = memo(function GeraeteAbschnitt({ onPcSteuerung }
   const rolle = useSelect(wamo, (s) => s.profil?.rolle ?? null);
   const desktop = useDesktopApp();
   const serverBrowser = useServerBrowser();
-  const bloecke = geraeteBloecke({ rolle, desktop, serverBrowser, bueroVerfuegbar: BUERO_VERFUEGBAR });
+  const { admin: pcAdmin } = usePcSchalter();
+  const bloecke = geraeteBloecke({ rolle, desktop, serverBrowser, bueroVerfuegbar: BUERO_VERFUEGBAR, pcAdmin });
   return (
     <>
       {bloecke.includes("status") && (

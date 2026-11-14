@@ -140,6 +140,14 @@ test("Geräteblöcke je Rolle und Plattform", () => {
   assert.deepEqual(geraeteBloecke({ ...basis, rolle: null }), ["status", "betriebsart"]);
 });
 
+test("Block PC-Steuerung ohne Sitzung: aus der gemerkten Rolle (pcAdmin), Laborkonten nie, die übrigen Admin-Blöcke folgen der Rolle", () => {
+  // noch keine Sitzung: der Kern hat keine Rolle gemeldet, die gemerkte ist admin
+  assert.deepEqual(geraeteBloecke({ ...basis, rolle: null, desktop: true, pcAdmin: true }), ["status", "pc", "betriebsart", "einrichtung"]);
+  // Laborkonto mit gemeldeter Admin-Rolle: kein Block PC-Steuerung
+  assert.deepEqual(geraeteBloecke({ ...basis, rolle: "admin", pcAdmin: false }), ["status", "verwaltung", "fernzugriff", "betriebsart"]);
+  assert.deepEqual(geraeteBloecke({ ...basis, rolle: "admin", pcAdmin: true }), ["status", "verwaltung", "pc", "fernzugriff", "betriebsart"]);
+});
+
 test("Stand der Geräteeinrichtung als Satz", () => {
   const stand = { zustand: "eingerichtet" as const, tunnel: "verbunden" as const, kennung: "pc-niko" };
   const buero = { desktop: true, bueroBetrieb: true };

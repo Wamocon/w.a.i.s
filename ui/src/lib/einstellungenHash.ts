@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
-import { GERAETEVERWALTUNG_ID, hashFuer, parseHash, type AbschnittId, type HashZiel } from "@/lib/einstellungenAbschnitte";
+import { GERAETEVERWALTUNG_ID, hashFuer, parseHash, PC_STEUERUNG_ID, type AbschnittId, type HashZiel } from "@/lib/einstellungenAbschnitte";
 import {
   basisNachErsetzen,
   nachRueckschrittNochOffen,
@@ -126,23 +126,36 @@ export function einstellungenOeffnen(abschnitt: AbschnittId | null = null) {
 }
 
 /**
- * Zur Karte Geräteverwaltung (Geräte und PC): Seite und Abschnitt öffnen, dann die Karte in Sicht bringen und fokussieren.
- * Die Karte entsteht erst mit dem Abschnitt; deshalb wird nach dem Zeichnen gesucht (kurz wiederholt, falls der Abschnitt
- * noch lädt). Für Hinweise an Admins ("Gerät wartet auf Freigabe") und die Info-Seite.
+ * Abschnitt "Geräte und PC" öffnen, dann ein Element darin in Sicht bringen und fokussieren. Es entsteht erst mit dem Abschnitt;
+ * deshalb wird nach dem Zeichnen gesucht (kurz wiederholt, falls der Abschnitt noch lädt), nach dem Fokus der Überschrift, den die
+ * Einstellungsseite beim Öffnen setzt.
  */
-export function zurGeraeteverwaltung() {
+function zuGeraeten(id: string, block: ScrollLogicalPosition, fokus: (el: HTMLElement) => HTMLElement) {
   einstellungenOeffnen("geraete");
   let versuche = 0;
   const suchen = () => {
-    const karte = document.getElementById(GERAETEVERWALTUNG_ID);
-    if (karte) {
-      karte.scrollIntoView({ block: "start", behavior: "auto" });
-      karte.focus({ preventScroll: true });
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ block, behavior: "auto" });
+      fokus(el).focus({ preventScroll: true });
     } else if (++versuche < 10) {
       setTimeout(suchen, 60);
     }
   };
-  setTimeout(suchen, 60); // nach dem Fokus der Überschrift, den die Einstellungsseite beim Öffnen setzt
+  setTimeout(suchen, 60);
+}
+
+/** Zur Karte Geräteverwaltung (Geräte und PC). Für Hinweise an Admins ("Gerät wartet auf Freigabe") und die Info-Seite. */
+export function zurGeraeteverwaltung() {
+  zuGeraeten(GERAETEVERWALTUNG_ID, "start", (karte) => karte);
+}
+
+/**
+ * Zum Schalter "PC-Steuerung" (Geräte und PC), aus der Kopfzeile. Der Fokus landet auf dem Schalter, damit Leertaste oder Enter ihn
+ * gleich umlegen; ist er gerade gesperrt, auf dem Block mit dem Hinweis.
+ */
+export function zurPcSteuerung() {
+  zuGeraeten(PC_STEUERUNG_ID, "center", (block) => block.querySelector<HTMLElement>('[role="switch"]:not(:disabled)') ?? block);
 }
 
 /**
