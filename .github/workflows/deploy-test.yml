@@ -1,0 +1,126 @@
+# Stufe test: das neue Kern-Release im freien Slot bauen und starten (test-kern) und die neue Fassung der Oberfläche in der freien
+# Farbe bauen und prüfen (test-oberflaeche), OHNE umzuschalten. Danach der Rauchtest des laufenden Betriebs. Live bleibt alles beim
+# Alten; prod schaltet später genau diese gebauten Teile. Aufgerufen von deploy.yml oder von Hand.
+name: Ausrollen test
+
+on:
+  workflow_call:
+    inputs:
+      stand:
+        type: string
+        required: true
+      teil:
+        type: string
+        default: beides
+      trocken:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      stand:
+        description: "Commit (7 bis 40 Zeichen) oder Release-Name v<version>-<commit7>; der Stand muss in dev verteilt sein"
+        type: string
+        required: true
+      teil:
+        description: "Teil"
+        type: choice
+        options: [beides, kern, oberflaeche]
+        default: beides
+      trocken:
+        description: "Trockenlauf: nur zeigen, was geschähe"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  stand:
+    name: Stand auflösen (nur Commits aus main)
+    if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.stand.outputs.commit }}
+    steps:
+      - name: Hilfsskript holen (nur scripts/wais_deploy_github.py)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/wais_deploy_github.py
+          sparse-checkout-cone-mode: false
+
+      - name: Stand auflösen
+        id: stand
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EINGABE: ${{ inputs.stand }}
+        run: python3 scripts/wais_deploy_github.py stand --eingabe "$EINGABE"
+
+  server:
+    name: Kern und Oberfläche bauen und prüfen, ohne Umschalten
+    needs: stand
+    if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
+    runs-on: [self-hosted, linux, ARM64, wais-deploy]
+    environment: test
+    timeout-minutes: 60
+    concurrency:
+      group: wais-deploy
+      cancel-in-progress: false
+    permissions: {}
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMMIT: ${{ needs.stand.outputs.commit }}
+      TEIL: ${{ inputs.teil }}
+      TROCKEN: ${{ inputs.trocken }}
+    steps:
+      - name: Eingaben prüfen
+        run: |
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Commit ungültig"; exit 1; }
+          [[ "$TEIL" =~ ^(beides|kern|oberflaeche)$ ]] || { echo "::error::Teil ungültig (beides, kern, oberflaeche)"; exit 1; }
+
+      - name: Kern-Release bauen und im freien Slot starten (test-kern)
+        id: kern
+        if: inputs.teil != 'oberflaeche'
+        run: |
+          args=("$COMMIT")
+          if [ "$TROCKEN" = true ]; then args+=(--trocken); fi
+          sudo -n /usr/local/sbin/wais-deploy test-kern "${args[@]}" | tee "$RUNNER_TEMP/test-kern.txt"
+
+      - name: Oberfläche in der freien Farbe bauen und prüfen (test-oberflaeche)
+        id: oberflaeche
+        if: inputs.teil != 'kern'
+        run: |
+          args=("$COMMIT")
+          if [ "$TROCKEN" = true ]; then args+=(--trocken); fi
+          sudo -n /usr/local/sbin/wais-deploy test-oberflaeche "${args[@]}" | tee "$RUNNER_TEMP/test-oberflaeche.txt"
+
+      - name: Rauchtest des laufenden Betriebs (rauchtest)
+        id: rauchtest
+        run: sudo -n /usr/local/sbin/wais-deploy rauchtest | tee "$RUNNER_TEMP/rauchtest.txt"
+
+      - name: Zusammenfassung
+        if: always()
+        env:
+          S_KERN: ${{ steps.kern.outcome }}
+          S_OBERFLAECHE: ${{ steps.oberflaeche.outcome }}
+          S_RAUCHTEST: ${{ steps.rauchtest.outcome }}
+        run: |
+          wert() { [ -f "$RUNNER_TEMP/$2.txt" ] && sed -n "s/^WAIS $1=\([A-Za-z0-9._:-]*\)\$/\1/p" "$RUNNER_TEMP/$2.txt" | tail -n 1; }
+          {
+            echo "## Ausrollen test auf Sokrates-2 (ohne Umschalten)"
+            echo
+            echo "| Punkt | Ergebnis |"
+            echo "| --- | --- |"
+            echo "| Stand | \`$COMMIT\` |"
+            echo "| Teil, Trockenlauf | $TEIL, $TROCKEN |"
+            echo "| test-kern | $S_KERN: Release $(wert release test-kern || true), Slot $(wert slot test-kern || true), $(wert ergebnis test-kern || true) |"
+            echo "| test-oberflaeche | $S_OBERFLAECHE: Farbe $(wert farbe test-oberflaeche || true), $(wert ergebnis test-oberflaeche || true) |"
+            echo "| rauchtest | $S_RAUCHTEST |"
+            echo
+            echo "Nächster Schritt: Workflow **Ausrollen prod** mit diesem Stand starten, dann die Freigabe im Environment prod erteilen."
+          } >> "$GITHUB_STEP_SUMMARY"

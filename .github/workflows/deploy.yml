@@ -1,0 +1,57 @@
+# Ausrollen auf Sokrates-2: nach jedem Merge auf main die Stufen dev und test, von Hand auch für einen bestimmten Stand.
+#
+# dev  (deploy-dev.yml):  Stand auflösen, die Prüf-Workflows des Commits abwarten, am Server prüfen und verteilen
+# test (deploy-test.yml): neues Kern-Release im freien Slot bauen und starten, neue Farbe der Oberfläche bauen und prüfen,
+#                         OHNE umzuschalten, danach Rauchtest
+# prod (deploy-prod.yml): nie automatisch. Von Hand starten ("Ausrollen prod"), dann Freigabe im Environment prod.
+#
+# Sicherheit: kein Auslöser pull_request, die Jobs auf dem eigenen Runner laufen nur für main und nie in einem Fork. Am Server
+# nimmt /usr/local/sbin/wais-deploy ohnehin nur Commits an, die in origin/main enthalten sind. Anleitung: docs/runner-einrichten.md
+name: Ausrollen
+
+run-name: "Ausrollen dev und test (${{ github.event_name }})"
+
+on:
+  push:
+    branches: [main]
+    # Reine Doku (docs/ und Markdown im Hauptordner) braucht kein neues Kern-Release und keine neue Farbe
+    paths-ignore: ["docs/**", "*.md"]
+  workflow_dispatch:
+    inputs:
+      stand:
+        description: "Commit (7 bis 40 Zeichen) oder Release-Name v<version>-<commit7>; leer = Kopf von main"
+        type: string
+        default: ""
+      teil:
+        description: "Teil für die Stufe test"
+        type: choice
+        options: [beides, kern, oberflaeche]
+        default: beides
+      trocken:
+        description: "Trockenlauf: nur zeigen, was geschähe"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  dev:
+    name: Stufe dev
+    uses: ./.github/workflows/deploy-dev.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      stand: ${{ inputs.stand || github.sha }}
+      trocken: ${{ inputs.trocken || false }}
+
+  test:
+    name: Stufe test
+    needs: dev
+    uses: ./.github/workflows/deploy-test.yml
+    permissions:
+      contents: read
+    with:
+      stand: ${{ needs.dev.outputs.commit }}
+      teil: ${{ inputs.teil || 'beides' }}
+      trocken: ${{ inputs.trocken || false }}
