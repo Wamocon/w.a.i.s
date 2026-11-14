@@ -13,6 +13,7 @@ import type {
   ServerMessage,
   Vorgang,
 } from "@/lib/nachrichten";
+import { hinweisText, type DateiMeldung } from "./export.ts"; // relativ aus demselben Grund
 import { fristLoeschen } from "./auftragFrist.ts"; // relativ aus demselben Grund
 import { AUFGABE_LEER, naechsteAufgabe, type Aufgabe } from "./aufgabenanzeige.ts"; // relativ aus demselben Grund
 import { auftraegeNachQuittung } from "./auftragStart.ts"; // relativ aus demselben Grund
@@ -173,6 +174,10 @@ export type WamoState = {
   ansage: string;
   /** kurzer sichtbarer Hinweis (z. B. "PC-Steuerung automatisch eingeschaltet"), verschwindet selbst */
   toast: { key: number; text: string } | null;
+  /** zuletzt gespeicherte Datei (Canvas als Word, Excel, ...): Hinweis mit "Öffnen", bis die Person ihn schließt */
+  datei: Extract<DateiMeldung, { ok: true }> | null;
+  /** zählt die Antworten auf "Speichern" (Erfolg oder Fehler): ein gesperrter Knopf im Canvas wird damit wieder frei */
+  dateiAntworten: number;
 };
 
 export const HISTORY = 240; // ~12 s bei 20 Hz
@@ -216,6 +221,8 @@ export const initialState: WamoState = {
   einwilligungAbgelehnt: false,
   ansage: "",
   toast: null,
+  datei: null,
+  dateiAntworten: 0,
 };
 
 export const wamo = createStore<WamoState>(initialState);
@@ -388,6 +395,11 @@ export function zeigeToast(text: string) {
     toastTimer = null;
     wamo.set((s) => (s.toast?.key === key ? { ...s, toast: null } : s));
   }, TOAST_MS);
+}
+
+/** Den Hinweis zur zuletzt gespeicherten Datei schließen (die Datei bleibt am PC). */
+export function schliesseDateiHinweis() {
+  wamo.set((s) => (s.datei ? { ...s, datei: null } : s));
 }
 
 // ---------- Freigaben mit Frist (PC-Aktionen): abgelaufene Karten verschwinden selbst ----------
@@ -567,6 +579,7 @@ export function applyServerMessage(msg: ServerMessage) {
         modellQuelle: msg.modellQuelle,
         modellHinweis: msg.modellHinweis,
         entwicklungGrund: msg.entwicklungGrund,
+        office: msg.office,
       };
       const vorher = wamo.get().betrieb;
       wamo.set((s) => ({
@@ -586,6 +599,25 @@ export function applyServerMessage(msg: ServerMessage) {
     case "gemerkt":
       zeigeMemo({ bereich: msg.bereich, status: msg.status, text: msg.text, id: msg.id });
       return;
+    case "datei": {
+      // Canvas als Datei gespeichert: Hinweis mit "Öffnen" (components/DateiHinweis.tsx); ein Fehler kommt als kurzer Hinweis
+      if (!msg.ok) {
+        wamo.set((s) => ({ ...s, dateiAntworten: s.dateiAntworten + 1 }));
+        zeigeToast(msg.grund);
+        return;
+      }
+      const datei = {
+        ok: true as const,
+        kennung: msg.kennung,
+        name: msg.name,
+        format: msg.format,
+        ordner: msg.ordner,
+        pfad: msg.pfad,
+        geoeffnet: msg.geoeffnet,
+      };
+      wamo.set((s) => ({ ...s, datei, dateiAntworten: s.dateiAntworten + 1, ansage: hinweisText(datei) }));
+      return;
+    }
     case "auftrag": {
       const a: Auftrag = {
         job: msg.job,

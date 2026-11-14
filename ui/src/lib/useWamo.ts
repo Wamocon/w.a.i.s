@@ -29,6 +29,7 @@ import {
   type Entscheidung,
   type LeerlaufLage,
 } from "@/lib/stillStart";
+import { istOfficeFormat, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
 import { parseServerMessage, type Auftrag, type Markierung, type ModellModus } from "@/lib/nachrichten";
 import type { SchluesselArt } from "@/lib/schluesselhilfe";
 import { abdruckGestartet, abdruckLaeuft, kannEinlernen, kannLoeschen, STIMME_LEER } from "@/lib/stimme";
@@ -169,6 +170,8 @@ export type WamoAktionen = {
   modellzugang?: (anfrage: ModellzugangAnfrage) => boolean;
   /** Stimmabdruck einlernen und löschen (lib/stimme.ts). Optional, damit die Vorschau ohne Kern auskommt. */
   stimmabdruck?: StimmabdruckAktionen;
+  /** Canvas als Datei am PC speichern und die gespeicherte Datei öffnen (lib/export.ts). Optional, damit die Vorschau ohne Kern auskommt. */
+  office?: OfficeAktionen;
 };
 
 /** Die drei Aktionen am Stimmabdruck; der Kern prüft sie und antwortet mit stimmabdruck-Nachrichten. true, wenn gesendet. */
@@ -209,7 +212,9 @@ type ClientMessage =
   | { type: "bildstrom"; data: { aktion: "an" | "aus" | "monitor" | "ack" | "anfordern"; monitor?: number; seq?: number; token?: string } }
   | { type: "modellzugang"; data: ModellzugangAnfrage }
   | { type: "stimmabdruck"; data: { aktion: "start"; einwilligung: string } | { aktion: "abbrechen" } | { aktion: "loeschen" } }
-  | { type: "kontingent"; data: Record<string, never> };
+  | { type: "kontingent"; data: Record<string, never> }
+  | { type: "canvas_export"; data: { canvas_id: string; format: OfficeFormat } }
+  | { type: "datei_oeffnen"; data: { kennung: string } };
 
 function senden(client: PipecatClient, msg: ClientMessage) {
   client.sendClientMessage(msg.type, msg.data);
@@ -1595,6 +1600,30 @@ export function useWamo(): WamoAktionen {
     wamo.set((s) => ({ ...s, ansage: "Eintrag zurückgenommen" }));
   }, []);
 
+  // Canvas als Datei am PC (lib/export.ts): nur senden; ob es geht, entscheiden Kern und Host, das Ergebnis kommt als Nachricht "datei"
+  const office = useMemo<OfficeAktionen>(() => {
+    const schicken = (msg: ClientMessage, fehlerText: string) => {
+      const client = clientRef.current;
+      if (!client || !istOnline(wamo.get())) {
+        zeigeToast(`${fehlerText}: keine Verbindung.`);
+        return false;
+      }
+      try {
+        senden(client, msg);
+      } catch {
+        zeigeToast(`${fehlerText}: die Nachricht ging nicht hinaus.`);
+        return false;
+      }
+      return true;
+    };
+    return {
+      speichern: (canvasId, format) =>
+        istOfficeFormat(format) && schicken({ type: "canvas_export", data: { canvas_id: canvasId, format } }, "Nicht gespeichert"),
+      oeffnen: (kennung) =>
+        /^[0-9a-f]{16}$/.test(kennung) && schicken({ type: "datei_oeffnen", data: { kennung } }, "Nicht geöffnet"),
+    };
+  }, []);
+
   const schliesseFehler = useCallback(() => setFehler(null), []);
 
   // Mikrofone für die Auswahl in der Mikrofon-Warnung (Bezeichnungen gibt es erst nach der Freigabe)
@@ -1664,6 +1693,7 @@ export function useWamo(): WamoAktionen {
       stillStarten,
       sprechen,
       eingabeMelden,
+      office,
     }),
     [
       connect,
@@ -1683,6 +1713,7 @@ export function useWamo(): WamoAktionen {
       stillStarten,
       sprechen,
       eingabeMelden,
+      office,
     ],
   );
 }
