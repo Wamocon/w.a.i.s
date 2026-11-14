@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from hilfen import BETREUER_TOKEN, KERN_TOKEN, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen
+from hilfen import BETREUER_TOKEN, KERN_TOKEN, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen, token_datei
 
 from wamo_labor_dienst.app import create_app
 from wamo_labor_dienst.datenbank import ZentralDB
@@ -121,8 +121,8 @@ def test_senken_steht_mit_zeit_art_und_wert_in_der_betreuer_spur(client):
 # ---------- (b) Untergrenze der Aufbewahrung ----------
 def _env(tmp_path, **extra):
     kern, betreuer = tmp_path / "k", tmp_path / "b"
-    kern.write_text(KERN_TOKEN, encoding="utf-8")
-    betreuer.write_text(BETREUER_TOKEN, encoding="utf-8")
+    token_datei(kern, KERN_TOKEN)
+    token_datei(betreuer, BETREUER_TOKEN)
     return {"WAMO_LABOR_DIENST_KERN_TOKEN_DATEI": str(kern), "WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI": str(betreuer), **extra}
 
 

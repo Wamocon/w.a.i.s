@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from hilfen import token_datei
 from wamo_labor_dienst.konfig import KonfigFehler, Konfig, aus_umgebung, token_aus_datei
 
 KERN = "kT9mQ2vLx7RpD4sWn8BcYfH6jGaZ1eU5oXiN0tVrMqA3"
@@ -14,8 +15,8 @@ BETREUER = "Bn4Wd8Zs1Yh6Kt3Qe9Jx5Cv2Rm7Lg0Pa+Uo/Fi-Nz._~=Tq"
 
 def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
     kern, betreuer = tmp_path / "kern.token", tmp_path / "betreuer.token"
-    kern.write_text(KERN + "\n", encoding="utf-8")
-    betreuer.write_text(BETREUER, encoding="utf-8")
+    token_datei(kern, KERN + "\n")
+    token_datei(betreuer, BETREUER)
     return {"WAMO_LABOR_DIENST_KERN_TOKEN_DATEI": str(kern), "WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI": str(betreuer), **extra}
 
 
@@ -60,7 +61,7 @@ def test_nicht_lesbare_tokendatei(tmp_path):
 @pytest.mark.parametrize("inhalt", ["", "zu-kurz", "a" * 31, "a" * 201, "mit leerzeichen " + "a" * 40, "umlaut-ä" + "a" * 40])
 def test_unbrauchbarer_token_wird_abgelehnt_ohne_den_wert_zu_nennen(tmp_path, inhalt):
     env = _env(tmp_path)
-    Path(env["WAMO_LABOR_DIENST_KERN_TOKEN_DATEI"]).write_text(inhalt, encoding="utf-8")
+    token_datei(Path(env["WAMO_LABOR_DIENST_KERN_TOKEN_DATEI"]), inhalt)
     with pytest.raises(KonfigFehler) as e:
         aus_umgebung(env)
     assert inhalt.strip() == "" or inhalt.strip() not in str(e.value)
@@ -68,7 +69,7 @@ def test_unbrauchbarer_token_wird_abgelehnt_ohne_den_wert_zu_nennen(tmp_path, in
 
 def test_gleicher_token_fuer_kern_und_betreuer_wird_abgelehnt(tmp_path):
     env = _env(tmp_path)
-    Path(env["WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI"]).write_text(KERN, encoding="utf-8")
+    token_datei(Path(env["WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI"]), KERN)
     with pytest.raises(KonfigFehler, match="verschieden"):
         aus_umgebung(env)
 
@@ -116,8 +117,8 @@ def test_einstieg_meldet_eine_falsche_uhr_mit_ausgang_2(tmp_path, monkeypatch, c
     from wamo_labor_dienst import __main__ as einstieg
 
     kern, betreuer = tmp_path / "k", tmp_path / "b"
-    kern.write_text(KERN, encoding="utf-8")
-    betreuer.write_text(BETREUER, encoding="utf-8")
+    token_datei(kern, KERN)
+    token_datei(betreuer, BETREUER)
     for name, wert in (("WAMO_LABOR_DIENST_KERN_TOKEN_DATEI", str(kern)), ("WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI", str(betreuer)), ("WAMO_LABOR_DIENST_DATEN", str(tmp_path / "d"))):
         monkeypatch.setenv(name, wert)
     echtes = einstieg.create_app
@@ -143,7 +144,7 @@ def test_einstieg_meldet_eine_falsche_uhr_mit_ausgang_2(tmp_path, monkeypatch, c
 ])
 def test_tokenqualitaet_mindestens_43_zeichen_und_16_verschiedene(tmp_path, token, ok):
     env = _env(tmp_path)
-    Path(env["WAMO_LABOR_DIENST_KERN_TOKEN_DATEI"]).write_text(token, encoding="utf-8")
+    token_datei(Path(env["WAMO_LABOR_DIENST_KERN_TOKEN_DATEI"]), token)
     if ok:
         assert aus_umgebung(env).kern_token == token
     else:
@@ -154,7 +155,7 @@ def test_tokenqualitaet_mindestens_43_zeichen_und_16_verschiedene(tmp_path, toke
 
 def test_fehler_der_tokenqualitaet_nennen_den_grund_ohne_den_wert(tmp_path):
     env = _env(tmp_path)
-    Path(env["WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI"]).write_text("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", encoding="utf-8")
+    token_datei(Path(env["WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI"]), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     with pytest.raises(KonfigFehler, match="verschiedene Zeichen"):
         aus_umgebung(env)
 

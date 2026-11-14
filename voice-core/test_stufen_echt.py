@@ -32,6 +32,10 @@ import test_release as TR  # noqa: E402
 import quelle as Q  # noqa: E402
 from release_stufen import Kontext  # noqa: E402
 
+# git fetch startet danach seine Wartung im Hintergrund (maintenance --auto, bei neuerem Git losgelöst). Räumt der Test den Ordner
+# gleichzeitig weg, scheitert das Löschen sonst mit "Directory not empty". Ein Rest im Temp-Ordner schadet nicht.
+AUFRAEUMEN = {"ignore_cleanup_errors": True}
+
 GIT = shutil.which("git")
 KERN_V = "v0.1.0"
 
@@ -108,7 +112,7 @@ class Grundlage(unittest.TestCase):
     """Eine lokale Quelle (origin, Spiegel) mit zwei Ständen: der laufende (c1) und die Änderung (c2)."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="stufen-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="stufen-", **AUFRAEUMEN)
         self.addCleanup(self.tmp.cleanup)
         self.origin = TQ.neues_repo(self.tmp.name)
         pakete(self.origin)
@@ -385,7 +389,7 @@ class WegGrundlage(TR.ReleaseTest):
 
     def setUp(self):
         super().setUp()
-        self.tmp2 = tempfile.TemporaryDirectory(prefix="weg-")
+        self.tmp2 = tempfile.TemporaryDirectory(prefix="weg-", **AUFRAEUMEN)
         self.addCleanup(self.tmp2.cleanup)
         self.origin = TQ.neues_repo(self.tmp2.name)
         pakete(self.origin)
@@ -505,7 +509,7 @@ class Wirkungsflaechen(unittest.TestCase):
     """Die Funde der Wirkungsflächen für die Karte (stufen_quelle.py): laufen ohne Git und ohne Sandbox, mit einer Attrappe des Läufers."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="anzeige-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="anzeige-", **AUFRAEUMEN)
         self.addCleanup(self.tmp.cleanup)
         self.ordner = os.path.join(self.tmp.name, "anzeige")
 
