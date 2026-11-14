@@ -54,6 +54,14 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Hinzugefügt
 
+- User Story in Jira aus dem Canvas (Zweig `feat/jira-story`, Paket P3 aus dem Plan Office und Versand): Werkzeug `jira_story_anlegen` und Knopf
+  "Als User Story in Jira" am eigenen Canvas-Dokument, nur für Admins im Büro, nie im Labor, Werkzeug unter dem Gate der Stimmprüfung. Angelegt wird
+  nur nach dem Klick auf "Freigeben" auf der Karte im Kern (Job `jira`, `voice-core/jira_freigaben.py`: Hash über alle Werte, genau einmal, 300
+  Sekunden, höchstens 1800 Zeichen, Freitext nur mit Präfix), mit genau einem Aufruf an Jira Cloud (`voice-core/jira_client.py`, REST v3,
+  Beschreibung als Atlassian Document Format ohne Erwähnungen und Verweise, Epic über `parent`), bei unklarer Antwort einmal nachsehen, nie neu
+  anlegen. Ergebnis mit Schlüssel und geprüftem Verweis in der Oberfläche. Schalter `WAMO_JIRA` (Standard aus) und `WAMO_JIRA_URL`,
+  `WAMO_JIRA_EMAIL`, `WAMO_JIRA_TOKEN`, `WAMO_JIRA_PROJEKTE`, `WAMO_JIRA_STANDARD_PROJEKT` nur über `wamo-core-env`; eigener technischer
+  Jira-Benutzer nur für W.A.I.S. (`docs/jira-benutzer-einrichten.md`). Keine Migration.
 - Innehalten statt Abbrechen (`voice-core/wiedergabe.py`, Schalter `WAMO_INNEHALTEN`, `WAMO_INNEHALTEN_WEITER_SECS` und `WAMO_INNEHALTEN_MAX_SECS`, Standard an): Ein einzelnes echtes
   Wort der Person, während WAMO spricht ("Danke", "Du"), lässt WAMO an der nächsten Wortgrenze innehalten (der Tonausgang pausiert in `write_audio_frame`, je Sitzung ein eigener
   `AusgabeHalt`). Kommt nach 0,7 Sekunden Stille nichts nach (höchstens 2,5 Sekunden Pause, nie über 4 Sekunden), spricht WAMO genau dort weiter. Zwei Wörter oder ein Stoppwort
