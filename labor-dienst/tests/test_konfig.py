@@ -41,6 +41,7 @@ def test_werte_aus_der_umgebung(tmp_path):
 def test_token_aus_datei_streift_leerraum_und_bom(tmp_path):
     datei = tmp_path / "t"
     datei.write_bytes(b"\xef\xbb\xbf" + KERN.encode() + b"\r\n")
+    datei.chmod(0o600)  # wie im Betrieb, unter Linux nimmt der Dienst sonst keinen Token an
     assert token_aus_datei(str(datei), "X") == KERN
 
 
