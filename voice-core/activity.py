@@ -53,7 +53,7 @@ FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "m
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
                                 "github_repo_anlegen", "outlook_senden"})
-FREIGABE_DETAIL_ZEICHEN = 2000
+FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
 FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
 _DOMAENE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}")

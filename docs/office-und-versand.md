@@ -135,6 +135,27 @@ nur für W.A.I.S. mit "Browse Projects" und "Create Issues" in `WMCNL` und den f
 5. **OneNote:** Microsoft 365 bringt OneNote für den Desktop mit COM-Schnittstelle (`OneNote.Application`); ob es auf Nikos PC installiert und mit einem Notizbuch
    verbunden ist, ist offen (V, Paket 0).
 
+### 2.6 Prüfung am PC für Paket 2 (Stand 15.11.2026)
+
+Entscheidung von Niko am 15.11.2026 (wörtlich): "Mache 1 und 2, kommt immer drauf an welches Outlook aktiviert ist!" Damit sind Q1 und Q5
+beantwortet: Läuft das klassische Outlook, sendet W.A.I.S. nach dem Klick mit 30 Sekunden zum Zurückholen und mit der Outlook-Signatur;
+läuft das neue Outlook, öffnet W.A.I.S. einen fertigen Entwurf mit Anhang, und Niko sendet selbst. Im Zweifel gibt es nur den Entwurf.
+
+| Geprüft am PC von Niko | Ergebnis | Kennzeichen |
+| --- | --- | --- |
+| Was läuft und was eingestellt ist | `olk.exe` läuft, `OUTLOOK.EXE` nicht; `UseNewOutlook` ist nicht gesetzt; `Outlook.Application` ist registriert, ein Profil ist da; `mailto` und `.eml` gehören dem klassischen Outlook. Die Registry allein hätte also "klassisch" ergeben: Die Erkennung hängt deshalb zuerst an den laufenden Programmen (`host/office_outlook.py`) | B |
+| `.eml` mit `X-Unsent: 1`, Text und HTML-Teil, Anhang, geöffnet mit `%LOCALAPPDATA%\Microsoft\WindowsApps\olk.exe <Datei>` | fertiger Entwurf mit An, Betreff, Text und Anhang (auch mit Umlaut im Dateinamen und einer Word-Datei von 124 KB), die Signatur steht unter dem Text, das neue Outlook speichert ihn sofort unter Entwürfe | B (Bilder beim Prüfbericht) |
+| dieselbe `.eml` nur mit Textteil | die Signatur landet über dem Text, ohne Umbruch dazwischen | B |
+| Start über die App-Kennung (`IApplicationActivationManager.ActivateForFile`) | Fehler "Diese App bietet keine Unterstützung für den angegebenen Vertrag" | B |
+| Deep Link `ms-outlook://mail/deeplink/compose?...` | neues Fenster mit "Diese Aktion wird noch nicht unterstützt" | B |
+| `olk.exe` mit `mailto:...&attach=...` | Entwurf mit Empfänger, Betreff, Text und Signatur, ohne Anhang: nur Rückfall, dann zeigt der Explorer den Anhang markiert | B |
+| Standardprogramm für `.eml` und `mailto` | am PC das klassische Outlook, also das falsche, das dafür erst gestartet würde; deshalb nicht ausgeführt und nicht genutzt | B (Zuordnung) |
+| Senden über das klassische Outlook per COM | am PC nicht geprüft: Das klassische Outlook läuft dort nicht, und in keinem Test wird gesendet. Attrappen decken Auflösung, Signatur, Frist, Zurückholen und die Prüfung vor dem Senden ab; der Echttest braucht ein laufendes klassisches Outlook | V |
+
+Die Frist von 30 Sekunden hält der Host selbst (Mail unter Entwürfe, Senden erst danach), nicht Outlooks `DeferredDeliveryTime`: Den Zeitpunkt
+arbeitet dort Exchange ab, Zurückholen hieße ein Element im Postausgang finden, und beides ließe sich nur mit echtem Senden prüfen. Fällt der
+Host in der Frist aus, bleibt die Mail ungesendet unter Entwürfe.
+
 ## 3. Nutzerablauf
 
 | Nr | Niko | W.A.I.S. | Karte |
