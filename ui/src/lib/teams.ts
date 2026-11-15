@@ -30,6 +30,15 @@ export function teamsFehler(d: TeamsDaten): string | null {
   return null;
 }
 
+/**
+ * Hinweis im Formular. fern: Browser, der den Laptop aus der Ferne steuert (lib/pcSchalter.ts, pcFern); Teams öffnet sich dann auf dem
+ * Laptop und nicht auf dem Gerät des Browsers (dieselbe Formulierung wie bei Dateien und Mails).
+ */
+export function teamsHinweis(fern: boolean): string {
+  const wo = fern ? "Teams auf deinem Laptop" : "Teams";
+  return `W.A.I.S. sendet nie: Nach deiner Freigabe öffnet sich ${wo} mit diesem Text im Eingabefeld, und du drückst dort selbst Enter.`;
+}
+
 const UEBERSCHRIFT = /^\s{0,3}#{1,6}\s+/;
 const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
 

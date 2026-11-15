@@ -64,6 +64,22 @@ describe("Canvas, Als Teams-Nachricht", () => {
     expect(screen.getByRole("alert").textContent).toBe("Nur interne Adressen.");
   });
 
+  it("im Browser sagt der Hinweis, dass Teams auf dem Laptop aufgeht; in der Desktop-App nicht", () => {
+    zustand(DOKUMENT);
+    const { unmount } = render(<CanvasBereich teams={teamsAktionen()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Als Teams-Nachricht" }));
+    expect(screen.getByText(/öffnet sich Teams auf deinem Laptop/)).toBeTruthy();
+    unmount();
+    (window as unknown as { wamoDesktop?: unknown }).wamoDesktop = { isDesktop: true };
+    try {
+      render(<CanvasBereich teams={teamsAktionen()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Als Teams-Nachricht" }));
+      expect(screen.queryByText(/auf deinem Laptop/)).toBeNull();
+    } finally {
+      delete (window as unknown as { wamoDesktop?: unknown }).wamoDesktop;
+    }
+  });
+
   it("gibt es nur mit betrieb.teams und nur für eigene, gespeicherte Elemente", () => {
     const teams = teamsAktionen();
     zustand(DOKUMENT, { ...BETRIEB, teams: undefined });

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseServerMessage } from "./nachrichten.ts";
-import { klartext, TEAMS_EMPFAENGER_MAX, TEAMS_GRUPPE_MAX, TEAMS_TEXT_MAX, teamsFehler } from "./teams.ts";
+import { klartext, TEAMS_EMPFAENGER_MAX, TEAMS_GRUPPE_MAX, TEAMS_TEXT_MAX, teamsFehler, teamsHinweis } from "./teams.ts";
 
 test("Formular: Empfänger und Text nötig, Grenzen wie im Host, Gruppenname nur für mehrere", () => {
   const gut = { an: ["max@firma.example"], gruppenname: "", text: "Hallo" };
@@ -41,4 +41,10 @@ test("Nachrichten: teams_antwort und betrieb.teams", () => {
   const betrieb = (teams: unknown) => parseServerMessage({ type: "betrieb", modus: "buero", modelle: {}, pc: "verbunden", teams });
   assert.equal((betrieb(true) as { teams?: boolean }).teams, true);
   assert.equal((betrieb("ja") as { teams?: boolean }).teams, undefined);
+});
+
+test("Hinweis im Formular: im Browser, der den Laptop steuert, öffnet sich Teams auf dem Laptop", () => {
+  assert.match(teamsHinweis(true), /^W\.A\.I\.S\. sendet nie: .*öffnet sich Teams auf deinem Laptop mit diesem Text.*selbst Enter/);
+  assert.doesNotMatch(teamsHinweis(false), /Laptop/);
+  assert.match(teamsHinweis(false), /öffnet sich Teams mit diesem Text/);
 });

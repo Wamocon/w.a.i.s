@@ -4,7 +4,8 @@ import { useEffect, useId, useState, type FormEvent } from "react";
 import type { CanvasItem } from "@/components/Canvas";
 import { eigenesElement, empfaengerListe } from "@/lib/mail";
 import { useSelect } from "@/lib/store";
-import { klartext, TEAMS_TEXT_MAX, teamsFehler, type TeamsAktionen } from "@/lib/teams";
+import { klartext, TEAMS_TEXT_MAX, teamsFehler, teamsHinweis, type TeamsAktionen } from "@/lib/teams";
+import { usePcFern } from "@/lib/usePcSchalter";
 import { wamo } from "@/lib/wamo";
 
 /** Nach so vielen Sekunden ohne Antwort des Kerns gibt der Knopf wieder frei (Adressbuch am PC, Tunnel). */
@@ -14,11 +15,13 @@ const ANTWORT_FRIST_MS = 90_000;
  * "Als Teams-Nachricht" im Kopf eines eigenen, gespeicherten Canvas-Elements (nur mit betrieb.teams, voice-core/teams_werkzeuge.py):
  * Felder für An, Gruppenname (nur bei mehreren) und Text (Vorschlag: der Inhalt des Canvas als Klartext, mit Zeichenzahl). "Zur
  * Freigabe vorbereiten" schickt nur die Angaben; Kern und Host legen daraus die Karte an. Erst der Klick dort öffnet Teams mit dem Text
- * im Eingabefeld, senden muss die Person selbst. Bis die Antwort kommt, ist der Knopf gesperrt; bei Erfolg schließt das Formular.
+ * im Eingabefeld, senden muss die Person selbst. Bis die Antwort kommt, ist der Knopf gesperrt; bei Erfolg schließt das Formular. Im
+ * Browser, der den Laptop aus der Ferne steuert (usePcFern), sagt der Hinweis, dass Teams dort aufgeht; alles läuft über den Kern.
  */
 export function CanvasTeams({ item, teams }: { item: CanvasItem; teams: TeamsAktionen }) {
   const verfuegbar = useSelect(wamo, (s) => s.betrieb?.teams === true);
   const antwort = useSelect(wamo, (s) => s.teamsAntwort);
+  const fern = usePcFern();
   const id = useId();
   const [offen, setOffen] = useState(false);
   const [an, setAn] = useState("");
@@ -81,8 +84,8 @@ export function CanvasTeams({ item, teams }: { item: CanvasItem; teams: TeamsAkt
           <textarea id={`${id}-text`} rows={6} value={text} onChange={(e) => setText(e.target.value)} aria-describedby={`${id}-zahl`} />
           <p id={`${id}-zahl`} className="canvas-mail-hinweis">{`${text.length} von ${TEAMS_TEXT_MAX} Zeichen`}</p>
           <p className="canvas-mail-hinweis">
-            W.A.I.S. sendet nie: Nach deiner Freigabe öffnet sich Teams mit diesem Text im Eingabefeld, und du drückst dort selbst Enter.
-            Namen gehen nur mit dem klassischen Outlook, sonst bitte Adressen. Sagen geht auch: „Schreib Anna in Teams, dass …“
+            {teamsHinweis(fern)} Namen gehen nur mit dem klassischen Outlook, sonst bitte Adressen. Sagen geht auch: „Schreib Anna in
+            Teams, dass …“
           </p>
           {fehler && (
             <p className="notice" role="alert">
