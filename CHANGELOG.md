@@ -60,11 +60,13 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   (`ui/src/lib/stillStart.ts`: Geräteschalter „Still starten beim Tippen“, nie Laborkonten, Übernahme, Ratenbegrenzung). Der Browser
   bedient nur: Die Werkzeuge laufen auf dem Laptop, den der Kern dem Profil aus dem Geräteregister zuordnet; im Browser in der
   Betriebsart Büro steht das am Schalter, dazu, was nur die Desktop-App kann (Autostart, Lichtrahmen am Zielfenster). Den Haken für den
-  Autostart gibt es dort nicht. In einer Sitzung ohne PC-Host ist der Schalter mit klarem Satz gesperrt (statt stiller Ablehnung im
-  Kern), bei getrenntem oder gesperrtem PC nennt ein Satz den Zustand. Der Hinweis nach dem Speichern aus dem Canvas sagt im Browser „auf
-  deinem Laptop“ und „Am Laptop öffnen“. Live-Bild, Freigabekarten, Export, OneNote und Mail über Outlook laufen über den Kern und bleiben. Nur
-  Oberfläche (`ui/src/lib/pcSchalter.ts`, `usePcSchalter.ts`, `geraet.ts`, `export.ts`, `useWamo.ts`,
-  `ui/src/components/einstellungen/Geraete.tsx`, `ui/src/components/DateiHinweis.tsx`); der Kern entscheidet weiter (Rolle admin,
+  Autostart gibt es dort nicht, und ohne Sitzung steht dabei, dass der stille Start eine laufende Sitzung auf einem anderen Gerät (etwa
+  der Desktop-App am Laptop) beendet. In einer Sitzung ohne PC-Host ist der Schalter mit klarem Satz gesperrt (statt stiller Ablehnung im
+  Kern), bei getrenntem oder gesperrtem PC nennt ein Satz den Zustand; die Hinweise hängen über `aria-describedby` am Schalter. Der
+  Hinweis nach dem Speichern aus dem Canvas sagt im Browser „auf deinem Laptop“ und „Am Laptop öffnen“, der Hinweis zur Mail im neuen
+  Outlook „auf deinem Laptop offen“. Live-Bild, Freigabekarten, Export, OneNote und Mail über Outlook laufen über den Kern und bleiben. Nur
+  Oberfläche (`ui/src/lib/pcSchalter.ts`, `usePcSchalter.ts`, `geraet.ts`, `export.ts`, `mail.ts`, `useWamo.ts`,
+  `ui/src/components/einstellungen/Geraete.tsx`, `ui/src/components/DateiHinweis.tsx`, `ui/src/components/MailVersand.tsx`); der Kern entscheidet weiter (Rolle admin,
   Register, PC-Sperre je Sitzung, Freigabekarten, Gate der Stimmprüfung). Ablauf, Quelle und Anzeige am Laptop (KP-3A, KP-3C) sind offen.
 - Mail über Outlook am PC aus dem Canvas (Paket 2 aus `docs/office-und-versand.md`, Zweig `feat/outlook`): Auf Zuruf (Werkzeug
   `outlook_senden`) oder per Klick („Als E-Mail“ im Kopf des Canvas mit An, Cc, Betreff, Text und dem Canvas als Anhang) legt W.A.I.S.

@@ -32,6 +32,8 @@ export const PC_VERBINDEN_MS = VERBINDUNG_FRIST_MS;
 
 export const HINWEIS_IM_GESPRAECH = "Der Schalter ist während eines Gesprächs bedienbar.";
 export const HINWEIS_OHNE_SITZUNG = "Ohne Gespräch startet W.A.I.S. dafür still, ohne Mikrofon.";
+/** Browser, der den Laptop aus der Ferne steuert: Der Kern löst je Profil die laufende Sitzung ab (voice-core/sitzungen.py), auch die der App am Laptop. */
+export const HINWEIS_OHNE_SITZUNG_FERN = `${HINWEIS_OHNE_SITZUNG} Läuft gerade eine Sitzung auf einem anderen Gerät, etwa in der Desktop-App am Laptop, endet sie dabei.`;
 export const HINWEIS_STILL_AUS =
   "Ohne Gespräch nur mit „Still starten beim Tippen“ (Einstellungen, Sprache und Ton). Sonst ist der Schalter während eines Gesprächs bedienbar.";
 export const TEXT_WARTET = "wird eingeschaltet …";

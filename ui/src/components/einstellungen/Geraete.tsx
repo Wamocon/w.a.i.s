@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { StatusDetails } from "@/components/Statusleiste";
 import {
   BETRIEBSARTEN,
@@ -15,7 +15,15 @@ import { geraeteBloecke, geraeteStandText, PC_STEUERUNG_ID } from "@/lib/einstel
 import { useDesktopApp, useServerBrowser } from "@/lib/geraet";
 import { nachbar } from "@/lib/modellwahl";
 import { geraeteAnzeige } from "@/lib/geraeteAnzeige";
-import { HINWEIS_LAPTOP, HINWEIS_NUR_APP, HINWEIS_OHNE_SITZUNG, pcLageHinweis, SCHALT_WARTEN_MS, TEXT_WARTET } from "@/lib/pcSchalter";
+import {
+  HINWEIS_LAPTOP,
+  HINWEIS_NUR_APP,
+  HINWEIS_OHNE_SITZUNG,
+  HINWEIS_OHNE_SITZUNG_FERN,
+  pcLageHinweis,
+  SCHALT_WARTEN_MS,
+  TEXT_WARTET,
+} from "@/lib/pcSchalter";
 import { useSelect } from "@/lib/store";
 import { usePcSchalter } from "@/lib/usePcSchalter";
 import { istOnline, wamo, zeigeToast } from "@/lib/wamo";
@@ -29,8 +37,9 @@ import { GeraeteVerwaltung } from "./GeraeteVerwaltung";
  * er bedienbar: "an" startet still eine Sitzung (useWamo.pcSteuerung) und schaltet ein, sobald der Kern den PC als verbunden meldet.
  * Solange das läuft, ist er gesperrt (pcEinschalten.wartet); klappt es nicht, steht der Grund darunter (pcEinschalten.hinweis, für
  * Screenreader als Status). Ist der PC in der Sitzung nicht verbunden, sagt ein Satz warum (pcLageHinweis). Im Browser in der Betriebsart
- * Büro steht dabei, dass er den Laptop steuert, und was nur die Desktop-App kann; den Haken für die Automatik gibt es dort nicht, denn
- * sie wirkt im Büro nur mit dem Rechnernamen der Desktop-App (useWamo).
+ * Büro steht dabei, dass er den Laptop steuert, dass ein stiller Start eine laufende Sitzung auf einem anderen Gerät beendet, und was nur
+ * die Desktop-App kann; den Haken für die Automatik gibt es dort nicht, denn sie wirkt im Büro nur mit dem Rechnernamen der Desktop-App
+ * (useWamo). Die Hinweise hängen über aria-describedby am Schalter, damit auch ein gesperrter Schalter seinen Grund nennt.
  */
 const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { onSchalten: (an: boolean) => boolean }) {
   const { anzeige, fern } = usePcSchalter();
@@ -41,10 +50,9 @@ const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { 
   const ein = useSelect(wamo, (s) => s.pcEinschalten);
   const [ziel, setZiel] = useState<boolean | null>(null);
   const auto = usePcAuto();
+  const id = useId();
   const ausstehend = ein.wartet || (ziel !== null && ziel !== an && !belegt);
   if (anzeige.art === "verborgen") return null;
-  // derselbe Satz steht nach einem gescheiterten Wunsch schon darunter (Status): nicht zweimal
-  const lageText = lage && lage !== ein.hinweis ? lage : null;
   const hinweis = ausstehend
     ? ein.wartet
       ? TEXT_WARTET
@@ -54,10 +62,14 @@ const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { 
       : anzeige.art === "gesperrt"
         ? anzeige.hinweis
         : anzeige.ohneSitzung
-          ? HINWEIS_OHNE_SITZUNG
-          : (lageText ?? `gilt nur für diese Sitzung${pcName ? `, Ziel ${pcName}` : ""}`);
-  // gesperrt mit demselben Satz, den der Status schon nennt (Kern ohne PC-Host nach einem Klick): dort genügt er
+          ? fern
+            ? HINWEIS_OHNE_SITZUNG_FERN
+            : HINWEIS_OHNE_SITZUNG
+          : (lage ?? `gilt nur für diese Sitzung${pcName ? `, Ziel ${pcName}` : ""}`);
+  // Derselbe Satz steht nach einem gescheiterten Wunsch schon im Status darunter: dort genügt er, und daneben steht kein "alles gut"
   const zeile = hinweis === ein.hinweis ? null : hinweis;
+  const ids = { zeile: `${id}-zeile`, fern: `${id}-fern`, status: `${id}-status` };
+  const beschrieben = [zeile && ids.zeile, fern && ids.fern, ein.hinweis && ids.status].filter(Boolean).join(" ") || undefined;
   return (
     <div className="pc-steuerung" id={PC_STEUERUNG_ID} tabIndex={-1} role="group" aria-label="PC-Steuerung">
       <div className="pc-switch-row">
@@ -65,14 +77,23 @@ const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { 
           an={an}
           ausstehend={ausstehend}
           gesperrt={anzeige.art === "gesperrt"}
+          beschrieben={beschrieben}
           onSchalten={onSchalten}
           setZiel={setZiel}
         />
-        {zeile && <span className="pc-switch-hint">{zeile}</span>}
+        {zeile && (
+          <span className="pc-switch-hint" id={ids.zeile}>
+            {zeile}
+          </span>
+        )}
       </div>
-      {fern && <p className="pc-switch-hint pc-fern-hinweis">{HINWEIS_LAPTOP}</p>}
+      {fern && (
+        <p className="pc-switch-hint pc-fern-hinweis" id={ids.fern}>
+          {HINWEIS_LAPTOP}
+        </p>
+      )}
       {/* immer eingehängt, nur der Text wechselt: ein neu eingefügter Bereich wird oft überhört */}
-      <p className="pc-switch-hint pc-ein-hinweis" role="status">
+      <p className="pc-switch-hint pc-ein-hinweis" role="status" id={ids.status}>
         {ein.hinweis ?? ""}
       </p>
       {fern ? (
@@ -94,12 +115,15 @@ function PcSchalterKnopf({
   an,
   ausstehend,
   gesperrt,
+  beschrieben,
   onSchalten,
   setZiel,
 }: {
   an: boolean;
   ausstehend: boolean;
   gesperrt: boolean;
+  /** Kennungen der Hinweise neben und unter dem Schalter (aria-describedby) */
+  beschrieben?: string;
   onSchalten: (an: boolean) => boolean;
   setZiel: (ziel: boolean | null) => void;
 }) {
@@ -114,6 +138,7 @@ function PcSchalterKnopf({
       aria-checked={an}
       className="pc-switch"
       data-an={an || undefined}
+      aria-describedby={beschrieben}
       disabled={ausstehend || gesperrt}
       onClick={() => {
         const neu = !an;
