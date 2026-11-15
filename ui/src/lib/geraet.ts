@@ -8,15 +8,21 @@ import { useSyncExternalStore } from "react";
  * Dieselbe Oberfläche läuft an zwei Orten: auf dem PC (Desktop-App oder Browser, Kern lokal oder im Büro) und im
  * Büro-LAN als Dienst auf Sokrates-2, den jedes Gerät im Browser öffnet. Für den zweiten Fall wird sie mit
  * NEXT_PUBLIC_WAMO_NUR_BUERO=ja gebaut (Build-Argument, infra/sokrates2/wamo-ui/wamo-ui.conf). Ein solcher Build
- * kennt keinen lokalen Kern: Er steht nicht in der CSP, und ein Browser darauf hat nur die Betriebsart Büro. PC-Werkzeuge
- * gehören zur Desktop-App, deshalb zeigt der Browser dort statt des Schalters einen Hinweis.
+ * kennt keinen lokalen Kern: Er steht nicht in der CSP, und ein Browser darauf hat nur die Betriebsart Büro.
+ *
+ * PC-Steuerung (seit 15.11.2026 auch im Browser, Entscheidung 11.11.2026): Der Browser bedient nur. Die PC-Werkzeuge laufen
+ * immer auf dem Laptop, den der Kern der Sitzung aus dem Geräteregister zuordnet (voice-core/pc_geraet.py; Host und Tunnel
+ * dort, eingerichtet mit der Desktop-App), nie auf dem Gerät des Browsers. Der Schalter sagt das (lib/pcSchalter.ts, pcFern).
+ * Was die Desktop-Brücke braucht, fehlt im Browser und wird dort genannt: Einrichtung des Laptops, Lichtrahmen und Welle am
+ * Zielfenster (markierung), Autostart der PC-Steuerung (Rechnername), Betriebsart Unterwegs.
  *
  * Erkannt wird die Desktop-App an window.wamoDesktop (preload.js), nie an der Adresse: Dieselbe Adresse kann in
  * Zukunft von einer Domain bedient werden (Variante B), ohne dass sich hier etwas ändert.
  *
- * Grenze: Das ist eine Entscheidung der Oberfläche, kein Schutz. Die Seite kann window.wamoDesktop selbst setzen, und der
- * Kern nimmt den Wunsch nach PC-Steuerung von jeder Admin-Sitzung an. Maßgeblich bleibt dort die Bindung des PCs an
- * genau ein Profil (WAMO_PC_HOST_PROFILE), die PC-Sperre je Sitzung und die Freigabe-Karten.
+ * Grenze: Die Unterscheidung App oder Browser ist eine Entscheidung der Oberfläche, kein Schutz. Die Seite kann
+ * window.wamoDesktop selbst setzen, und der Kern nimmt den Wunsch nach PC-Steuerung von jeder Admin-Sitzung an. Maßgeblich
+ * bleiben dort Rolle admin, die Bindung des Laptops an das Profil im Geräteregister, die PC-Sperre je Sitzung, die
+ * Freigabekarten und das Gate der Stimmprüfung.
  */
 
 /** Wahr im Build für Sokrates-2 (Build-Konstante, auf Server und Client gleich). */
@@ -28,8 +34,8 @@ export function nurBueroBuild(wert: string | undefined): boolean {
 }
 
 /**
- * Browser auf dem Server: Build für Sokrates-2 und keine Desktop-App. Hier gibt es nur die Betriebsart Büro,
- * und die PC-Steuerung ist nicht verfügbar (sie läuft über die Desktop-App des PCs).
+ * Browser auf dem Server: Build für Sokrates-2 und keine Desktop-App. Hier gibt es nur die Betriebsart Büro; die
+ * PC-Steuerung bedient von hier aus den Laptop aus dem Geräteregister (siehe oben).
  */
 export function istServerBrowser(nurBuero: boolean, desktop: boolean): boolean {
   return nurBuero && !desktop;
