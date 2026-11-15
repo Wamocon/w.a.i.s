@@ -33,8 +33,9 @@ const TOKEN_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const TOKEN_MAX = 8192;
 const DATEI_PFAD = "/wamo/api/installer/datei";
 const INSTALLER_RE = /^WAIS-Setup-\d+\.\d+\.\d+\.exe(\.part)?$/;
-const LADE_FRIST_MS = 10 * 60 * 1000;
+const LADE_FRIST_MS = 10 * 60 * 1000; // ganzer Ablauf: Verbinden, Anfrage, Laden, Nachprüfen
 const STILL_FRIST_MS = 30 * 1000;
+const SPERRE_NACH_ABBRUCH_MS = 10 * 60 * 1000; // nach "Abbrechen" fragt die App so lange nicht erneut
 
 const TEXT = Object.freeze({
   nichtBestaetigt: "Update vom Server nicht bestätigt, bitte Niko fragen.",
@@ -45,6 +46,8 @@ const TEXT = Object.freeze({
   abgebrochen: "Update abgebrochen.",
   laden: "Der Installer konnte nicht geladen werden. Bitte später erneut versuchen.",
   pruefsumme: "Der geladene Installer passt nicht zum bestätigten Update. Bitte Niko fragen.",
+  starten: "Der Installer ließ sich nicht starten. Bitte W.A.I.S. neu starten und es noch einmal versuchen.",
+  gesperrt: "Das Update wurde gerade abgebrochen. Die App fragt in einigen Minuten wieder.",
 });
 
 class UpdateFehler extends Error {
@@ -144,7 +147,12 @@ function verbindeGeprueft(ziel, { pruefe, tlsModul = tls, frist = STILL_FRIST_MS
     });
     s.once("error", reject);
     s.once("secureConnect", () => {
-      const e = pruefe(s, host);
+      let e;
+      try {
+        e = pruefe(s, host);
+      } catch (err) {
+        e = { ok: false, grund: err?.message }; // geschlossen scheitern, nie eine Ausnahme im Hauptprozess
+      }
       if (e?.ok !== true) {
         s.destroy();
         reject(new Error(`Zertifikat nicht vertraut: ${e?.grund ?? "unbekannt"}`));
@@ -195,6 +203,7 @@ function schreibeGeprueft(res, m, teilDatei, dsys) {
     const aus = dsys.createWriteStream(teilDatei, { flags: "w", mode: 0o600 });
     let bytes = 0;
     let ende = false;
+    let geschrieben = false; // erst nach erfolgreichem end() und passender Prüfsumme; erfüllt wird erst nach 'close'
     const scheitern = (fehler) => {
       if (ende) return;
       ende = true;
@@ -213,16 +222,36 @@ function schreibeGeprueft(res, m, teilDatei, dsys) {
     });
     res.on("error", () => scheitern(new UpdateFehler(TEXT.laden, "Antwort abgebrochen")));
     aus.on("error", () => scheitern(new UpdateFehler(TEXT.laden, "Schreiben fehlgeschlagen")));
+    aus.on("close", () => {
+      if (ende) return;
+      if (!geschrieben) return scheitern(new UpdateFehler(TEXT.laden, "Datei vorzeitig geschlossen"));
+      ende = true;
+      resolve();
+    });
     res.on("end", () => {
       if (ende) return;
-      aus.end(() => {
+      aus.end((err) => {
         if (ende) return;
-        ende = true;
-        if (bytes !== m.groesse || hash.digest("hex") !== m.sha256) reject(new UpdateFehler(TEXT.pruefsumme, "SHA-256 oder Größe passt nicht"));
-        else resolve();
+        if (err) return scheitern(new UpdateFehler(TEXT.laden, "Schreiben fehlgeschlagen"));
+        if (bytes !== m.groesse || hash.digest("hex") !== m.sha256) {
+          return scheitern(new UpdateFehler(TEXT.pruefsumme, "SHA-256 oder Größe passt nicht"));
+        }
+        geschrieben = true;
       });
     });
   });
+}
+
+/** Liest die Datei von der Platte und vergleicht Größe und SHA-256 mit dem Manifest (zählt, nicht der Netzstrom). */
+async function pruefeDatei(datei, m, dsys) {
+  const hash = crypto.createHash("sha256");
+  let bytes = 0;
+  for await (const stueck of dsys.createReadStream(datei)) {
+    bytes += stueck.length;
+    if (bytes > m.groesse) break;
+    hash.update(stueck);
+  }
+  if (bytes !== m.groesse || hash.digest("hex") !== m.sha256) throw new UpdateFehler(TEXT.pruefsumme, "Datei auf der Platte passt nicht");
 }
 
 /**
@@ -240,20 +269,28 @@ async function ladeInstaller(opt) {
   const endDatei = path.join(opt.ordner, m.datei);
   const teilDatei = `${endDatei}.part`;
   let socket = null;
+  let res = null;
   let uhr = null;
-  try {
+  // Eine Frist für alles ab dem Verbinden: ein Kern, der nach dem Handshake schweigt, hält das Update nicht fest
+  const frist = new Promise((_, reject) => {
+    uhr = setTimeout(() => reject(new UpdateFehler(TEXT.laden, "Zeitüberschreitung")), opt.frist ?? LADE_FRIST_MS);
+  });
+  const ablauf = (async () => {
     socket = await opt.verbinden(ziel).catch((err) => {
       throw new UpdateFehler(TEXT.laden, err?.message);
     });
     const kopf = { Authorization: `Bearer ${opt.token}`, Accept: "application/octet-stream" };
-    const res = await opt.anfragen(ziel, socket, kopf);
-    const frist = new Promise((_, reject) => {
-      uhr = setTimeout(() => reject(new UpdateFehler(TEXT.laden, "Zeitüberschreitung")), opt.frist ?? LADE_FRIST_MS);
-    });
-    await Promise.race([schreibeGeprueft(res, m, teilDatei, dsys), frist]);
+    res = await opt.anfragen(ziel, socket, kopf);
+    await schreibeGeprueft(res, m, teilDatei, dsys);
+    await pruefeDatei(teilDatei, m, dsys);
+  })();
+  ablauf.catch(() => {}); // nach einer Zeitüberschreitung endet der Ablauf still
+  try {
+    await Promise.race([ablauf, frist]);
     dsys.renameSync(teilDatei, endDatei);
     return endDatei;
   } catch (err) {
+    res?.destroy?.();
     socket?.destroy?.();
     try {
       dsys.rmSync(teilDatei, { force: true });
@@ -280,7 +317,9 @@ const sauber = (text, token) => {
  */
 function erzeugeUpdater(opt) {
   const log = opt.log ?? (() => {});
+  const jetzt = opt.jetzt ?? Date.now;
   let laeuft = false;
+  let gesperrtBis = 0; // nach "Abbrechen" keine neue Rückfrage, auch wenn die Seite es immer wieder versucht
   const pruefe = (a) => pruefeManifest({ manifest: a?.manifest, signatur: a?.signatur, schluessel: opt.schluessel, aktuelleVersion: opt.version });
 
   function pruefen(angebot) {
@@ -302,12 +341,21 @@ function erzeugeUpdater(opt) {
     if (!e.neuer) return { ok: false, text: TEXT.nichtNeuer };
     if (!tokenGueltig(auftrag?.token)) return { ok: false, text: TEXT.anmeldung };
     if (laeuft) return { ok: false, text: TEXT.laeuft };
+    if (jetzt() < gesperrtBis) return { ok: false, text: TEXT.gesperrt };
     laeuft = true;
     try {
-      if ((await opt.fragen(e.manifest)) !== true) return { ok: false, abgebrochen: true, text: TEXT.abgebrochen };
+      const ja = await Promise.resolve(opt.fragen(e.manifest)).catch(() => false);
+      if (ja !== true) {
+        gesperrtBis = jetzt() + SPERRE_NACH_ABBRUCH_MS;
+        return { ok: false, abgebrochen: true, text: TEXT.abgebrochen };
+      }
       const datei = await opt.laden({ manifest: e.manifest, token: auftrag.token });
       log(`Installer ${e.manifest.version} geladen und geprüft, Start`);
-      await opt.starten(datei);
+      try {
+        await opt.starten(datei);
+      } catch (err) {
+        throw new UpdateFehler(TEXT.starten, err?.message);
+      }
       opt.beenden();
       return { ok: true };
     } catch (err) {
@@ -322,6 +370,7 @@ function erzeugeUpdater(opt) {
 }
 
 module.exports = {
+  SPERRE_NACH_ABBRUCH_MS,
   GROESSE_MAX,
   MANIFEST_MAX_BYTES,
   MANIFEST_SCHLUESSEL,

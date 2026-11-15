@@ -21,7 +21,7 @@ import type { KernJson, TunnelZustand } from "./geraet.ts";
 export const PRUEF_ABSTAND_MS = 10_000; // "Erneut prüfen" höchstens einmal je 10 Sekunden
 export const TEXT_MAX = 300;
 export const FRIST_BRUECKE_MS = 15_000; // so lange wartet die Prüfliste auf eine Antwort der App
-const MANIFEST_MAX = 16_384;
+const MANIFEST_MAX_BYTES = 4096; // wie die App (desktop/update.js)
 
 export const PUNKT_REIHENFOLGE = [
   "anmeldung",
@@ -120,8 +120,10 @@ const T_INSTALL_WEG = "Das Update ließ sich nicht starten.";
 const T_OHNE_APP = "Updates gibt es nur in der Desktop-App.";
 const T_ANMELDUNG_WEG = "Die Anmeldung ist abgelaufen. Bitte neu anmelden.";
 
-const RE_VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
-const RE_SIGNATUR = /^[A-Za-z0-9+/_-]{40,200}={0,2}$/;
+// Formate genau wie in der App (desktop/update.js): Version ohne führende Nullen, Signatur 64 Byte Base64 mit Auffüllung, ein LF erlaubt
+const RE_VERSION = /^(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})$/;
+const RE_SIGNATUR = /^[A-Za-z0-9+/]{86}==\n?$/;
+const RE_UNSICHTBAR = /[\p{Cc}\p{Cf}\p{Cs}]/gu; // Steuerzeichen, Bidi- und Nullbreitenzeichen, einzelne Surrogate
 const TUNNEL: readonly TunnelZustand[] = ["verbunden", "host", "aus", "unbekannt"];
 const HOST: readonly HostUmgebung[] = ["bereit", "fehlt", "fehler", "entwickler"];
 
@@ -130,13 +132,13 @@ const istObjekt = (v: unknown): v is Objekt => typeof v === "object" && v !== nu
 const istVersion = (v: unknown): v is string => typeof v === "string" && RE_VERSION.test(v);
 const enthaelt = <T extends string>(liste: readonly T[], v: unknown): v is T => typeof v === "string" && (liste as readonly string[]).includes(v);
 
-/** Text zur Anzeige: nur Text, ohne Steuerzeichen, auf TEXT_MAX Zeichen gekürzt; sonst der Ersatz. */
+/**
+ * Text zur Anzeige: nur Text, ohne Steuer-, Format- (Bidi, Nullbreite) und Surrogatzeichen, auf TEXT_MAX Zeichen gekürzt; sonst der
+ * Ersatz. Ein überlanger Text wird vor dem Bereinigen grob abgeschnitten, damit die Arbeit begrenzt bleibt.
+ */
 export function satz(v: unknown, ersatz: string): string {
   if (typeof v !== "string") return ersatz;
-  const sauber = Array.from(v)
-    .filter((z) => z.charCodeAt(0) >= 32 && z.charCodeAt(0) !== 127)
-    .join("")
-    .trim();
+  const sauber = v.slice(0, 4 * TEXT_MAX).replace(RE_UNSICHTBAR, "").trim();
   return sauber ? Array.from(sauber).slice(0, TEXT_MAX).join("") : ersatz;
 }
 
@@ -154,10 +156,15 @@ export function pruefeKernStand(v: unknown): KernStand | null {
   return stand;
 }
 
-/** Manifest vom Server: Text und Signatur (Base64) werden nur an die App gereicht, die Oberfläche liest sie nicht. */
-export function pruefeManifest(v: unknown): Manifest | null {
-  if (!istObjekt(v) || typeof v.manifest !== "string" || typeof v.signatur !== "string") return null;
-  if (!v.manifest || v.manifest.length > MANIFEST_MAX || !RE_SIGNATUR.test(v.signatur)) return null;
+/**
+ * Manifest vom Server (GET /wamo/api/installer): Text und Signatur werden unverändert nur an die App gereicht, die Oberfläche liest sie
+ * nicht. Signatur null heißt: der Server bietet kein Update an. Alles andere außerhalb der Formate der App ist nicht lesbar (null).
+ */
+export function pruefeManifest(v: unknown): Manifest | "kein_angebot" | null {
+  if (!istObjekt(v)) return null;
+  if (v.signatur === null) return "kein_angebot";
+  if (typeof v.manifest !== "string" || typeof v.signatur !== "string" || !v.manifest || !RE_SIGNATUR.test(v.signatur)) return null;
+  if (new TextEncoder().encode(v.manifest).length > MANIFEST_MAX_BYTES) return null;
   return { manifest: v.manifest, signatur: v.signatur };
 }
 
@@ -320,12 +327,13 @@ async function kernStandHolen(kernJson: KernJson): Promise<KernStand | null> {
 async function updateStandHolen(b: PrueflisteBruecke, kernJson: KernJson, frist: number): Promise<UpdateStand> {
   const update = b.update;
   if (!istVersion(b.version) || !update) return { art: "ohne_pruefung" };
-  let manifest: Manifest | null;
+  let manifest: Manifest | "kein_angebot" | null;
   try {
     manifest = pruefeManifest(await kernJson("/installer"));
   } catch (e) {
     return fehlerStatus(e) === 404 ? { art: "kein_angebot" } : { art: "unbekannt" };
   }
+  if (manifest === "kein_angebot") return { art: "kein_angebot" };
   if (!manifest) return { art: "unbekannt" };
   const anfrage = { manifest: manifest.manifest, signatur: manifest.signatur };
   const ergebnis = pruefeUpdatePruefung(await mitFrist(() => update.pruefen(anfrage), frist));

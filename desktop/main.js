@@ -74,7 +74,7 @@ const { erzeugeMarkierungsAnzeige, fuerRandFenster, pruefeMarkierung, ruhezustan
 const { entladenBehandeln } = require("./entladen");
 const { erzeugeHostUmgebung } = require("./host-umgebung");
 const { adressen, loeseAuf, wirksameBetriebsart } = require("./installation");
-const { anfrageUeber, erzeugeUpdater, ladeInstaller, schluesselAusListe, verbindeGeprueft } = require("./update");
+const { TEXT: UPDATE_TEXT, anfrageUeber, erzeugeUpdater, ladeInstaller, schluesselAusListe, verbindeGeprueft } = require("./update");
 const { erzeugePruefer, ladeCa, pruefeSocket } = require("./zertifikat");
 const { MENUE_TEXT, symbolReparieren } = require("./symbol-reparatur");
 const { taskleisteAbsichern } = require("./taskleiste");
@@ -978,6 +978,8 @@ try {
     version: app.getVersion(),
     installiert: PFADE.modus === "installiert" && Boolean(PFADE.updateOrdner),
     fragen: async (m) => {
+      // Nur bei sichtbarem Fenster: ein in den Tray verstecktes W.A.I.S. fragt nie nach einem Update
+      if (!mainWin || mainWin.isDestroyed() || !mainWin.isVisible()) return false;
       const { response } = await dialog.showMessageBox(mainWin, {
         type: "question",
         title: "W.A.I.S. aktualisieren",
@@ -1019,7 +1021,7 @@ try {
 } catch (err) {
   console.error(`Update-Schlüssel nicht geladen (${err.message}); Updates aus der App sind aus.`);
 }
-const UPDATE_AUS = { ok: false, text: "Update vom Server nicht bestätigt, bitte Niko fragen." };
+const UPDATE_AUS = { ok: false, text: UPDATE_TEXT.nichtBestaetigt };
 ipcMain.handle("update:pruefen", (event, angebot) => (fromMainUi(event) && updater ? updater.pruefen(angebot) : UPDATE_AUS));
 ipcMain.handle("update:installieren", (event, auftrag) =>
   fromMainUi(event) && updater ? updater.installieren(auftrag) : UPDATE_AUS,

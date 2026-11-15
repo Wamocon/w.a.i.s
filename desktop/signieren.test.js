@@ -70,3 +70,50 @@ test("Schlüssel nie in einem Git-Arbeitsbaum", () => {
   assert.equal(fs.existsSync(path.join(__dirname, "testdaten", "nie.pem")), false);
   assert.equal(imGitBaum(path.join(os.tmpdir(), "irgendwo", "x.pem"), () => false), false);
 });
+
+test("schluessel-erzeugen: ohne Passwort nur mit ausdrücklichem Schalter, Passwort mindestens 16 Zeichen", () => {
+  const { schluesselSchuetzen } = require("../scripts/wamo-dist-signieren.cjs");
+  const ordner = fs.mkdtempSync(path.join(os.tmpdir(), "wais-schluessel-"));
+  const alt = process.env.WAIS_SIGNATUR_PASSWORT;
+  try {
+    delete process.env.WAIS_SIGNATUR_PASSWORT;
+    assert.throws(() => schluesselErzeugen(path.join(ordner, "a.pem")), /16 Zeichen/);
+    assert.equal(fs.existsSync(path.join(ordner, "a.pem")), false);
+    process.env.WAIS_SIGNATUR_PASSWORT = "zu-kurz";
+    assert.throws(() => schluesselErzeugen(path.join(ordner, "a.pem")), /16 Zeichen/);
+    process.env.WAIS_SIGNATUR_PASSWORT = "ein-langes-Testpasswort";
+    const roh = schluesselErzeugen(path.join(ordner, "b.pem"));
+    assert.match(fs.readFileSync(path.join(ordner, "b.pem"), "utf8"), /ENCRYPTED PRIVATE KEY/);
+    assert.match(roh, /^[A-Za-z0-9+/]{43}=$/);
+    delete process.env.WAIS_SIGNATUR_PASSWORT;
+    const klar = schluesselErzeugen(path.join(ordner, "c.pem"), { ohnePasswort: true });
+    assert.doesNotMatch(fs.readFileSync(path.join(ordner, "c.pem"), "utf8"), /ENCRYPTED/);
+    assert.throws(() => schluesselErzeugen(path.join(ordner, "c.pem"), { ohnePasswort: true }), /nie überschrieben/);
+    process.env.WAIS_SIGNATUR_PASSWORT = "ein-langes-Testpasswort";
+    assert.equal(schluesselSchuetzen(path.join(ordner, "c.pem")), klar);
+    assert.match(fs.readFileSync(path.join(ordner, "c.pem"), "utf8"), /ENCRYPTED PRIVATE KEY/);
+    assert.equal(fs.existsSync(path.join(ordner, "c.pem.neu")), false);
+  } finally {
+    if (alt === undefined) delete process.env.WAIS_SIGNATUR_PASSWORT;
+    else process.env.WAIS_SIGNATUR_PASSWORT = alt;
+  }
+});
+
+test("Kindprozesse bekommen das Passwort nie", () => {
+  const { kindUmgebung } = require("../scripts/wamo-dist-signieren.cjs");
+  const alt = process.env.WAIS_SIGNATUR_PASSWORT;
+  process.env.WAIS_SIGNATUR_PASSWORT = "geheim-geheim-geheim";
+  try {
+    assert.equal("WAIS_SIGNATUR_PASSWORT" in kindUmgebung(), false);
+  } finally {
+    if (alt === undefined) delete process.env.WAIS_SIGNATUR_PASSWORT;
+    else process.env.WAIS_SIGNATUR_PASSWORT = alt;
+  }
+});
+
+test("Hardware-Token: nur mit absolutem Modul und Werkzeug, Kennung nur hex", () => {
+  const { signiereMitToken } = require("../scripts/wamo-dist-signieren.cjs");
+  assert.throws(() => signiereMitToken(Buffer.from("x"), { modul: "ykcs11.dll", id: "02" }), /absolut/);
+  assert.throws(() => signiereMitToken(Buffer.from("x"), { modul: __filename, id: "02; rm" }), /Hex/);
+  assert.throws(() => signiereMitToken(Buffer.from("x"), { modul: __filename, id: "02", werkzeug: "pkcs11-tool" }), /pkcs11-tool/);
+});

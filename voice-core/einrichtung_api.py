@@ -14,10 +14,14 @@ Sicherheit
     Rechteprüfung, und nur für das eigene Gerät. Mit dem Socket verbindet sie sich allein, um per SO_PEERCRED zu prüfen, dass genau
     der Tunnelbenutzer lauscht, und schließt ihn sofort: kein Byte an den Laptop, kein MCP-Start, kein Werkzeugaufruf, keine
     PC-Sperre, keine Aufrufgrenze, kein Zugang für eine Sitzung. Die gelesenen Geheimnisse verlassen dateien_pruefen nie.
+    Der connect auf pc.sock öffnet über den SSH-Rücktunnel am Laptop kurz eine TCP-Verbindung zum Host, die sofort wieder endet
+    (kein Byte auf Anwendungsebene).
   * Antworten nennen nie Werte, Schlüssel, Pfade oder Datenbankmeldungen. Wirft eine Quelle oder fehlt etwas, das nur am Server
     prüfbar ist, wird der Punkt rot mit einem ehrlichen Satz; nach außen geht keine Ausnahme. Im Log steht nur der Fehlertyp.
-  * Drosselung: Ein Ergebnis gilt je Profil 10 Sekunden (Knopf "Erneut prüfen"), gleichzeitige Aufrufe teilen sich eine Prüfung.
-    Cache-Control: no-store.
+  * Fristen: jede Quelle höchstens QUELLE_SECS, die ganze Prüfung höchstens GESAMT_SECS. Was dann offen ist oder trotz eigener
+    Absicherung wirft, wird rot mit dem Satz "lässt sich gerade nicht prüfen" (UNKLAR).
+  * Drosselung: Ein Ergebnis gilt je Profil 10 Sekunden (Knopf "Erneut prüfen"), auch ein unvollständiges; gleichzeitige Aufrufe
+    teilen sich eine Prüfung. Cache-Control: no-store.
 
 Quellen (Funktionen auf Modulebene, die Tests ersetzen): erstanmeldung_stand (Paket P1b dockt nur dort an), aktives_geraet und
 geraete_status (Register devices), dateien_pruefen und gegenstelle_pruefen (Tunnel), modellzugang_stand (model_access),
@@ -32,6 +36,7 @@ import os
 import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from loguru import logger
@@ -46,17 +51,35 @@ import pc_host
 import pc_tunnel
 import sprache_anbieter
 import stimme_speicher
+from auth_gate import Identity
 from geraete_register import Geraet, GeraeteRegister, RegisterFehler
 from memory import DatabaseUnavailable, MemoryStore, normalize_uuid, shared_database
 from wamo_api import identitaet
 
 router = APIRouter()
 
+Stufe = Literal["gruen", "rot", "hinweis"]
+
+
+class Punkt(TypedDict):
+    id: str
+    stufe: Stufe
+    text: str
+
+
+class StandAntwort(TypedDict):
+    punkte: list[Punkt]
+    geprueft: str
+
+
 PUNKTE = ("passwort", "geraet", "tunnel", "stimme", "gespraech", "entwicklung", "stimmabdruck", "pc")
-GRUEN, ROT, HINWEIS = "gruen", "rot", "hinweis"
+GRUEN: Stufe = "gruen"
+ROT: Stufe = "rot"
+HINWEIS: Stufe = "hinweis"
 ZWISCHENSPEICHER_SECS = 10.0
 MAX_ZWISCHENSPEICHER = 500
-QUELLE_SECS = 5.0  # eine Abfrage der Datenbank
+QUELLE_SECS = 5.0  # eine Abfrage der Datenbank oder das Lesen der Dateien des Geräts
+GESAMT_SECS = 8.0  # die ganze Prüfung
 SOCKET_SECS = pc_tunnel.CONNECT_TIMEOUT_SECS
 NO_STORE = {"Cache-Control": "no-store"}
 GEGENSTELLE = pc_tunnel.GegenstellenPruefung  # Backend mit Prüfung per SO_PEERCRED (Tests ersetzen nur das Lesen der uid)
@@ -64,6 +87,7 @@ GEGENSTELLE = pc_tunnel.GegenstellenPruefung  # Backend mit Prüfung per SO_PEER
 SATZ_PASSWORT_OK = "Passwort gewechselt."
 SATZ_PASSWORT_KEINE = "Kein Passwortwechsel nötig."
 SATZ_PASSWORT_ROT = "Bitte zuerst dein Passwort ändern."
+SATZ_PASSWORT_UNKLAR = "Der Stand deines Passworts lässt sich gerade nicht prüfen."
 SATZ_GERAET_OK = "Dein Laptop ist gebunden und freigegeben."
 SATZ_GERAET_WARTET = "Dein Laptop wartet auf die Freigabe durch einen Admin."
 SATZ_GERAET_GESPERRT = "Dein Laptop ist gesperrt, bitte wende dich an einen Admin."
@@ -97,18 +121,24 @@ SATZ_PC_OK = "PC-Steuerung ist für dein Profil bereit."
 SATZ_PC_NICHT_FREI = "PC-Steuerung ist für dein Profil noch nicht freigeschaltet."
 SATZ_PC_AUS = "PC-Steuerung ist am Server ausgeschaltet."
 SATZ_PC_NICHT_ERREICHBAR = "PC-Steuerung geht erst, wenn der Tunnel zu deinem Laptop steht."
+SATZ_PC_UNKLAR = "Die PC-Steuerung lässt sich gerade nicht prüfen."
 
+# Satz für einen Punkt, der bis zur Frist offen blieb oder an einem unerwarteten Fehler scheiterte
+UNKLAR = {"passwort": SATZ_PASSWORT_UNKLAR, "geraet": SATZ_GERAET_FEHLER, "tunnel": SATZ_TUNNEL_UNKLAR,
+          "stimme": SATZ_STIMME_UNKLAR, "gespraech": SATZ_GESPRAECH_UNKLAR, "entwicklung": SATZ_ENT_UNKLAR,
+          "stimmabdruck": SATZ_ABDRUCK_UNKLAR, "pc": SATZ_PC_UNKLAR}
 # Quelle des Modellzugangs (modellzugang.Stand.quelle) -> Stufe und Satz; "profil" mit Claude ist grün
-GESPRAECH = {"keiner": (HINWEIS, SATZ_GESPRAECH_HAUS), "wahl": (HINWEIS, SATZ_GESPRAECH_WAHL),
-             "festgelegt": (HINWEIS, SATZ_GESPRAECH_FESTGELEGT), "zuordnung": (HINWEIS, SATZ_GESPRAECH_ZUORDNUNG)}
+GESPRAECH: dict[str, tuple[Stufe, str]] = {
+    "keiner": (HINWEIS, SATZ_GESPRAECH_HAUS), "wahl": (HINWEIS, SATZ_GESPRAECH_WAHL),
+    "festgelegt": (HINWEIS, SATZ_GESPRAECH_FESTGELEGT), "zuordnung": (HINWEIS, SATZ_GESPRAECH_ZUORDNUNG)}
 
 _uhr = time.monotonic
-_zwischenspeicher: dict[tuple[str, str], tuple[float, dict]] = {}
-_laufend: dict[tuple[str, str], asyncio.Future] = {}
+_zwischenspeicher: dict[tuple[str, str], tuple[float, StandAntwort]] = {}
+_laufend: dict[tuple[str, str], asyncio.Future[StandAntwort]] = {}
 
 
 # ---------- Quellen (Tests ersetzen sie) ----------
-def erstanmeldung_stand(identity) -> object:
+def erstanmeldung_stand(identity: Identity) -> object:
     """Stand der Erstanmeldung (Paket P1b: erledigt, keine, offen, ...). Bis P1b ihn an die Identität hängt, fehlt er: None."""
     return getattr(identity, "erstanmeldung", None)
 
@@ -133,15 +163,21 @@ async def dateien_pruefen(geraet: Geraet) -> tuple[str, int]:
     Rechteprüfung. Liefert Socket und uid des Tunnelbenutzers; die Geheimnisse werden verworfen. Wirft bei jeder Abweichung."""
     wurzel = pc_geraet.socket_wurzel()
     uid = pc_geraet._uid_von(geraet.benutzer)
-    await asyncio.wait_for(asyncio.to_thread(pc_geraet.lies_geheimnisse, geraet, wurzel, uid=uid), pc_geraet.LESEN_SECS)
+    await asyncio.wait_for(asyncio.to_thread(pc_geraet.lies_geheimnisse, geraet, wurzel, uid=uid), QUELLE_SECS)
     return f"{wurzel}/{geraet.ordner}/pc.sock", uid
 
 
 async def gegenstelle_pruefen(pfad: str, uid: int) -> None:
     """Verbindet mit dem Socket, prüft per SO_PEERCRED, dass genau der Tunnelbenutzer lauscht (pc_tunnel.pruefe_gegenstelle),
-    und schließt sofort. Sendet kein Byte. Wirft, wenn der Socket fehlt oder die Gegenstelle nicht passt."""
-    strom = await asyncio.wait_for(GEGENSTELLE(uid).connect_unix_socket(pfad, timeout=SOCKET_SECS), SOCKET_SECS + 1.0)
-    await strom.aclose()
+    und schließt sofort, auch bei Abbruch. Sendet und liest kein Byte. Wirft, wenn der Socket fehlt, die Gegenstelle nicht passt
+    oder SOCKET_SECS ablaufen (eine einzige Frist)."""
+    strom = None
+    try:
+        async with asyncio.timeout(SOCKET_SECS):
+            strom = await GEGENSTELLE(uid).connect_unix_socket(pfad)
+    finally:
+        if strom is not None:
+            await asyncio.shield(strom.aclose())
 
 
 async def modellzugang_stand(user_id: str) -> mz.Stand:
@@ -158,7 +194,7 @@ def soniox_gesetzt() -> bool:
 
 
 def entwicklung_problem() -> str | None:
-    """Grund aus den Einstellungen des Servers (dev_agent.entwicklung_problem). Der Text geht nie in die Antwort."""
+    """Grund aus den Einstellungen des Servers (dev_agent.entwicklung_problem, liest Dateien). Der Text geht nie in die Antwort."""
     return dev_agent.entwicklung_problem()
 
 
@@ -169,11 +205,11 @@ async def abdruck_vorhanden(user_id: str) -> bool | None:
 
 
 # ---------- Punkte ----------
-def _punkt(punkt_id: str, stufe: str, text: str) -> dict:
+def _punkt(punkt_id: str, stufe: Stufe, text: str) -> Punkt:
     return {"id": punkt_id, "stufe": stufe, "text": text}
 
 
-def _fehler(punkt_id: str, satz: str, fehler: BaseException) -> dict:
+def _fehler(punkt_id: str, satz: str, fehler: BaseException) -> Punkt:
     logger.warning("Einrichtung: Punkt {} nicht prüfbar ({})", punkt_id, type(fehler).__name__)
     return _punkt(punkt_id, ROT, satz)
 
@@ -182,19 +218,22 @@ def _satz(text: str) -> str:
     return " ".join(text.split()).rstrip(".") + "."
 
 
-def _passwort(ich) -> dict:
-    stand = erstanmeldung_stand(ich)
-    if stand is None or stand == "keine":
-        return _punkt("passwort", GRUEN, SATZ_PASSWORT_KEINE)
-    if stand == "erledigt":
-        return _punkt("passwort", GRUEN, SATZ_PASSWORT_OK)
+def _passwort(ich: Identity) -> Punkt:
+    try:
+        stand = erstanmeldung_stand(ich)
+        if stand is None or stand == "keine":
+            return _punkt("passwort", GRUEN, SATZ_PASSWORT_KEINE)
+        if stand == "erledigt":
+            return _punkt("passwort", GRUEN, SATZ_PASSWORT_OK)
+    except Exception as e:  # noqa: BLE001 (jede Quelle darf scheitern, der Punkt wird rot)
+        return _fehler("passwort", SATZ_PASSWORT_UNKLAR, e)
     return _punkt("passwort", ROT, SATZ_PASSWORT_ROT)
 
 
-async def _geraet_fehlt(user_id: str) -> dict:
+async def _geraet_fehlt(user_id: str) -> Punkt:
     try:
         status = await asyncio.wait_for(geraete_status(user_id), QUELLE_SECS)
-    except Exception as e:  # noqa: BLE001 (jede Quelle darf scheitern, der Punkt wird rot)
+    except Exception as e:  # noqa: BLE001
         return _fehler("geraet", SATZ_GERAET_FEHLER, e)
     if "beantragt" in status:
         return _punkt("geraet", ROT, SATZ_GERAET_WARTET)
@@ -203,29 +242,36 @@ async def _geraet_fehlt(user_id: str) -> dict:
     return _punkt("geraet", ROT, SATZ_GERAET_FEHLT)
 
 
-async def _tunnel(geraet: Geraet) -> tuple[dict, bool]:
+async def _tunnel(geraet: Geraet) -> tuple[Punkt, bool]:
     if not pc_geraet.register_modus():
         return _punkt("tunnel", ROT, SATZ_TUNNEL_AUS), False
     try:
         pfad, uid = await dateien_pruefen(geraet)
         await gegenstelle_pruefen(pfad, uid)
     except Exception as e:  # noqa: BLE001 (Ordner, Dateien, Fingerabdruck, Socket oder Gegenstelle passen nicht)
-        grund = e if isinstance(e, pc_geraet.PcGeraetFehler) else type(e).__name__  # PcGeraetFehler nennt nie Werte
-        logger.info("WAMO-GERAET Einrichtung: Tunnel von Gerät {} steht nicht: {}", geraet.kennung, grund)
+        if isinstance(e, (pc_geraet.PcGeraetFehler, pc_tunnel.GegenstelleFalsch)):  # beide Texte nennen nie Werte
+            logger.warning("WAMO-GERAET Einrichtung: Tunnel von Gerät {} steht nicht: {}", geraet.kennung, e)
+        else:
+            logger.info("WAMO-GERAET Einrichtung: Tunnel von Gerät {} steht nicht ({})", geraet.kennung, type(e).__name__)
         return _punkt("tunnel", ROT, SATZ_TUNNEL_ROT), False
     return _punkt("tunnel", GRUEN, SATZ_TUNNEL_OK), True
 
 
-async def _geraet_und_tunnel(user_id: str) -> tuple[dict, dict, bool]:
-    """Punkte geraet und tunnel und ob der eigene Laptop erreichbar ist."""
+async def _geraet_und_tunnel(user_id: str, fertig: dict[str, Punkt]) -> bool:
+    """Trägt geraet und tunnel ein, sobald sie feststehen. Liefert, ob der eigene Laptop erreichbar ist."""
     try:
         geraet = await asyncio.wait_for(aktives_geraet(user_id), QUELLE_SECS)
     except Exception as e:  # noqa: BLE001
-        return _fehler("geraet", SATZ_GERAET_FEHLER, e), _punkt("tunnel", ROT, SATZ_TUNNEL_UNKLAR), False
+        fertig["geraet"] = _fehler("geraet", SATZ_GERAET_FEHLER, e)
+        fertig["tunnel"] = _punkt("tunnel", ROT, SATZ_TUNNEL_UNKLAR)
+        return False
     if geraet is None:
-        return await _geraet_fehlt(user_id), _punkt("tunnel", ROT, SATZ_TUNNEL_OHNE_GERAET), False
-    tunnel, erreichbar = await _tunnel(geraet)
-    return _punkt("geraet", GRUEN, SATZ_GERAET_OK), tunnel, erreichbar
+        fertig["geraet"] = await _geraet_fehlt(user_id)
+        fertig["tunnel"] = _punkt("tunnel", ROT, SATZ_TUNNEL_OHNE_GERAET)
+        return False
+    fertig["geraet"] = _punkt("geraet", GRUEN, SATZ_GERAET_OK)
+    fertig["tunnel"], erreichbar = await _tunnel(geraet)
+    return erreichbar
 
 
 async def _modellzugang(user_id: str) -> mz.Stand | None:
@@ -236,19 +282,21 @@ async def _modellzugang(user_id: str) -> mz.Stand | None:
         return None
 
 
-def _stimme(stand: mz.Stand | None) -> dict:
+def _stimme(stand: mz.Stand | None) -> Punkt:
+    """Erst die Wahl (Umgebung vor Profil, wie die Sitzung), den Soniox-Schlüssel nur verlangen, wenn Soniox gewählt ist."""
+    if stand is None:
+        return _punkt("stimme", ROT, SATZ_STIMME_UNKLAR)
     try:
-        if not soniox_gesetzt():
-            return _punkt("stimme", ROT, SATZ_STIMME_FEHLT)
-        if stand is None:
-            return _punkt("stimme", ROT, SATZ_STIMME_UNKLAR)
-        wahl = {sprache_anbieter.gewuenscht(b, getattr(stand, b)) for b in ("stt", "tts")}  # Umgebung vor Profil, wie die Sitzung
+        wahl = {sprache_anbieter.gewuenscht(b, getattr(stand, b)) for b in ("stt", "tts")}
+        schluessel_fehlt = "soniox" in wahl and not soniox_gesetzt()
     except Exception as e:  # noqa: BLE001
         return _fehler("stimme", SATZ_STIMME_UNKLAR, e)
+    if schluessel_fehlt:
+        return _punkt("stimme", ROT, SATZ_STIMME_FEHLT)
     return _punkt("stimme", GRUEN, SATZ_STIMME_OK) if wahl == {"soniox"} else _punkt("stimme", HINWEIS, SATZ_STIMME_HAUS)
 
 
-def _gespraech(stand: mz.Stand | None) -> dict:
+def _gespraech(stand: mz.Stand | None) -> Punkt:
     if stand is None:
         return _punkt("gespraech", ROT, SATZ_GESPRAECH_UNKLAR)
     if stand.art == "claude" and stand.quelle == "profil":
@@ -256,16 +304,16 @@ def _gespraech(stand: mz.Stand | None) -> dict:
     return _punkt("gespraech", *GESPRAECH.get(stand.quelle, (HINWEIS, SATZ_GESPRAECH_HAUS)))
 
 
-def _entwicklung_grund(ich, stand: mz.Stand | None) -> str | None:
+async def _entwicklung_grund(ich: Identity, stand: mz.Stand | None) -> str | None:
     """Warum Entwicklungsaufträge für dieses Admin-Profil aus sind, oder None. Dieselbe Folge wie bot.build_session: Schalter,
     Einstellungen, Profilbindung (entwicklung_betrieb.grund_vorab im Büro), dann der eigene Zugang (boss.entwicklung_quelle)."""
-    im_buero = pc_host.buero()
-    problem = entwicklung_problem() if dev_agent.entwicklung_enabled() else None
+    im_buero, an = pc_host.buero(), dev_agent.entwicklung_enabled()
+    problem = await asyncio.wait_for(asyncio.to_thread(entwicklung_problem), QUELLE_SECS) if an else None
     if im_buero:
         grund = entwicklung_betrieb.grund_vorab(ich.user_id, True, problem)
         if grund is not None:
             return SATZ_ENT_PROBLEM if grund == problem else _satz(grund)  # das Problem nennt Variablen, nie in die Antwort
-    elif not dev_agent.entwicklung_enabled():
+    elif not an:
         return SATZ_ENT_AUS
     elif problem:
         return SATZ_ENT_PROBLEM
@@ -276,17 +324,17 @@ def _entwicklung_grund(ich, stand: mz.Stand | None) -> str | None:
     return SATZ_ENT_KEIN_ZUGANG if fehlt else None
 
 
-def _entwicklung(ich, stand: mz.Stand | None) -> dict:
+async def _entwicklung(ich: Identity, stand: mz.Stand | None) -> Punkt:
     if not ich.is_admin:  # heute nur Admins (P5: rechte.entwicklung_erlaubt)
         return _punkt("entwicklung", HINWEIS, SATZ_ENT_MITGLIED)
     try:
-        grund = _entwicklung_grund(ich, stand)
+        grund = await _entwicklung_grund(ich, stand)
     except Exception as e:  # noqa: BLE001
         return _fehler("entwicklung", SATZ_ENT_UNKLAR, e)
     return _punkt("entwicklung", ROT, grund) if grund else _punkt("entwicklung", GRUEN, SATZ_ENT_OK)
 
 
-async def _stimmabdruck(user_id: str) -> dict:
+async def _stimmabdruck(user_id: str) -> Punkt:
     try:
         da = await asyncio.wait_for(abdruck_vorhanden(user_id), QUELLE_SECS)
     except Exception as e:  # noqa: BLE001
@@ -296,7 +344,7 @@ async def _stimmabdruck(user_id: str) -> dict:
     return _punkt("stimmabdruck", GRUEN, SATZ_ABDRUCK_OK) if da else _punkt("stimmabdruck", HINWEIS, SATZ_ABDRUCK_FEHLT)
 
 
-def _pc(ich, erreichbar: bool) -> dict:
+def _pc(ich: Identity, erreichbar: bool) -> Punkt:
     """Heute: Admins, Mitglieder nur mit WAMO_PC_MITGLIEDER (wie pc_geraet.pc_zugang_fuer; P4: rechte.pc_stufe)."""
     try:
         if not (ich.is_admin or pc_geraet.mitglieder_erlaubt()):
@@ -304,37 +352,69 @@ def _pc(ich, erreichbar: bool) -> dict:
         if not pc_host.pc_host_enabled():
             return _punkt("pc", ROT, SATZ_PC_AUS)
     except Exception as e:  # noqa: BLE001
-        return _fehler("pc", SATZ_PC_NICHT_FREI, e)
+        return _fehler("pc", SATZ_PC_UNKLAR, e)
     return _punkt("pc", GRUEN, SATZ_PC_OK) if erreichbar else _punkt("pc", ROT, SATZ_PC_NICHT_ERREICHBAR)
 
 
-async def _pruefen(ich) -> dict:
-    """Alle Punkte in fester Reihenfolge. Wirft nie: jede Teilprüfung fängt ihre Fehler selbst."""
-    (geraet, tunnel, erreichbar), stand, abdruck = await asyncio.gather(
-        _geraet_und_tunnel(ich.user_id), _modellzugang(ich.user_id), _stimmabdruck(ich.user_id))
-    punkte = [_passwort(ich), geraet, tunnel, _stimme(stand), _gespraech(stand), _entwicklung(ich, stand), abdruck,
-              _pc(ich, erreichbar)]
+async def _alle_punkte(ich: Identity, fertig: dict[str, Punkt]) -> None:
+    """Trägt jeden Punkt in fertig ein, sobald er feststeht. Wirft eine Teilprüfung, bricht die TaskGroup die anderen ab."""
+    fertig["passwort"] = _passwort(ich)
+    erreichbar = False
+
+    async def geraet_und_tunnel() -> None:
+        nonlocal erreichbar
+        erreichbar = await _geraet_und_tunnel(ich.user_id, fertig)
+
+    async def zugang() -> None:
+        stand = await _modellzugang(ich.user_id)
+        fertig["stimme"], fertig["gespraech"] = _stimme(stand), _gespraech(stand)
+        fertig["entwicklung"] = await _entwicklung(ich, stand)
+
+    async def abdruck() -> None:
+        fertig["stimmabdruck"] = await _stimmabdruck(ich.user_id)
+
+    async with asyncio.TaskGroup() as gruppe:
+        gruppe.create_task(geraet_und_tunnel())
+        gruppe.create_task(zugang())
+        gruppe.create_task(abdruck())
+    fertig["pc"] = _pc(ich, erreichbar)
+
+
+async def _pruefen(ich: Identity) -> StandAntwort:
+    """Alle Punkte in fester Reihenfolge, höchstens GESAMT_SECS lang. Wirft nie: Offene Punkte werden rot (UNKLAR)."""
+    fertig: dict[str, Punkt] = {}
+    try:
+        async with asyncio.timeout(GESAMT_SECS):
+            await _alle_punkte(ich, fertig)
+    except TimeoutError:
+        logger.warning("Einrichtung: Frist von {} s abgelaufen (offen: {})", GESAMT_SECS,
+                       ", ".join(p for p in PUNKTE if p not in fertig))
+    except Exception as e:  # noqa: BLE001 (Auffangschutz: eine Teilprüfung warf trotz eigener Absicherung)
+        teile = e.exceptions if isinstance(e, BaseExceptionGroup) else (e,)
+        logger.error("Einrichtung: Prüfung abgebrochen ({})", ", ".join(type(t).__name__ for t in teile))
+    punkte = [fertig.get(pid) or _punkt(pid, ROT, UNKLAR[pid]) for pid in PUNKTE]
     rot = [p["id"] for p in punkte if p["stufe"] == ROT]
     logger.info("Einrichtung: Stand geprüft (Profil {}, rot: {})", ich.user_id[:8], ", ".join(rot) or "nichts")
     return {"punkte": punkte, "geprueft": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 # ---------- Zwischenspeicher und Route ----------
-def _merken(schluessel: tuple[str, str], lauf: asyncio.Future) -> None:
+def _merken(schluessel: tuple[str, str], lauf: asyncio.Future[StandAntwort]) -> None:
+    """Rückruf am Ende einer Prüfung: aus _laufend nehmen und das Ergebnis speichern. Beim Schreiben fallen abgelaufene Einträge
+    weg; ist der Speicher dann noch voll, nur der älteste."""
     if _laufend.get(schluessel) is lauf:
         del _laufend[schluessel]
     if lauf.cancelled() or lauf.exception() is not None:
         return
     jetzt = _uhr()
-    if len(_zwischenspeicher) >= MAX_ZWISCHENSPEICHER:  # abgelaufene Profile aufräumen, nie unbegrenzt wachsen
-        for k in [k for k, (t, _) in _zwischenspeicher.items() if jetzt - t >= ZWISCHENSPEICHER_SECS]:
-            del _zwischenspeicher[k]
-        if len(_zwischenspeicher) >= MAX_ZWISCHENSPEICHER:
-            _zwischenspeicher.clear()
+    for k in [k for k, (t, _) in _zwischenspeicher.items() if jetzt - t >= ZWISCHENSPEICHER_SECS]:
+        del _zwischenspeicher[k]
+    if schluessel not in _zwischenspeicher and len(_zwischenspeicher) >= MAX_ZWISCHENSPEICHER:
+        del _zwischenspeicher[min(_zwischenspeicher, key=lambda k: _zwischenspeicher[k][0])]
     _zwischenspeicher[schluessel] = (jetzt, lauf.result())
 
 
-async def stand_fuer(ich) -> dict:
+async def stand_fuer(ich: Identity) -> StandAntwort:
     """Stand für diese geprüfte Identität: aus dem Zwischenspeicher (10 Sekunden je Profil und Rolle), aus einer schon laufenden
     Prüfung oder neu geprüft."""
     schluessel = (ich.user_id, ich.rolle)
@@ -343,16 +423,16 @@ async def stand_fuer(ich) -> dict:
         return treffer[1]
     lauf = _laufend.get(schluessel)
     if lauf is None:
-        lauf = asyncio.ensure_future(_pruefen(ich))
+        lauf = asyncio.create_task(_pruefen(ich))
         _laufend[schluessel] = lauf
         lauf.add_done_callback(lambda f: _merken(schluessel, f))
     return await asyncio.shield(lauf)  # bricht die Anfrage ab, läuft die Prüfung für die anderen weiter
 
 
 @router.get("/einrichtung/stand")
-async def stand(request: Request, response: Response) -> dict:
+async def stand(request: Request, response: Response) -> dict:  # dict: eine TypedDict-Annotation nähme FastAPI als Antwortmodell
     ich = await identitaet(request)
     response.headers["Cache-Control"] = "no-store"
     if labor.ist_labor(ich):
         raise HTTPException(403, "Die Prüfliste der Einrichtung gibt es für Laborprofile nicht", headers=NO_STORE)
-    return await stand_fuer(ich)
+    return dict(await stand_fuer(ich))

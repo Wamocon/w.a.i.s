@@ -378,3 +378,119 @@ test("verbindeGeprueft: ohne passende Kette zur WAMO-CA kein Socket, sonst der g
   assert.equal(ja.s.opt.rejectUnauthorized, false); // die Kette prüft pruefeSocket, nicht Node
   assert.equal(ja.s.opt.port, 55444);
 });
+
+// ---------- Befunde aus den Reviews ----------
+test("Schreibfehler beim letzten Schreiben: nie Erfolg, keine Datei bleibt liegen", async () => {
+  const { Writable } = require("node:stream");
+  const ordner = fs.mkdtempSync(path.join(os.tmpdir(), "wais-update-"));
+  const kaputtesFs = {
+    ...fs,
+    createWriteStream: () =>
+      new Writable({
+        write: (_s, _e, cb) => cb(),
+        final: (cb) => cb(new Error("ENOSPC")),
+      }),
+  };
+  const p = ladeInstaller({
+    manifest: pruefe(angebot()).manifest,
+    token: TOKEN,
+    kernUrl: "https://192.168.178.136:55444",
+    ordner,
+    fs: kaputtesFs,
+    verbinden: async () => ({ destroy: () => {} }),
+    anfragen: async () => antwort({ laenge: INHALT.length }),
+  });
+  await assert.rejects(p, (err) => err.name === "UpdateFehler");
+  assert.deepEqual(fs.readdirSync(ordner), []);
+});
+
+test("Datei auf der Platte zählt: weicht sie nach dem Schreiben ab, gibt es kein Update", async () => {
+  const ordner = fs.mkdtempSync(path.join(os.tmpdir(), "wais-update-"));
+  const falschLesendesFs = { ...fs, createReadStream: () => require("node:stream").Readable.from([Buffer.from("anders")]) };
+  const p = ladeInstaller({
+    manifest: pruefe(angebot()).manifest,
+    token: TOKEN,
+    kernUrl: "https://192.168.178.136:55444",
+    ordner,
+    fs: falschLesendesFs,
+    verbinden: async () => ({ destroy: () => {} }),
+    anfragen: async () => antwort({ laenge: INHALT.length }),
+  });
+  await assert.rejects(p, (err) => err.name === "UpdateFehler" && err.text === TEXT.pruefsumme);
+  assert.deepEqual(fs.readdirSync(ordner), []);
+});
+
+test("Gesamtfrist ab dem Verbinden: ein schweigender Kern hält das Update nicht fest, der Socket wird geschlossen", async () => {
+  const ordner = fs.mkdtempSync(path.join(os.tmpdir(), "wais-update-"));
+  let zerstoert = false;
+  const p = ladeInstaller({
+    manifest: pruefe(angebot()).manifest,
+    token: TOKEN,
+    kernUrl: "https://192.168.178.136:55444",
+    ordner,
+    frist: 50,
+    verbinden: async () => ({ destroy: () => (zerstoert = true) }),
+    anfragen: () => new Promise(() => {}), // keine Antwort, nie
+  });
+  await assert.rejects(p, (err) => err.name === "UpdateFehler" && /Zeitüberschreitung/.test(err.message));
+  assert.equal(zerstoert, true);
+});
+
+test("verbindeGeprueft: wirft die Kettenprüfung, scheitert die Verbindung geschlossen statt abzustürzen", async () => {
+  const { EventEmitter } = require("node:events");
+  const s = new EventEmitter();
+  s.destroy = () => (s.zerstoert = true);
+  s.setTimeout = () => {};
+  const tlsModul = { connect: () => (setImmediate(() => s.emit("secureConnect")), s) };
+  const ziel = new URL("https://192.168.178.136:55444/");
+  await assert.rejects(
+    verbindeGeprueft(ziel, {
+      tlsModul,
+      pruefe: () => {
+        throw new Error("kaputtes Zertifikat");
+      },
+    }),
+    /Zertifikat nicht vertraut/,
+  );
+  assert.equal(s.zerstoert, true);
+});
+
+test("Nach Abbrechen fragt die App 10 Minuten nicht erneut, auch wenn die Seite drängt", async () => {
+  let zeit = 1_000_000;
+  let fragen = 0;
+  const updater = erzeugeUpdater({
+    schluessel: SCHLUESSEL,
+    version: "0.2.0",
+    installiert: true,
+    jetzt: () => zeit,
+    fragen: async () => (fragen++, false),
+    laden: async () => "x",
+    starten: async () => {},
+    beenden: () => {},
+  });
+  assert.equal((await updater.installieren({ ...angebot(), token: TOKEN })).abgebrochen, true);
+  assert.deepEqual(await updater.installieren({ ...angebot(), token: TOKEN }), { ok: false, text: TEXT.gesperrt });
+  zeit += 10 * 60 * 1000 + 1;
+  assert.equal((await updater.installieren({ ...angebot(), token: TOKEN })).abgebrochen, true);
+  assert.equal(fragen, 2);
+});
+
+test("Rückfrage wirft: gilt als Abbruch; Startfehler: eigener Satz", async () => {
+  const basis = { schluessel: SCHLUESSEL, version: "0.2.0", installiert: true, laden: async () => "x", beenden: () => {} };
+  const wirft = erzeugeUpdater({
+    ...basis,
+    fragen: async () => {
+      throw new Error("Fenster weg");
+    },
+    starten: async () => {},
+  });
+  assert.equal((await wirft.installieren({ ...angebot(), token: TOKEN })).abgebrochen, true);
+  const startFehler = erzeugeUpdater({
+    ...basis,
+    fragen: async () => true,
+    starten: async () => {
+      throw new Error("EACCES");
+    },
+  });
+  assert.deepEqual(await startFehler.installieren({ ...angebot(), token: TOKEN }), { ok: false, text: TEXT.starten });
+});

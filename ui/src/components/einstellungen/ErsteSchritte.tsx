@@ -1,8 +1,7 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import {
-  PRUEF_ABSTAND_MS,
   STUFE_TEXT,
   erneutWartezeit,
   nachInstallation,
@@ -12,6 +11,7 @@ import {
   type Punkt,
   type Stufe,
   type UpdateAngebot,
+  type UpdateInstallation,
 } from "@/lib/einrichtung";
 import { kernJson } from "@/lib/kernApi";
 import { accessToken } from "@/lib/supabase";
@@ -22,7 +22,8 @@ import { Block } from "./Block";
  * docs/ausrollen-neue-nutzer.md 4.3). Je Zeile ein Zeichen (Haken, Ausrufezeichen, i) und der Zustand als Wort für Screenreader, dazu
  * der Satz; die Farbe trägt nie allein. Ein Update der App gibt es nur als Knopf, wenn die App das Manifest des Servers bestätigt hat.
  * Das Token holt erst der Klick und gibt es nur an die App weiter (lib/einrichtung.ts, updateInstallieren); es steht nie im Zustand.
- * "Erneut prüfen" geht einmal je 10 Sekunden (aria-disabled, damit der Fokus auf dem Knopf bleibt).
+ * "Erneut prüfen" geht einmal je 10 Sekunden und nie während einer Installation (aria-disabled, damit der Fokus auf dem Knopf bleibt).
+ * Nach dem Aushängen setzt nichts mehr Zustand, auch keine Antwort, die erst danach kommt.
  */
 
 const UHRZEIT = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
@@ -74,29 +75,90 @@ function Zeile({ p, beschaeftigt, onUpdate }: { p: Punkt; beschaeftigt: boolean;
   );
 }
 
-/** Laden, erneut prüfen (gedrosselt) und Update starten. Antworten nach dem Aushängen werden verworfen. */
-function usePruefliste() {
-  const [punkte, setPunkte] = useState<readonly Punkt[] | null>(null);
-  const [laeuft, setLaeuft] = useState(true);
+/**
+ * Sperre für "Erneut prüfen" aus einer einzigen Uhr (performance.now, monoton). Der Zeitgeber zeigt nur an, was die Uhr sagt: Er
+ * schaut beim Ablauf noch einmal nach und stellt sich bei Bedarf neu. Vor jedem neuen Zeitgeber wird der alte gelöscht.
+ */
+function useSperre() {
   const [gesperrt, setGesperrt] = useState(false);
-  const [zeit, setZeit] = useState<string | null>(null);
+  const letzter = useRef<number | null>(null);
+  const uhr = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (uhr.current !== null) clearTimeout(uhr.current);
+      uhr.current = null;
+    },
+    [],
+  );
+
+  const nachsehen = useCallback(function pruefe() {
+    if (uhr.current !== null) clearTimeout(uhr.current);
+    const warten = erneutWartezeit(letzter.current, performance.now());
+    uhr.current = warten > 0 ? setTimeout(pruefe, warten) : null;
+    setGesperrt(warten > 0);
+  }, []);
+
+  const frei = useCallback(() => erneutWartezeit(letzter.current, performance.now()) === 0, []);
+  const sperren = useCallback(() => {
+    letzter.current = performance.now();
+    nachsehen();
+  }, [nachsehen]);
+
+  return { gesperrt, frei, sperren };
+}
+
+type Punkte = readonly Punkt[] | null;
+
+const appPunktNach = (erg: UpdateInstallation) => (alt: Punkte) => alt && alt.map((p) => (p.id === "app" ? nachInstallation(p, erg) : p));
+
+/** Update starten (höchstens eines zugleich); das Ergebnis ersetzt nur den Punkt App-Version, nach dem Aushängen nichts mehr. */
+function useInstallation(aktiv: RefObject<boolean>, setPunkte: Dispatch<SetStateAction<Punkte>>) {
   const [installiert, setInstalliert] = useState(false);
+  const installiertJetzt = useRef(false); // sofort gesetzt, damit ein Doppelklick die App nur einmal ruft
+
+  const installieren = useCallback(
+    async (angebot: UpdateAngebot) => {
+      if (installiertJetzt.current) return;
+      installiertJetzt.current = true;
+      setInstalliert(true);
+      try {
+        const erg = await updateInstallieren({ update: window.wamoDesktop?.update, angebot, token: accessToken });
+        if (aktiv.current) setPunkte(appPunktNach(erg));
+      } finally {
+        installiertJetzt.current = false;
+        if (aktiv.current) setInstalliert(false);
+      }
+    },
+    [aktiv, setPunkte],
+  );
+
+  return { installiert, installiertJetzt, installieren };
+}
+
+/** Laden, erneut prüfen (gedrosselt) und Update starten. Nach dem Aushängen setzt keine späte Antwort mehr Zustand. */
+function usePruefliste() {
+  const [punkte, setPunkte] = useState<Punkte>(null);
+  const [laeuft, setLaeuft] = useState(true);
+  const [zeit, setZeit] = useState<string | null>(null);
   const aktiv = useRef(true);
   const laeuftJetzt = useRef(false); // sofort gesetzt, damit ein zweiter Klick im selben Takt nichts auslöst
-  const installiertJetzt = useRef(false);
-  const letzterKlick = useRef<number | null>(null);
-  const sperre = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { gesperrt, frei, sperren } = useSperre();
+  const { installiert, installiertJetzt, installieren } = useInstallation(aktiv, setPunkte);
 
   const laden = useCallback(async () => {
     if (laeuftJetzt.current) return;
     laeuftJetzt.current = true;
     setLaeuft(true);
-    const neu = await prueflisteLaden({ kernJson, bruecke: window.wamoDesktop });
-    laeuftJetzt.current = false;
-    if (!aktiv.current) return;
-    setPunkte(neu);
-    setZeit(UHRZEIT.format(new Date()));
-    setLaeuft(false);
+    try {
+      const neu = await prueflisteLaden({ kernJson, bruecke: window.wamoDesktop });
+      if (!aktiv.current) return;
+      setPunkte(neu);
+      setZeit(UHRZEIT.format(new Date()));
+    } finally {
+      laeuftJetzt.current = false;
+      if (aktiv.current) setLaeuft(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -105,32 +167,14 @@ function usePruefliste() {
     return () => {
       aktiv.current = false;
       clearTimeout(erster);
-      if (sperre.current !== null) clearTimeout(sperre.current);
-      sperre.current = null;
     };
   }, [laden]);
 
   const erneut = useCallback(() => {
-    if (laeuftJetzt.current || erneutWartezeit(letzterKlick.current, Date.now()) > 0) return;
-    letzterKlick.current = Date.now();
-    setGesperrt(true);
-    sperre.current = setTimeout(() => {
-      sperre.current = null;
-      setGesperrt(false);
-    }, PRUEF_ABSTAND_MS);
+    if (laeuftJetzt.current || installiertJetzt.current || !frei()) return;
+    sperren();
     void laden();
-  }, [laden]);
-
-  const installieren = useCallback(async (angebot: UpdateAngebot) => {
-    if (installiertJetzt.current) return;
-    installiertJetzt.current = true;
-    setInstalliert(true);
-    const erg = await updateInstallieren({ update: window.wamoDesktop?.update, angebot, token: accessToken });
-    installiertJetzt.current = false;
-    if (!aktiv.current) return;
-    setInstalliert(false);
-    setPunkte((alt) => alt && alt.map((p) => (p.id === "app" ? nachInstallation(p, erg) : p)));
-  }, []);
+  }, [laden, frei, sperren, installiertJetzt]);
 
   return { punkte, laeuft, gesperrt, zeit, installiert, erneut, installieren };
 }
@@ -141,6 +185,11 @@ function standZeile(laeuft: boolean, gesperrt: boolean, zeit: string | null): st
   return gesperrt ? `${geprueft} Erneut prüfen geht einmal je 10 Sekunden.`.trim() : geprueft;
 }
 
+function zusammenfassungText(punkte: Punkte, laeuft: boolean): string {
+  if (punkte) return zusammenfassung(punkte);
+  return laeuft ? "Prüfe ..." : "Die Prüfung ist fehlgeschlagen. Bitte erneut prüfen.";
+}
+
 export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
   const { punkte, laeuft, gesperrt, zeit, installiert, erneut, installieren } = usePruefliste();
   const offen = punkte !== null && punkte.some((p) => p.stufe === "rot");
@@ -148,7 +197,7 @@ export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
     <Block titel="Prüfliste">
       <p className="ez-text">Hier siehst du, ob auf diesem Gerät und am Server alles für W.A.I.S. bereit ist.</p>
       <p className="es-zusammenfassung" role="status" aria-live="polite" data-offen={offen || undefined}>
-        {punkte === null ? "Prüfe ..." : zusammenfassung(punkte)}
+        {zusammenfassungText(punkte, laeuft)}
       </p>
       {punkte && (
         <ul className="es-liste" aria-label="Prüfliste">
@@ -161,7 +210,7 @@ export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
         <button
           type="button"
           className="btn-secondary es-knopf"
-          aria-disabled={laeuft || gesperrt || undefined}
+          aria-disabled={laeuft || gesperrt || installiert || undefined}
           aria-busy={laeuft || undefined}
           onClick={erneut}
         >

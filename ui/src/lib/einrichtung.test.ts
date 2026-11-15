@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PRUEF_ABSTAND_MS, TEXT_MAX, appVersionPunkt, erneutWartezeit, hostPunkt, mikrofonPunkt, nachInstallation, offenePunkte } from "./einrichtung.ts";
 import { pruefeAppStatus, pruefeInstallation, pruefeKernStand, pruefeManifest, pruefeUpdatePruefung, prueflisteLaden } from "./einrichtung.ts";
-import { tunnelPunkt, updateInstallieren, zusammenfassung, zusammenfuehren } from "./einrichtung.ts";
+import { satz, tunnelPunkt, updateInstallieren, zusammenfassung, zusammenfuehren } from "./einrichtung.ts";
 import type { AppStand, KernStand, Punkt, PrueflisteBruecke, UpdateBruecke } from "./einrichtung.ts";
 
 const SIGNATUR = `${"A".repeat(86)}==`;
@@ -68,16 +68,11 @@ test("Kern-Antwort ohne Liste ist nicht lesbar", () => {
 // ---------- Reihenfolge und Zusammenführen ----------
 test("Reihenfolge wie Tabelle 4.3, Anmeldung immer bereit", () => {
   const liste = zusammenfuehren({ kern: kernAlleGruen(), app: appBereit() });
-  assert.deepEqual(
-    liste.map((p) => p.id),
-    ["anmeldung", "passwort", "app", "geraet", "host", "tunnel", "mikrofon", "stimme", "gespraech", "entwicklung", "stimmabdruck", "pc"],
-  );
-  assert.deepEqual(
-    liste.map((p) => p.titel),
-    ["Anmeldung", "Passwort", "App-Version", "Gerät", "Host-Umgebung", "Tunnel", "Mikrofon", "Stimme", "Gespräch", "Entwicklungsaufträge", "Stimmabdruck", "PC-Steuerung"],
-  );
-  assert.equal(punkt(liste, "anmeldung")?.stufe, "gruen");
-  assert.equal(punkt(liste, "anmeldung")?.text, "Angemeldet mit zweitem Faktor.");
+  const ids = ["anmeldung", "passwort", "app", "geraet", "host", "tunnel", "mikrofon", "stimme", "gespraech", "entwicklung", "stimmabdruck", "pc"];
+  assert.deepEqual(liste.map((p) => p.id), ids);
+  const titel = ["Anmeldung", "Passwort", "App-Version", "Gerät", "Host-Umgebung", "Tunnel", "Mikrofon", "Stimme", "Gespräch"];
+  assert.deepEqual(liste.map((p) => p.titel), [...titel, "Entwicklungsaufträge", "Stimmabdruck", "PC-Steuerung"]);
+  assert.deepEqual(kurz(punkt(liste, "anmeldung")), { stufe: "gruen", text: "Angemeldet mit zweitem Faktor." });
   assert.equal(zusammenfassung(liste), "Alles bereit.");
   assert.equal(offenePunkte(liste), 0);
 });
@@ -86,10 +81,7 @@ test("Sätze des Kerns erscheinen unverändert, fehlende Punkte des Kerns fallen
   const kern: KernStand = { passwort: { stufe: "rot", text: "Bitte zuerst dein Passwort ändern." }, tunnel: { stufe: "gruen", text: "ok" } };
   const liste = zusammenfuehren({ kern, app: appBereit() });
   assert.deepEqual(punkt(liste, "passwort"), { id: "passwort", titel: "Passwort", stufe: "rot", text: "Bitte zuerst dein Passwort ändern." });
-  assert.deepEqual(
-    liste.map((p) => p.id),
-    ["anmeldung", "passwort", "app", "host", "tunnel", "mikrofon"],
-  );
+  assert.deepEqual(liste.map((p) => p.id), ["anmeldung", "passwort", "app", "host", "tunnel", "mikrofon"]);
   assert.equal(zusammenfassung(liste), "Noch 1 Punkt offen.");
 });
 
@@ -97,25 +89,21 @@ test("Kern nicht erreichbar: ein Punkt Kern statt der Punkte des Servers, der Tu
   const liste = zusammenfuehren({ kern: null, app: appBereit() });
   assert.deepEqual(liste.slice(0, 2).map((p) => p.id), ["anmeldung", "kern"]);
   assert.deepEqual(punkt(liste, "kern"), { id: "kern", titel: "Kern", stufe: "rot", text: T_KERN });
-  for (const id of ["passwort", "geraet", "stimme", "gespraech", "entwicklung", "stimmabdruck", "pc"] as const) {
-    assert.equal(punkt(liste, id), undefined, id);
-  }
+  for (const id of ["passwort", "geraet", "stimme", "gespraech", "entwicklung", "stimmabdruck", "pc"] as const) assert.equal(punkt(liste, id), undefined, id);
   assert.equal(punkt(liste, "tunnel")?.stufe, "rot");
   assert.equal(zusammenfassung(liste), "Noch 2 Punkte offen.");
 });
 
 test("Browser ohne Desktop-Brücke: die Punkte der App sind Hinweise, die Punkte des Kerns bleiben", () => {
   const liste = zusammenfuehren({ kern: kernAlleGruen(), app: null });
-  for (const id of ["app", "host", "tunnel", "mikrofon"] as const) {
-    assert.deepEqual(kurz(punkt(liste, id)), { stufe: "hinweis", text: T_NUR_APP }, id);
-  }
+  for (const id of ["app", "host", "tunnel", "mikrofon"] as const) assert.deepEqual(kurz(punkt(liste, id)), { stufe: "hinweis", text: T_NUR_APP }, id);
   assert.equal(punkt(liste, "stimme")?.text, "Punkt stimme ist bereit.");
   assert.equal(zusammenfassung(liste), "Alles bereit.");
 });
 
 // ---------- App-Version und Updates ----------
 test("App-Version: ohne Version (App 0.2.0) oder mit ungültiger Version heißt es Update empfohlen", () => {
-  for (const version of [undefined, null, "", "0.3", "v0.3.0", "0.3.0-beta", 3, "1.2.3\n"]) {
+  for (const version of [undefined, null, "", "0.3", "v0.3.0", "0.3.0-beta", 3, "1.2.3\n", "01.2.3", "1.02.3", "1.2.10000"]) {
     const p = appVersionPunkt(version, { art: "kein_angebot" });
     assert.deepEqual({ stufe: p.stufe, text: p.text, update: p.update }, { stufe: "rot", text: "Update empfohlen.", update: undefined }, String(version));
   }
@@ -123,8 +111,7 @@ test("App-Version: ohne Version (App 0.2.0) oder mit ungültiger Version heißt 
 
 test("App-Version: Server ohne signiertes Manifest, ohne Update-Prüfung in der App, Manifest nicht abrufbar", () => {
   const ohne = appVersionPunkt("0.3.0", { art: "kein_angebot" });
-  assert.equal(ohne.stufe, "gruen");
-  assert.equal(ohne.text, "Version 0.3.0. Der Server bietet noch kein Update an.");
+  assert.deepEqual(kurz(ohne), { stufe: "gruen", text: "Version 0.3.0. Der Server bietet noch kein Update an." });
   const alt = appVersionPunkt("0.3.0", { art: "ohne_pruefung" });
   assert.deepEqual(kurz(alt), { stufe: "gruen", text: "Version 0.3.0." });
   const weg = appVersionPunkt("0.3.0", { art: "unbekannt" });
@@ -163,14 +150,25 @@ test("Antwort der App auf update.pruefen wird streng gelesen: ohne ok, Version u
   }
 });
 
-test("Manifest vom Server: nur Text und Signatur in Base64, sonst nicht lesbar", () => {
+test("Manifest vom Server im Format der App: Signatur 64 Byte Base64 (ein LF erlaubt), höchstens 4096 Byte, null heißt kein Angebot", () => {
   assert.deepEqual(pruefeManifest({ ...MANIFEST, version: "0.4.0", groesse: 1 }), MANIFEST);
-  assert.deepEqual(pruefeManifest({ manifest: "m", signatur: "a-b_c".repeat(10) }), { manifest: "m", signatur: "a-b_c".repeat(10) });
-  const ohneSignatur = [null, { manifest: "m" }, { manifest: "m", signatur: "kein base64!" }, { manifest: "m", signatur: "AAAA" }];
-  const ohneText = [{ signatur: SIGNATUR }, { manifest: "", signatur: SIGNATUR }, { manifest: 1, signatur: SIGNATUR }];
-  for (const v of [...ohneSignatur, ...ohneText, { manifest: "m".repeat(20_000), signatur: SIGNATUR }]) {
+  assert.deepEqual(pruefeManifest({ manifest: "m", signatur: `${SIGNATUR}\n` }), { manifest: "m", signatur: `${SIGNATUR}\n` });
+  assert.deepEqual(pruefeManifest({ manifest: "m".repeat(4096), signatur: SIGNATUR }), { manifest: "m".repeat(4096), signatur: SIGNATUR });
+  for (const v of [{ manifest: "m", signatur: null }, { manifest: null, signatur: null }]) assert.equal(pruefeManifest(v), "kein_angebot");
+  const falsch = [`${SIGNATUR}\n\n`, `${SIGNATUR}A`, `A${SIGNATUR}`, `${"A".repeat(87)}=`, `${"-".repeat(86)}==`, "AAAA", "kein base64!"];
+  const ohneText = [{ signatur: SIGNATUR }, { manifest: "", signatur: SIGNATUR }, { manifest: 1, signatur: SIGNATUR }, { manifest: null, signatur: SIGNATUR }];
+  const zuLang = [{ manifest: "m".repeat(4097), signatur: SIGNATUR }, { manifest: "ü".repeat(2049), signatur: SIGNATUR }];
+  for (const v of [null, { manifest: "m" }, ...falsch.map((signatur) => ({ manifest: "m", signatur })), ...ohneText, ...zuLang]) {
     assert.equal(pruefeManifest(v), null, JSON.stringify(v)?.slice(0, 40));
   }
+});
+
+test("Anzeigetext: ohne Steuer-, Bidi- und Nullbreitenzeichen, gekürzt", () => {
+  assert.equal(satz("Update\u202E gnurednA\u200B fertig.\u0007", "x"), "Update gnurednA fertig.");
+  assert.equal(satz("\u200B\u202E\u2066 \u0000", "Ersatz."), "Ersatz.");
+  assert.equal(satz(`${"\u200B".repeat(2000)}Text`, "Ersatz."), "Ersatz."); // nur die ersten 1200 Zeichen zählen
+  assert.equal(satz("a\uD800b", "x"), "ab");
+  assert.equal(satz("ü".repeat(500), "x"), "ü".repeat(TEXT_MAX));
 });
 
 // ---------- Host-Umgebung, Tunnel, Mikrofon ----------
@@ -221,11 +219,9 @@ test("Zusammenfassung zählt nur offene Punkte, Hinweise zählen nicht", () => {
 
 test("Erneut prüfen: einmal je 10 Sekunden, eine rückwärts laufende Uhr verkürzt nie", () => {
   assert.equal(PRUEF_ABSTAND_MS, 10_000);
-  assert.equal(erneutWartezeit(null, 5_000), 0);
-  assert.equal(erneutWartezeit(100_000, 100_000), 10_000);
-  assert.equal(erneutWartezeit(100_000, 104_000), 6_000);
-  assert.equal(erneutWartezeit(100_000, 110_000), 0);
-  assert.equal(erneutWartezeit(100_000, 90_000), 10_000);
+  const faelle: [number | null, number, number][] = [[null, 5_000, 0], [100_000, 100_000, 10_000], [100_000, 104_000, 6_000]];
+  faelle.push([100_000, 110_000, 0], [100_000, 90_000, 10_000]);
+  for (const [letzte, jetzt, warten] of faelle) assert.equal(erneutWartezeit(letzte, jetzt), warten, `${letzte} ${jetzt}`);
 });
 
 // ---------- Installation ----------
@@ -233,9 +229,9 @@ test("Antwort auf update.installieren: ok, still abgebrochen oder ein Satz", () 
   assert.deepEqual(pruefeInstallation({ ok: true }), { ok: true });
   assert.deepEqual(pruefeInstallation({ ok: false, text: "Abgebrochen.", abgebrochen: true }), { ok: false, text: "Abgebrochen.", abgebrochen: true });
   assert.deepEqual(pruefeInstallation({ ok: false, text: "Signatur passt nicht." }), { ok: false, text: "Signatur passt nicht.", abgebrochen: false });
-  const unsinn = pruefeInstallation("ja");
-  assert.equal(unsinn.ok, false);
-  if (!unsinn.ok) assert.equal(unsinn.abgebrochen, false);
+  assert.deepEqual(pruefeInstallation("ja"), { ok: false, text: "Das Update ließ sich nicht starten.", abgebrochen: false });
+  const start = "Der Installer ließ sich nicht starten. Bitte W.A.I.S. neu starten und es noch einmal versuchen.";
+  assert.deepEqual(pruefeInstallation({ ok: false, text: start }), { ok: false, text: start, abgebrochen: false });
 });
 
 test("Nach der Installation: abgebrochen lässt den Punkt stehen, ein Fehler nimmt den Knopf weg", () => {
@@ -264,11 +260,8 @@ test("updateInstallieren: das Token geht nur an die App, ohne Token und ohne Br�
   assert.equal(ohneToken.ok, false);
   assert.equal(aufrufe.length, 1);
   assert.equal((await updateInstallieren({ update: undefined, angebot, token: async () => "geheim" })).ok, false);
-  const wirft = await updateInstallieren({
-    update: { ...update, installieren: async () => Promise.reject(new Error("weg")) },
-    angebot,
-    token: async () => "geheim",
-  });
+  const kaputt = { ...update, installieren: async () => Promise.reject(new Error("weg")) };
+  const wirft = await updateInstallieren({ update: kaputt, angebot, token: async () => "geheim" });
   assert.equal(wirft.ok, false);
   assert.ok(!JSON.stringify(wirft).includes("geheim"));
 });
@@ -317,6 +310,14 @@ test("prueflisteLaden: alles bereit, die App prüft genau Manifest und Signatur"
   assert.deepEqual(pfade.sort(), ["/einrichtung/stand", "/installer"]);
   assert.deepEqual(pruefAufrufe, [MANIFEST]);
   assert.equal(punkt(liste, "app")?.text, "Version 0.3.0, aktuell.");
+});
+
+test("prueflisteLaden: Server ohne signiertes Manifest (Signatur null) fragt die App nicht", async () => {
+  const { kernJson } = kernAttrappe({ "/einrichtung/stand": KERN_ANTWORT, "/installer": { manifest: null, signatur: null } });
+  const { bruecke, pruefAufrufe } = brueckeAttrappe();
+  const app = punkt(await prueflisteLaden({ kernJson, bruecke }), "app");
+  assert.deepEqual(kurz(app), { stufe: "gruen", text: "Version 0.3.0. Der Server bietet noch kein Update an." });
+  assert.equal(pruefAufrufe.length, 0);
 });
 
 test("prueflisteLaden: älterer Kern ohne Routen (404)", async () => {

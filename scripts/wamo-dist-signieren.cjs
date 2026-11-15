@@ -10,9 +10,13 @@
 //   node scripts/wamo-dist-signieren.cjs signieren <exe> --pkcs11-modul <dll> --pkcs11-id <hex> [--pkcs11-tool <exe>]
 //                                                                                  Ziel: Hardware-Token (PIN am Token)
 //   node scripts/wamo-dist-signieren.cjs pruefen <exe>                              Manifest, Signatur und Datei prüfen
-//   node scripts/wamo-dist-signieren.cjs schluessel-erzeugen <datei>                neuer Übergangsschlüssel (nie im Repo)
+//   node scripts/wamo-dist-signieren.cjs schluessel-erzeugen <datei> [--ohne-passwort]
+//                                                                                  neuer Übergangsschlüssel (nie im Repo)
 //   node scripts/wamo-dist-signieren.cjs schluessel-schuetzen <datei>               Schlüsseldatei mit Passwort verschlüsseln
-// Ein verschlüsselter Schlüssel liest sein Passwort aus WAIS_SIGNATUR_PASSWORT (nur in der Sitzung setzen, nie speichern).
+// Ein verschlüsselter Schlüssel liest sein Passwort aus WAIS_SIGNATUR_PASSWORT (mindestens 16 Zeichen, nur in der Sitzung
+// setzen, nie speichern; Kindprozesse bekommen es nie). Node verschlüsselt PKCS#8 mit PBKDF2 und wenigen Runden: Das Passwort
+// schützt nur gegen schnelles Lesen, der Regelfall ist das Hardware-Token. Signiert wird nur ein Stand, der in origin/main
+// liegt (nach git fetch), und nur, wenn das Manifest die Prüfung der App besteht.
 // Der private Schlüssel wird nie ausgegeben, nie ins Repo geschrieben und nie in eine Datei innerhalb eines Git-Arbeitsbaums.
 "use strict";
 
@@ -28,6 +32,16 @@ const { pruefeManifest, schluesselAusListe } = require(path.join(DESKTOP, "updat
 
 const EXE_RE = /^WAIS-Setup-(\d+\.\d+\.\d+)\.exe$/;
 const PASSWORT_ENV = "WAIS_SIGNATUR_PASSWORT";
+const PASSWORT_MIN = 16;
+const SYSTEM32 = path.join(process.env.SystemRoot || "C:\\Windows", "System32");
+const PKCS11_TOOL_STANDARD = "C:\\Program Files\\OpenSC Project\\OpenSC\\tools\\pkcs11-tool.exe";
+
+/** Umgebung für Kindprozesse: nie mit dem Passwort des Schlüssels. */
+function kindUmgebung() {
+  const env = { ...process.env };
+  delete env[PASSWORT_ENV];
+  return env;
+}
 
 function fehler(text) {
   const e = new Error(text);
@@ -38,6 +52,14 @@ function fehler(text) {
 /** Liegt der Pfad in einem Git-Arbeitsbaum (irgendein Elternordner mit .git)? Dann nie einen privaten Schlüssel dorthin. */
 function imGitBaum(pfad, existiert = fs.existsSync) {
   let ordner = path.resolve(path.dirname(pfad));
+  // Junctions und symbolische Verweise auflösen, soweit der Ordner schon existiert
+  for (let o = ordner; ; o = path.dirname(o)) {
+    if (fs.existsSync(o)) {
+      ordner = path.join(fs.realpathSync.native(o), path.relative(o, ordner));
+      break;
+    }
+    if (path.dirname(o) === o) break;
+  }
   for (;;) {
     if (existiert(path.join(ordner, ".git"))) return true;
     const oben = path.dirname(ordner);
@@ -64,7 +86,7 @@ function sha256Datei(datei) {
   return hash.digest("hex");
 }
 
-const git = (...args) => execFileSync("git", ["-C", REPO, ...args], { encoding: "utf8" }).trim();
+const git = (...args) => execFileSync("git", ["-C", REPO, ...args], { encoding: "utf8", env: kindUmgebung() }).trim();
 
 function appSchluessel() {
   return schluesselAusListe(JSON.parse(fs.readFileSync(path.join(DESKTOP, "update-schluessel.json"), "utf8")));
@@ -94,16 +116,17 @@ function privatSchluessel(datei) {
 }
 
 /** Signatur mit dem Hardware-Token über pkcs11-tool (OpenSC); die PIN fragt das Werkzeug selbst ab. */
-function signiereMitToken(bytes, { modul, id, werkzeug = "pkcs11-tool" }) {
+function signiereMitToken(bytes, { modul, id, werkzeug = PKCS11_TOOL_STANDARD }) {
   if (!/^[0-9a-fA-F]{2,40}$/.test(id ?? "")) throw fehler("--pkcs11-id muss eine Hex-Kennung sein (zum Beispiel 02).");
-  if (!modul || !fs.existsSync(modul)) throw fehler("--pkcs11-modul fehlt oder existiert nicht.");
+  if (!modul || !path.isAbsolute(modul) || !fs.existsSync(modul)) throw fehler("--pkcs11-modul fehlt, ist nicht absolut oder existiert nicht.");
+  if (!path.isAbsolute(werkzeug) || !fs.existsSync(werkzeug)) throw fehler("pkcs11-tool nicht gefunden (--pkcs11-tool mit absolutem Pfad angeben).");
   const ordner = fs.mkdtempSync(path.join(os.tmpdir(), "wais-sign-"));
   const ein = path.join(ordner, "manifest.bin");
   const aus = path.join(ordner, "signatur.bin");
   try {
     fs.writeFileSync(ein, bytes);
     const args = ["--module", modul, "--login", "--sign", "--mechanism", "EDDSA", "--id", id, "--input-file", ein, "--output-file", aus];
-    const lauf = spawnSync(werkzeug, args, { stdio: "inherit" });
+    const lauf = spawnSync(werkzeug, args, { stdio: "inherit", env: kindUmgebung() });
     if (lauf.status !== 0) throw fehler("pkcs11-tool hat nicht signiert (PIN, Token oder Kennung prüfen).");
     const sig = fs.readFileSync(aus);
     if (sig.length !== 64) throw fehler(`Das Token lieferte ${sig.length} statt 64 Byte (Mechanismus EDDSA mit Ed25519 nötig).`);
@@ -133,6 +156,9 @@ function signieren(exe, opt, schluessel = appSchluessel()) {
   if (!schluessel.some((k) => crypto.verify(null, bytes, k, sig))) {
     throw fehler("Die Signatur passt zu keinem Schlüssel in desktop/update-schluessel.json. Nichts geschrieben.");
   }
+  // Vor dem Schreiben genau so prüfen wie die App (Format, Version, Dateiname), damit nie ein kaputtes Paar entsteht
+  const e = pruefeManifest({ manifest: text, signatur: sig.toString("base64"), schluessel, aktuelleVersion: "0.0.0" });
+  if (!e.ok) throw fehler(`Das Manifest bestünde die Prüfung der App nicht (${e.grund}). Nichts geschrieben.`);
   const ordner = path.dirname(exe);
   fs.writeFileSync(path.join(ordner, "aktuell.json"), bytes);
   fs.writeFileSync(path.join(ordner, "aktuell.json.sig"), `${sig.toString("base64")}\n`, "ascii");
@@ -145,38 +171,68 @@ function nurBesitzer(datei) {
     fs.chmodSync(datei, 0o600);
     return;
   }
-  execFileSync("icacls", [datei, "/inheritance:r", "/grant:r", `${os.userInfo().username}:F`], { stdio: "ignore" });
+  execFileSync(path.join(SYSTEM32, "icacls.exe"), [datei, "/inheritance:r", "/grant:r", `${os.userInfo().username}:F`], {
+    stdio: "ignore",
+    env: kindUmgebung(),
+  });
+}
+
+/** Leere Datei anlegen, Rechte setzen, erst dann den Inhalt schreiben; scheitert etwas, ist die Datei wieder weg. */
+function schreibeGeschuetzt(ziel, inhalt) {
+  fs.writeFileSync(ziel, "", { flag: "wx", mode: 0o600 });
+  try {
+    nurBesitzer(ziel);
+    fs.writeFileSync(ziel, inhalt, { flag: "r+" });
+  } catch (err) {
+    fs.rmSync(ziel, { force: true });
+    throw err;
+  }
+}
+
+function passwortAusUmgebung() {
+  const passwort = process.env[PASSWORT_ENV];
+  if (!passwort || passwort.length < PASSWORT_MIN) throw fehler(`${PASSWORT_ENV} fehlt oder ist kürzer als ${PASSWORT_MIN} Zeichen.`);
+  return passwort;
 }
 
 const rohOeffentlich = (k) => Buffer.from(crypto.createPublicKey(k).export({ format: "jwk" }).x, "base64url").toString("base64");
 
-function schluesselErzeugen(datei) {
+function schluesselErzeugen(datei, { ohnePasswort = false } = {}) {
   const ziel = path.resolve(datei);
   if (imGitBaum(ziel)) throw fehler("Die Schlüsseldatei darf nie in einem Git-Arbeitsbaum liegen.");
   if (fs.existsSync(ziel)) throw fehler("Die Datei gibt es schon; ein Schlüssel wird nie überschrieben.");
+  const passwort = ohnePasswort ? null : passwortAusUmgebung();
   const { privateKey } = crypto.generateKeyPairSync("ed25519");
-  const passwort = process.env[PASSWORT_ENV];
   const pem = passwort
     ? privateKey.export({ type: "pkcs8", format: "pem", cipher: "aes-256-cbc", passphrase: passwort })
     : privateKey.export({ type: "pkcs8", format: "pem" });
   fs.mkdirSync(path.dirname(ziel), { recursive: true });
-  fs.writeFileSync(ziel, pem, { flag: "wx", mode: 0o600 });
-  nurBesitzer(ziel);
+  schreibeGeschuetzt(ziel, pem);
   return rohOeffentlich(privateKey);
 }
 
+/** Verschlüsselt eine Klartext-Schlüsseldatei. Die alten Blöcke bleiben auf der Platte: danach die Platte nicht weitergeben. */
 function schluesselSchuetzen(datei) {
-  const passwort = process.env[PASSWORT_ENV];
-  if (!passwort || passwort.length < 12) throw fehler(`${PASSWORT_ENV} fehlt oder ist kürzer als 12 Zeichen.`);
+  const passwort = passwortAusUmgebung();
   const ziel = path.resolve(datei);
+  if (imGitBaum(ziel)) throw fehler("Die Schlüsseldatei darf nie in einem Git-Arbeitsbaum liegen.");
   const pem = fs.readFileSync(ziel, "utf8");
   if (pem.includes("ENCRYPTED")) throw fehler("Die Schlüsseldatei ist schon verschlüsselt.");
   const k = crypto.createPrivateKey(pem);
   const neu = `${ziel}.neu`;
-  fs.writeFileSync(neu, k.export({ type: "pkcs8", format: "pem", cipher: "aes-256-cbc", passphrase: passwort }), { flag: "wx", mode: 0o600 });
-  nurBesitzer(neu);
+  schreibeGeschuetzt(neu, k.export({ type: "pkcs8", format: "pem", cipher: "aes-256-cbc", passphrase: passwort }));
   fs.renameSync(neu, ziel);
   return rohOeffentlich(k);
+}
+
+/** Signiert wird nur ein Stand, der schon in origin/main liegt (geprüft und gemergt), nie ein lokaler Commit. */
+function standInMain() {
+  git("fetch", "-q", "origin", "main");
+  try {
+    git("merge-base", "--is-ancestor", "HEAD", "origin/main");
+  } catch {
+    throw fehler("HEAD liegt nicht in origin/main. Signiert wird nur ein gemergter Stand (Installer aus main bauen).");
+  }
 }
 
 function wert(args, name) {
@@ -187,7 +243,8 @@ function wert(args, name) {
 function hauptprogramm(args) {
   const [befehl, ziel] = args;
   if (befehl === "schluessel-erzeugen" && ziel) {
-    console.log(`Öffentlicher Schlüssel (für desktop/update-schluessel.json): ${schluesselErzeugen(ziel)}`);
+    const roh = schluesselErzeugen(ziel, { ohnePasswort: args.includes("--ohne-passwort") });
+    console.log(`Öffentlicher Schlüssel (für desktop/update-schluessel.json): ${roh}`);
     return;
   }
   if (befehl === "schluessel-schuetzen" && ziel) {
@@ -201,9 +258,10 @@ function hauptprogramm(args) {
   }
   if (befehl === "signieren" && ziel) {
     if (git("status", "--porcelain", "--untracked-files=no") !== "") throw fehler("Der Arbeitsbaum ist nicht sauber; signiert wird nur ein committeter Stand.");
+    standInMain();
     const paketVersion = JSON.parse(fs.readFileSync(path.join(DESKTOP, "package.json"), "utf8")).version;
     const schluesselDatei = wert(args, "--schluessel");
-    const token = { modul: wert(args, "--pkcs11-modul"), id: wert(args, "--pkcs11-id"), werkzeug: wert(args, "--pkcs11-tool") };
+    const token = { modul: wert(args, "--pkcs11-modul"), id: wert(args, "--pkcs11-id"), werkzeug: wert(args, "--pkcs11-tool") ?? PKCS11_TOOL_STANDARD };
     if (!schluesselDatei && !token.modul) throw fehler("--schluessel <datei> oder --pkcs11-modul <dll> angeben.");
     const m = signieren(path.resolve(ziel), { commit: git("rev-parse", "HEAD"), paketVersion, schluesselDatei, token });
     console.log(`Signiert: ${m.datei}, ${m.groesse} Byte, SHA-256 ${m.sha256}, Commit ${m.commit}`);
@@ -221,4 +279,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { angabenFuer, imGitBaum, manifestText, pruefeAusgabe, schluesselErzeugen, signieren, signiereMitToken };
+module.exports = { angabenFuer, imGitBaum, kindUmgebung, manifestText, pruefeAusgabe, schluesselErzeugen, schluesselSchuetzen, signieren, signiereMitToken };

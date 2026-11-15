@@ -11,8 +11,12 @@ import ast
 import asyncio
 import pathlib
 import re
+import subprocess
+import threading
+import uuid
 from dataclasses import dataclass
 
+import anyio
 import asyncpg
 import httpcore
 import httpx
@@ -291,6 +295,14 @@ def test_stimme_profil_im_haus(ctx, quellen, stt, tts):
     assert punkte(ctx)["stimme"] == ("hinweis", api.SATZ_STIMME_HAUS)
 
 
+def test_stimme_im_haus_braucht_keinen_soniox_schluessel(ctx, quellen):
+    quellen.soniox, quellen.stand = False, stand_von(stt="haus", tts="haus")
+    assert punkte(ctx)["stimme"] == ("hinweis", api.SATZ_STIMME_HAUS)
+    assert "soniox_gesetzt" not in quellen.aufrufe
+    quellen.stand = stand_von(stt="haus", tts="soniox")  # ein Baustein auf Soniox braucht den Schlüssel
+    assert neu(ctx, quellen)["stimme"] == ("rot", api.SATZ_STIMME_FEHLT)
+
+
 def test_stimme_umgebung_ueberstimmt_das_profil(ctx, monkeypatch):
     monkeypatch.setenv("WAMO_TTS_ANBIETER", "haus")
     assert punkte(ctx)["stimme"] == ("hinweis", api.SATZ_STIMME_HAUS)
@@ -387,6 +399,13 @@ def test_entwicklung_pruefung_wirft(ctx, quellen):
     assert punkte(ctx)["entwicklung"] == ("rot", api.SATZ_ENT_UNKLAR)
 
 
+async def test_entwicklung_problem_laeuft_nicht_in_der_ereignisschleife(quellen, monkeypatch):
+    faeden: list[int] = []
+    monkeypatch.setattr(api, "entwicklung_problem", lambda: faeden.append(threading.get_ident()))  # liest am Server Dateien
+    stand = await api.stand_fuer(Identity(ADMIN, "Niko", "admin", "du"))
+    assert stand["punkte"][5]["stufe"] == "gruen" and faeden and faeden[0] != threading.get_ident()
+
+
 # ---------- stimmabdruck ----------
 @pytest.mark.parametrize("wert,stufe,text", [
     (True, "gruen", api.SATZ_ABDRUCK_OK),
@@ -456,10 +475,10 @@ def test_ohne_identitaet_keine_abfrage(ctx, quellen, monkeypatch, status):
     assert quellen.aufrufe == []
 
 
-def test_echte_identitaet_ohne_zugangskontrolle(quellen):
+def test_echte_identitaet_ohne_zugangskontrolle(quellen, monkeypatch):
     import wamo_api
 
-    wamo_api.gate_setzen(None)
+    monkeypatch.setattr(wamo_api, "_gate", None)
     app = FastAPI()
     app.include_router(api.router, prefix="/wamo/api")
     assert TestClient(app).get(STAND).status_code == 503
@@ -481,22 +500,197 @@ def test_zwischenspeicher_zehn_sekunden_je_profil(ctx, quellen):
                                                          "text": "Die Stimme ist am Server nicht eingerichtet."}
 
 
-async def test_gleichzeitige_aufrufe_pruefen_einmal(quellen):
-    langsam = asyncio.Event()
+def langsames_geraet(quellen, monkeypatch) -> asyncio.Event:
+    """aktives_geraet wartet, bis der Test das Ereignis setzt."""
+    frei = asyncio.Event()
 
     async def aktives_geraet(_uid):
         quellen.aufrufe.append("aktives_geraet")
-        await langsam.wait()
+        await frei.wait()
         return GERAET
 
-    api.aktives_geraet = aktives_geraet  # monkeypatch aus quellen stellt am Ende zurück
-    ich = Identity(ADMIN, "Niko", "admin", "du")
-    laeufe = [asyncio.ensure_future(api.stand_fuer(ich)) for _ in range(5)]
-    await asyncio.sleep(0)
-    langsam.set()
+    monkeypatch.setattr(api, "aktives_geraet", aktives_geraet)
+    return frei
+
+
+async def schritte(n: int = 5) -> None:
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
+ICH = Identity(ADMIN, "Niko", "admin", "du")
+
+
+async def test_gleichzeitige_aufrufe_pruefen_einmal(quellen, monkeypatch):
+    frei = langsames_geraet(quellen, monkeypatch)
+    laeufe = [asyncio.create_task(api.stand_fuer(ICH)) for _ in range(5)]
+    await schritte()
+    frei.set()
     ergebnisse = await asyncio.gather(*laeufe)
     assert quellen.aufrufe.count("aktives_geraet") == 1 and all(e == ergebnisse[0] for e in ergebnisse)
     assert api._laufend == {}
+
+
+async def test_abbruch_eines_wartenden_beendet_die_geteilte_pruefung_nicht(quellen, monkeypatch):
+    frei = langsames_geraet(quellen, monkeypatch)
+    a, b = asyncio.create_task(api.stand_fuer(ICH)), asyncio.create_task(api.stand_fuer(ICH))
+    await schritte()
+    a.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await a
+    frei.set()
+    assert (await b)["punkte"][1] == {"id": "geraet", "stufe": "gruen", "text": api.SATZ_GERAET_OK}
+    assert api._laufend == {} and (ADMIN, "admin") in api._zwischenspeicher
+
+
+async def test_auch_ohne_wartende_endet_die_pruefung_und_wird_gespeichert(quellen, monkeypatch):
+    frei = langsames_geraet(quellen, monkeypatch)
+    einziger = asyncio.create_task(api.stand_fuer(ICH))
+    await schritte()
+    lauf = api._laufend[(ADMIN, "admin")]
+    einziger.cancel()
+    frei.set()
+    await lauf
+    await schritte(2)
+    assert api._laufend == {} and (ADMIN, "admin") in api._zwischenspeicher
+
+
+async def test_nach_einem_fehler_bleibt_nichts_laufend_und_nichts_gespeichert(quellen, monkeypatch):
+    async def kaputt(_ich):
+        raise RuntimeError("kaputt")
+
+    monkeypatch.setattr(api, "_pruefen", kaputt)
+    with pytest.raises(RuntimeError):
+        await api.stand_fuer(ICH)
+    await schritte(2)
+    assert api._laufend == {} and api._zwischenspeicher == {}
+
+
+async def test_verdraengung_nur_des_aeltesten_und_abgelaufene_beim_schreiben(quellen, monkeypatch):
+    monkeypatch.setattr(api, "MAX_ZWISCHENSPEICHER", 3)
+    profile = [str(uuid.UUID(int=i + 1, version=4)) for i in range(5)]
+    for p in profile[:4]:  # Zeit 1000, 1001, 1002, 1003: beim vierten fällt nur der älteste weg
+        await api.stand_fuer(Identity(p, "Mitglied", "mitglied", "du"))
+        quellen.uhr.t += 1.0
+    assert [k[0] for k in api._zwischenspeicher] == profile[1:4]
+    quellen.uhr.t = 1012.5  # profile[1] und [2] sind abgelaufen, [3] noch nicht
+    await api.stand_fuer(Identity(profile[4], "Mitglied", "mitglied", "du"))
+    assert [k[0] for k in api._zwischenspeicher] == [profile[3], profile[4]]
+
+
+# ---------- Auffangschutz und Fristen ----------
+def test_erstanmeldung_wirft_passwort_rot_rest_unberuehrt(ctx, quellen, monkeypatch):
+    def wirft(_ich):
+        raise RuntimeError("Feld kaputt")
+
+    monkeypatch.setattr(api, "erstanmeldung_stand", wirft)
+    p = punkte(ctx)
+    assert p["passwort"] == ("rot", api.SATZ_PASSWORT_UNKLAR)
+    assert all(stufe == "gruen" for pid, (stufe, _) in p.items() if pid != "passwort")
+
+
+def test_wirft_eine_teilpruefung_werden_offene_punkte_rot_und_gespeichert(ctx, quellen, monkeypatch):
+    def kaputt(_stand):
+        raise RuntimeError("unerwartet")
+
+    monkeypatch.setattr(api, "_stimme", kaputt)
+    p = punkte(ctx)
+    assert list(p) == IDS
+    for pid in ("stimme", "gespraech", "entwicklung", "pc"):
+        assert p[pid] == ("rot", api.UNKLAR[pid]), pid
+    for pid, (stufe, text) in p.items():  # was vorher fertig war, bleibt; alles andere ist rot und unklar
+        assert stufe == "gruen" or (stufe, text) == ("rot", api.UNKLAR[pid]), pid
+    anzahl = len(quellen.aufrufe)
+    quellen.uhr.t += api.ZWISCHENSPEICHER_SECS - 1
+    assert punkte(ctx) == p and len(quellen.aufrufe) == anzahl  # auch dieses Ergebnis gilt 10 Sekunden
+    assert api._laufend == {}
+
+
+def test_haengende_quelle_endet_mit_quellenfrist(ctx, quellen, monkeypatch):
+    async def haengt(_uid):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(api, "QUELLE_SECS", 0.05)
+    monkeypatch.setattr(api, "aktives_geraet", haengt)
+    p = punkte(ctx)
+    assert p["geraet"] == ("rot", api.SATZ_GERAET_FEHLER) and p["tunnel"] == ("rot", api.SATZ_TUNNEL_UNKLAR)
+    assert p["stimme"][0] == p["gespraech"][0] == p["stimmabdruck"][0] == "gruen"
+
+
+def test_gesamtfrist_macht_offene_punkte_rot(ctx, quellen, monkeypatch):
+    abgebrochen = []
+
+    async def haengt(_pfad, _uid):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            abgebrochen.append(True)
+            raise
+
+    monkeypatch.setattr(api, "GESAMT_SECS", 0.1)
+    monkeypatch.setattr(api, "gegenstelle_pruefen", haengt)
+    p = punkte(ctx)
+    assert p["geraet"] == ("gruen", api.SATZ_GERAET_OK)
+    assert p["tunnel"] == ("rot", api.SATZ_TUNNEL_UNKLAR) and p["pc"] == ("rot", api.SATZ_PC_UNKLAR)
+    assert p["stimme"][0] == p["entwicklung"][0] == p["stimmabdruck"][0] == "gruen"
+    assert abgebrochen == [True] and api._laufend == {}
+
+
+def test_dateien_lesen_hat_die_quellenfrist(ctx, echter_tunnel, monkeypatch):
+    def langsam(*_args, **_kwargs):
+        threading.Event().wait(0.3)
+
+    monkeypatch.setattr(api, "QUELLE_SECS", 0.05)
+    monkeypatch.setattr(pc_geraet, "lies_geheimnisse", langsam)
+    assert punkte(ctx)["tunnel"] == ("rot", api.SATZ_TUNNEL_ROT)
+    assert echter_tunnel.verbunden == []
+
+
+# ---------- Quellen mit Attrappen-Datenbank ----------
+class Db:
+    def __init__(self, configured=True, zeilen=()):
+        self.configured, self.zeilen, self.aufrufe = configured, list(zeilen), []
+
+    def t(self, name):
+        return f"wamo_test.{name}"
+
+    async def fetch(self, sql, *args):
+        self.aufrufe.append((sql, args))
+        return self.zeilen
+
+
+async def test_geraete_status_liest_nur_eigene_persoenliche_geraete(monkeypatch):
+    db = Db(zeilen=[{"status": "beantragt"}, {"status": "gesperrt"}])
+    monkeypatch.setattr(api, "shared_database", lambda: db)
+    assert await api.geraete_status(ADMIN.upper()) == frozenset({"beantragt", "gesperrt"})
+    ((sql, args),) = db.aufrufe
+    assert "wamo_test.devices" in sql and "'persoenlich'" in sql and "limit 8" in sql and "$1::uuid" in sql
+    assert args == (ADMIN,)
+    with pytest.raises(gr.RegisterFehler):
+        await api.geraete_status("kein-profil")
+    monkeypatch.setattr(api, "shared_database", lambda: Db(configured=False))
+    with pytest.raises(gr.RegisterFehler):
+        await api.geraete_status(ADMIN)
+    assert len(db.aufrufe) == 1
+
+
+async def test_modellzugang_stand_ohne_datenbank(monkeypatch):
+    from memory import DatabaseUnavailable
+
+    gefragt = []
+
+    async def stand_laden(user_id, *, db):
+        gefragt.append((user_id, db))
+        return stand_von()
+
+    monkeypatch.setattr(mz, "stand_laden", stand_laden)
+    monkeypatch.setattr(api, "shared_database", lambda: Db(configured=False))
+    with pytest.raises(DatabaseUnavailable):
+        await api.modellzugang_stand(ADMIN)
+    assert gefragt == []
+    db = Db()
+    monkeypatch.setattr(api, "shared_database", lambda: db)
+    assert (await api.modellzugang_stand(ADMIN)).quelle == "profil" and gefragt == [(ADMIN, db)]
 
 
 # ---------- Geheimnisse, Pfade, MCP und Socket ----------
@@ -560,6 +754,39 @@ def test_falsche_gegenstelle_ist_rot_und_geschlossen(ctx, echter_tunnel):
     assert all(s.zu and s.geschrieben == [] for s in echter_tunnel.stroeme)
 
 
+async def test_gegenstelle_hat_eine_frist_und_schliesst_auch_bei_abbruch(monkeypatch):
+    monkeypatch.setattr(api, "GEGENSTELLE", lambda uid: pc_tunnel.GegenstellenPruefung(uid, lesen=lambda sock: sock.uid))
+    monkeypatch.setattr(api, "SOCKET_SECS", 0.05)
+
+    async def haengt(self, path, timeout=None, socket_options=None):
+        assert timeout is None  # nur die eine Frist von gegenstelle_pruefen
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(httpcore.AnyIOBackend, "connect_unix_socket", haengt)
+    with pytest.raises(TimeoutError):
+        await api.gegenstelle_pruefen("/run/wamo-pc/t07/pc.sock", 1007)
+
+    strom, frei = Strom(1007), asyncio.Event()
+
+    async def langsam_zu():
+        await frei.wait()
+        strom.zu = True
+
+    async def verbinden(self, path, timeout=None, socket_options=None):
+        return strom
+
+    strom.aclose = langsam_zu
+    monkeypatch.setattr(httpcore.AnyIOBackend, "connect_unix_socket", verbinden)
+    lauf = asyncio.create_task(api.gegenstelle_pruefen("/run/wamo-pc/t07/pc.sock", 1007))
+    await schritte()
+    lauf.cancel()  # Abbruch während des Schließens: das Schließen läuft weiter
+    with pytest.raises(asyncio.CancelledError):
+        await lauf
+    frei.set()
+    await schritte()
+    assert strom.zu and strom.geschrieben == []
+
+
 def test_kein_geheimnis_und_kein_pfad_in_der_antwort(ctx, quellen, echter_tunnel, monkeypatch):
     monkeypatch.setenv("SONIOX_API_KEY", SONIOX)
     monkeypatch.setattr(api, "soniox_gesetzt", ECHT["soniox_gesetzt"])
@@ -581,17 +808,20 @@ def test_nie_mcp_start_und_nie_werkzeugaufruf(ctx, quellen, echter_tunnel, monke
             raise AssertionError(f"{name} darf die Prüfliste nie aufrufen")
         return f
 
-    async def falle_async(*args, **kwargs):
-        verboten.append("httpx.AsyncClient.send")
-        raise AssertionError("kein HTTP an den Laptop")
+    def falle_async(name):
+        async def f(*args, **kwargs):
+            verboten.append(name)
+            raise AssertionError(f"{name} darf die Prüfliste nie aufrufen")
+        return f
 
+    # MCP und Werkzeuge (auch der stdio-Weg, der den Host als Prozess startet), HTTP an den Laptop und jeder Prozessstart
     for modul, name in ((pc_host, "host_client"), (pc_host, "host_tools"), (pc_host, "call_host_tool"), (pc_host, "pc_zugang"),
                         (pc_host, "pc_sperre_pruefen"), (pc_host, "MCPClient"), (pc_geraet, "pc_zugang_fuer"),
-                        (pc_tunnel, "TunnelHost")):
+                        (pc_tunnel, "TunnelHost"), (subprocess, "Popen")):
         monkeypatch.setattr(modul, name, falle(f"{modul.__name__}.{name}"))
-    for name in ("_rpc", "pruefen", "tools", "call_text", "ueberwache"):
-        monkeypatch.setattr(pc_tunnel.TunnelHost, name, falle(f"TunnelHost.{name}"), raising=False)
-    monkeypatch.setattr(httpx.AsyncClient, "send", falle_async)
+    for modul, name in ((httpx.AsyncClient, "send"), (asyncio, "create_subprocess_exec"), (asyncio, "create_subprocess_shell"),
+                        (anyio, "open_process")):
+        monkeypatch.setattr(modul, name, falle_async(f"{getattr(modul, '__name__', modul)}.{name}"))
     p = punkte(ctx)
     assert p["tunnel"] == ("gruen", api.SATZ_TUNNEL_OK) and p["pc"] == ("gruen", api.SATZ_PC_OK)
     assert verboten == []
@@ -602,5 +832,6 @@ def test_quelltext_kennt_keinen_weg_zum_host():
     baum = ast.parse(pathlib.Path(api.__file__).read_text(encoding="utf-8"))
     namen = {n.id for n in ast.walk(baum) if isinstance(n, ast.Name)} | {n.attr for n in ast.walk(baum) if isinstance(n, ast.Attribute)}
     for verboten in ("host_client", "host_tools", "call_host_tool", "pc_zugang", "pc_zugang_fuer", "TunnelHost", "MCPClient",
-                     "call_text", "pc_sperre_pruefen", "write", "send", "sendall"):
+                     "call_text", "pc_sperre_pruefen", "write", "send", "sendall", "Popen", "create_subprocess_exec",
+                     "create_subprocess_shell", "open_process"):
         assert verboten not in namen, verboten
