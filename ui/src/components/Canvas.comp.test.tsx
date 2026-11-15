@@ -1,10 +1,11 @@
-// Komponententest des Canvas: Kopierknopf mit Bestätigungs-Chip (components/Canvas.tsx, lib/kopieren.ts).
+// Komponententest des Canvas: Kopierknopf mit Bestätigungs-Chip (components/Canvas.tsx, lib/kopieren.ts), Überarbeitung an derselben
+// Stelle und Meldung des offenen Reiters (lib/canvasWahl.ts).
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasBereich } from "@/components/Canvas";
 import { KOPIERT_MS } from "@/lib/kopieren";
-import { resetWamo, wamo } from "@/lib/wamo";
+import { applyServerMessage, resetWamo, wamo } from "@/lib/wamo";
 
 const CODE = "select * from geraete;";
 
@@ -122,5 +123,93 @@ describe("Canvas, Kopierknopf", () => {
     expect(vi.getTimerCount()).toBeGreaterThan(0);
     unmount();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// ---------- Überarbeiten im offenen Reiter (Befund 15.11.2026) und Meldung des offenen Reiters an den Kern ----------
+const A = "aaaaaaaa-0000-4000-8000-000000000001";
+const B = "aaaaaaaa-0000-4000-8000-000000000002";
+const C = "aaaaaaaa-0000-4000-8000-000000000003";
+const A2 = "aaaaaaaa-0000-4000-8000-000000000004";
+
+function dreiImCanvas() {
+  wamo.set((s) => ({
+    ...s,
+    canvas: [
+      { id: A, kind: "dokument", title: "Angebot", text: "Erste Fassung" },
+      { id: B, kind: "dokument", title: "Notiz", text: "Notiz" },
+      { id: C, kind: "tabelle", title: "Städte", columns: ["Stadt"], rows: [["Frankfurt"]] },
+    ],
+  }));
+}
+
+const reiter = (container: HTMLElement) => Array.from(container.querySelectorAll<HTMLButtonElement>(".canvas-tab"));
+const offen = (container: HTMLElement) => reiter(container).find((r) => r.getAttribute("aria-current") === "true")?.textContent;
+
+describe("Canvas, Überarbeitung im offenen Reiter", () => {
+  beforeEach(() => {
+    resetWamo();
+    dreiImCanvas();
+  });
+  afterEach(() => resetWamo());
+
+  it("ersetzt das Element an derselben Stelle, legt keinen Reiter an und zeigt die neue Fassung", () => {
+    const { container } = render(<CanvasBereich />);
+    fireEvent.click(reiter(container)[0]); // die Person liest das Angebot
+    act(() => applyServerMessage({ type: "canvas", item: { id: A2, kind: "dokument", title: "Angebot", text: "Zweite Fassung" }, ersetzt: A }));
+    expect(reiter(container).map((r) => r.textContent)).toEqual(["Angebot", "Notiz", "Städte"]);
+    expect(offen(container)).toBe("Angebot");
+    expect(screen.getByText("Zweite Fassung")).toBeTruthy();
+    expect(screen.queryByText("Erste Fassung")).toBeNull();
+    expect(wamo.get().canvas.map((it) => it.id)).toEqual([A2, B, C]);
+    expect(wamo.get().ansage).toBe("Auf dem Canvas überarbeitet: Angebot");
+  });
+
+  it("zeigt den überarbeiteten Reiter auch, wenn gerade ein anderer offen war", () => {
+    const { container } = render(<CanvasBereich />);
+    expect(offen(container)).toBe("Städte"); // ohne eigene Auswahl das Neueste
+    act(() => applyServerMessage({ type: "canvas", item: { id: A2, kind: "dokument", title: "Angebot, kürzer", text: "Kurz" }, ersetzt: A }));
+    expect(offen(container)).toBe("Angebot, kürzer");
+    expect(screen.getByText("Kurz")).toBeTruthy();
+  });
+
+  it("hängt ein Element mit unbekanntem ersetzt wie bisher hinten an", () => {
+    const { container } = render(<CanvasBereich />);
+    act(() => applyServerMessage({ type: "canvas", item: { id: A2, kind: "dokument", title: "Neu", text: "x" }, ersetzt: "fremd" }));
+    expect(reiter(container).map((r) => r.textContent)).toEqual(["Angebot", "Notiz", "Städte", "Neu"]);
+    expect(wamo.get().ansage).toBe("Neues Ergebnis auf dem Canvas: Neu");
+  });
+
+  it("meldet den offenen Reiter beim Zeigen, beim Wechsel und nach der Überarbeitung, je Wechsel genau einmal", () => {
+    const aktiv = vi.fn();
+    const { container, rerender } = render(<CanvasBereich aktiv={aktiv} />);
+    expect(aktiv.mock.calls).toEqual([[C]]);
+    fireEvent.click(reiter(container)[1]);
+    expect(aktiv.mock.calls).toEqual([[C], [B]]);
+    rerender(<CanvasBereich aktiv={aktiv} />);
+    fireEvent.click(reiter(container)[1]); // derselbe Reiter noch einmal: keine zweite Meldung
+    expect(aktiv.mock.calls).toEqual([[C], [B]]);
+    act(() => applyServerMessage({ type: "canvas", item: { id: A2, kind: "dokument", title: "Angebot", text: "Neu" }, ersetzt: A }));
+    expect(aktiv.mock.calls).toEqual([[C], [B], [A2]]);
+  });
+
+  it("meldet ein Element ohne Kennung als null (der Kern sagt dem Modell, dass es sich nicht überarbeiten lässt)", () => {
+    resetWamo();
+    wamo.set((s) => ({ ...s, canvas: [{ kind: "tabelle", title: "Geräte", columns: ["Name"], rows: [["Drucker"]] }] }));
+    const aktiv = vi.fn();
+    render(<CanvasBereich aktiv={aktiv} />);
+    expect(aktiv.mock.calls).toEqual([[null]]);
+  });
+
+  it("meldet den gewählten älteren Reiter erneut, wenn ein neues Element dazukommt, aber nicht bei Fortschritt am selben Element", () => {
+    const aktiv = vi.fn();
+    const { container } = render(<CanvasBereich aktiv={aktiv} />);
+    fireEvent.click(reiter(container)[0]);
+    expect(aktiv.mock.calls).toEqual([[C], [A]]);
+    act(() => applyServerMessage({ type: "canvas", item: { id: "dev-7", kind: "dokument", title: "Auftrag", text: "läuft" } }));
+    expect(offen(container)).toBe("Angebot"); // die eigene Auswahl bleibt
+    expect(aktiv.mock.calls).toEqual([[C], [A], [A]]); // der Kern erfährt: offen ist weiter das Angebot, nicht das Neue
+    act(() => applyServerMessage({ type: "canvas", item: { id: "dev-7", kind: "dokument", title: "Auftrag", text: "fertig" } }));
+    expect(aktiv.mock.calls).toEqual([[C], [A], [A]]);
   });
 });

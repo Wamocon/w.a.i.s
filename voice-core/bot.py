@@ -57,6 +57,10 @@ Nachrichten von der Oberfläche:
   {"type": "onenote_seite", "data": {"canvas_id"}}
                                           eigenes Canvas-Element als OneNote-Seite, erst nach der Freigabekarte (onenote_werkzeuge.py;
                                           nur admin mit WAMO_OFFICE=onenote, nie im Labor). Antwort: {"type": "onenote", "ok", "text"}
+  {"type": "canvas_aktiv", "data": {"canvas_id"}}
+                                          offener Reiter auf dem Canvas (Kennung der Oberfläche oder null, canvas_sitzung.py): nur
+                                          Elemente dieser Sitzung lassen sich überarbeiten; weicht er ab, bekommt das Modell einen
+                                          Systemhinweis ohne Antwort (nie im Labor)
   {"type": "teams_vorbereiten", "data": {"an", "gruppenname"?, "text"}}
                                           Teams-Chat mit vorbefülltem Text zur Freigabe vorbereiten (teams_werkzeuge.py; nur admin
                                           mit WAMO_OFFICE=teams, nie im Labor; gesendet wird in Teams nur von der Person). Antwort:
@@ -150,6 +154,8 @@ from llm_anbieter import LLMNichtVerfuegbar, ausblenden_text, gespraech_llm, les
 from memory import MemoryStore, Profile, ProfileDirectory, Recall, shared_database
 from modellzugang import modellzugang_nachricht, zugang_laden
 from boss import Boss, entwicklung_quelle, modus_wirksam
+import canvas_sitzung as canvas_sitzung_mod
+from canvas_sitzung import CanvasSitzung
 from kern_dienst import runner_vorbereiten
 from cache_waerme import vorwaermen
 from env_schalter import schalter_an
@@ -736,15 +742,18 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # Fremdinhalte im laufenden Zug (Websuche, Bildschirm, PC, Entwicklungs-Ergebnisse) merken: kein
     # sofort wirksames gemeinsames Wissen (M4) und kein Lernen aus diesen Abschnitten.
     turn = TurnState(transcript_len=lambda: len(transcript))
+    # Canvas-Elemente dieser Sitzung (canvas_sitzung.py): Überarbeiten an derselben Stelle statt eines neuen Reiters, offener Reiter
+    canvas_sitzung = CanvasSitzung()
     # Labor: Text, Klicks auf Freigabekarten und Suchen zählen je Profil und Durchlauf, nicht je Verbindung (labor_limit.LimitRegister): eine
     # Neuverbindung setzt nichts zurück. Das Schaufenster ohne Platz hat keinen Durchlauf, dort zählt das Profil allein.
     labor_grenzen = (labor_limit.LIMITS.fuer(identity.user_id, labor_sitzung.stand.durchlauf_id if labor_sitzung.stand else None)
                      if labor_sitzung else None)
     if labor_sitzung:  # Laborprofil: nur die Erlaubnisliste, nie merken oder Fernzugriff (labor.WERKZEUGE_BASIS)
         standard_tools = list(register_tools(llm, memory, identity, turn, zugang=zugang, erlaubt=labor.WERKZEUGE_BASIS,
-                                             suchen_zaehler=labor_grenzen.suchen).standard_tools)
+                                             suchen_zaehler=labor_grenzen.suchen, canvas=canvas_sitzung).standard_tools)
     else:
-        standard_tools = list(register_tools(llm, memory, identity, turn, zugang=zugang, fernzugriff=fernzugriff).standard_tools)
+        standard_tools = list(register_tools(llm, memory, identity, turn, zugang=zugang, fernzugriff=fernzugriff,
+                                             canvas=canvas_sitzung).standard_tools)
     # Vorgänge (vorgaenge.py): was WAMO gerade abarbeitet, live für die Tafel "Vorgänge". Alle Änderungen sind synchron, das
     # Senden und Speichern machen Hintergrundtasks mit Frist: der Audiopfad wartet nie darauf. send entsteht weiter unten.
     # Labor: keine Ablage in der Datenbank (vorgaenge bleibt leer, labor_speicher.py)
@@ -1020,8 +1029,11 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         await task.queue_frames([RTVIServerMessageFrame(data=data)])
 
     async def canvas_legen(item: dict) -> None:
-        """Ergebnis einer Boss-Aufgabe aufs Canvas, gespeichert wie bei canvas_zeigen."""
+        """Ergebnis einer Boss-Aufgabe aufs Canvas, gespeichert wie bei canvas_zeigen. Gespeicherte Ergebnisse kommen in die Liste der
+        Sitzung (das Modell kann sie überarbeiten), seine Kennung erfährt das Modell erst über den offenen Reiter."""
         item["id"] = await memory.save_canvas(CANVAS_TYPE[item["kind"]], item["title"], item)
+        if item["id"]:
+            canvas_sitzung.neu(item["id"], item["title"], vom_modell=False)
         await send({"type": "canvas", "item": item})
 
     async def send_betrieb() -> None:
@@ -1434,6 +1446,13 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 logger.warning("Mail-Nachricht ohne Mail über Outlook in dieser Sitzung abgewiesen")
                 return
             await mail.client_nachricht(msg.type, data)
+        elif msg.type == canvas_sitzung_mod.NACHRICHT:
+            # Offener Reiter auf dem Canvas: nur Elemente dieser Sitzung zählen. Das Modell erfährt einen Wechsel als Systemhinweis,
+            # ohne zu antworten (der Titel steht darin als Daten)
+            # (canvas_id null: ein Element ohne Kennung, etwa eine Geräteliste; fehlt die Angabe, ist die Nachricht ohne Wirkung)
+            hinweis = canvas_sitzung.aktiv_melden(data["canvas_id"]) if "canvas_id" in data else None
+            if hinweis and state["live"]:
+                await task.queue_frames([LLMMessagesAppendFrame(messages=[{"role": "user", "content": hinweis}], run_llm=False)])
         elif msg.type in teams_werkzeuge.NACHRICHTEN:
             # Teams-Nachricht vorbereiten (teams_werkzeuge.py): nur in Sitzungen mit Teams
             if teams is None:

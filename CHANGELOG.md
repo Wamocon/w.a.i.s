@@ -409,6 +409,23 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Behoben
 
+- Canvas überarbeitet das offene Element statt einen neuen Reiter anzulegen (Zweig `feat/canvas-ersetzen`, Befund vom 15.11.2026): Bisher
+  legte jede Änderung am Canvas einen neuen Reiter an und ließ die alte Fassung offen, denn `canvas_zeigen` meldete dem Modell nur
+  „angezeigt“ ohne Kennung. Jetzt liefert das Werkzeug eine kurze Kennung (`canvas_id` wie `c2`, je Sitzung, bleibt über alle
+  Überarbeitungen gleich) und kennt den Parameter `ersetzt`. Eine Überarbeitung wird als neue Zeile in `canvas_items` gespeichert (die
+  vorige Fassung bleibt, keine Migration, kein Update-Recht nötig), die Nachricht `canvas` trägt die neue Kennung und `ersetzt` mit der
+  alten. Die Oberfläche setzt das neue Element an dieselbe Stelle und zeigt den Reiter; Speichern, OneNote, Jira-Story, Teilen,
+  „Als E-Mail“ und „Als Teams-Nachricht“ nutzen damit die neue Fassung. Offene Formulare bleiben stehen, ein unveränderter Betreff folgt
+  dem neuen Titel, ein unveränderter Teams-Text dem neuen Inhalt. Ersetzt wird nur, was diese Sitzung selbst gezeigt
+  hat (`voice-core/canvas_sitzung.py`, dazu gespeicherte Boss-Ergebnisse), eine unbekannte Kennung ergibt einen neuen Reiter mit Hinweis;
+  ohne Datenbank gibt es lokale Kennungen ohne Teilen und Speichern. Die Oberfläche meldet den offenen Reiter (Client-Nachricht
+  `canvas_aktiv`, nie im Labor); weicht er ab, bekommt das Modell einen kurzen Systemhinweis ohne Antwort, der Titel steht darin als Daten.
+  Ein Reiter außerhalb der Liste (Auftrag, Geräteliste, geteiltes Dokument) gilt dabei als nicht überarbeitbar, Änderungen dazu werden
+  ein neuer Reiter.
+  Die Regel steht in der Werkzeugbeschreibung: ändern, ergänzen, kürzen oder umbauen heißt überarbeiten, ein neuer Reiter nur auf
+  ausdrücklichen Wunsch. Tests in `voice-core/test_canvas_ersetzen.py`, `ui/src/lib/canvasWahl.test.ts`,
+  `ui/src/components/Canvas.comp.test.tsx`, `ui/src/components/Mail.comp.test.tsx`, `ui/src/components/Teams.comp.test.tsx` und
+  `ui/src/components/WamoAnsicht.labor.comp.test.tsx`.
 - PC-Steuerung verbindet den Laptop nach, wenn der Tunnel erst nach dem Sitzungsstart steht (Zweig `fix/pc-nachverbinden`). Befund vom
   15.11.2026: Die Desktop-App startete die Sitzung 18 Sekunden, bevor der Tunnel des Laptops stand. Der Kern fragte den Zugang nur einmal beim
   Aufbau, die Sitzung blieb ohne PC, und jeder Klick auf den Schalter „PC-Steuerung“ endete still in „aus“. Jetzt holt die Sitzung den

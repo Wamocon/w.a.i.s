@@ -32,6 +32,14 @@ export function CanvasMail({ item, mail }: { item: CanvasItem; mail: MailAktione
   const [fehler, setFehler] = useState<string | null>(null);
   const [wartet, setWartet] = useState<number | null>(null);
 
+  // Überarbeitet W.A.I.S. das Element (lib/canvasWahl.ts, das Formular bleibt stehen), folgt ein unveränderter Betreff dem neuen Titel;
+  // Inhalt und Anhang liest der Kern ohnehin über die Kennung der neuen Fassung
+  const [titel, setTitel] = useState(item.title);
+  if (item.title !== titel) {
+    setTitel(item.title);
+    if (betreff === titel) setBetreff(item.title);
+  }
+
   if (wartet !== null && antwort.n !== wartet) {
     // Antwort da: bei Erfolg liegt die Karte bereit (Formular zu), sonst bleibt es mit dem Grund offen
     setWartet(null);
