@@ -49,6 +49,7 @@ def host(monkeypatch):
     h = Host()
     monkeypatch.setattr(onw, "call_host_tool", h)
     monkeypatch.setattr(office_werkzeuge, "call_host_tool", h)  # Rückfall über OfficeDateien.exportieren
+    monkeypatch.setenv("WAMO_OFFICE", "dateien onenote")  # Rückfall als Word-Datei nur mit dem Teil "dateien"
     return h
 
 
@@ -216,6 +217,7 @@ async def test_ohne_onenote_fragt_der_kern_den_host_gar_nicht_erst(monkeypatch):
 
     monkeypatch.setattr(onw, "call_host_tool", h)
     monkeypatch.setattr(office_werkzeuge, "call_host_tool", h)
+    monkeypatch.setenv("WAMO_OFFICE", "dateien onenote")
     s = seiten()
     await s.schemas()
     p = Params()
@@ -366,3 +368,20 @@ def bot():
     with mock.patch.dict(os.environ, umgebung):
         import bot as modul
     return modul
+
+
+# ---------- Review PR 138: Rückfall nur, wenn Speichern als Datei an ist ----------
+async def test_ohne_teil_dateien_kein_word_rueckfall_sondern_ein_klarer_satz(host, monkeypatch):
+    monkeypatch.setenv("WAMO_OFFICE", "onenote")
+    host.anfrage = {"status": "rejected", "rueckfall": "word", "summary": "OneNote für den Desktop ist nicht installiert."}
+    s = seiten()
+    assert [x.name for x in await s.schemas()] == ["onenote_seite"]
+    assert s.word is False
+    p = Params()
+    await s._werkzeug(p)
+    assert p.ergebnis["status"] == "rejected"
+    assert "nicht installiert" in p.ergebnis["summary"] and "Speichern als Datei ist ausgeschaltet" in p.ergebnis["summary"]
+    assert "office_datei_erstellen" not in [n for n, _ in host.aufrufe]
+    host.faehig = {"status": "success", "formate": ["word"], "onenote": False}
+    assert await seiten().schemas() == []  # ohne OneNote und ohne "dateien" gibt es das Werkzeug gar nicht
+

@@ -57,7 +57,8 @@ XS_2013 = 2
 CFT_NOTIZBUCH, CFT_ABSCHNITT = 1, 3
 NICHT_SYNCHRON = 0x8004201D  # OneNote: Inhalt noch nicht synchronisiert
 OHNE_DATUM = 0.0  # dateExpectedLastModified: ohne Prüfung; muss mitgehen, der Standard der Typbibliothek passt nicht zu c_double
-ZIEL_NAME_MAX = 36  # drei Namen auf der Karte, das Ziel bleibt unter 200 Zeichen
+ZIEL_NAME_MAX = 28  # Notizbuch und Abschnitt auf der Karte; mit dem Konto bleibt das Ziel unter 200 Zeichen
+KONTO_MAX = 40  # so lang darf das Konto auf der Karte werden; gekürzt wird nur der Name vor dem @, die Domäne bleibt ganz
 KEIN_FIRMENKONTO = ("An diesem PC ist kein OneDrive der Firma (OneDrive for Business) angemeldet. Firmeninhalte gehen nur in das "
                     "Notizbuch W.A.I.S. dort.")
 MEHRERE_FIRMENKONTEN = ("An diesem PC sind mehrere OneDrive-for-Business-Konten angemeldet; welches der Firma gehört, ist nicht "
@@ -68,8 +69,9 @@ FETT = "<span style='font-weight:bold'>{}</span>"
 CODE_INLINE = "<span style='font-family:Consolas'>{}</span>"
 _CLSID_RE = re.compile(r"\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}")
 _ABSCHNITT_RE = re.compile(r'[^\\/:*?"<>|#%\x00-\x1f]{1,50}')
-_SITE_RE = re.compile(r"(https://[a-z0-9-]+-my\.sharepoint\.[a-z]{2,3}/personal/[a-z0-9_.-]+)/_api", re.IGNORECASE)
-_MAIL_RE = re.compile(r"[^@\s]{1,64}@([a-z0-9-]+(?:\.[a-z0-9-]+)+)", re.IGNORECASE)
+# Nur die persönliche Site in SharePoint Online (<name>-my.sharepoint.com), ein Pfadsegment, das nicht mit einem Punkt beginnt
+_SITE_RE = re.compile(r"(https://[a-z0-9-]{1,63}-my\.sharepoint\.com/personal/[a-z0-9_-][a-z0-9_.-]{0,99})/_api", re.IGNORECASE)
+_MAIL_RE = re.compile(r"[^@\s]{1,64}@((?=[a-z0-9.-]{1,50}$)[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})+)", re.IGNORECASE)
 # Wie persona.sichtbar im Kern, das die Karte bereinigt: Steuer-, Format-, Richtungs- und unsichtbare Zeichen, Variantenwähler. Der Host
 # entfernt sie schon im Inhalt, damit Karte und Seite zeichengleich sind (ein U+202E könnte sonst den Text auf der Seite umdrehen).
 _UNSICHTBAR = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
@@ -221,7 +223,8 @@ def firmenkonto(*, konten: list[dict] | None = None, domaenen: str | None = None
     erlaubt = {d.strip().lower().lstrip("@") for d in re.split(r"[\s,;]+", roh or "") if d.strip()}
     passend = []
     for konto in konten:
-        mail = _MAIL_RE.fullmatch(str(konto.get("UserEmail") or ""))
+        roh = str(konto.get("UserEmail") or "")
+        mail = _MAIL_RE.fullmatch(roh) if _sauber(roh) == roh else None  # keine Steuer-, Richtungs- oder unsichtbaren Zeichen
         site = _SITE_RE.fullmatch(str(konto.get("ServiceEndpointUri") or ""))
         if mail and site and (not erlaubt or mail.group(1).lower() in erlaubt):
             passend.append(Firmenkonto(mail.group(0), site.group(1)))
@@ -364,11 +367,19 @@ def _kurz(text: str) -> str:
     return text if len(text) <= ZIEL_NAME_MAX else text[: ZIEL_NAME_MAX - 1] + "…"
 
 
+def _konto_kurz(konto: str) -> str:
+    """Konto für die Karte: höchstens KONTO_MAX Zeichen, gekürzt wird der Name vor dem @, die Domäne bleibt immer ganz."""
+    if len(konto) <= KONTO_MAX or "@" not in konto:
+        return konto if len(konto) <= KONTO_MAX else konto[: KONTO_MAX - 1] + "…"
+    name, domaene = konto.rsplit("@", 1)
+    return name[: max(1, KONTO_MAX - len(domaene) - 2)] + "…@" + domaene
+
+
 def karten_ziel(ziel: Ziel) -> str:
     """Ziel der Karte: Notizbuch und Abschnitt (mit "wird neu angelegt") und das Konto, dessen OneDrive es ist."""
     notizbuch = f"Notizbuch {_kurz(ziel.notizbuch)}" + ("" if ziel.notizbuch_id else " (wird neu angelegt)")
     abschnitt = f"Abschnitt {_kurz(ziel.abschnitt)}" + ("" if ziel.abschnitt_id else " (wird angelegt)")
-    return f"OneNote, {notizbuch}, {abschnitt}, OneDrive der Firma ({_kurz(ziel.konto)})"
+    return f"OneNote, {notizbuch}, {abschnitt}, OneDrive der Firma ({_konto_kurz(ziel.konto)})"
 
 
 # ---------- COM ----------
@@ -436,7 +447,8 @@ def _im_faden(arbeit: Callable, timeout: float, fabrik: Callable | None = None, 
     """arbeit(app) in einem eigenen Faden mit Zeitgrenze; immer nur ein Zugriff zur Zeit. Nach der Zeitgrenze wird abbruch gesetzt
     (die Arbeit prüft es vor jedem Schritt, der etwas anlegt). Wirft OneNoteFehler."""
     if not _SPERRE.acquire(timeout=warten):
-        raise OneNoteFehler("OneNote ist noch mit dem vorigen Auftrag beschäftigt. Bitte gleich noch einmal.")
+        raise OneNoteFehler("OneNote ist noch mit dem vorigen Auftrag beschäftigt. Ist dort ein Dialog offen? Bitte in OneNote "
+                            "nachsehen und gleich noch einmal versuchen.")
     stand: dict = {}
     faden = threading.Thread(target=_lauf, args=(arbeit, fabrik or _onenote, stand), name="wais-onenote", daemon=True)
     try:

@@ -15,7 +15,8 @@ Notizbuch, legt der Host es erst dann an.
 
 Rückfall: Fehlt OneNote für den Desktop, gibt es kein eindeutiges OneDrive der Firma oder ist OneNote nicht bereit (Fähigkeiten oder
 rueckfall "word" vom Host), speichert der Kern die Seite als Word-Datei in Dokumente\\WAIS (office_werkzeuge.OfficeDateien.exportieren,
-ohne Karte wie in Paket 1) und sagt, dass sie sich über "An OneNote senden" in OneNote einfügen lässt.
+ohne Karte wie in Paket 1) und sagt, dass sie sich über "An OneNote senden" in OneNote einfügen lässt. Das nur, wenn WAMO_OFFICE auch den
+Teil "dateien" enthält; sonst gibt es eine klare Ablehnung (DATEIEN_AUS).
 
 Oberfläche: betrieb trägt "onenote": true, solange der Knopf gehen kann (anzeige). Nach einem Klick meldet der Kern
 {"type": "onenote", "ok", "text"}: Karte liegt bereit, Rückfall als Word-Datei oder der Grund, warum nicht.
@@ -35,7 +36,7 @@ import labor
 from activity import APPROVAL_ID_RE, freigabe_anfrage
 from canvas_quelle import CanvasNichtErreichbar, canvas_lesen, kennung_gueltig
 from office_werkzeuge import (CANVAS_NICHT_ERREICHBAR, ERSTELLEN_TIMEOUT_SECS, FAEHIGKEITEN_TIMEOUT_SECS, KEIN_CANVAS, PC_AUS,
-                              OfficeDateien, office_teile)
+                              OfficeDateien, dateien_an, office_teile)
 from pc_host import call_host_tool, pc_freigabe_entscheiden
 from persona import clean_inline
 
@@ -52,6 +53,7 @@ ONENOTE_FEHLT = "OneNote für den Desktop ist an diesem PC nicht installiert."
 LAEUFT_SCHON = "Eine OneNote-Seite wird gerade schon vorbereitet. Bitte einen Moment warten."
 RUECKFALL = ("{grund} Stattdessen liegt die Seite als Word-Datei {name} im Ordner {ordner}. Über „An OneNote senden“ lässt sie "
              "sich in OneNote einfügen.")
+DATEIEN_AUS = "Speichern als Datei ist ausgeschaltet, deshalb gibt es auch keine Word-Datei als Ersatz."
 KARTE_BEREIT = "Die OneNote-Seite liegt zur Freigabe bereit. Erst nach deinem Klick auf der Karte wird sie angelegt."
 KEINE_KARTE = "Die Freigabekarte ließ sich nicht anzeigen. Am PC ist nichts passiert."
 
@@ -104,7 +106,8 @@ class OneNoteSeiten:
         if antwort.get("status") != "success" or not isinstance(antwort.get("onenote"), bool):
             return []  # älterer Host ohne OneNote-Werkzeug, office.aus oder Tunnel weg
         self.onenote = antwort["onenote"]
-        self.word = isinstance(antwort.get("formate"), list) and "word" in antwort["formate"]
+        # Rückfall als Word-Datei nur, wenn Speichern als Datei an ist (WAMO_OFFICE mit "dateien"), sonst eine klare Ablehnung
+        self.word = dateien_an() and isinstance(antwort.get("formate"), list) and "word" in antwort["formate"]
         self._dateien.formate = ("word",) if self.word else ()
         logger.info("OneNote-Seiten: OneNote {}, Rückfall Word {}", self.onenote, self.word)
         return [schema()] if self.onenote or self.word else []
@@ -170,6 +173,8 @@ class OneNoteSeiten:
 
     async def _rueckfall(self, gefunden: dict, grund: str) -> dict:
         """Ohne OneNote: dieselbe Seite als Word-Datei in Dokumente\\WAIS (wie canvas_exportieren, Meldung an die Oberfläche inklusive)."""
+        if not dateien_an():
+            return {"status": "rejected", "summary": f"{grund} {DATEIEN_AUS}"}
         if not self.word:
             return {"status": "rejected", "summary": f"{grund} Eine Word-Datei als Ersatz geht an diesem PC auch nicht."}
         ergebnis = await self._dateien.exportieren("word", canvas_id=gefunden["id"], quelle=TEIL)

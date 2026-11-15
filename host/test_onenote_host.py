@@ -73,7 +73,8 @@ class Anfrage(_Basis):
         self.assertEqual(antwort["detail"], f"Seite: Angebot\nInhalt:\n> Angebot\n> • {GEHEIM}")
         self.assertEqual(antwort["ziel"], "OneNote, Notizbuch W.A.I.S. (wird neu angelegt), Abschnitt W.A.I.S (wird angelegt), "
                                           "OneDrive der Firma (anna@firma.example)")
-        self.assertEqual(antwort["gueltig_s"], host.FREIGABE_GUELTIG_SECS)
+        self.assertEqual(antwort["gueltig_s"], host.FREIGABE_GUELTIG_SECS)  # wie powershell und webseite (300 s)
+        self.assertNotIn("onenote", host.EINGABE_ARTEN)
         self.assertEqual(antwort["anlass"], "Niko will es in OneNote")
         eintrag = host.PENDING[antwort["approval_id"]]
         self.assertEqual((eintrag["art"], eintrag["ziel"], eintrag["seite"].titel), ("onenote", ZIEL, "Angebot"))

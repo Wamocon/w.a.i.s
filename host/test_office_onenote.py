@@ -8,6 +8,7 @@ diesen Abschnitt wieder. Fehlt das Notizbuch, überspringt er sich; er legt es n
 
 from __future__ import annotations
 
+import html
 import os
 import re
 import secrets
@@ -102,6 +103,13 @@ def test_firmenkonto_ist_das_einzige_onedrive_for_business():
     ([SCHULE], "firma.example", "kein OneDrive der Firma"),
     ([{**FIRMA, "ServiceEndpointUri": "https://boese.example/personal/x/_api"}], "", "kein OneDrive der Firma"),
     ([{**FIRMA, "UserEmail": "ohne-domaene"}], "", "kein OneDrive der Firma"),
+    ([{**FIRMA, "UserEmail": "anna" + chr(0x202E) + "@firma.example"}], "", "kein OneDrive der Firma"),
+    ([{**FIRMA, "UserEmail": "an" + chr(0x200B) + "na@firma.example"}], "", "kein OneDrive der Firma"),
+    ([{**FIRMA, "ServiceEndpointUri": "https://firma-my.sharepoint.com/personal/../_api"}], "", "kein OneDrive der Firma"),
+    ([{**FIRMA, "ServiceEndpointUri": "https://firma-my.sharepoint.com/personal/./_api"}], "", "kein OneDrive der Firma"),
+    ([{**FIRMA, "ServiceEndpointUri": "https://firma-my.sharepoint.de/personal/anna/_api"}], "", "kein OneDrive der Firma"),
+    ([{**FIRMA, "ServiceEndpointUri": "https://firma-my.sharepoint.com.boese.example/personal/a/_api"}], "", "kein OneDrive"),
+    ([{**FIRMA, "ServiceEndpointUri": "http://firma-my.sharepoint.com/personal/anna/_api"}], "", "kein OneDrive der Firma"),
 ])
 def test_kein_eindeutiges_firmenkonto_heisst_rueckfall(konten, domaenen, text):
     with pytest.raises(on.OneNoteFehler, match=text) as fehler:
@@ -213,6 +221,11 @@ def test_tabelle_mit_kopfzeile():
     assert [c.find(f".//{NS}T").text or "" for c in zeilen[2].findall(NS + "Cell")] == ["&lt;b&gt;", ""]
 
 
+def test_titel_ist_maskiert():
+    titel = ET.fromstring(on.seiten_xml(_seite({"art": "dokument", "titel": "Q&A <b>", "text": "x"}), SEITE_ID))
+    assert titel.find(f"{NS}Title/{NS}OE/{NS}T").text == "Q&amp;A &lt;b&gt;"
+
+
 def test_titel_aus_dem_canvas_oder_vom_modell():
     assert _seite({"art": "dokument", "titel": "Angebot", "text": "x"}).titel == "Angebot"
     assert _seite({"art": "dokument", "titel": "Angebot", "text": "x"}, "  Neuer\u200b Titel\n ").titel == "Neuer Titel"
@@ -240,8 +253,10 @@ def test_ziel_der_karte_nennt_notizbuch_abschnitt_und_konto():
     assert on.karten_ziel(ziel()) == "OneNote, Notizbuch W.A.I.S., Abschnitt W.A.I.S, OneDrive der Firma (anna@firma.example)"
     neu = on.karten_ziel(ziel("", ""))
     assert "Notizbuch W.A.I.S. (wird neu angelegt), Abschnitt W.A.I.S (wird angelegt)" in neu
-    lang = on.karten_ziel(on.Ziel("k" * 300, ADRESSE, "", "N" * 300, "W.A.I.S", ""))
-    assert len(lang) <= 200
+    lang = on.karten_ziel(on.Ziel("k" * 60 + "@firma.example", ADRESSE, "", "N" * 50, "A" * 50, ""))
+    assert len(lang) <= 200 and lang.endswith("…@firma.example)")  # gekürzt wird der Name vorn, die Domäne bleibt ganz
+    assert on.karten_ziel(on.Ziel("a@" + "d" * 46 + ".example", ADRESSE, "", "W.A.I.S.", "W.A.I.S", "")).endswith(
+        "@" + "d" * 46 + ".example)")
 
 
 # ---------- Ablauf mit einer Attrappe von OneNote ----------
@@ -391,7 +406,7 @@ def test_zeitgrenze_und_nur_ein_zugriff_zur_zeit():
     with pytest.raises(on.OneNoteFehler, match="nicht in der Zeit"):
         on.ziel_pruefen(konto=KONTO, fabrik=haengt, timeout=0.2)
     assert time.monotonic() - start < 2
-    with pytest.raises(on.OneNoteFehler, match="beschäftigt"):
+    with pytest.raises(on.OneNoteFehler, match="beschäftigt.*Dialog"):
         on.ziel_pruefen(konto=KONTO, fabrik=lambda: App(), timeout=0.2, warten=0.05)
     los.set()
     _warten_bis_frei()
@@ -542,11 +557,11 @@ def test_echtes_onenote_legt_seite_im_eigenen_test_abschnitt_an_und_raeumt_auf()
 
 
 def _echte_seiten(ziel_echt: on.Ziel, konto: on.Firmenkonto, name: str) -> None:
-    seite = on.seite_pruefen({"art": "dokument", "titel": "Prüfung W.A.I.S.", "text": f"# Kopf\n- eins\n{BOESE} **fett**"})
+    seite = on.seite_pruefen({"art": "dokument", "titel": TITEL_ECHT, "text": f"# Kopf\n- eins\n{BOESE} **fett**"})
     ergebnis = on.seite_anlegen(seite, ziel_echt, zeigen=False, konto=konto)
     assert ergebnis["abschnitt_neu"] is True and ergebnis["notizbuch_neu"] is False
     baum = ET.fromstring(_seite_lesen(ergebnis["seite_id"]))
-    assert baum.find(f"{NS}Title/{NS}OE/{NS}T").text.strip() == "Prüfung W.A.I.S."
+    assert html.unescape(baum.find(f"{NS}Title/{NS}OE/{NS}T").text.strip()) == TITEL_ECHT  # Titel bleibt Text, auch Q&A <b>
     alles = "".join(t.text or "" for t in baum.iter(NS + "T"))
     assert "&lt;a href=" in alles and "&lt;b&gt;fett&lt;/b&gt;" in alles and "eins" in alles
     assert baum.find(f".//{NS}Image") is None
@@ -562,6 +577,7 @@ def _seite_lesen(seiten_id: str) -> str:
     return on._im_faden(lambda app: app.GetPageContent(seiten_id, xsSchema=on.XS_2013), on.LESEN_TIMEOUT_SECS)
 
 
+TITEL_ECHT = "Prüfung Q&A <b> W.A.I.S."
 TABELLE_ECHT = {"art": "tabelle", "titel": "Tabelle", "spalten": ["Name", "Wert"], "zeilen": [["<b>", "=1+1"], ["ä", ""]]}
 CODE_ECHT = {"art": "code", "titel": "Code", "text": "def f():\n    return '<x>'", "sprache": "python"}
 
