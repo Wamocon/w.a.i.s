@@ -439,6 +439,42 @@ def test_mail_bauen_falsches_konto(outlook, tmp_path):
         oc.com_lauf(lambda app: oc.mail_bauen(app, mail(tmp_path, mit_anhang=False), "fremd@x.example", []))
 
 
+class TraegesKonto(Mail):
+    """Späte Bindung in pywin32: SendUsingAccount = ... wirkt manchmal nicht, nur der Aufruf über die DISPID 64209."""
+
+    def __init__(self, app, invoke_wirkt=True):
+        super().__init__(app)
+        self._konto, self.invokes = None, []
+        self._oleobj_ = SimpleNamespace(Invoke=self._invoke)
+        self._invoke_wirkt = invoke_wirkt
+
+    @property
+    def SendUsingAccount(self):  # noqa: N802
+        return self._konto
+
+    @SendUsingAccount.setter
+    def SendUsingAccount(self, wert):  # noqa: N802 (Zuweisung geht verloren)
+        pass
+
+    def _invoke(self, dispid, lcid, flags, ergebnis, wert):
+        self.invokes.append(dispid)
+        if self._invoke_wirkt:
+            self._konto = wert
+
+
+@pytest.mark.parametrize("invoke_wirkt", [True, False])
+def test_konto_wird_nachgeprueft_und_sonst_per_dispid_gesetzt(outlook, tmp_path, monkeypatch, invoke_wirkt):
+    items = []
+    monkeypatch.setattr(outlook, "CreateItem", lambda art: items.append(TraegesKonto(outlook, invoke_wirkt)) or items[-1])
+    m = mail(tmp_path, mit_anhang=False)
+    if invoke_wirkt:
+        item = oc.com_lauf(lambda app: oc.mail_bauen(app, m, KONTO, []))
+        assert item.SendUsingAccount.SmtpAddress == KONTO and item.invokes == [64209]
+    else:
+        with pytest.raises(oo.MailFehler, match="Konto"):
+            oc.com_lauf(lambda app: oc.mail_bauen(app, m, KONTO, []))
+
+
 # ---------- Versand mit 30 Sekunden zum Zurückholen ----------
 def test_versand_nach_der_frist():
     gesendet = []

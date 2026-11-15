@@ -196,8 +196,31 @@ def mail_bauen(app, mail: Mail, konto_smtp: str, pfade: list[Path]):
             raise MailFehler("Outlook löst eine Adresse anders auf als auf der Karte. Es ist nichts passiert.")
     for p in pfade:
         item.Attachments.Add(str(p))
-    item.SendUsingAccount = konto
+    _konto_setzen(item, konto)
     return item
+
+
+DISPID_SEND_USING_ACCOUNT = 64209
+
+
+def _konto_setzen(item, konto) -> None:
+    """Festes Konto setzen und nachprüfen. Bei später Bindung (pywin32 ohne makepy) geht die Zuweisung manchmal verloren; dann hilft
+    der Aufruf über die DISPID. Stimmt das Konto danach nicht, wird nichts gebaut (MailFehler)."""
+    soll = (adresse(str(konto.SmtpAddress or "")) or "").lower()
+
+    def stimmt() -> bool:
+        ist = item.SendUsingAccount
+        return ist is not None and (adresse(str(ist.SmtpAddress or "")) or "").lower() == soll
+
+    item.SendUsingAccount = konto
+    if stimmt():
+        return
+    try:
+        item._oleobj_.Invoke(DISPID_SEND_USING_ACCOUNT, 0, 8, 0, konto)  # 8: DISPATCH_PROPERTYPUTREF
+    except Exception:  # noqa: BLE001 (dann zählt nur die Prüfung)
+        pass
+    if not stimmt():
+        raise MailFehler("Das Outlook-Konto ließ sich für diese Mail nicht festlegen. Es ist nichts passiert.")
 
 
 def pruefwerte(item) -> dict:
