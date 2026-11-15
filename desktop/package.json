@@ -53,6 +53,7 @@
           "**/*.py",
           "pyproject.toml",
           "uv.lock",
+          "vorlagen/*.png",
           "!**/test_*.py",
           "!**/conftest.py",
           "!.venv/**",

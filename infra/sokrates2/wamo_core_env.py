@@ -92,6 +92,9 @@ ERLAUBT = set(PFLICHT) | {
     # /start und Offer je Profil und Minute
     "WAMO_LABOR_TEXT_ABSTAND_SECS", "WAMO_LABOR_TEXT_MAX_ZEICHEN", "WAMO_LABOR_SUCHEN_MAX", "WAMO_LABOR_ANFRAGEN_MAX",
     "WAMO_LABOR_KLICK_ABSTAND_SECS", "WAMO_LABOR_KLICK_MAX",
+    # Office-Dateien aus dem Canvas (voice-core/office_werkzeuge.py): Liste der Teile, in Paket 1 nur "dateien". Leer oder
+    # unbekannt heißt aus. Gilt nur für Admins, nie im Labor; am PC sperrt zusätzlich die Datei office.aus.
+    "WAMO_OFFICE",
 }
 ERLAUBT_PRAEFIX = ("WAMO_LLM_",)  # Anbieter-Fabrik (Phase P4)
 SCHLUESSEL_RE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
