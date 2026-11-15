@@ -1610,7 +1610,7 @@ class DokumentationTests(unittest.TestCase):
 
     def test_changelog_unter_hinzugefuegt(self):
         text = lies(REPO / "CHANGELOG.md")
-        offen = text.split("## [Unveröffentlicht]", 1)[1].split("\n## [", 1)[0]
+        offen = text.split("## [Unveröffentlicht]", 1)[1].split("\n## [0.1.0]", 1)[0]  # seit v0.1.0, auch nach einem Release
         hinzugefuegt = offen.split("### Hinzugefügt", 1)[1]
         eintrag = next((b for b in hinzugefuegt.split("\n- ") if b.startswith("Betrieb des Labor-Dienstes")), None)
         self.assertIsNotNone(eintrag, "Eintrag zum Betrieb des Labor-Dienstes fehlt unter Hinzugefügt")

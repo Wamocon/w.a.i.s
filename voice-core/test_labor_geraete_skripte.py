@@ -1903,7 +1903,7 @@ class DokumentationTests(unittest.TestCase):
 
     def test_changelog_unter_hinzugefuegt(self):
         text = lies(REPO / "CHANGELOG.md")
-        offen = text.split("## [Unveröffentlicht]", 1)[1].split("\n## [", 1)[0]
+        offen = text.split("## [Unveröffentlicht]", 1)[1].split("\n## [0.1.0]", 1)[0]  # seit v0.1.0, auch nach einem Release
         hinzugefuegt = offen.split("### Hinzugefügt", 1)[1]
         eintrag = next((b for b in hinzugefuegt.split("\n- ") if b.lstrip("- ").startswith("Betreuer-Geräte des Testlabors über den Gerätenamen")), None)
         self.assertIsNotNone(eintrag, "Eintrag zu den Betreuer-Geräten fehlt unter Hinzugefügt")
