@@ -2237,7 +2237,10 @@ class HausZugangTests(unittest.TestCase):
                 (ordner / f"{job}.json").write_text(json.dumps({"v": 1, "job": job, "bis": bis}), encoding="utf-8")
             (ordner / "fremd.txt").write_text("x", encoding="utf-8")
             (ordner / ("d" * 16 + ".json")).write_text("kaputt", encoding="utf-8")
-            self.assertEqual(D.haus_alte_dateien_loeschen(ordner, eigen, jetzt=jetzt), 1)
+            rest = ordner / f".{alt}.0123456789abcdef.tmp"
+            rest.write_text("{}", encoding="utf-8")
+            os.utime(rest, (jetzt - 7200, jetzt - 7200))
+            self.assertEqual(D.haus_alte_dateien_loeschen(ordner, eigen, jetzt=jetzt), 2)
             self.assertEqual(sorted(p.name for p in ordner.iterdir()),
                              sorted([f"{frisch}.json", f"{eigen}.json", "fremd.txt", "d" * 16 + ".json"]))
             self.assertEqual(D.haus_alte_dateien_loeschen(ordner / "fehlt", eigen), 0)

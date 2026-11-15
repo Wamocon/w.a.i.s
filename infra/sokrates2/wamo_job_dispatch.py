@@ -663,18 +663,23 @@ def _haus_datei_schreiben(ordner: Path, job: str, inhalt: bytes) -> None:
 
 def haus_alte_dateien_loeschen(ordner: Path, eigener_job: str, jetzt: float | None = None, hoechstens: int = 200) -> int:
     """Löscht abgelaufene Tokendateien (bis vor jetzt) früherer Läufe, etwa nach einem SIGKILL des Dispatchers. Nur Dateien der Form
-    <job>.json, nie die des laufenden Auftrags, höchstens hoechstens Dateien je Aufruf. Unlesbares bleibt liegen (der Proxy weist es ohnehin
-    ab). Liefert die Zahl der gelöschten Dateien; wirft nie."""
+    <job>.json, nie die des laufenden Auftrags, höchstens hoechstens Dateien je Aufruf; dazu liegengebliebene Temp-Dateien (.<job>.<hex>.tmp)
+    älter als eine Stunde. Unlesbares bleibt liegen (der Proxy weist es ohnehin ab). Liefert die Zahl der gelöschten Dateien; wirft nie."""
     jetzt = time.time() if jetzt is None else jetzt
     geloescht = 0
     try:
-        namen = sorted(os.listdir(ordner))[:hoechstens]
+        alle = sorted(os.listdir(ordner))
     except OSError:
         return 0
+    for name in [n for n in alle if n.startswith(".") and n.endswith(".tmp")][:hoechstens]:
+        try:
+            if os.lstat(ordner / name).st_mtime < jetzt - 3600:
+                os.unlink(ordner / name)
+                geloescht += 1
+        except OSError:
+            pass
+    namen = [n for n in alle if n.endswith(".json") and JOB_RE.fullmatch(n[:-5]) and n[:-5] != eigener_job][:hoechstens]
     for name in namen:
-        job = name[:-5] if name.endswith(".json") else ""
-        if not JOB_RE.fullmatch(job) or job == eigener_job:
-            continue
         inhalt = read_no_follow(ordner / name, 4096)
         try:
             bis = json.loads(inhalt or "").get("bis")
@@ -714,6 +719,7 @@ def haus_tokendatei(job: str, token: str, profil: str, max_token: int, zeitlimit
         _signale_zulassen(maske)
         raise HausNichtBereit(f"die Tokendatei für den Proxy lässt sich nicht schreiben ({type(e).__name__})") from None
     except BaseException:
+        _haus_datei_loeschen(ordner, job)  # auch nach einem Abbruch zwischen os.replace und hier bleibt keine Datei stehen
         _signale_zulassen(maske)
         raise
     try:
