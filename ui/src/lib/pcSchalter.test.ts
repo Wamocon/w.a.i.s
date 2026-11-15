@@ -79,6 +79,14 @@ test("Admin: die Rolle vom Kern gilt zuerst, ohne Sitzung die gemerkte; Laborkon
   assert.equal(pcAdmin({ rolleKern: "admin", rolleGemerkt: "admin", laborKonto: true }), false);
 });
 
+test("Mitglied: nur mit der Stufe mitglied vom Kern in der laufenden Sitzung, Laborkonten nie", () => {
+  assert.equal(pcAdmin({ rolleKern: "mitglied", rolleGemerkt: null, laborKonto: false, pcStufeKern: "mitglied" }), true);
+  assert.equal(pcAdmin({ rolleKern: "mitglied", rolleGemerkt: null, laborKonto: false, pcStufeKern: null }), false);
+  assert.equal(pcAdmin({ rolleKern: "mitglied", rolleGemerkt: "mitglied", laborKonto: false }), false);
+  assert.equal(pcAdmin({ rolleKern: "mitglied", rolleGemerkt: null, laborKonto: true, pcStufeKern: "mitglied" }), false);
+  assert.equal(pcAdmin({ rolleKern: "admin", rolleGemerkt: null, laborKonto: false, pcStufeKern: null }), true);
+});
+
 const lage = (p: Partial<Parameters<typeof schalterAnzeige>[0]> = {}): Parameters<typeof schalterAnzeige>[0] => ({
   admin: true,
   presence: "offline",
@@ -244,4 +252,14 @@ test("Browser ohne Sitzung: der Hinweis sagt, dass ein stiller Start eine laufen
   assert.ok(HINWEIS_OHNE_SITZUNG_FERN.startsWith(HINWEIS_OHNE_SITZUNG));
   assert.match(HINWEIS_OHNE_SITZUNG_FERN, /anderen Gerät/);
   assert.match(HINWEIS_OHNE_SITZUNG_FERN, /endet/);
+});
+
+test("betrieb.pc_stufe: nur admin oder mitglied, alles andere fehlt", async () => {
+  const { parseServerMessage } = await import("./nachrichten.ts");
+  const mit = parseServerMessage({ type: "betrieb", modus: "buero", pc: "verbunden", pc_stufe: "mitglied" });
+  assert.ok(mit && mit.type === "betrieb" && mit.pcStufe === "mitglied");
+  for (const kaputt of ["root", "", 1, null, undefined]) {
+    const b = parseServerMessage({ type: "betrieb", modus: "buero", pc: "verbunden", pc_stufe: kaputt });
+    assert.ok(b && b.type === "betrieb" && b.pcStufe === undefined);
+  }
 });

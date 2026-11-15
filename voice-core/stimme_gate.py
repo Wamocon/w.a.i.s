@@ -13,7 +13,8 @@ vor dem Ausführen das Gate (werkzeuge_absichern, schemas_absichern): geprüft w
 
 Modi (WAMO_STIMME_PRUEFUNG): aus | beobachten (messen, melden, ins Log schreiben, nichts sperren) | streng (Standard). Alles wirkt nur für ein
 Profil mit eingelerntem Abdruck: ohne Abdruck wird nicht geprüft und nichts gesperrt (status fehlt), die Einwilligung ist freiwillig und
-ihr Fehlen ohne Nachteil. Streng sperrt Werkzeuge außerdem, solange für ein Profil mit Abdruck oder bei unbekanntem Stand (Datenbank nicht
+ihr Fehlen ohne Nachteil. Ausnahme (Entscheidung N10, Plan docs/ausrollen-neue-nutzer.md 4.5): PC-Werkzeuge der Mitglieder fragen zusätzlich
+die Pflichtstufe (pflicht_pruefen), unabhängig vom Modus; ohne Abdruck nehmen sie nur getippte Befehle an. Streng sperrt Werkzeuge außerdem, solange für ein Profil mit Abdruck oder bei unbekanntem Stand (Datenbank nicht
 lesbar) Modell oder Abdruck nicht geladen sind oder die Prüfung länger als WARTEN_WERKZEUG_SECS dauert; getippter Text geht immer.
 
 Schwellen (alle als Schalter in der Umgebung, siehe schwellen_aus_env): WAMO_STIMME_EIGEN_MIN (ab hier die eigene Stimme, 0,5),
@@ -110,6 +111,7 @@ class StimmGate:
     _nur_kurz: bool = False  # seither kamen nur kurze Äußerungen, die nach der Person klangen
     _geloescht: bool = False  # die Person hat ihren Abdruck in dieser Sitzung gelöscht (setze_abdruck mit geloescht)
     _getippt_um: float = -math.inf
+    _gesprochen_um: float = -math.inf  # Ende der letzten gesprochenen Äußerung (stimme_pruefer.py), auch ohne Abdruck und im Modus aus
     _ausstehend: asyncio.Task | None = field(default=None, repr=False)
 
     @classmethod
@@ -179,6 +181,44 @@ class StimmGate:
         self._wer = GETIPPT
         self._um = self._getippt_um = self.uhr()
         self._nur_kurz = False
+
+    def gesprochen(self) -> None:
+        """Eine gesprochene Äußerung ist zu Ende (stimme_pruefer.py, in jedem Modus und auch ohne Abdruck). Zählt nur für die Pflichtstufe:
+        Wer nach dem Tippen spricht, gilt dort nicht mehr als getippt."""
+        self._gesprochen_um = self.uhr()
+
+    def pflicht_grund(self) -> str | None:
+        """Pflichtstufe für PC-Befehle der Mitglieder (rechte.stimme_pflicht, Entscheidung N10), unabhängig vom Modus: Sprache nur mit
+        eingelerntem Abdruck und bereiter Prüfung (dann dieselbe Regel wie grund_der_stimme), sonst nur getippter Text, und nur, solange seit
+        dem Tippen niemand gesprochen hat. None heißt erlaubt, sonst der Grund. Ohne Abdruck, im Modus aus oder solange die Prüfung nicht
+        bereit ist, gehen PC-Befehle eines Mitglieds also nur getippt."""
+        if self._ausstehend is not None and not self._ausstehend.done():
+            return "Stimmprüfung dauert zu lange"
+        if self.status == "bereit":
+            return self.grund_der_stimme()
+        if self._wer == GETIPPT and self._getippt_um >= self._gesprochen_um:
+            return self.grund_der_stimme()  # getippt gilt so lange wie eine erkannte Stimme (vertrauen_secs)
+        if self.modus == "aus":
+            return "Stimmprüfung ist aus, PC-Befehle nur getippt"
+        if self.zustand == "fehlt":
+            return "kein Stimmabdruck eingelernt, PC-Befehle nur getippt"
+        return "Stimmprüfung nicht bereit, PC-Befehle nur getippt"
+
+    async def pflicht_pruefen(self, werkzeug: str) -> dict | None:
+        """Vor jedem PC-Werkzeug eines Mitglieds (pc_mitglied.py), in jedem Modus, auch aus und beobachten: None = ausführen, sonst das
+        Ergebnis für das Modell."""
+        if self._ausstehend and not self._ausstehend.done():
+            await asyncio.wait({self._ausstehend}, timeout=WARTEN_WERKZEUG_SECS)
+        grund = self.pflicht_grund()
+        if grund is None:
+            return None
+        logger.warning("Stimmprüfung (Pflicht für Mitglieder): {} gesperrt ({})", werkzeug, grund)
+        return {
+            "status": "blocked",
+            "grund": f"Stimmabdruck: {grund}",
+            "hinweis": "PC-Befehle per Sprache gehen für dieses Profil nur mit eingelerntem Stimmabdruck und sicher erkannter Stimme. "
+                       "Sonst den Befehl in der Oberfläche tippen. Nicht erneut versuchen.",
+        }
 
     def grund_der_stimme(self) -> str | None:
         """None, wenn zuletzt die Person sprach oder tippte, sonst warum nicht."""

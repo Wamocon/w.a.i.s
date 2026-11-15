@@ -215,6 +215,17 @@ class EntwicklungsSchalterNieUebertragenTest(unittest.TestCase):
                      "WAMO_ENTWICKLUNG_KOSTEN_TAG_USD", "WAMO_ENTWICKLUNG_BEFEHLE_BUERO", "WAMO_ENTWICKLUNG_ORT"):
             self.assertFalse(env.erlaubt(name), name)
 
+    def test_freischaltung_der_mitglieder_nur_vom_server(self):
+        """Paket P4: WAMO_PC_MITGLIEDER_PROFILE setzt nur wamo-core-env am Server, nie die .env eines PCs; der alte kernweite Schalter
+        WAMO_PC_MITGLIEDER steht in keiner der beiden Listen."""
+        wurzel = Path(__file__).resolve().parent.parent
+        env = self._laden("wamo_core_env_probe3", wurzel / "infra" / "sokrates2" / "wamo_core_env.py")
+        skript = self._laden("wamo_kern_sokrates2_probe2", wurzel / "scripts" / "wamo_kern_sokrates2.py")
+        self.assertTrue(env.erlaubt("WAMO_PC_MITGLIEDER_PROFILE"))
+        self.assertNotIn("WAMO_PC_MITGLIEDER_PROFILE", skript.AUS_ENV)
+        self.assertFalse(env.erlaubt("WAMO_PC_MITGLIEDER"))
+        self.assertNotIn("WAMO_PC_MITGLIEDER", skript.AUS_ENV)
+
     def test_aus_env_des_pc_skripts_enthaelt_keinen_entwicklungsschalter(self):
         skript = self._laden("wamo_kern_sokrates2_probe", Path(__file__).resolve().parent.parent / "scripts" / "wamo_kern_sokrates2.py")
         self.assertFalse([n for n in skript.AUS_ENV if n.startswith("WAMO_ENTWICKLUNG")])

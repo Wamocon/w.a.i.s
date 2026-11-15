@@ -910,8 +910,15 @@ ssh sokrates2 "cd ~/wamo-infra && sudo PYTHONDONTWRITEBYTECODE=1 WAMO_INFRA=\$HO
    lauscht, bevor ein Byte gesendet wird. Jede Anfrage trägt `X-WAMO-Geraet` und `X-WAMO-Profil` (der Host prüft sie gegen
    `geraet.json`). Der Rechnername des Hosts muss zum Register passen, sonst keine Werkzeuge. Alle 60 s (erste Prüfung nach
    15 s) prüft eine Wache, ob das Gerät noch aktiv ist; gesperrt, widerrufen oder drei Ausfälle des Registers beenden die
-   PC-Steuerung der Sitzung. Mitglieder bekommen Werkzeuge nur mit `WAMO_PC_MITGLIEDER=an` (Standard aus; vor der
-   Einwilligung für Bildschirmfotos und den Rechten auf dem eigenen Laptop nicht setzen). Ablehnungen stehen mit Präfix
+   PC-Steuerung der Sitzung. Mitglieder bekommen Werkzeuge nur mit ihrer `user_id` in `WAMO_PC_MITGLIEDER_PROFILE`
+   (Freischaltung je Person, durch Komma getrennt, Standard leer; `voice-core/rechte.py`, Paket P4 aus
+   `docs/ausrollen-neue-nutzer.md`), und zwar nur `LLM_TOOLS_MITGLIED` (ohne PowerShell, Git, GitHub, Bildschirm, Live-Bild und
+   Office), gesprochene Befehle nur mit eingelerntem Stimmabdruck (sonst nur getippt) und nach Fremdinhalt im Zug auch für
+   ändernde Werkzeuge mit Freigabekarte (`voice-core/pc_mitglied.py`). Laborprofile nie. Setzen nur über
+   `printf 'WAMO_PC_MITGLIEDER_PROFILE=%s\n' '<user_id>[,<user_id>]' | sudo /usr/local/sbin/wamo-core-env setzen` (Werte nur über
+   stdin), wirksam mit dem nächsten Kern-Release; Notaus je Person: Gerät in der Geräteverwaltung sperren, dann die Liste ohne die
+   Person setzen (oder `sudo /usr/local/sbin/wamo-core-env loeschen WAMO_PC_MITGLIEDER_PROFILE` für alle) und Kern-Release. Der frühere kernweite Schalter
+   `WAMO_PC_MITGLIEDER` wirkt nicht mehr. Ablehnungen stehen mit Präfix
    `WAMO-GERAET` im Journal. Umstellen: erst Rauchtest, dann in der Unit `WAMO_PC_REGISTER=an`, `daemon-reload`, Neustart
    des Kerns (nur wenn laut Journal keine Sitzung läuft); zurück mit `aus`.
 
