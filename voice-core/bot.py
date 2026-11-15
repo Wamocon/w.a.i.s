@@ -180,6 +180,8 @@ import labor_werkzeuge
 import office_werkzeuge
 import onenote_werkzeuge
 from pc_freigaben import PcFreigaben
+import pc_nachverbinden
+from pc_nachverbinden import PcNachholer, nachholen_moeglich
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
 from screen import PC_OFF, foto as screen_foto, register_screen_tools
 from sitzungen import Sitzung, Sitzungen
@@ -625,6 +627,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # (WAMO_PC_REGISTER=an): die Sitzung bekommt nur IHREN Laptop aus dem Geräteregister, sonst keine (pc_geraet.py).
     geraet_zugang = await pc_zugang(identity) if register_modus() and not labor_sitzung else None
     pc_enabled = False if labor_sitzung else (geraet_zugang is not None if register_modus() else pc_host_fuer(identity))
+    # Steht der Tunnel beim Start noch nicht (App-Start, stiller Start, Neuaufbau), holt die Sitzung den Zugang nach (pc_nachverbinden.py):
+    # nur Admin mit aktivem Gerät im Register, nie im Labor. Bis dahin gibt es keinen Client und keine PC-Werkzeuge.
+    pc_nachholen = False if labor_sitzung else await nachholen_moeglich(identity, zugang_da=geraet_zugang is not None)
     entwicklung = is_admin and entwicklung_enabled()
     # Fernzugriff auf die Sparks (rd_api): WAMO kennt ihn und kann den Dialog öffnen, nur für Admins und nur bei eingeschaltetem Schalter
     from rd_api import aktiv as rd_aktiv
@@ -642,12 +647,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     if labor_sitzung:  # Entwicklungsgate am labor_art (labor.entwicklung_arten): Fernzugriff nie, Entwicklung bis zur Verdrahtung nie
         entwicklung, fernzugriff, ent_grund = False, False, "Entwicklungsaufträge gibt es im Labor nicht"
     # PC-Steuerung je Sitzung standardmäßig aus; nur ein Admin schaltet sie in der UI ein.
-    state: dict = {"pc": "verbindet" if pc_enabled else "aus", "pc_latenz_ms": None, "pc_steuerung": False,
+    state: dict = {"pc": "verbindet" if (pc_enabled or pc_nachholen) else "aus", "pc_latenz_ms": None, "pc_steuerung": False,
                    "client_ready": False, "live": True, "cleaned": False, "guard": None,
                    "pc_weg": False, "pc_tools": False, "pc_waechter": None, "geraet_wache": None, "labor_wache": None,  # pc_weg: Hinweis im Prompt
                    "stimme_laden": None,  # Hintergrundaufgabe: Abdruck laden (stimme_sitzung.laden_bis_bekannt)
                    "geraet_ok": geraet_zugang is None, "geraet_entzogen": False,  # Tunnel je Gerät: erst nach dem Namensabgleich, nie nach einem Entzug
-                   "pc_name": None, "pc_belegt": False,
+                   "pc_name": None, "pc_belegt": False, "pc_nachholen": None, "pc_klick": 0,  # pc_nachholen: Hintergrund des Nachholers
                    "pc_gesperrt": False, "sperr_probe": None}  # Bildschirm am PC gesperrt (Host: status=locked)
     # Kennung dieser Sitzung für die PC-Sperre (Sitzung.pc_lease_nehmen) und ihre Ablösung (sitzungen.py)
     sitzung = sitzung or Sitzung(identity.user_id)
@@ -749,6 +754,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
 
     # PC-Werkzeuge nur für admin; im Hintergrund dazuholen (lokal per stdio, im Büro über den Tunnel).
     pc_client = host_client(geraet_zugang) if pc_enabled else None
+    # Teile, die den PC nur über lambda: pc_client erreichen, entstehen auch, wenn der Zugang erst nachgeholt wird. Ohne Client und ohne
+    # Schemas (die bringt erst attach_pc_tools) bleiben sie wirkungslos, wie bei ausgeschalteter PC-Steuerung.
+    pc_teile = pc_client is not None or pc_nachholen
 
     def pc_allowed() -> bool:
         # Abgelöst oder Sperre verloren (Büro): sofort keine PC-Aktionen mehr, auch vor dem Trennen
@@ -758,13 +766,13 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # Bildschirm sehen und klicken: Das Bild geht an das Bildmodell, deshalb nur für admin, bis die Einwilligung der
     # Mitglieder geregelt ist (Bauplan S6)
     screen_schemas = (register_screen_tools(llm, lambda: pc_client, pc_allowed, turn.taint, zugang=zugang)
-                      if pc_client and is_admin else [])
+                      if pc_teile and is_admin else [])
 
     # Office-Dateien aus dem Canvas (office_werkzeuge.py): nur admin mit PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=dateien.
     # Das Werkzeug läuft durch das Stimmabdruck-Gate (registriert nach werkzeuge_absichern); sein Schema kommt erst dazu, wenn der Host
     # meldet, welche Formate gehen (attach_pc_tools). Speichern und Öffnen nur mit PC-Steuerung und gehaltener Sperre (pc_allowed).
     office = (office_werkzeuge.OfficeDateien(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d))
-              if (pc_client is not None and is_admin and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
+              if (pc_teile and is_admin and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
     if office is not None:
         office.register(llm)
     # OneNote-Seite aus dem Canvas (onenote_werkzeuge.py): dieselben Bedingungen, aber WAMO_OFFICE=onenote. Die Seite entsteht erst nach dem
@@ -772,7 +780,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # Der Klick "Als OneNote-Seite" bekommt seine Karte über die PC-Freigaben (freigaben steht weiter unten, gilt beim Klick längst).
     onenote = (onenote_werkzeuge.OneNoteSeiten(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
                                                karte=lambda a: freigaben.anfrage(a) if freigaben is not None else None)
-               if (pc_client is not None and is_admin and not labor_sitzung and onenote_werkzeuge.fuer_sitzung(identity)) else None)
+               if (pc_teile and is_admin and not labor_sitzung and onenote_werkzeuge.fuer_sitzung(identity)) else None)
     if onenote is not None:
         onenote.register(llm)
 
@@ -787,7 +795,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     boss = None if labor_sitzung else Boss(
         zugang, senden=lambda d: send(d), melden=lambda t: melde_llm(t), fremdinhalt=turn.taint,
         gefaerbt=lambda: turn.tainted, auftraggeber=identity.name, canvas=lambda item: canvas_legen(item),
-        bild_quelle=bildschirm_foto if (pc_client and is_admin) else None, vorgaenge=vorgaenge)
+        bild_quelle=bildschirm_foto if (pc_teile and is_admin) else None, vorgaenge=vorgaenge)
     if boss is not None:
         boss.register(llm)
         standard_tools += boss.schemas()
@@ -1010,7 +1018,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         senden=send, ansage=ansage, aufruf=call_host_tool,
         # Fernanfrage vom Handy: Token dieser Sitzung mit frischem Code des zweiten Faktors (bild_fern.py)
         fern_pruefen=bild_fern.pruefer(identity.user_id, zugangstor),
-    ) if (pc_client is not None and is_admin and geraet_zugang is not None) else None
+    ) if (pc_teile and is_admin and (geraet_zugang is not None or pc_nachholen)) else None
 
     async def set_sperre(gesperrt: bool) -> None:
         """Bildschirm am PC gesperrt oder entsperrt (Werkzeugergebnis, Tunnel-Probe, system_info)."""
@@ -1049,7 +1057,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         Lichtrahmen. Ohne PC-Werkzeuge gibt es keinen Rahmen."""
         return (geraet_zugang.geraet.kennung if geraet_zugang is not None else None), state["pc_name"]
 
-    if pc_client is not None:
+    if pc_teile:
         aktivitaet.markierung_von = markierung_von
 
     async def melde_llm(text: str) -> None:
@@ -1063,7 +1071,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         memory, client=lambda: pc_client, melden=melde_llm, fremdinhalt=turn.taint, senden=send, von=identity.name,
         darf=lambda: darf_pc_freigeben(identity, pc_enabled, bool(state["pc_steuerung"]), sitzung.pc_lease_haelt()),
         pc_name=lambda: state["pc_name"], markierung_von=markierung_von,
-    ) if pc_client else None
+    ) if pc_teile else None
     if freigaben is not None and is_admin:  # Mitglieder können nichts freigeben: keine Karte, die ins Leere läuft
         aktivitaet.on_freigabe = freigaben.anfrage
 
@@ -1232,8 +1240,45 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         if state["live"]:
             await vorwaermen(llm, context.tools)
 
+    async def pc_nachholen_versuch() -> bool:
+        """Ein Versuch, den Zugang zum eigenen Laptop nachzuholen (pc_nachverbinden.py): derselbe Weg wie beim Start, keine Prüfung
+        lockerer. True, sobald Zugang und Client stehen; ob der Host antwortet und der Rechnername passt, entscheidet start_pc."""
+        nonlocal geraet_zugang, pc_client, pc_enabled
+        if pc_client is not None:
+            return True
+        geraet_neu = await pc_zugang(identity)
+        if geraet_neu is None or not state["live"] or state["geraet_entzogen"]:
+            return False
+        client = host_client(geraet_neu)
+        if client is None:
+            return False
+        state["geraet_ok"] = False  # erst nach dem Namensabgleich in attach_pc_tools
+        geraet_zugang, pc_client, pc_enabled = geraet_neu, client, True
+        sitzung.geraet_id = geraet_neu.geraet.device_id  # die PC-Sperre gilt je Gerät
+        logger.info("WAMO-GERAET Zugang zu Gerät {} nach dem Sitzungsstart nachgeholt", geraet_neu.geraet.kennung)
+        if state["live"]:
+            await refresh_prompt()  # PC-Werkzeuge im Prompt (prompt_for liest pc_enabled)
+        await start_pc()
+        return True
+
+    async def pc_nachholen_ende() -> None:
+        """Die Zeit des Hintergrunds ist um, ohne Zugang: die Oberfläche zeigt "nicht erreichbar" statt weiter "verbindet"."""
+        if state["live"] and pc_client is None:
+            await set_pc("getrennt")
+
+    async def pc_nicht_nachgeholt() -> None:
+        """Der Klick auf "an" fand den Laptop nicht (Tunnel steht noch nicht): "getrennt" und ein kurzer Satz statt still "aus"."""
+        await set_pc("getrennt")
+        if nachholer is not None and nachholer.hinweis_faellig():
+            await ansage(pc_nachverbinden.HINWEIS_NICHT_VERBUNDEN)
+
+    nachholer = (PcNachholer(pc_nachholen_versuch, aktiv=lambda: bool(state["live"] and not state["geraet_entzogen"]))
+                 if pc_nachholen else None)
+
     if pc_client:
         _keep(asyncio.create_task(start_pc()))
+    elif nachholer is not None:
+        state["pc_nachholen"] = _keep(asyncio.create_task(nachholer.hintergrund(pc_nachholen_ende)))
 
     @task.rtvi.event_handler("on_client_ready")
     async def on_client_ready(_rtvi):
@@ -1266,6 +1311,14 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         elif msg.type == "pc_steuerung":
             # Nur ein Admin mit eingerichtetem PC-Host darf einschalten; ausschalten geht immer.
             # Im Büro steuert höchstens eine Sitzung den PC (pc_host.pc_lease_nehmen); eine abgelöste nie wieder.
+            # Tunnel je Gerät ohne Zugang beim Start: "an" holt ihn zuerst nach (pc_nachverbinden.py); scheitert das, sagt die Sitzung es.
+            state["pc_klick"] += 1
+            klick = state["pc_klick"]
+            nicht_nachgeholt = False
+            if data.get("an") is True and nachholer is not None and not pc_enabled:
+                nicht_nachgeholt = not await nachholer.versuchen()
+                if klick != state["pc_klick"] or not state["live"]:
+                    return  # inzwischen kam ein neuerer Klick (er entscheidet), oder die Sitzung ist zu Ende
             an = bool(data.get("an") is True and pc_enabled and state["geraet_ok"])
             state["pc_belegt"] = an and not sitzung.pc_lease_nehmen()
             if state["pc_belegt"] or not an:
@@ -1275,6 +1328,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             if not an and bild is not None:
                 await bild.stoppen("Die PC-Steuerung ist aus. Das Live-Bild ist beendet.")
             logger.info("PC-Steuerung {}{}", "an" if an else "aus", " (andere Sitzung steuert)" if state["pc_belegt"] else "")
+            if nicht_nachgeholt:
+                await pc_nicht_nachgeholt()
             await send_betrieb()
         elif msg.type == "bildstrom":
             # Live-Bild: ohne Admin, gebundenes Gerät und PC-Steuerung gibt es nichts (Bilder sendet nur bildstrom.py)
@@ -1487,7 +1542,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         guard_task = state["guard"]
         if guard_task is not None and guard_task is not asyncio.current_task():
             guard_task.cancel()
-        for name in ("pc_waechter", "sperr_probe", "geraet_wache", "labor_wache", "stimme_laden"):
+        for name in ("pc_waechter", "sperr_probe", "geraet_wache", "labor_wache", "stimme_laden", "pc_nachholen"):
             hintergrund = state[name]
             if hintergrund is not None and hintergrund is not asyncio.current_task():
                 hintergrund.cancel()
