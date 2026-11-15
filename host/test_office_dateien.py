@@ -219,11 +219,111 @@ def test_text_mit_links_bleibt_text():
     {"art": "tabelle", "titel": "x", "spalten": [], "zeilen": [["a"]]},
     {"art": "tabelle", "titel": "x", "spalten": ["a"], "zeilen": "a"},
     {"art": "tabelle", "titel": "x", "spalten": ["a"], "zeilen": [[1]]},
-    {"art": "code", "titel": "x", "text": "y", "sprache": "py; rm"},
 ])
 def test_ungueltige_inhalte(roh):
     with pytest.raises(od.InhaltFehler):
         od.pruefen(roh)
+
+
+@pytest.mark.parametrize("sprache,erwartet", [
+    ("py; rm", "pyrm"), ("Python 3", "python3"), ("c#", "c#"), ("objective-c++", "objective-c++"),
+    ("x" * 40, "x" * 20), ("```js\n# Kopf", "js#kopf"), (5, ""), (None, ""), ("", ""),
+])
+def test_unzulaessige_code_sprache_wird_bereinigt(sprache, erwartet):
+    """Die Sprache kommt vom Modell: nicht ablehnen, sondern auf erlaubte Zeichen kürzen; ein Zaun in Markdown bleibt dicht."""
+    inhalt = od.pruefen({"art": "code", "titel": "x", "text": "y = 1", "sprache": sprache})
+    assert inhalt.sprache == erwartet
+    md = od.erzeugen(inhalt, "markdown").decode()
+    assert md.splitlines()[0] == "```" + erwartet and md.count("```") == 2
+
+
+def test_word_und_powerpoint_mit_aktuellem_erstellungsdatum():
+    from datetime import datetime, timedelta, timezone
+
+    jetzt = datetime.now(timezone.utc).replace(tzinfo=None)
+    for eig in (Document(io.BytesIO(_bauen(DOKUMENT, "word"))).core_properties,
+                Presentation(io.BytesIO(_bauen(DOKUMENT, "powerpoint"))).core_properties):
+        for wert in (eig.created, eig.modified):
+            wert = wert.astimezone(timezone.utc).replace(tzinfo=None) if wert.tzinfo else wert
+            assert abs(wert - jetzt) < timedelta(minutes=5), wert  # nicht das Datum der Bibliotheksvorlage (2013)
+
+
+@pytest.mark.parametrize("zeichen", [0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x061C, 0x00AD, 0x180E, 0xD800, 0xDBFF, 0xDFFF])
+def test_unsichtbare_zeichen_im_titel_fallen_weg(zeichen):
+    assert od.pruefen({"art": "dokument", "titel": "Ange" + chr(zeichen) + "bot", "text": "a"}).titel == "Angebot"
+
+
+def test_zeile_mit_mehr_werten_als_spalten_wird_gemeldet():
+    roh = {"art": "tabelle", "titel": "x", "spalten": ["a", "b"], "zeilen": [["1", "2"], ["1", "2", "verloren"]]}
+    with pytest.raises(od.InhaltFehler, match="Zeile 2"):
+        od.pruefen(roh)
+
+
+def test_excel_druckkopf_titel_gekuerzt():
+    roh = {"art": "tabelle", "titel": "&" * 60 + "x" * 140, "spalten": ["a"], "zeilen": [["1"]]}
+    ws = load_workbook(io.BytesIO(_bauen(roh, "excel"))).active
+    mitte = ws.oddHeader.center.text
+    assert len(mitte) <= od.KOPF_TITEL_MAX
+    assert mitte.replace("&&", "").count("&") == 0  # kein halbes && am Schnitt
+    assert len(ws.oddHeader.left.text or "") + len(mitte) < 255
+
+
+def test_powerpoint_tabelle_mit_mehr_als_12_spalten_abgelehnt():
+    breit = {"art": "tabelle", "titel": "breit", "spalten": [f"S{i}" for i in range(13)], "zeilen": [["x"] * 13]}
+    with pytest.raises(od.InhaltFehler, match="Excel"):
+        od.passt(od.pruefen(breit), "powerpoint")
+    for fmt in ("excel", "word", "csv", "markdown"):
+        od.passt(od.pruefen(breit), fmt)
+    zwoelf = {**breit, "spalten": breit["spalten"][:12], "zeilen": [["x"] * 12]}
+    assert _bauen(zwoelf, "powerpoint").startswith(b"PK")
+
+
+# ---------- Laufzeit begrenzen ----------
+def _code(zeilen: int) -> dict:
+    return {"art": "code", "titel": "c", "text": "\n".join("x" for _ in range(zeilen))}
+
+
+def _punkte(zeilen: int) -> dict:
+    return {"art": "dokument", "titel": "d", "text": "\n".join("- p" for _ in range(zeilen))}
+
+
+def _tabelle(zeilen: int, spalten: int) -> dict:
+    return {"art": "tabelle", "titel": "t", "spalten": [f"S{i}" for i in range(spalten)], "zeilen": [["x"] * spalten] * zeilen}
+
+
+@pytest.mark.parametrize("fmt", ["word", "pdf"])
+@pytest.mark.parametrize("roh", [_code(od.ABSAETZE_MAX + 1), _punkte(od.ABSAETZE_MAX + 1)], ids=["code", "punkte"])
+def test_zu_viele_absaetze_fuer_word(roh, fmt):
+    with pytest.raises(od.InhaltFehler, match="Markdown"):
+        od.passt(od.pruefen(roh), fmt)
+    od.passt(od.pruefen(roh), "markdown")
+
+
+@pytest.mark.parametrize("fmt", ["word", "pdf", "powerpoint"])
+def test_zu_viele_zellen_je_format(fmt):
+    spalten = 12 if fmt == "powerpoint" else od.SPALTEN_MAX
+    zeilen = od.ZELLEN_MAX[fmt] // spalten + 1
+    with pytest.raises(od.InhaltFehler, match="Excel"):
+        od.passt(od.pruefen(_tabelle(zeilen, spalten)), fmt)
+
+
+@pytest.mark.parametrize("fmt,roh", [
+    ("word", _code(od.ABSAETZE_MAX)),
+    ("word", _punkte(od.ABSAETZE_MAX)),
+    ("word", _tabelle(od.ZELLEN_MAX["word"] // od.SPALTEN_MAX, od.SPALTEN_MAX)),
+    ("powerpoint", _tabelle(od.ZELLEN_MAX["powerpoint"] // 12, 12)),
+    ("powerpoint", _code(od.ABSAETZE_MAX)),
+    ("excel", _tabelle(od.ZEILEN_MAX, od.SPALTEN_MAX)),
+], ids=["word-code", "word-punkte", "word-tabelle", "pptx-tabelle", "pptx-code", "excel-tabelle"])
+def test_bau_an_der_grenze_bleibt_unter_20_sekunden(fmt, roh):
+    import time
+
+    inhalt = od.pruefen(roh)
+    od.passt(inhalt, fmt)
+    start = time.perf_counter()
+    daten = od.erzeugen(inhalt, fmt)
+    assert time.perf_counter() - start < 20, fmt
+    assert len(daten) < od.DATEI_MAX
 
 
 def test_grenzen():
