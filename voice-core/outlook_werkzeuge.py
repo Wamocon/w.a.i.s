@@ -94,6 +94,17 @@ def schema(formate: tuple[str, ...]) -> FunctionSchema:
     )
 
 
+def _als_liste(wert: object) -> list[str] | None:
+    """Empfänger vom Modell: eine Liste aus Texten oder ein Text mit Komma oder Semikolon (wird geteilt); sonst None."""
+    if wert is None:
+        return []
+    if isinstance(wert, str):
+        return [t.strip() for t in re.split(r"[,;]", wert) if t.strip()]
+    if isinstance(wert, list) and all(isinstance(w, str) for w in wert):
+        return list(wert)
+    return None
+
+
 def _textliste(wert: object) -> list[str] | None:
     if wert is None:
         return []
@@ -190,6 +201,9 @@ class OutlookMail:
             return {"status": "error", "summary": "Kein Zugriff auf den PC."}
         if not self.verfuegbar:
             return {"status": "rejected", "summary": "Mail über Outlook geht an diesem PC nicht."}
+        an_liste, cc_liste = _als_liste(an), _als_liste(cc)
+        if not an_liste or cc_liste is None:
+            return {"status": "rejected", "summary": "Empfänger fehlen oder sind ungültig: bitte Adressen oder Namen als Liste angeben."}
         kennungen: list[str] = []
         if anhang not in (None, "", "keiner", "ohne"):
             if anhang not in self._anhang_formate():
@@ -204,8 +218,8 @@ class OutlookMail:
                 return {"status": datei.get("status", "error") if datei.get("status") in ("rejected", "blocked", "locked") else "error",
                         "summary": f"Ohne Anhang keine Mail: {clean_inline(datei.get('summary', ''), 300)}"}
             kennungen.append(datei["datei"]["kennung"])
-        argumente = {"an": an, "cc": cc if cc is not None else [], "betreff": betreff, "text": text if text is not None else "",
-                     "anhaenge": kennungen}
+        argumente = {"an": an_liste, "cc": cc_liste, "betreff": betreff if isinstance(betreff, str) else "",
+                     "text": text if isinstance(text, str) else "", "anhaenge": kennungen}
         try:
             host = json.loads(await asyncio.wait_for(call_host_tool(client, "outlook_mail_anfragen", argumente), ANFRAGE_TIMEOUT_SECS))
         except Exception as e:  # noqa: BLE001 (Tunnel weg, Zeitgrenze, kaputte Antwort)

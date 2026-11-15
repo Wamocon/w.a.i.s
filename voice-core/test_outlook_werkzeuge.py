@@ -206,6 +206,20 @@ async def test_sprache_legt_die_karte_an_und_das_modell_sieht_keine_kennung(host
     assert m.gesendet[-1]["type"] == "freigaben"
 
 
+async def test_empfaenger_als_text_werden_zur_liste(host):
+    m = mail()
+    p = Params(an="max@firma.example, anna@kunde.example", cc="x@kunde.example", betreff="Angebot", text="x")
+    await m._werkzeug(p)
+    assert p.ergebnis["status"] == "wartet_auf_klick"
+    args = host.aufrufe[-1][1]
+    assert args["an"] == ["max@firma.example", "anna@kunde.example"] and args["cc"] == ["x@kunde.example"]
+    for kaputt in ({"an": [5]}, {"an": {"x": 1}}, {"an": None}, {"cc": [None]}):
+        p = Params(**{"an": ["a@firma.example"], "betreff": "B", "text": "T", **kaputt})
+        await m._werkzeug(p)
+        assert p.ergebnis["status"] == "rejected" and "Empfänger" in p.ergebnis["summary"], kaputt
+    assert len([n for n in host.namen() if n == "outlook_mail_anfragen"]) == 1
+
+
 async def test_fremdinhalt_im_zug_gibt_eine_warnung(host):
     m = mail(fremd=True)
     await m.vorbereiten(an=["max@firma.example"], cc=None, betreff="Angebot", text="x", quelle="sprache")
