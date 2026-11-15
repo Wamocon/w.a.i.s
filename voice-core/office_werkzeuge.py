@@ -28,7 +28,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 import labor
-from canvas_quelle import canvas_lesen, kennung_gueltig
+from canvas_quelle import CanvasNichtErreichbar, canvas_lesen, kennung_gueltig
 from memory import DB_ERRORS
 from pc_host import call_host_tool
 from persona import clean_inline
@@ -48,6 +48,7 @@ KENNUNG_RE = re.compile(r"[0-9a-f]{16}")
 PC_AUS = "Die PC-Steuerung ist aus. Sie lässt sich in der Oberfläche einschalten."  # wie screen.PC_OFF
 KEIN_CANVAS = ("Kein eigenes Canvas-Element gefunden. Speichern geht nur für Inhalte, die W.A.I.S. für dich auf das Canvas gelegt "
                "hat.")
+CANVAS_NICHT_ERREICHBAR = "Das Canvas ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen."
 
 
 def office_teile(wert: str | None = None) -> set[str]:
@@ -143,7 +144,10 @@ class OfficeDateien:
         if not isinstance(fmt, str) or fmt not in self.formate:
             verfuegbar = ", ".join(FORMAT_NAMEN[f] for f in self.formate) or "keins"
             return {"status": "rejected", "summary": f"Dieses Format geht an diesem PC nicht (möglich: {verfuegbar})."}
-        gefunden = await canvas_lesen(self.memory, canvas_id=canvas_id, titel=titel)
+        try:
+            gefunden = await canvas_lesen(self.memory, canvas_id=canvas_id, titel=titel)
+        except CanvasNichtErreichbar:
+            return {"status": "error", "summary": CANVAS_NICHT_ERREICHBAR}
         if gefunden is None:
             return {"status": "rejected", "summary": KEIN_CANVAS}
         inhalt = gefunden["inhalt"]

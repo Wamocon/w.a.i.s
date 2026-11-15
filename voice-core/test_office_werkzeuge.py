@@ -71,12 +71,19 @@ TAB = zeile("tabelle", "Liste", columns=["a", "b"], rows=[["1", "2"]])
 
 
 # ---------- canvas_quelle ----------
+def _filter(sql: str) -> str:
+    """Bedingungen der äußeren Abfrage (auf der Wurzel), ohne den Teil der neuesten Fassung."""
+    return sql.split(") n on true", 1)[1]
+
+
 async def test_lesen_nach_kennung_nur_eigene():
     m = Memory([DOK])
     gefunden = await cq.canvas_lesen(m, canvas_id=CID)
     assert gefunden == {"id": CID, "inhalt": {"art": "dokument", "titel": "Angebot", "text": f"# Angebot\n{GEHEIM}"}}
     sql, args = m.db.abfragen[0]
-    assert "user_id = $1::uuid" in sql and "id = $2::uuid" in sql and args == (UID, CID)
+    filt = _filter(sql)
+    assert "w.user_id = $1::uuid" in filt and "w.parent_id is null" in filt and args == (UID, CID)
+    assert "coalesce(k.parent_id, k.id)" in filt and "k.id = $2::uuid" in filt  # auch die Kennung einer Fassung führt zur Wurzel
 
 
 @pytest.mark.parametrize("kennung", ["", "x", "../" + CID, CID + "0", "' or 1=1 --"])
@@ -86,11 +93,30 @@ async def test_ungueltige_kennung_fragt_die_datenbank_nicht(kennung):
     assert m.db.abfragen == []
 
 
-async def test_lesen_nach_titel_ohne_platzhalter_aus_der_eingabe():
+async def test_export_liest_die_neueste_fassung_der_wurzel():
+    """Bearbeitungen legen neue Zeilen an (parent_id = Wurzel, version + 1, session_id null): gelesen wird immer die höchste
+    Fassung, gefiltert und gezählt wird über die Wurzel."""
+    fassung = {"id": CID, "title": "Angebot", "data": json.dumps({"kind": "dokument", "title": "Angebot", "text": "Fassung 3"})}
+    m = Memory([fassung])
+    gefunden = await cq.canvas_lesen(m, canvas_id=CID)
+    assert gefunden == {"id": CID, "inhalt": {"art": "dokument", "titel": "Angebot", "text": "Fassung 3"}}
+    sql, _ = m.db.abfragen[0]
+    kopf, rest = sql.split("join lateral", 1)
+    assert "w.id::text as id" in kopf and "n.title" in kopf and "n.data" in kopf  # Kennung der Wurzel, Inhalt der Fassung
+    neueste = rest.split(") n on true", 1)[0]
+    assert "x.id = w.id or x.parent_id = w.id" in neueste
+    assert "order by x.version desc" in neueste and "limit 1" in neueste
+    assert "order by n.updated_at desc limit 1" in _filter(sql)
+
+
+@pytest.mark.parametrize("titel", ["Test_Plan", "Umsatz in %", r"Pfad C:\Daten"])
+async def test_lesen_nach_titel_ohne_platzhalter(titel):
+    """Titel mit _ oder % treffen genau diesen Text: keine LIKE-Muster, nichts wird entfernt."""
     m = Memory([DOK])
-    await cq.canvas_lesen(m, titel="An%ge_bot\\")
+    await cq.canvas_lesen(m, titel=f"  {titel} ")
     sql, args = m.db.abfragen[0]
-    assert "title ilike $2" in sql and args == (UID, "%Angebot%")
+    assert "strpos(lower(w.title), lower($2)) > 0" in _filter(sql) and "like" not in sql.lower()
+    assert args == (UID, titel)
 
 
 async def test_ohne_angabe_erst_diese_sitzung_dann_das_profil():
@@ -98,9 +124,15 @@ async def test_ohne_angabe_erst_diese_sitzung_dann_das_profil():
     gefunden = await cq.canvas_lesen(m)
     assert gefunden["inhalt"] == {"art": "tabelle", "titel": "Liste", "spalten": ["a", "b"], "zeilen": [["1", "2"]]}
     (sql1, args1), (sql2, args2) = m.db.abfragen
-    assert "session_id = $2::uuid" in sql1 and args1 == (UID, SID)
-    assert "session_id" not in sql2 and args2 == (UID,)
-    assert all("order by updated_at desc limit 1" in s for s, _ in m.db.abfragen)
+    assert "w.session_id = $2::uuid" in _filter(sql1) and args1 == (UID, SID)
+    assert "session_id" not in _filter(sql2) and args2 == (UID,)
+    assert all("order by n.updated_at desc limit 1" in s for s, _ in m.db.abfragen)
+
+
+async def test_datenbankfehler_ist_nicht_nicht_gefunden():
+    with pytest.raises(cq.CanvasNichtErreichbar):
+        await cq.canvas_lesen(Memory(fehler=OSError("weg")), canvas_id=CID)
+    assert await cq.canvas_lesen(Memory([None]), canvas_id=CID) is None
 
 
 async def test_arten_und_kaputte_daten():
@@ -112,7 +144,6 @@ async def test_arten_und_kaputte_daten():
     for kaputt in ({"id": CID, "title": "x", "data": "{kein json"}, zeile("bild", text="x"), zeile(text=5)):
         assert await cq.canvas_lesen(Memory([kaputt]), canvas_id=CID) is None
     assert await cq.canvas_lesen(Memory([DOK], enabled=False), canvas_id=CID) is None
-    assert await cq.canvas_lesen(Memory(fehler=OSError("weg")), canvas_id=CID) is None
 
 
 # ---------- Schalter und Zugang ----------
@@ -328,6 +359,17 @@ async def test_kein_eigenes_canvas(host):
     p = Params(format="word", canvas="Gibt es nicht")
     await o._werkzeug(p)
     assert p.ergebnis["status"] == "rejected" and "Canvas" in p.ergebnis["summary"]
+    assert host.aufrufe == []
+
+
+async def test_datenbank_weg_ist_eine_eigene_meldung(host):
+    o = office(Memory(fehler=OSError("weg")))
+    o.formate = ("word",)
+    p = Params(format="word")
+    await o._werkzeug(p)
+    assert p.ergebnis == {"status": "error", "summary": ow.CANVAS_NICHT_ERREICHBAR}
+    assert ow.CANVAS_NICHT_ERREICHBAR.startswith("Das Canvas ist gerade nicht erreichbar")
+    assert ow.KEIN_CANVAS != ow.CANVAS_NICHT_ERREICHBAR
     assert host.aufrufe == []
 
 
