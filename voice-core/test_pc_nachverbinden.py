@@ -322,7 +322,7 @@ class Lage:
         return json.dumps({"machine": self.rechner})
 
 
-async def bauen(identity: Identity):
+async def bauen(identity: Identity, sitzung=None):
     llms = []
     echtes = bot.gespraech_llm
 
@@ -332,7 +332,7 @@ async def bauen(identity: Identity):
         return ergebnis
 
     with mock.patch.object(bot, "Pipeline", wraps=bot.Pipeline) as pipeline, mock.patch.object(bot, "gespraech_llm", side_effect=llm_merken):
-        session = await bot.build_session(smoke.FakeTransport(), identity)
+        session = await bot.build_session(smoke.FakeTransport(), identity, sitzung)
     session.task.queue_frames = mock.AsyncMock()
     session.task.queue_frame = mock.AsyncMock()
     await session.task.rtvi._call_event_handler("on_client_ready")
@@ -499,6 +499,52 @@ async def test_nachgeholte_werkzeuge_fragen_das_gate_der_stimmpruefung(buero):
     schemas = {s.name: s for s in nutzer.context.tools.standard_tools if isinstance(s, FunctionSchema)}
     assert getattr(schemas["programm_oeffnen"].handler, MARKE, None) is gate
     assert getattr(llm._functions["bildschirm_ansehen"].handler, MARKE, None) is gate
+    await session.cleanup()
+
+
+async def test_klick_waehrend_des_namensabgleichs_wartet_auf_den_versuch(buero):
+    """Der Hintergrund hat den Client schon gebaut, der Rechnername ist noch nicht geprüft: ein Klick auf "an" wartet auf den laufenden
+    Versuch, statt still in "aus" zu enden."""
+    lage = Lage(buero, [None, pc_zugang_test()])
+    for name in ("ERSTE_SECS", "SCHNELL_SECS", "ABSTAND_SECS"):
+        buero.setattr(pc_nachverbinden, name, 0.01)
+    frei = asyncio.Event()
+
+    async def langsame_werkzeuge(client):
+        await frei.wait()
+        return pc_werkzeuge()
+
+    buero.setattr(bot, "host_tools", langsame_werkzeuge)
+    session, _stufen, _llm = await bauen(admin())
+    await bis(lambda: lage.host_client.call_count == 1, 5.0)
+    await klick(session, True)
+    frei.set()
+    await bis(lambda: betrieb(session)["pc_steuerung"] == "an", 5.0)
+    stand = betrieb(session)
+    assert (stand["pc"], stand["pc_steuerung"]) == ("verbunden", "an")
+    assert gesprochen(session) == []
+    await session.cleanup()
+
+
+async def test_ein_fehler_beim_neuen_prompt_haelt_den_start_nicht_auf(buero):
+    lage = Lage(buero, [None, pc_zugang_test()])
+    session, _stufen, _llm = await bauen(admin())
+    with mock.patch("memory.MemoryStore.recall", mock.AsyncMock(side_effect=RuntimeError("Datenbank weg"))):
+        await klick(session, True)
+    stand = betrieb(session)
+    assert (stand["pc"], stand["pc_steuerung"]) == ("verbunden", "an") and lage.host_client.call_count == 1
+    await session.cleanup()
+
+
+async def test_abgeloeste_sitzung_holt_nichts_mehr_nach(buero):
+    from sitzungen import Sitzung
+
+    lage = Lage(buero, [None, pc_zugang_test()])
+    sitzung = Sitzung(USER)
+    session, _stufen, _llm = await bauen(admin(), sitzung)
+    sitzung.abgeloest = True
+    await klick(session, True)
+    assert lage.pc_zugang.await_count == 1 and lage.host_client.call_count == 0
     await session.cleanup()
 
 

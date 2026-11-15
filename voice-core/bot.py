@@ -661,7 +661,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                    "client_ready": False, "live": True, "cleaned": False, "guard": None,
                    "pc_weg": False, "pc_tools": False, "pc_waechter": None, "geraet_wache": None, "labor_wache": None,  # pc_weg: Hinweis im Prompt
                    "stimme_laden": None,  # Hintergrundaufgabe: Abdruck laden (stimme_sitzung.laden_bis_bekannt)
-                   "geraet_ok": geraet_zugang is None, "geraet_entzogen": False,  # Tunnel je Gerät: erst nach dem Namensabgleich, nie nach einem Entzug
+                   "geraet_ok": geraet_zugang is None and not pc_nachholen, "geraet_entzogen": False,  # Tunnel je Gerät: erst nach dem Namensabgleich, nie nach einem Entzug
                    "pc_name": None, "pc_belegt": False, "pc_nachholen": None, "pc_klick": 0,  # pc_nachholen: Hintergrund des Nachholers
                    "pc_gesperrt": False, "sperr_probe": None}  # Bildschirm am PC gesperrt (Host: status=locked)
     # Kennung dieser Sitzung für die PC-Sperre (Sitzung.pc_lease_nehmen) und ihre Ablösung (sitzungen.py)
@@ -1267,22 +1267,23 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
 
     async def pc_nachholen_versuch() -> bool:
         """Ein Versuch, den Zugang zum eigenen Laptop nachzuholen (pc_nachverbinden.py): derselbe Weg wie beim Start, keine Prüfung
-        lockerer. True, sobald Zugang und Client stehen; ob der Host antwortet und der Rechnername passt, entscheidet start_pc."""
+        lockerer. True, sobald Zugang und Client stehen und start_pc gelaufen ist; ob der Host antwortet und der Rechnername passt,
+        entscheidet start_pc. Scheiterte start_pc beim letzten Mal, läuft es mit demselben Client noch einmal."""
         nonlocal geraet_zugang, pc_client, pc_enabled
-        if pc_client is not None:
-            return True
-        geraet_neu = await pc_zugang(identity)
-        if geraet_neu is None or not state["live"] or state["geraet_entzogen"]:
-            return False
-        client = host_client(geraet_neu)
-        if client is None:
-            return False
-        state["geraet_ok"] = False  # erst nach dem Namensabgleich in attach_pc_tools
-        geraet_zugang, pc_client, pc_enabled = geraet_neu, client, True
-        sitzung.geraet_id = geraet_neu.geraet.device_id  # die PC-Sperre gilt je Gerät
-        logger.info("WAMO-GERAET Zugang zu Gerät {} nach dem Sitzungsstart nachgeholt", geraet_neu.geraet.kennung)
-        if state["live"]:
-            await refresh_prompt()  # PC-Werkzeuge im Prompt (prompt_for liest pc_enabled)
+        if pc_client is None:
+            geraet_neu = await pc_zugang(identity)
+            if geraet_neu is None or not state["live"] or state["geraet_entzogen"] or sitzung.abgeloest:
+                return False
+            client = host_client(geraet_neu)
+            if client is None:
+                return False
+            state["geraet_ok"] = False  # erst nach dem Namensabgleich in attach_pc_tools
+            geraet_zugang, pc_client, pc_enabled = geraet_neu, client, True
+            sitzung.geraet_id = geraet_neu.geraet.device_id  # die PC-Sperre gilt je Gerät
+            logger.info("WAMO-GERAET Zugang zu Gerät {} nach dem Sitzungsstart nachgeholt", geraet_neu.geraet.kennung)
+            if state["live"]:
+                with contextlib.suppress(Exception):  # ohne neuen Prompt weiter: die Werkzeuge kommen trotzdem (start_pc)
+                    await refresh_prompt()  # PC-Werkzeuge im Prompt (prompt_for liest pc_enabled)
         await start_pc()
         return True
 
@@ -1292,12 +1293,16 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             await set_pc("getrennt")
 
     async def pc_nicht_nachgeholt() -> None:
-        """Der Klick auf "an" fand den Laptop nicht (Tunnel steht noch nicht): "getrennt" und ein kurzer Satz statt still "aus"."""
+        """Der Klick auf "an" fand den Laptop nicht (Tunnel steht noch nicht): "getrennt" und ein kurzer Satz statt still "aus".
+        Hat der Hintergrund den Laptop inzwischen gefunden, gilt sein Stand."""
+        if nachholer is None or nachholer.verbunden or pc_client is not None or not state["live"]:
+            return
         await set_pc("getrennt")
-        if nachholer is not None and nachholer.hinweis_faellig():
+        if nachholer.hinweis_faellig():
             await ansage(pc_nachverbinden.HINWEIS_NICHT_VERBUNDEN)
 
-    nachholer = (PcNachholer(pc_nachholen_versuch, aktiv=lambda: bool(state["live"] and not state["geraet_entzogen"]))
+    nachholer = (PcNachholer(pc_nachholen_versuch,
+                             aktiv=lambda: bool(state["live"] and not state["geraet_entzogen"] and not sitzung.abgeloest))
                  if pc_nachholen else None)
 
     if pc_client:
@@ -1340,7 +1345,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             state["pc_klick"] += 1
             klick = state["pc_klick"]
             nicht_nachgeholt = False
-            if data.get("an") is True and nachholer is not None and not pc_enabled:
+            if data.get("an") is True and nachholer is not None and not nachholer.verbunden:  # auch während Namensabgleich: warten
                 nicht_nachgeholt = not await nachholer.versuchen()
                 if klick != state["pc_klick"] or not state["live"]:
                     return  # inzwischen kam ein neuerer Klick (er entscheidet), oder die Sitzung ist zu Ende
