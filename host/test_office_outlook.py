@@ -387,6 +387,19 @@ def test_rueckfall_scheitert_bei_zu_langem_text(tmp_path):
     assert r["status"] == "error"
 
 
+def test_entwurfsdatei_wird_spaeter_geloescht(tmp_path):
+    m = mail(tmp_path)
+    geplant = []
+    r = oo.neu_entwurf(m, oo.anhaenge_lesen(m.anhaenge), ordner=tmp_path / "e", starten=Start(), fenster=lambda: [],
+                       alias=Path("C:/olk.exe"), warten=0.05, loeschen_planen=geplant.append)
+    assert r["status"] == "success"
+    (pfad,) = geplant
+    assert pfad.suffix == ".eml" and pfad.parent == tmp_path / "e"
+    oo._entfernen(pfad)
+    assert not pfad.exists()
+    oo._entfernen(pfad)  # schon weg: kein Fehler
+
+
 def test_alte_entwurfsdateien_werden_aufgeraeumt(tmp_path):
     ordner = tmp_path / "e"
     ordner.mkdir()

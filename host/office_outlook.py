@@ -42,6 +42,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 from collections.abc import Callable, Iterator
@@ -535,6 +536,21 @@ def _passend(w: dict, betreff_: str) -> bool:
     return str(w.get("programm", "")).lower() == NEU_EXE and str(w.get("titel", "")).strip().startswith(betreff_[:60].strip())
 
 
+def _entfernen(pfad: Path) -> None:
+    try:
+        pfad.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _spaeter_loeschen(pfad: Path) -> None:
+    """Die Entwurfsdatei (Text und Anhang) nach ENTWURF_AUFBEWAHREN_SECS löschen; das neue Outlook hat sie dann längst gelesen. Fällt
+    der Host vorher aus, räumt der nächste Entwurf sie weg (_aufraeumen)."""
+    uhr = threading.Timer(ENTWURF_AUFBEWAHREN_SECS, _entfernen, args=(pfad,))
+    uhr.daemon = True
+    uhr.start()
+
+
 def _aufraeumen(ordner: Path) -> None:
     grenze = time.time() - ENTWURF_AUFBEWAHREN_SECS
     for alt in ordner.glob("*.eml"):
@@ -547,7 +563,8 @@ def _aufraeumen(ordner: Path) -> None:
 
 def neu_entwurf(mail: Mail, anhang_daten: list[tuple[Anhang, bytes]], *, ordner: Path | None = None,
                 starten: Callable[[list[str]], None] | None = None, fenster: Callable[[], list[dict]] | None = None,
-                alias: Path | None = None, warten: float = FENSTER_WARTEN_SECS) -> dict:
+                alias: Path | None = None, warten: float = FENSTER_WARTEN_SECS,
+                loeschen_planen: Callable[[Path], None] | None = None) -> dict:
     """Entwurf im neuen Outlook: .eml über olk.exe (mit Anhang), sonst mailto über olk.exe (ohne Anhang) und der Anhang im Explorer."""
     ordner, starten, fenster = Path(ordner or ENTWURF_ORDNER), starten or _starten, fenster or _fenster
     alias = Path(alias or OLK_ALIAS)
@@ -560,6 +577,7 @@ def neu_entwurf(mail: Mail, anhang_daten: list[tuple[Anhang, bytes]], *, ordner:
         starten([str(alias), str(pfad)])
     except (OSError, ValueError) as e:
         return _rueckfall(mail, anhang_daten, starten, alias, type(e).__name__)
+    (loeschen_planen or _spaeter_loeschen)(pfad)
     ende, gesehen = time.monotonic() + warten, False
     while not gesehen:
         gesehen = any(_passend(w, mail.betreff) and w.get("hwnd") not in vorher for w in fenster())
