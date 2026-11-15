@@ -39,6 +39,9 @@ DETAIL_KEYS = {
 def _detail(name: str, args: dict) -> str:
     if name == "outlook_senden" and isinstance(args, dict):  # nur die Zahl, nie Adressen, Betreff oder Text
         return f"{sum(len(args[k]) for k in ('an', 'cc') if isinstance(args.get(k), list))} Empfänger"
+    if name == "teams_nachricht" and isinstance(args, dict):  # nur die Zahl, nie Adressen oder Text
+        an = args.get("an")
+        return f"{len(an) if isinstance(an, list) else len([t for t in re.split(r'[,;]', str(an or '')) if t.strip()])} Empfänger"
     key = DETAIL_KEYS.get(name)
     if key and isinstance(args, dict) and args.get(key):
         return str(args[key])[:80]
@@ -48,15 +51,15 @@ def _detail(name: str, args: dict) -> str:
 
 
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
-FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote")
+FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote", "teams")
 # Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
-# über onenote_seite_anfragen, onenote_werkzeuge.py; outlook_senden legt seine Karte selbst über diese Funktion an,
-# outlook_werkzeuge.py)
+# über onenote_seite_anfragen, onenote_werkzeuge.py; outlook_senden und teams_nachricht legen ihre Karte selbst über diese Funktion
+# an, outlook_werkzeuge.py und teams_werkzeuge.py)
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
-                                "github_repo_anlegen", "onenote_seite", "outlook_senden"})
+                                "github_repo_anlegen", "onenote_seite", "outlook_senden", "teams_nachricht"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
-FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
+FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails und Teams (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
 _DOMAENE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}")
 
@@ -96,8 +99,9 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
     roh = data.get("detail") if isinstance(data.get("detail"), str) else ""
     if aktion == "senden":
         roh = roh.replace("\r\n", "\n").replace("\n", "⏎\n").rstrip("\n")  # jedes Enter sendet: sichtbar machen
-    grenze = FREIGABE_DETAIL_ZEICHEN_MAIL if aktion == "mail" else FREIGABE_DETAIL_ZEICHEN
-    detail = _karten_text(roh, grenze, zeilen=True, utf16=aktion == "mail")
+    lang = aktion in ("mail", "teams")  # lange Karte, gezählt wie in der Oberfläche
+    grenze = FREIGABE_DETAIL_ZEICHEN_MAIL if lang else FREIGABE_DETAIL_ZEICHEN
+    detail = _karten_text(roh, grenze, zeilen=True, utf16=lang)
     grund = _karten_text(data.get("grund"), FREIGABE_KURZ_ZEICHEN)
     ziel = _karten_text(data.get("ziel"), FREIGABE_KURZ_ZEICHEN)
     anlass = _karten_text(data.get("anlass"), FREIGABE_KURZ_ZEICHEN)  # vom Modell, nur als Hinweis
@@ -113,6 +117,8 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
     }
     if aktion == "mail":
         anfrage["protokoll"] = _mail_protokoll(data.get("protokoll"))
+    elif aktion == "teams":
+        anfrage["protokoll"] = _teams_protokoll(data.get("protokoll"))
     return anfrage
 
 
@@ -129,6 +135,20 @@ def _mail_protokoll(roh: object) -> dict:
         sauber["weg"] = p["weg"]
     if p.get("programm") in ("klassisch", "neu"):
         sauber["programm"] = p["programm"]
+    return sauber
+
+
+def _teams_protokoll(roh: object) -> dict:
+    """Was der Kern zu einer Teams-Nachricht in actions schreibt: Zahl, Domänen und ob es einen Gruppennamen gibt, nie Adressen oder
+    Text."""
+    p = roh if isinstance(roh, dict) else {}
+    sauber: dict = {}
+    if isinstance(p.get("an"), int) and not isinstance(p.get("an"), bool) and 0 < p["an"] <= 10:
+        sauber["an"] = p["an"]
+    if isinstance(p.get("domaenen"), list):
+        sauber["domaenen"] = [d for d in p["domaenen"][:10] if isinstance(d, str) and len(d) <= 100 and _DOMAENE.fullmatch(d)]
+    if isinstance(p.get("gruppe"), bool):
+        sauber["gruppe"] = p["gruppe"]
     return sauber
 
 

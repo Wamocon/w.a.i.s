@@ -2,12 +2,14 @@
 
 import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { CanvasMail } from "@/components/MailFormular";
+import { CanvasTeams } from "@/components/TeamsFormular";
 import { JiraStoryKnopf } from "@/components/JiraStory";
 import { TeilenKnopf } from "@/components/Teilen";
 import { canvasIndex, canvasWunsch } from "@/lib/canvasWahl";
 import { exportFormate, knopfText, ONENOTE_KNOPF, onenoteMoeglich, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
 import { KOPIERT_MS, kopierChipText, type KopierStatus } from "@/lib/kopieren";
 import type { MailAktionen } from "@/lib/mail";
+import type { TeamsAktionen } from "@/lib/teams";
 import { istUuid } from "@/lib/teilenHilfe";
 import { useSelect } from "@/lib/store";
 import { useThema } from "@/lib/useThema";
@@ -50,15 +52,17 @@ export const CanvasBereich = memo(function CanvasBereich({
   jiraStory,
   office,
   mail,
+  teams,
 }: {
   jiraStory?: (canvasId: string) => boolean;
   office?: OfficeAktionen;
   mail?: MailAktionen;
+  teams?: TeamsAktionen;
 }) {
   const items = useSelect(wamo, (s) => s.canvas);
   // PC-Werkzeuge gibt es vorerst nur für admin; Mitgliedern den Hinweis darauf ersparen
   const mitglied = useSelect(wamo, (s) => s.profil?.rolle === "mitglied");
-  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} mail={mail} />;
+  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} mail={mail} teams={teams} />;
   return (
     <div className="canvas-empty">
       <p className="eyebrow">Canvas</p>
@@ -81,11 +85,13 @@ function Canvas({
   jiraStory,
   office,
   mail,
+  teams,
 }: {
   items: CanvasItem[];
   jiraStory?: (canvasId: string) => boolean;
   office?: OfficeAktionen;
   mail?: MailAktionen;
+  teams?: TeamsAktionen;
 }) {
   const [picked, setPicked] = useState<number | null>(null);
   // "Ergebnis ansehen" in der Tafel Vorgänge (lib/canvasWahl.ts): ein neuer Wunsch wählt das Element mit dieser Kennung, noch im
@@ -131,6 +137,7 @@ function Canvas({
           <JiraStoryKnopf item={item} anfragen={jiraStory} />
           {office && <CanvasSpeichern key={item.id ?? item.title} item={item} office={office} />}
           {mail && <CanvasMail key={`mail-${item.id ?? item.title}`} item={item} mail={mail} />}
+          {teams && <CanvasTeams key={`teams-${item.id ?? item.title}`} item={item} teams={teams} />}
         </header>
         <CanvasBody item={item} />
       </article>

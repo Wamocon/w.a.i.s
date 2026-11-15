@@ -252,6 +252,18 @@ und richtet die Umgebung neu ein, sobald sich der Hash von `uv.lock` ändert (`d
 
 ### 4.5 Teams
 
+**Stand der Umsetzung (15.11.2026, Zweig `feat/teams`, Entscheidung von Niko).** Teams öffnet den Chat vorbefüllt per Deep Link, die
+Person drückt selbst Enter; W.A.I.S. sendet in Teams nie, und geöffnet wird erst nach der Karte in W.A.I.S. Abweichend vom ersten
+Entwurf unten: bis zu 10 Empfänger (Gruppenchat, `topicName` als Gruppenname nur bei mindestens zwei), Modul `host/office_teams.py`
+statt `host/teams_link.py`, Link `msteams://teams.microsoft.com/l/chat/0/0?users=...&message=...` (Microsoft Learn, "Deep link to a
+Teams chat": `users` nur als UPN in Mailform, `message` steht als Entwurf im Eingabefeld). Microsoft nennt keine Längengrenze; der Host
+begrenzt den Text auf 1000 Zeichen und den ganzen Link auf 2000 (unter 2083, `INTERNET_MAX_URL_LENGTH`), zu lang heißt Hinweis, nie ein
+gekürzter Text. Empfänger nur intern (wie Mails: `WAMO_MAIL_INTERN`, exakt gleiche Domäne; so entschieden am 15.11.2026), Namen nur über das Adressbuch des
+klassischen Outlooks (`office_outlook_com._aufloesen`), mehrdeutig heißt Rückfrage nach der Adresse. Am PC geprüft: `msteams:` ist
+registriert (`"ms-teams.exe" "%1"`), der Link mit der eigenen Adresse öffnet den Chat mit sich selbst; lag dort schon ein eigener
+Entwurf, ließ Teams ihn stehen und zeigte den Text aus dem Link nicht (nichts überschrieben, nichts gesendet). Ob der Text in einem
+leeren Eingabefeld erscheint und Zeilenumbrüche ankommen, ist noch am Gerät zu bestätigen (V).
+
 Nach dem Klick öffnet der Host `msteams:/l/chat/0/0?users=<Adresse>&message=<Text>` über die Shell. Jeder Wert ist einzeln URL-kodiert, die Adresse muss das Muster einer
 Mailadresse erfüllen und in einer internen Domäne liegen (Stufe 1, A). Ein Empfänger je Nachricht. Gesendet wird nur durch Niko mit Enter; ein späteres Enter durch
 W.A.I.S. im Teams-Fenster bräuchte wie heute eine eigene Karte (`windows_control.py:41` bis `:49`). Rückfall, wenn `msteams:` nicht registriert ist: dieselbe Adresse
@@ -349,7 +361,7 @@ Die vier PC-Werkzeuge verlangen zusätzlich PC-Steuerung und Sperre (`voice-core
 | `office_datei_erstellen(format, inhalt, oeffnen)` | Datei bauen, ins Register, öffnen | `change` | |
 | `office_datei_oeffnen(kennung)` | Datei aus dem Register öffnen | `change` | |
 | `outlook_mail_anfragen(an, cc, betreff, text, anhaenge, anlass)` | auflösen, prüfen, Anfrage | `critical` | `mail` |
-| `teams_chat_anfragen(an, text, anlass)` | prüfen, Anfrage | `critical` | `teams` |
+| `teams_chat_anfragen(an, text, gruppenname, anlass)` | auflösen, prüfen, Anfrage | `critical` | `teams` |
 | `onenote_seite_anfragen(inhalt, titel, anlass, canvas_id)` | prüfen, Firmenkonto und Notizbuch lesen, Anfrage | `critical` | `onenote` |
 
 Ein Hostschalter, die Datei `%LOCALAPPDATA%\WAMO\office.aus`, sperrt alle sechs sofort (bei jedem Aufruf geprüft). `_inhalt_audit` und `_ausfuehren` bekommen die drei
