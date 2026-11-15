@@ -54,7 +54,8 @@ CALL_TIMEOUT_SECS = 30.0
 # Werkzeuge, die am PC selbst länger laufen dürfen (powershell_lesen hat dort 60 s Zeitlimit)
 LANGE_WERKZEUGE = {"powershell_lesen": 75.0, "freigabe_entscheiden": 135.0,  # Freigabe: 120 s am PC
                    "git_klonen": 115.0,  # Klon: 90 s am PC, dazu Beenden des Prozessbaums
-                   "office_datei_erstellen": 80.0}  # PDF über Word: bis 45 s am PC, dazu Bau der Datei (office_werkzeuge.py)
+                   "office_datei_erstellen": 80.0,  # PDF über Word: bis 45 s am PC, dazu Bau der Datei (office_werkzeuge.py)
+                   "onenote_seite_anfragen": 45.0}  # OneNote starten und Notizbücher lesen: bis 30 s am PC (onenote_werkzeuge.py)
 PROBE_TIMEOUT_SECS = 5.0
 ERSTKONTAKT_TIMEOUT_SECS = 10.0  # tools() beim Sitzungsaufbau, wenn der Kern noch Modelle lädt
 MAX_ANTWORT_BYTES = 8 * 1024 * 1024  # Bildschirmfotos als JPEG-Base64 liegen bei etwa 1 MB

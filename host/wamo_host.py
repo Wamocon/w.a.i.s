@@ -11,7 +11,8 @@ untrusted: auch Text aus Websuche, Mails oder Dateien kann im Modell als Anweisu
   read      sofort                (system_info, powershell_lesen mit reinen Get-/Test-Befehlen)
   change    sofort, protokolliert (webseite_oeffnen, programm_oeffnen, dark_mode, git_klonen; nur für den Kern:
             office_datei_erstellen und office_datei_oeffnen, Dateien nur in Dokumente\\WAIS, Schalter office.aus)
-  critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung durch einen Admin in der UI (auch github_repo_anlegen)
+  critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung durch einen Admin in der UI (auch github_repo_anlegen und,
+            nur für den Kern, onenote_seite_anfragen)
   blocked   nie
 Freigaben kann das Modell NICHT selbst erteilen. Solange eine Anfrage offen ist oder eine freigegebene Aktion läuft,
 ruhen alle Eingaben (status=wartet), und die eigene Oberfläche (Freigabekarte) bedient WAMO nie: Das Modell kann die
@@ -52,6 +53,7 @@ import live_bild
 import office_ablage
 import office_com
 import office_dateien
+import office_onenote
 import uia_control
 import windows_control as wc
 
@@ -2123,8 +2125,9 @@ def office_faehigkeiten() -> dict:
     if aus := _office_aus("office_faehigkeiten"):
         return {**aus, "formate": []}
     faehig = office_com.faehigkeiten()
-    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"]})
-    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE}
+    onenote = office_onenote.onenote_vorhanden()
+    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"], "onenote": onenote})
+    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE, "onenote": onenote}
 
 
 @mcp.tool()
@@ -2241,6 +2244,88 @@ def office_datei_oeffnen(kennung: str) -> dict:
     return {"status": "success", "summary": f"{pfad.name} ist geöffnet."}
 
 
+# ---------- OneNote-Seite aus dem Canvas (office_onenote.py) ----------
+# Nur für den Kern, nie in LLM_TOOLS: Das Sprachmodell ruft onenote_seite im Kern, der Kern liest das eigene Canvas-Element und schickt
+# hierher nur dessen feste Struktur. Der Host prüft selbst (Inhalt, Titel, Länge, Zeichen), liest nur das Standard-Notizbuch und legt eine
+# Freigabe-Anfrage an (critical, Art onenote). Die Seite entsteht erst nach dem Klick eines Admins (freigabe_entscheiden), genau einmal.
+# Fehlt OneNote für den Desktop oder ist es nicht bereit, gibt es keine Karte, sondern rueckfall "word" (der Kern speichert dann eine
+# Word-Datei). office.aus sperrt auch dieses Werkzeug. Das Audit nennt Notizbuch, Abschnitt und Seitenkennung, Titel und Inhalt nur als
+# Prüfsumme.
+ONENOTE_KARTE = ("Das legt eine Seite in deinem OneNote an. Ein Admin muss sie in der Oberfläche freigeben; bis dahin passiert "
+                 "nichts.")
+ONENOTE_FEHLT = "OneNote für den Desktop ist an diesem PC nicht installiert oder nicht per COM erreichbar."
+ONENOTE_ZU_LANG = (f"Das ist zu lang für die Freigabekarte (höchstens rund {FREIGABE_DETAIL_MAX} Zeichen). Bitte kürzer fassen oder "
+                   "als Word-Datei speichern.")
+ONENOTE_BREMSE = office_onenote.Bremse(office_onenote.SEITEN_JE_STUNDE, 3600)
+
+
+def _onenote_audit(seite: office_onenote.Seite, ziel: office_onenote.Ziel) -> dict:
+    return {"notizbuch": ziel.notizbuch[:80], "notizbuch_neu": not ziel.notizbuch_id, "abschnitt": ziel.abschnitt,
+            "abschnitt_neu": not ziel.abschnitt_id, "titel": _text_audit(seite.titel),
+            "inhalt": _text_audit("\n".join(office_onenote.text_zeilen(seite.inhalt)))}
+
+
+@mcp.tool()
+async def onenote_seite_anfragen(inhalt: dict, titel: str = "", anlass: str = "", canvas_id: str = "") -> dict:
+    """Nur für den Kern: Freigabe-Anfrage für eine neue OneNote-Seite aus einem Canvas-Inhalt (critical, nur per Karte, genau
+    einmal) im Standard-Notizbuch, Abschnitt W.A.I.S. Ohne OneNote für den Desktop: rueckfall "word", keine Karte."""
+    if aus := _office_aus("onenote_seite_anfragen"):
+        return aus
+    if vorab := _eingabe_vorab("onenote_seite_anfragen"):
+        return vorab
+    # Im Thread: OneNote startet beim ersten Zugriff und liest die Notizbücher (bis LESEN_TIMEOUT_SECS)
+    return await asyncio.to_thread(_onenote_anfragen, inhalt, titel, anlass, canvas_id)
+
+
+def _onenote_anfragen(roh: object, titel: object, anlass: object, canvas_id: object) -> dict:
+    tool = "onenote_seite_anfragen"
+    cid = canvas_id if isinstance(canvas_id, str) and CANVAS_ID_RE.fullmatch(canvas_id) else None
+    try:
+        seite = office_onenote.seite_pruefen(roh, titel)
+    except office_dateien.InhaltFehler as e:
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "error": str(e)[:200]})
+        return {"status": "rejected", "summary": str(e)}
+    detail = office_onenote.karten_detail(seite)
+    if len(detail) + detail.count("\n") > FREIGABE_DETAIL_MAX:
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "grund": "zu lang für eine Freigabe"})
+        return {"status": "rejected", "summary": ONENOTE_ZU_LANG}
+    if not office_onenote.onenote_vorhanden():
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "grund": "OneNote fehlt"})
+        return {"status": "rejected", "rueckfall": "word", "summary": ONENOTE_FEHLT}
+    if ONENOTE_BREMSE.voll():
+        _audit({"tool": tool, "risk": "rejected", "grund": "Rate-Grenze"})
+        return {"status": "rejected", "summary": "Zu viele OneNote-Seiten in kurzer Zeit (höchstens 10 je Stunde)."}
+    try:
+        ziel = office_onenote.ziel_pruefen()
+    except office_onenote.OneNoteFehler as e:  # Rückfall nur, wenn OneNote nicht taugt; bei "beschäftigt" oder Zeitgrenze später
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "grund": "OneNote nicht bereit", "error": str(e)[:200]})
+        return {"status": "rejected", **({"rueckfall": "word"} if e.rueckfall else {}), "summary": str(e)}
+    text = uia_control.sicherer_text(anlass, 200) if isinstance(anlass, str) else ""
+    antwort = _anfrage(tool, "onenote", {"seite": seite, "ziel": ziel}, "onenote", "Seite in OneNote anlegen", detail,
+                       office_onenote.karten_ziel(ziel), ONENOTE_KARTE, {"canvas_id": cid, **_onenote_audit(seite, ziel)}, text)
+    if antwort["status"] == "needs_approval":
+        ONENOTE_BREMSE.zaehlen()  # nur Karten zählen, Fehlversuche verbrauchen nichts
+    return antwort
+
+
+def _onenote_ausfuehren(eintrag: dict) -> dict:
+    """Freigegebene Seite anlegen; Notizbuch und Abschnitt prüft office_onenote direkt davor noch einmal, office.aus auch hier."""
+    if aus := _office_aus("onenote_seite_anfragen"):
+        return aus
+    seite, ziel = eintrag["seite"], eintrag["ziel"]
+    try:
+        angelegt = office_onenote.seite_anlegen(seite, ziel, zeigen=not _ist_gesperrt())
+    except office_onenote.OneNoteFehler as e:
+        _audit({"tool": "onenote_seite_anfragen", "risk": "critical", "result": "error", "error": str(e)[:200]})
+        return {"status": "error", "summary": str(e)}
+    _audit({"tool": "onenote_seite_anfragen", "risk": "critical", "result": "success", "seite_id": angelegt["seite_id"][:80],
+            "notizbuch_neu": angelegt["notizbuch_neu"], "abschnitt_neu": angelegt["abschnitt_neu"]})
+    nb_neu = " (neu angelegt)" if angelegt["notizbuch_neu"] else ""
+    ab_neu = " (neu angelegt)" if angelegt["abschnitt_neu"] else ""
+    return {"status": "success", "summary": f"Seite „{seite.titel}“ liegt in OneNote im Notizbuch {angelegt['notizbuch'][:80]}"
+            f"{nb_neu}, Abschnitt {angelegt['abschnitt']}{ab_neu}, im OneDrive der Firma."}
+
+
 UNBEKANNT = {"status": "error", "summary": "Unbekannte oder abgelaufene Freigabe."}
 
 
@@ -2269,6 +2354,8 @@ def _inhalt_audit(eintrag: dict) -> dict:
     if art == "uia_text":
         return {"ziel": eintrag["titel"][:120], "nummer": eintrag["nummer"], "element": eintrag["knoten"].name[:60],
                 **_text_audit(eintrag["text"])}
+    if art == "onenote":  # Notizbuch und Abschnitt, Titel und Inhalt nur als Prüfsumme
+        return _onenote_audit(eintrag["seite"], eintrag["ziel"])
     if art == "github_anlegen":  # Repository und Sichtbarkeit, die Beschreibung nur als Prüfsumme
         return {"repo": f"{eintrag['org']}/{eintrag['name']}", "privat": eintrag["privat"],
                 **({"beschreibung": _text_audit(eintrag["beschreibung"])} if eintrag["beschreibung"] else {})}
@@ -2401,6 +2488,8 @@ def _ausfuehren(eintrag: dict) -> dict:
                 **_markierung(eintrag.get("hwnd"))}
     if art == "github_anlegen":
         return _github_anlegen_ausfuehren(eintrag)
+    if art == "onenote":
+        return _onenote_ausfuehren(eintrag)
     if art == "webseite":
         url = validate_url(eintrag["url"])  # die DNS-Auflösung kann sich seit der Anfrage geändert haben
         browser = _browser_name(eintrag["browser"])

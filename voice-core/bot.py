@@ -49,6 +49,9 @@ Nachrichten von der Oberfläche:
                                           eigenes Canvas-Element als Datei am PC speichern, gespeicherte Datei öffnen
                                           (office_werkzeuge.py; nur admin mit WAMO_OFFICE=dateien, nie im Labor). Antwort an die
                                           Oberfläche: {"type": "datei", "ok", ...}; betrieb trägt dann "office" (Formate)
+  {"type": "onenote_seite", "data": {"canvas_id"}}
+                                          eigenes Canvas-Element als OneNote-Seite, erst nach der Freigabekarte (onenote_werkzeuge.py;
+                                          nur admin mit WAMO_OFFICE=onenote, nie im Labor). Antwort: {"type": "onenote", "ok", "text"}
   {"type": "freigabe", "data": {...}}     sonst Freigabe für Entwicklungsaufträge (nur admin)
 Live-Untertitel: Pipecat sendet bot-output (mit Wortfortschritt aus den Soniox-Zeitstempeln) und
 user-transcription von selbst; RTVIObserverParams bleiben dafür auf dem Standard (eingeschaltet).
@@ -175,6 +178,7 @@ from bildstrom import NICHT_ERLAUBT as BILD_NICHT_ERLAUBT, Bildstrom
 import jira_werkzeuge
 import labor_werkzeuge
 import office_werkzeuge
+import onenote_werkzeuge
 from pc_freigaben import PcFreigaben
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
 from screen import PC_OFF, foto as screen_foto, register_screen_tools
@@ -367,7 +371,7 @@ def betrieb_message(
     pc: str, pc_latenz_ms: int | None = None, pc_steuerung: bool = False, entwicklung: bool = False,
     llm: str | None = None, pc_name: str | None = None, pc_belegt: bool = False, sprache: dict[str, str] | None = None,
     modell_modus: str | None = None, modell_quelle: str | None = None, modell_hinweis: str | None = None,
-    entwicklung_grund: str | None = None, office: list[str] | None = None,
+    entwicklung_grund: str | None = None, office: list[str] | None = None, onenote: bool = False,
 ) -> dict:
     """pc: verbindet | verbunden | gesperrt | getrennt | aus (gesperrt: Bildschirm am PC gesperrt, pc_anzeige).
     pc_steuerung: ob die PC-Werkzeuge in dieser Sitzung eingeschaltet sind (Standard aus).
@@ -381,7 +385,8 @@ def betrieb_message(
     Modell nehmen konnte (zu langsam, nicht erreichbar), für die Anzeige in der Statusleiste.
     entwicklung_grund: warum Entwicklungsaufträge im Büro aus sind (höchstens 120 Zeichen); der Aufrufer reicht ihn nur für
     Admins durch (entwicklung_betrieb.anzeige_grund), nie für Mitglieder.
-    office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld."""
+    office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld.
+    onenote: ob der Knopf "Als OneNote-Seite" gehen kann (onenote_werkzeuge.OneNoteSeiten.anzeige); False: kein Feld."""
     sprache = sprache or {}
     message = {
         "type": "betrieb",
@@ -409,6 +414,8 @@ def betrieb_message(
         message["entwicklung_grund"] = " ".join(entwicklung_grund.split())[:entwicklung_betrieb.ANZEIGE_ZEICHEN]
     if office:
         message["office"] = [f for f in office if f in office_werkzeuge.FORMATE]
+    if onenote is True:
+        message["onenote"] = True
     return message
 
 
@@ -760,6 +767,14 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
               if (pc_client is not None and is_admin and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
     if office is not None:
         office.register(llm)
+    # OneNote-Seite aus dem Canvas (onenote_werkzeuge.py): dieselben Bedingungen, aber WAMO_OFFICE=onenote. Die Seite entsteht erst nach dem
+    # Klick auf die Freigabekarte (activity.py, pc_freigaben.py); fehlt OneNote am PC, wird es eine Word-Datei in Dokumente\WAIS.
+    # Der Klick "Als OneNote-Seite" bekommt seine Karte über die PC-Freigaben (freigaben steht weiter unten, gilt beim Klick längst).
+    onenote = (onenote_werkzeuge.OneNoteSeiten(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
+                                               karte=lambda a: freigaben.anfrage(a) if freigaben is not None else None)
+               if (pc_client is not None and is_admin and not labor_sitzung and onenote_werkzeuge.fuer_sitzung(identity)) else None)
+    if onenote is not None:
+        onenote.register(llm)
 
     # WAMO Boss (boss.py): Aufgaben an Spezialisten verteilen; Karte unter Vorgänge, Ergebnis als Daten (turn.taint).
     # Die Art "bild" gibt es nur mit PC-Steuerung und Rolle admin, wie bildschirm_ansehen.
@@ -971,7 +986,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                    modell_modus=modus_wirksam(zugang), modell_quelle=zugang.quelle,
                                    modell_hinweis=llm_wahl.grund,
                                    entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund),
-                                   office=office.anzeige() if office is not None else None))
+                                   office=office.anzeige() if office is not None else None,
+                                   onenote=onenote is not None and onenote.anzeige()))
 
     async def stimme_sagen(text: str) -> None:
         """WAMO spricht einen Satz der Stimmprüfung (Anleitung beim Einlernen, Fehler), ohne das Modell zu fragen."""
@@ -1148,7 +1164,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             if stimme is not None:  # Handler im Schema registriert Pipecat selbst: auch sie fragen vorher das Gate der Stimmprüfung
                 pc_schemas = schemas_absichern(pc_schemas, stimme.gate)
             office_schemas = await office.schemas() if office is not None else []  # nur Formate, die der Host meldet
-            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas]))
+            onenote_schemas = await onenote.schemas() if onenote is not None else []  # nur, wenn der Host OneNote oder Word kann
+            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas,
+                                                          *onenote_schemas]))
             state["pc_tools"] = True
             started = time.monotonic()
             with contextlib.suppress(Exception):  # Latenz, Rechnername und Sperre sind nur Anzeigen
@@ -1292,6 +1310,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 logger.warning("Jira-Story ohne Jira-Stories in dieser Sitzung abgewiesen")
                 return
             jira_story.klick_starten(data)
+        elif msg.type == onenote_werkzeuge.NACHRICHT:
+            # Klick "Als OneNote-Seite" (onenote_werkzeuge.py): Freigabekarte, erst danach die Seite; nur in Sitzungen mit OneNote
+            if onenote is None:
+                logger.warning("OneNote-Nachricht ohne OneNote in dieser Sitzung abgewiesen")
+                return
+            await onenote.client_nachricht(data)
         elif msg.type in office_werkzeuge.NACHRICHTEN:
             # Canvas als Datei speichern und gespeicherte Datei öffnen (office_werkzeuge.py): nur in Sitzungen mit Office-Dateien
             if office is None:

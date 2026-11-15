@@ -4,7 +4,7 @@ import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } fr
 import { JiraStoryKnopf } from "@/components/JiraStory";
 import { TeilenKnopf } from "@/components/Teilen";
 import { canvasIndex, canvasWunsch } from "@/lib/canvasWahl";
-import { exportFormate, knopfText, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
+import { exportFormate, knopfText, ONENOTE_KNOPF, onenoteMoeglich, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
 import { KOPIERT_MS, kopierChipText, type KopierStatus } from "@/lib/kopieren";
 import { istUuid } from "@/lib/teilenHilfe";
 import { useSelect } from "@/lib/store";
@@ -132,13 +132,15 @@ const SPEICHERN_FRIST_MS = 90_000;
 
 /**
  * "Als Word, Excel, PowerPoint, PDF speichern": nur für eigene, gespeicherte Elemente und nur in Formaten, die der Kern in betrieb.office
- * meldet (Admin, PC-Steuerung an, der Host kann es; voice-core/office_werkzeuge.py). Bis die Antwort kommt (Nachricht "datei"), sind die
- * Knöpfe gesperrt: kein Doppelklick, keine zweite Datei.
+ * meldet (Admin, PC-Steuerung an, der Host kann es; voice-core/office_werkzeuge.py). Dazu "Als OneNote-Seite", wenn der Kern
+ * betrieb.onenote meldet (voice-core/onenote_werkzeuge.py): Der Klick legt nur die Freigabekarte an. Bis die Antwort kommt (Nachricht
+ * "datei" oder "onenote"), sind die Knöpfe gesperrt: kein Doppelklick, keine zweite Datei.
  */
 function CanvasSpeichern({ item, office }: { item: CanvasItem; office: OfficeAktionen }) {
   const verfuegbar = useSelect(wamo, (s) => s.betrieb?.office);
+  const onenoteAn = useSelect(wamo, (s) => s.betrieb?.onenote);
   const antworten = useSelect(wamo, (s) => s.dateiAntworten);
-  const [laeuft, setLaeuft] = useState<{ format: OfficeFormat; bei: number } | null>(null);
+  const [laeuft, setLaeuft] = useState<{ format: OfficeFormat | "onenote"; bei: number } | null>(null);
   if (laeuft && antworten !== laeuft.bei) setLaeuft(null); // Antwort da (Erfolg oder Fehler): wieder frei
   useEffect(() => {
     if (!laeuft) return;
@@ -146,7 +148,8 @@ function CanvasSpeichern({ item, office }: { item: CanvasItem; office: OfficeAkt
     return () => clearTimeout(uhr);
   }, [laeuft]);
   const formate = exportFormate(item, verfuegbar);
-  if (!formate.length || !item.id) return null;
+  const onenote = office.onenote && onenoteMoeglich(item, onenoteAn) ? office.onenote : undefined;
+  if ((!formate.length && !onenote) || !item.id) return null;
   const id = item.id;
   return (
     <div className="canvas-export" role="group" aria-label="Als Datei am PC speichern">
@@ -164,6 +167,19 @@ function CanvasSpeichern({ item, office }: { item: CanvasItem; office: OfficeAkt
           {knopfText(f)}
         </button>
       ))}
+      {onenote && (
+        <button
+          type="button"
+          className="btn-secondary btn-small"
+          disabled={laeuft !== null}
+          aria-busy={laeuft?.format === "onenote" ? true : undefined}
+          onClick={() => {
+            if (laeuft === null && onenote(id)) setLaeuft({ format: "onenote", bei: antworten });
+          }}
+        >
+          {ONENOTE_KNOPF}
+        </button>
+      )}
     </div>
   );
 }

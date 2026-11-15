@@ -46,11 +46,12 @@ def _detail(name: str, args: dict) -> str:
 
 
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
-FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github")
-# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken)
+FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "onenote")
+# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
+# über onenote_seite_anfragen, onenote_werkzeuge.py)
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
-                                "github_repo_anlegen"})
+                                "github_repo_anlegen", "onenote_seite"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche (ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
 
