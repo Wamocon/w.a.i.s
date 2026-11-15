@@ -30,3 +30,5 @@ infra/sokrates2/labor-daten/* text eol=lf
 infra/sokrates2/wamo-rd/erweiterung/*.json text eol=lf
 infra/sokrates2/wamo-rd/erweiterung/*.js text eol=lf
 infra/sokrates2/wamo-rd/erweiterung/*.css text eol=lf
+# Signierte Beispieldaten des Update-Vertrags (desktop/update.test.js): Bytes nie umschreiben, sonst passt die Signatur nicht
+desktop/testdaten/update/** -text

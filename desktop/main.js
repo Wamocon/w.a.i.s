@@ -30,6 +30,9 @@
 //   und Einstellungen liegen unter %APPDATA%\WAMO. Der Unterwegs-Kern ist dort nicht verfügbar und im Tray ausgegraut.
 // * Die WAMO-CA gilt nur innerhalb der App (zertifikat.js), nie als Änderung am Windows-Speicher und nie über
 //   --ignore-certificate-errors.
+// * Updates (update.js, nur installiert): Die Oberfläche reicht das Manifest des Kerns weiter; die App prüft die
+//   Ed25519-Signatur gegen update-schluessel.json und die steigende Version, fragt selbst nach, lädt über eine vorher geprüfte
+//   Verbindung, vergleicht Größe und SHA-256 und startet erst dann den Installer.
 //
 // Umgebung: WAMO_UI_URL, WAMO_VOICE_CORE_URL (http oder https), WAMO_MANAGE_SERVICES, WAMO_UI_DEV,
 // WAMO_LOG_LEVEL (an den Voice-Core; Standard INFO, nie DEBUG), WAMO_VOLLBILD_LOG=1 (Rohwerte des
@@ -71,6 +74,7 @@ const { erzeugeMarkierungsAnzeige, fuerRandFenster, pruefeMarkierung, ruhezustan
 const { entladenBehandeln } = require("./entladen");
 const { erzeugeHostUmgebung } = require("./host-umgebung");
 const { adressen, loeseAuf, wirksameBetriebsart } = require("./installation");
+const { anfrageUeber, erzeugeUpdater, ladeInstaller, schluesselAusListe, verbindeGeprueft } = require("./update");
 const { erzeugePruefer, ladeCa, pruefeSocket } = require("./zertifikat");
 const { MENUE_TEXT, symbolReparieren } = require("./symbol-reparatur");
 const { taskleisteAbsichern } = require("./taskleiste");
@@ -103,6 +107,7 @@ const PFADE = loeseAuf({
   resourcesPath: process.resourcesPath,
   verzeichnis: __dirname,
   userData: app.getPath("userData"),
+  lokaleDaten: process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
 });
 let ADRESSEN;
 try {
@@ -140,6 +145,7 @@ const geraet = erzeugeGeraet({
   repo: PFADE.ressourcen,
   log: (text) => console.log(`[Gerät] ${text}`),
   vorTunnel: hostUmgebung ? () => hostUmgebung.bereit() : undefined,
+  hostStatus: hostUmgebung ? () => hostUmgebung.status() : undefined,
 }); // geraet.js
 const LOG_MAX_BYTES = 5 * 1024 * 1024; // je Logdatei höchstens 5 MB
 const LOG_DATEIEN = 3; // name.log, name.log.1, name.log.2
@@ -554,6 +560,8 @@ function createMainWindow() {
       nodeIntegration: false,
       webviewTag: false,
       backgroundThrottling: false,
+      // Version der App für die Brücke (preload.js liest nur x.y.z daraus)
+      additionalArguments: [`--wamo-version=${app.getVersion()}`],
     },
   });
   const wc = mainWin.webContents;
@@ -959,6 +967,63 @@ ipcMain.handle(
 );
 ipcMain.handle("geraet:aktivieren", geraetHandler((antwort) => geraet.aktivieren(antwort)));
 ipcMain.handle("geraet:status", geraetHandler(async () => ({ ok: true, ...geraet.status() }), false));
+
+// ---------- Updates (update.js) ----------
+// Nur das Hauptfenster mit der eigenen Oberfläche. Ohne gültige Signatur und steigende Version fragt die App nichts und lädt
+// nichts; die Rückfrage stellt dieser Prozess, nicht die Seite. Das Token gilt nur für die eine Anfrage an den Kern.
+let updater = null;
+try {
+  updater = erzeugeUpdater({
+    schluessel: schluesselAusListe(require("./update-schluessel.json")),
+    version: app.getVersion(),
+    installiert: PFADE.modus === "installiert" && Boolean(PFADE.updateOrdner),
+    fragen: async (m) => {
+      const { response } = await dialog.showMessageBox(mainWin, {
+        type: "question",
+        title: "W.A.I.S. aktualisieren",
+        message: `Update auf W.A.I.S. ${m.version} installieren?`,
+        detail: "Das Update ist vom Server signiert und geprüft. W.A.I.S. lädt den Installer, schließt sich und startet danach neu.",
+        buttons: ["Jetzt installieren", "Abbrechen"],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      });
+      return response === 0;
+    },
+    laden: ({ manifest, token }) =>
+      ladeInstaller({
+        manifest,
+        token,
+        kernUrl: VOICE_CORE_URL,
+        ordner: PFADE.updateOrdner,
+        verbinden: (ziel) =>
+          verbindeGeprueft(ziel, { pruefe: (s, host) => (WAMO_CA ? pruefeSocket(s, host, WAMO_CA) : { ok: false, grund: "WAMO-CA fehlt" }) }),
+        anfragen: (ziel, socket, kopf) => anfrageUeber(ziel, socket, kopf),
+      }),
+    starten: (datei) =>
+      new Promise((resolve, reject) => {
+        const kind = spawn(datei, ["--updated"], { detached: true, stdio: "ignore" });
+        kind.once("error", reject);
+        kind.once("spawn", () => {
+          kind.unref();
+          resolve();
+        });
+      }),
+    beenden: () =>
+      setTimeout(() => {
+        quitting = true;
+        app.quit();
+      }, 500),
+    log: (text) => console.log(`[Update] ${text}`),
+  });
+} catch (err) {
+  console.error(`Update-Schlüssel nicht geladen (${err.message}); Updates aus der App sind aus.`);
+}
+const UPDATE_AUS = { ok: false, text: "Update vom Server nicht bestätigt, bitte Niko fragen." };
+ipcMain.handle("update:pruefen", (event, angebot) => (fromMainUi(event) && updater ? updater.pruefen(angebot) : UPDATE_AUS));
+ipcMain.handle("update:installieren", (event, auftrag) =>
+  fromMainUi(event) && updater ? updater.installieren(auftrag) : UPDATE_AUS,
+);
 
 // Zustände der Oberfläche (alles andere wird "idle")
 const ZUSTAENDE = new Set(["offline", "idle", "listening", "thinking", "speaking", "acting", "approval"]);
