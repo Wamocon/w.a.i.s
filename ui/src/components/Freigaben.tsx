@@ -53,6 +53,7 @@ function ApprovalCard({ a, onDecide }: { a: Approval; onDecide: (a: Approval, ja
       <p className="sr-only" role="alert">
         {texte.ueberschrift}: {a.grund}
         {a.ziel && `, Ziel: ${a.ziel}`}
+        {a.warnung && `, Achtung: ${a.warnung}`}
       </p>
       <p className="eyebrow">
         {texte.ueberschrift}
@@ -62,6 +63,7 @@ function ApprovalCard({ a, onDecide }: { a: Approval; onDecide: (a: Approval, ja
         {a.grund}
       </h3>
       {texte.hinweis && <p className="approval-hinweis">{texte.hinweis}</p>}
+      {a.warnung && <p className="approval-warnung">{a.warnung}</p>}
       {a.von && <p className="approval-von">angefordert von {a.von}</p>}
       {a.ziel && (
         <p className="approval-ziel">
