@@ -214,6 +214,24 @@ async def pc_zugang_fuer(identity, register: GeraeteRegister | None = None, wurz
                     wurzel=wurzel, geheimnisse=geheimnisse, register=register)
 
 
+async def geraet_erwartet(identity, register: GeraeteRegister | None = None) -> bool:
+    """Führt das Register für dieses Profil ein aktives Gerät? Entscheidet nur, ob eine Sitzung ohne Zugang ihn später nachholt
+    (pc_nachverbinden.py), und gibt selbst nie Zugang. Ist das Register gerade nicht lesbar, ja: jeder Versuch prüft dann alles wie beim
+    Start (pc_zugang_fuer) und scheitert geschlossen. Ohne eingerichtete Datenbank nein. Wirft nie."""
+    try:
+        if register is None:
+            db = shared_database()
+            if not db.configured:
+                return False
+            register = GeraeteRegister(db)
+        return await register.aktives_geraet(identity.user_id) is not None
+    except RegisterFehler as e:
+        logger.info("WAMO-GERAET Register beim Sitzungsstart nicht lesbar ({}): Zugang wird nachgeholt", type(e).__name__)
+        return True
+    except ValueError:
+        return False
+
+
 async def geraet_wache(zugang: PcZugang, bei_entzug: Callable[[str], Awaitable[None]], *, intervall: float = WACHE_SECS,
                        erste: float = WACHE_ERSTE_SECS, ausfaelle: int = WACHE_AUSFAELLE,
                        schlaf: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
