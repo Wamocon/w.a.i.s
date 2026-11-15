@@ -362,7 +362,9 @@ def test_bot_baut_teams_nur_fuer_admin_ohne_labor():
     zeile_ = next(z for z in BOT.splitlines() if "TeamsNachricht(" in z)
     block = BOT[BOT.index(zeile_) - 300: BOT.index(zeile_) + 500]
     assert "teams_werkzeuge.fuer_sitzung(identity)" in block
-    assert "is_admin" in block and "not labor_sitzung" in block and "pc_client is not None" in block
+    assert "is_admin" in block and "not labor_sitzung" in block and "pc_teile and is_admin" in block
+    # pc_teile: mit Client oder solange der Zugang zum Laptop nachgeholt werden kann (pc_nachverbinden.py), sonst nie
+    assert "pc_teile = pc_client is not None or pc_nachholen" in BOT
     assert "darf=pc_allowed" in block and "fremd=lambda: turn.tainted" in block
 
 
