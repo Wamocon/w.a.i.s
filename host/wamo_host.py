@@ -13,7 +13,8 @@ untrusted: auch Text aus Websuche, Mails oder Dateien kann im Modell als Anweisu
             office_datei_erstellen und office_datei_oeffnen, Dateien nur in Dokumente\\WAIS, Schalter office.aus)
   critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung durch einen Admin in der UI (auch github_repo_anlegen und,
             nur für den Kern, outlook_mail_anfragen: Senden über das klassische Outlook ist critical, ein Entwurf im neuen Outlook
-            ist change, kommt aber ebenso erst nach der Karte; Schalter office.aus)
+            ist change, kommt aber ebenso erst nach der Karte; teams_chat_anfragen: Teams-Chat mit Text im Eingabefeld, W.A.I.S.
+            sendet dort nie selbst; Schalter office.aus)
   blocked   nie
 Freigaben kann das Modell NICHT selbst erteilen. Solange eine Anfrage offen ist oder eine freigegebene Aktion läuft,
 ruhen alle Eingaben (status=wartet), und die eigene Oberfläche (Freigabekarte) bedient WAMO nie: Das Modell kann die
@@ -56,6 +57,7 @@ import office_com
 import office_dateien
 import office_outlook
 import office_outlook_com
+import office_teams
 import uia_control
 import windows_control as wc
 
@@ -2131,8 +2133,9 @@ def office_faehigkeiten() -> dict:
         return {**aus, "formate": []}
     faehig = office_com.faehigkeiten()
     mail = office_outlook.verfuegbar()  # welches Outlook gerade läuft, prüft erst die Mail-Anfrage (hier nie COM: schnell bleiben)
-    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"], "mail": mail})
-    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE, "mail": mail}
+    teams = office_teams.verfuegbar()  # Teams-App oder Browser; welcher Weg gilt, steht erst auf der Karte
+    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"], "mail": mail, "teams": teams})
+    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE, "mail": mail, "teams": teams}
 
 
 @mcp.tool()
@@ -2424,6 +2427,65 @@ def outlook_versand_status(versand_id: str) -> dict:
     return {"status": "success", **s}
 
 
+# ---------- Teams-Chat mit vorbereitetem Text (office_teams.py) ----------
+# Nur für den Kern, nie in LLM_TOOLS: Das Modell ruft teams_nachricht im Kern, der Kern ruft teams_chat_anfragen. Der Host prüft
+# Empfänger (nur aufgelöste interne Adressen, Namen nur über das klassische Outlook), Text, Gruppenname und die Länge des Links selbst,
+# baut die Karte mit genau dem Inhalt des Links und hält die Anfrage. Nach dem Klick öffnet er den Chat in der Teams-App (msteams:) oder im
+# Browser; der Text steht im Eingabefeld, senden muss die Person selbst. Audit nur mit Anzahl und Prüfsummen.
+TEAMS_PRO_STUNDE = 20
+TEAMS_KARTE = ("Die Teams-Nachricht liegt als Karte in der Oberfläche. Erst nach dem Klick eines Admins öffnet W.A.I.S. den Chat mit dem "
+               "Text im Eingabefeld; senden muss die Person in Teams selbst.")
+
+
+@mcp.tool()
+async def teams_chat_anfragen(an: list[str], text: str, gruppenname: str = "", anlass: str = "") -> dict:
+    """Nur für den Kern: bereitet einen Teams-Chat mit vorbefülltem Text vor und legt die Freigabekarte an (geöffnet erst nach dem
+    Klick, gesendet nie). an: Mailadressen oder (klassisches Outlook) Namen aus dem Adressbuch, höchstens 10, nur intern;
+    gruppenname: nur bei mindestens zwei Empfängern."""
+    tool = "teams_chat_anfragen"
+    if aus := _office_aus(tool):
+        return aus
+    if not _rate_ok(tool, TEAMS_PRO_STUNDE, 3600.0):
+        _audit({"tool": tool, "risk": "rejected", "grund": "Rate-Grenze"})
+        return {"status": "rejected", "summary": f"Höchstens {TEAMS_PRO_STUNDE} Teams-Nachrichten je Stunde. Bitte später noch einmal."}
+    # Im Thread: Erkennung und Auflösen im Adressbuch (COM) dauern einige Sekunden; die Probe des Kerns läuft weiter
+    return await asyncio.to_thread(_teams_anfragen, an, text, gruppenname, anlass)
+
+
+def _teams_audit(n: office_teams.Nachricht) -> dict:
+    """Audit am PC ohne Inhalt: Anzahl, Prüfsummen über Adressen, Text und Gruppenname."""
+    adressen = ",".join(sorted(e.smtp.lower() for e in n.empfaenger))
+    audit = {"an": len(n.empfaenger), "empfaenger": _text_audit(adressen), "text": _text_audit(n.text)}
+    return {**audit, "gruppe": _text_audit(n.gruppe)} if n.gruppe else audit
+
+
+def _teams_anfragen(an: object, text_roh: object, gruppe_roh: object, anlass: object) -> dict:
+    tool = "teams_chat_anfragen"
+    try:
+        n = office_teams.nachricht(an, text_roh, gruppe_roh)
+    except office_outlook.MailFehler as e:  # auch TeamsFehler und Fehler aus dem Adressbuch
+        _audit({"tool": tool, "risk": "rejected", "grund": "ungültig"})  # der Grund kann Adressen nennen: nicht ins Audit
+        return {"status": "rejected", "summary": str(e)}
+    app = office_teams.app_registriert()
+    antwort = _anfrage(tool, "teams", {"teams": n}, "teams", office_teams.GRUND, office_teams.kartentext(n, app), office_teams.ZIEL,
+                       TEAMS_KARTE, {**_teams_audit(n), "weg": "app" if app else "browser"},
+                       uia_control.sicherer_text(anlass, 200) if isinstance(anlass, str) and anlass else "",
+                       detail_max=office_teams.KARTE_MAX, zu_lang=office_teams.ZU_LANG)
+    if antwort.get("status") == "needs_approval":
+        antwort["protokoll"] = office_teams.protokoll(n)
+    return antwort
+
+
+def _teams_ausfuehren(eintrag: dict) -> dict:
+    """Freigegebener Teams-Chat: Schalter direkt davor neu prüfen, dann nur öffnen (der Text steht im Eingabefeld, nie gesendet)."""
+    if OFFICE_AUS.exists():
+        _audit({"tool": "teams_chat", "risk": "blocked", "grund": "office.aus"})
+        return {"status": "blocked", "summary": OFFICE_AUS_TEXT}
+    ergebnis = office_teams.oeffnen(eintrag["teams"])
+    _audit({"tool": "teams_chat", "risk": "critical", "weg": ergebnis.get("weg"), "result": ergebnis.get("status")})
+    return ergebnis
+
+
 UNBEKANNT = {"status": "error", "summary": "Unbekannte oder abgelaufene Freigabe."}
 
 
@@ -2459,6 +2521,8 @@ def _inhalt_audit(eintrag: dict) -> dict:
         m = eintrag["mail"]
         return {"weg": eintrag["weg"], "programm": eintrag["programm"], "adressen": [e.smtp for e in m.empfaenger],
                 "anhang_namen": [a.name[:120] for a in m.anhaenge], "betreff": _text_audit(m.betreff), "text": _text_audit(m.text)}
+    if art == "teams":  # nur Anzahl und Prüfsummen, nie Adressen, Gruppenname oder Text
+        return _teams_audit(eintrag["teams"])
     return {}
 
 
@@ -2590,6 +2654,8 @@ def _ausfuehren(eintrag: dict) -> dict:
         return _github_anlegen_ausfuehren(eintrag)
     if art == "mail":
         return _mail_ausfuehren(eintrag)
+    if art == "teams":
+        return _teams_ausfuehren(eintrag)
     if art == "webseite":
         url = validate_url(eintrag["url"])  # die DNS-Auflösung kann sich seit der Anfrage geändert haben
         browser = _browser_name(eintrag["browser"])

@@ -45,6 +45,8 @@ export type Betrieb = {
   office?: OfficeFormat[];
   /** Mail über Outlook am PC geht jetzt (nur Admins mit PC-Steuerung, voice-core/outlook_werkzeuge.py): Knopf "Als E-Mail" */
   mail?: boolean;
+  /** Teams-Nachrichten am PC gehen jetzt (nur Admins mit PC-Steuerung, voice-core/teams_werkzeuge.py): Knopf "Als Teams-Nachricht" */
+  teams?: boolean;
 };
 
 /** Modellwahl je Profil: Automatisch (der Boss wählt) oder Nur Hausmodelle */
@@ -273,6 +275,8 @@ export type ServerMessage =
   | { type: "mail_antwort"; ok: boolean; grund?: string }
   /** Mail über Outlook: Stand nach dem Klick (wartet mit Restzeit und Zurückholen, Endstand oder offener Entwurf); nie ein Inhalt */
   | { type: "mail_versand"; id: string | null; zustand: MailVersandZustand; restS?: number; text: string }
+  /** Teams-Nachricht: Antwort auf "Zur Freigabe vorbereiten" (ok: die Karte liegt bereit); nie ein Inhalt */
+  | { type: "teams_antwort"; ok: boolean; grund?: string }
   // Ohne stand: den Zustand der Startkarte setzt allein die Oberfläche (lib/auftragStart.ts), der Kern kann ihn nicht vorgeben
   | ({ type: "auftrag" } & Omit<Auftrag, "stand">)
   /** Antwort des Kerns auf den Klick "Starten": ok, oder nicht ok mit einem Satz als Grund (voice-core/dev_agent.py) */
@@ -665,6 +669,7 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         entwicklungGrund: zeile(m.entwicklung_grund, 120),
         office: officeFormate(m.office),
         mail: m.mail === true ? true : undefined,
+        teams: m.teams === true ? true : undefined,
       };
     }
     case "datei": {
@@ -685,6 +690,11 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
     case "mail_antwort":
       if (typeof m.ok !== "boolean") return null;
       return m.ok ? { type: "mail_antwort", ok: true } : { type: "mail_antwort", ok: false, grund: zeile(m.grund, 300) ?? "Nicht vorbereitet." };
+    case "teams_antwort":
+      if (typeof m.ok !== "boolean") return null;
+      return m.ok
+        ? { type: "teams_antwort", ok: true }
+        : { type: "teams_antwort", ok: false, grund: zeile(m.grund, 300) ?? "Nicht vorbereitet." };
     case "mail_versand": {
       const id = m.id ?? null;
       if ((id !== null && !(isStr(id) && VERSAND_KENNUNG.test(id))) || !oneOf(m.zustand, MAIL_VERSAND_ZUSTAENDE)) return null;

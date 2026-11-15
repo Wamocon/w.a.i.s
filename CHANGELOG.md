@@ -54,6 +54,16 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Hinzugefügt
 
+- Teams-Nachricht am PC aus dem Gespräch oder dem Canvas (Paket 4 aus `docs/office-und-versand.md`, Teil Teams, Zweig `feat/teams`):
+  Auf Zuruf (Werkzeug `teams_nachricht`) oder per Klick („Als Teams-Nachricht“ im Kopf des Canvas, Text als Klartext vorgeschlagen
+  und änderbar) legt W.A.I.S. eine Freigabekarte mit Empfängern und Text an. Erst nach dem Klick öffnet der Host den Chat per Deep Link
+  (`msteams://`, sonst Browser) mit dem Text im Eingabefeld; senden muss die Person selbst mit Enter, W.A.I.S. sendet in Teams nie.
+  Empfänger nur als aufgelöste interne Adressen (Namen nur über das Adressbuch des klassischen Outlooks, mehrdeutig heißt Rückfrage),
+  höchstens 10, Gruppenname nur bei mehreren, Text höchstens 1000 Zeichen und Link höchstens 2000 Zeichen (zu lang heißt Hinweis, nie
+  gekürzt). Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=teams`, PC-Steuerung und Stimmabdruck-Gate. Host: `teams_chat_anfragen`
+  (critical, Freigabeart `teams`, `host/office_teams.py`, Audit nur mit Anzahl und Prüfsummen, 20 je Stunde, `office.aus`). Kern:
+  `voice-core/teams_werkzeuge.py`, Aktion `teams` in `activity.py` und `pc_freigaben.py` (Protokoll ohne Adressen und Text).
+
 - Mail über Outlook am PC aus dem Canvas (Paket 2 aus `docs/office-und-versand.md`, Zweig `feat/outlook`): Auf Zuruf (Werkzeug
   `outlook_senden`) oder per Klick („Als E-Mail“ im Kopf des Canvas mit An, Cc, Betreff, Text und dem Canvas als Anhang) legt W.A.I.S.
   eine Freigabekarte mit genau dem Inhalt an, der rausgeht (lange Karte bis 8000 Zeichen, intern oder EXTERN je Empfänger, Warnung bei

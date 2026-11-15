@@ -188,6 +188,8 @@ export type WamoState = {
   mailAntwort: { n: number; ok: boolean; grund?: string };
   /** Stand des letzten Versands (wartet mit Frist und Zurückholen, Endstand oder offener Entwurf), bis die Person ihn schließt */
   mailVersand: MailVersand | null;
+  /** letzte Antwort auf "Zur Freigabe vorbereiten" (Teams-Nachricht); n zählt, damit das Formular jede Antwort sieht */
+  teamsAntwort: { n: number; ok: boolean; grund?: string };
 };
 
 export const HISTORY = 240; // ~12 s bei 20 Hz
@@ -236,6 +238,7 @@ export const initialState: WamoState = {
   dateiAntworten: 0,
   mailAntwort: { n: 0, ok: true },
   mailVersand: null,
+  teamsAntwort: { n: 0, ok: true },
 };
 
 export const wamo = createStore<WamoState>(initialState);
@@ -607,6 +610,7 @@ export function applyServerMessage(msg: ServerMessage) {
         entwicklungGrund: msg.entwicklungGrund,
         office: msg.office,
         mail: msg.mail,
+        teams: msg.teams,
       };
       const vorher = wamo.get().betrieb;
       wamo.set((s) => ({
@@ -651,6 +655,14 @@ export function applyServerMessage(msg: ServerMessage) {
         ...s,
         mailAntwort: { n: s.mailAntwort.n + 1, ok: msg.ok, grund: msg.grund },
         ansage: msg.ok ? "Die Mail liegt zur Freigabe bereit" : `Mail nicht vorbereitet: ${msg.grund ?? ""}`,
+      }));
+      return;
+    case "teams_antwort":
+      // Antwort auf "Zur Freigabe vorbereiten" (components/TeamsFormular.tsx): ok heißt, die Karte liegt bereit
+      wamo.set((s) => ({
+        ...s,
+        teamsAntwort: { n: s.teamsAntwort.n + 1, ok: msg.ok, grund: msg.grund },
+        ansage: msg.ok ? "Die Teams-Nachricht liegt zur Freigabe bereit" : `Teams-Nachricht nicht vorbereitet: ${msg.grund ?? ""}`,
       }));
       return;
     case "mail_versand": {
