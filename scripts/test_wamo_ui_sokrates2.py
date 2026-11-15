@@ -355,6 +355,16 @@ def test_tar_enthaelt_skripte_bau_info_und_keine_umgebungsdateien():
             assert b"\r" not in tar.extractfile(n).read(), n                # Unix-Zeilenenden
 
 
+def test_tar_eintraege_tragen_die_zeit_des_verteilens():
+    """Mit fester Zeit 0 übersah der Docker-Bau am Server Änderungen gleicher Größe: Er überträgt den Bau-Kontext nur für Dateien,
+    deren Größe oder Änderungszeit sich geändert hat (15.11.2026: package.json 0.1.0 auf 0.2.0, das Image meldete weiter 0.1.0)."""
+    for zeit in (1_794_757_000, 1_794_758_000):
+        tar = tarfile.open(fileobj=io.BytesIO(w.tar_bauen(False, COMMIT, True, zeit=zeit)[0]))
+        assert {m.mtime for m in tar.getmembers()} == {zeit}
+    tar = tarfile.open(fileobj=io.BytesIO(w.tar_bauen(False, COMMIT, True)[0]))
+    assert min(m.mtime for m in tar.getmembers()) > 1_700_000_000  # ohne Angabe: jetzt, nie 0
+
+
 def test_tar_mit_firewall_und_caddy_hat_die_gemeinsamen_dateien():
     daten, _, n_infra = w.tar_bauen(True, COMMIT, False)
     namen = tarfile.open(fileobj=io.BytesIO(daten)).getnames()

@@ -38,9 +38,10 @@ import re
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT =Path(__file__).resolve().parent.parent
 INFRA = ROOT / "infra" / "sokrates2"
 UI = ROOT / "ui"
 HOST = os.environ.get("WAMO_SSH_HOST", "wamo-sokrates2")  # SSH-Alias des Dienstkontos wamocon (~/.ssh/config), per WAMO_SSH_HOST änderbar
@@ -78,20 +79,20 @@ def ssh(befehl: str, eingabe: bytes | None = None, ausgabe: bool = True) -> subp
     return r
 
 
-def _eintrag(tar: tarfile.TarFile, name: str, daten: bytes, ausfuehrbar: bool = False) -> None:
+def _eintrag(tar: tarfile.TarFile, name: str, daten: bytes, zeit: int, ausfuehrbar: bool = False) -> None:
     info = tarfile.TarInfo(name)
     info.size = len(daten)
     info.mode = 0o755 if ausfuehrbar else 0o644
-    info.mtime = 0
+    info.mtime = zeit
     info.uname = info.gname = ""
     tar.addfile(info, io.BytesIO(daten))
 
 
-def _ordner(tar: tarfile.TarFile, name: str) -> None:
+def _ordner(tar: tarfile.TarFile, name: str, zeit: int) -> None:
     info = tarfile.TarInfo(name)
     info.type = tarfile.DIRTYPE
     info.mode = 0o755
-    info.mtime = 0
+    info.mtime = zeit
     tar.addfile(info)
 
 
@@ -136,9 +137,12 @@ def bau_info(commit: str, sauber: bool) -> bytes:
     return f"WAMO_COMMIT={commit}\nWAMO_SAUBER={'ja' if sauber else 'nein'}\n".encode("ascii")
 
 
-def tar_bauen(mit_firewall_und_caddy: bool, commit: str, sauber: bool) -> tuple[bytes, int, int]:
+def tar_bauen(mit_firewall_und_caddy: bool, commit: str, sauber: bool, zeit: int | None = None) -> tuple[bytes, int, int]:
     """Tar-Archiv für ~/wamo-infra: Skripte und Dateien der Oberfläche, bau.info und die Quellen von ui/.
-    Ergebnis (Daten, Zahl der UI-Dateien, Zahl der Infra-Dateien)."""
+    Ergebnis (Daten, Zahl der UI-Dateien, Zahl der Infra-Dateien).
+    zeit: Änderungszeit aller Einträge (Standard: jetzt). Nie eine feste Zeit: Der Docker-Bau am Server überträgt den Kontext nur
+    für Dateien mit neuer Größe oder Änderungszeit und übersah sonst Änderungen gleicher Größe (15.11.2026, Version in package.json)."""
+    zeit = int(time.time()) if zeit is None else zeit
     infra = list(INFRA_DATEIEN) + (GEMEINSAME_DATEIEN if mit_firewall_und_caddy else [])
     for rel in infra:
         if not (INFRA / rel).is_file():
@@ -151,11 +155,11 @@ def tar_bauen(mit_firewall_und_caddy: bool, commit: str, sauber: bool) -> tuple[
             for teil in Path(rel).parent.parts:
                 ordner = f"{ordner}/{teil}".lstrip("/")
                 if ordner not in gesehen:
-                    _ordner(tar, ordner)
+                    _ordner(tar, ordner, zeit)
                     gesehen.add(ordner)
-            _eintrag(tar, rel, _text(INFRA / rel), ausfuehrbar=rel.endswith(".sh"))
-        _eintrag(tar, "wamo-ui/bau.info", bau_info(commit, sauber))
-        _ordner(tar, "ui")
+            _eintrag(tar, rel, _text(INFRA / rel), zeit, ausfuehrbar=rel.endswith(".sh"))
+        _eintrag(tar, "wamo-ui/bau.info", bau_info(commit, sauber), zeit)
+        _ordner(tar, "ui", zeit)
         gesehen = {"ui"}
         dateien = ui_dateien()
         for pfad in dateien:
@@ -164,9 +168,9 @@ def tar_bauen(mit_firewall_und_caddy: bool, commit: str, sauber: bool) -> tuple[
             for teil in rel.parent.parts:
                 ordner = f"{ordner}/{teil}"
                 if ordner not in gesehen:
-                    _ordner(tar, ordner)
+                    _ordner(tar, ordner, zeit)
                     gesehen.add(ordner)
-            _eintrag(tar, f"ui/{rel.as_posix()}", _text(pfad))
+            _eintrag(tar, f"ui/{rel.as_posix()}", _text(pfad), zeit)
     return puffer.getvalue(), len(dateien), len(infra)
 
 
