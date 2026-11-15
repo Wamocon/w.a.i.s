@@ -29,7 +29,7 @@ function desktop(an: boolean) {
 }
 
 function admin() {
-  nutzerSetzen({ id: ID, email: "niko@wamocon.com" });
+  nutzerSetzen({ id: ID, email: "admin@wamo.test" });
   localStorage.setItem(`wamo.rolle.${ID}`, "admin");
 }
 
@@ -62,7 +62,7 @@ describe("PC-Steuerung aus dem Browser", () => {
       wamo.set((s) => ({
         ...s,
         presence: "idle",
-        profil: { name: "Niko", rolle: "admin" },
+        profil: { name: "Admin", rolle: "admin" },
         betrieb: { modus: "buero", modelle: {}, pc: "verbunden", pcSteuerung: "aus", pcName: "WMC-H-04-NS" },
       })),
     );
@@ -90,7 +90,7 @@ describe("PC-Steuerung aus dem Browser", () => {
   });
 
   it("Mitglieder sehen weder Schalter noch Hinweis", () => {
-    nutzerSetzen({ id: ID, email: "anna@wamocon.com" });
+    nutzerSetzen({ id: ID, email: "mitglied@wamo.test" });
     localStorage.setItem(`wamo.rolle.${ID}`, "mitglied");
     render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
     expect(schalter()).toBeNull();

@@ -103,13 +103,32 @@ describe("Schalter PC-Steuerung ohne Gespräch", () => {
       wamo.set((s) => ({
         ...s,
         presence: "idle",
-        profil: { name: "Niko", rolle: "admin" },
+        profil: { name: "Admin", rolle: "admin" },
         betrieb: { modus: "buero", modelle: {}, pc: "aus", pcSteuerung: "aus" },
       })),
     );
     render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
     expect((schalter() as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(HINWEIS_PC_AUS)).toBeTruthy();
+  });
+
+  it("nach einem Klick ohne Sitzung auf einen Kern ohne PC-Host steht der Satz nur einmal da", () => {
+    desktop(false);
+    person();
+    act(() =>
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        profil: { name: "Admin", rolle: "admin" },
+        betrieb: { modus: "buero", modelle: {}, pc: "aus", pcSteuerung: "aus" },
+        pcEinschalten: { wartet: false, hinweis: HINWEIS_PC_AUS },
+      })),
+    );
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    const treffer = screen.getAllByText(HINWEIS_PC_AUS);
+    expect(treffer).toHaveLength(1);
+    expect(treffer[0].getAttribute("role")).toBe("status"); // der Status sagt es den Screenreadern
+    expect((schalter() as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("Sitzung mit getrenntem PC: bedienbar, der Satz am Schalter nennt den Zustand (nur einmal, auch nach einem Wunsch)", () => {
@@ -119,7 +138,7 @@ describe("Schalter PC-Steuerung ohne Gespräch", () => {
       wamo.set((s) => ({
         ...s,
         presence: "idle",
-        profil: { name: "Niko", rolle: "admin" },
+        profil: { name: "Admin", rolle: "admin" },
         betrieb: { modus: "buero", modelle: {}, pc: "getrennt", pcSteuerung: "aus" },
         pcEinschalten: { wartet: false, hinweis: HINWEIS_PC_GETRENNT },
       })),

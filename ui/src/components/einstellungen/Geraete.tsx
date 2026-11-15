@@ -56,6 +56,8 @@ const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { 
         : anzeige.ohneSitzung
           ? HINWEIS_OHNE_SITZUNG
           : (lageText ?? `gilt nur für diese Sitzung${pcName ? `, Ziel ${pcName}` : ""}`);
+  // gesperrt mit demselben Satz, den der Status schon nennt (Kern ohne PC-Host nach einem Klick): dort genügt er
+  const zeile = hinweis === ein.hinweis ? null : hinweis;
   return (
     <div className="pc-steuerung" id={PC_STEUERUNG_ID} tabIndex={-1} role="group" aria-label="PC-Steuerung">
       <div className="pc-switch-row">
@@ -66,7 +68,7 @@ const PcSteuerungSchalter = memo(function PcSteuerungSchalter({ onSchalten }: { 
           onSchalten={onSchalten}
           setZiel={setZiel}
         />
-        <span className="pc-switch-hint">{hinweis}</span>
+        {zeile && <span className="pc-switch-hint">{zeile}</span>}
       </div>
       {fern && <p className="pc-switch-hint pc-fern-hinweis">{HINWEIS_LAPTOP}</p>}
       {/* immer eingehängt, nur der Text wechselt: ein neu eingefügter Bereich wird oft überhört */}
