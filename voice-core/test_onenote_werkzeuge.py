@@ -269,7 +269,9 @@ def test_bot_baut_onenote_nur_fuer_admin_ohne_labor_und_haengt_das_schema_an():
     zeile = next(z for z in BOT.splitlines() if "OneNoteSeiten(" in z)
     block = BOT[BOT.index(zeile) - 400: BOT.index(zeile) + 400]
     assert "onenote_werkzeuge.fuer_sitzung(identity)" in block
-    assert "is_admin" in block and "not labor_sitzung" in block and "pc_client is not None" in block and "darf=pc_allowed" in block
+    assert "is_admin" in block and "not labor_sitzung" in block and "pc_teile and is_admin" in block
+    # pc_teile: mit Client oder solange der Zugang zum Laptop nachgeholt werden kann (pc_nachverbinden.py), sonst nie
+    assert "pc_teile = pc_client is not None or pc_nachholen" in BOT and "darf=pc_allowed" in block
     assert "onenote.register(llm)" in BOT and "await onenote.schemas()" in BOT
     assert BOT.index("werkzeuge_absichern(llm, stimme.gate)") < BOT.index("onenote.register(llm)")
     assert "*onenote_schemas" in BOT

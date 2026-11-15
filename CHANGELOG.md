@@ -409,6 +409,18 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Behoben
 
+- PC-Steuerung verbindet den Laptop nach, wenn der Tunnel erst nach dem Sitzungsstart steht (Zweig `fix/pc-nachverbinden`). Befund vom
+  15.11.2026: Die Desktop-App startete die Sitzung 18 Sekunden, bevor der Tunnel des Laptops stand. Der Kern fragte den Zugang nur einmal beim
+  Aufbau, die Sitzung blieb ohne PC, und jeder Klick auf den Schalter „PC-Steuerung“ endete still in „aus“. Jetzt holt die Sitzung den
+  Zugang nach (`voice-core/pc_nachverbinden.py`): beim Klick auf „an“ und im Hintergrund (in der ersten Minute alle 5 s, danach alle 15 s,
+  höchstens 3 Minuten nach dem Start). Bis dahin meldet `betrieb` den PC als „verbindet“ statt „aus“; findet ein Klick den Laptop nicht,
+  meldet die Sitzung „getrennt“ und sagt „Der Laptop ist noch nicht verbunden. Läuft die Desktop-App?“ (höchstens alle 20 s). Nur für
+  Admins mit aktivem Gerät im Register, im Tunnel je Gerät mit Host an, nie im Labor und nie für Mitglieder (`nachholen_moeglich`,
+  `pc_geraet.geraet_erwartet`); ein Admin ohne Gerät sieht wie bisher „aus“. Ein Versuch ist genau der Weg des Starts (`pc_zugang` mit
+  `lies_geheimnisse`, `host_client` nur für dieses Gerät, `start_pc` mit Rechnernamen-Abgleich, Gerätewache und Tunnelwächter), höchstens
+  einer gleichzeitig, mindestens 2 s Abstand, nichts nach dem Sitzungsende oder einem Entzug. Eingeschaltet wird weiter nur per Klick, mit
+  PC-Sperre, Stimmabdruck-Gate und Gate der PC-Werkzeuge wie bisher; ein späterer Klick „aus“ gewinnt gegen einen noch laufenden Versuch.
+  Die Oberfläche bleibt unverändert. Tests in `voice-core/test_pc_nachverbinden.py`.
 - Selbstschutz der Entwicklungsaufträge nach der Umbenennung des Repos (Zweig `fix/selbstschutz-neuer-reponame`): Seit dem 14.11.2026 heißt
   das Repo auf GitHub `Wamocon/w.a.i.s`, der Selbstschutz erkannte es nur am Namen `wamo`. Ein Auftrag mit `w.a.i.s` wäre nicht als eigenes
   Repo abgelehnt worden. Kern (`voice-core/dev_guard.py`), Dispatcher und Kern-Kanal halten jetzt je eine Liste `SELF_REPOS = ("wamo",
