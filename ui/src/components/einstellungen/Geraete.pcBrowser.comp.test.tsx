@@ -15,9 +15,10 @@ vi.mock("@/lib/betriebsart", async (orig) => ({
 }));
 
 import { DateiHinweis } from "@/components/DateiHinweis";
+import { MailVersandHinweis } from "@/components/MailVersand";
 import { GeraeteAbschnitt } from "@/components/einstellungen/Geraete";
 import { nutzerSetzen } from "@/lib/nutzer";
-import { HINWEIS_LAPTOP, HINWEIS_NUR_APP } from "@/lib/pcSchalter";
+import { HINWEIS_LAPTOP, HINWEIS_NUR_APP, HINWEIS_OHNE_SITZUNG, HINWEIS_OHNE_SITZUNG_FERN } from "@/lib/pcSchalter";
 import { applyServerMessage, resetWamo, wamo } from "@/lib/wamo";
 
 const ID = "0b7f3c1e-2d4a-4c55-9a10-1a2b3c4d5e6f";
@@ -35,6 +36,13 @@ function admin() {
 
 const schalter = () => screen.queryByRole("switch", { name: /PC-Steuerung/ });
 const autoHaken = () => screen.queryByRole("checkbox", { name: /automatisch einschalten/ });
+/** Beschreibung des Schalters über aria-describedby (auch ein gesperrter Schalter nennt so seinen Grund). */
+const beschreibung = (el: Element) =>
+  (el.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
 
 describe("PC-Steuerung aus dem Browser", () => {
   beforeEach(() => {
@@ -54,6 +62,55 @@ describe("PC-Steuerung aus dem Browser", () => {
     expect(screen.getByText(HINWEIS_NUR_APP)).toBeTruthy();
     expect(autoHaken()).toBeNull();
     expect(screen.queryByText(/nur in der Desktop-App verfügbar/)).toBeNull();
+  });
+
+  it("Browser im Büro ohne Sitzung: der Hinweis sagt, dass eine laufende Sitzung auf einem anderen Gerät endet", () => {
+    admin();
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(screen.getByText(HINWEIS_OHNE_SITZUNG_FERN)).toBeTruthy();
+  });
+
+  it("der Schalter nennt seine Hinweise auch als Beschreibung, gesperrt wie bedienbar", () => {
+    admin();
+    const { unmount } = render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    const text = beschreibung(schalter()!);
+    expect(text).toContain(HINWEIS_OHNE_SITZUNG_FERN);
+    expect(text).toContain(HINWEIS_LAPTOP);
+    unmount();
+    localStorage.setItem(`wamo.stillStart.${ID}`, "aus");
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect((schalter() as HTMLButtonElement).disabled).toBe(true);
+    expect(beschreibung(schalter()!)).toMatch(/Still starten beim Tippen/);
+  });
+
+  it("gewählt Büro, aber die Sitzung läuft am lokalen Kern: kein Hinweis auf einen anderen Laptop, der Haken bleibt", () => {
+    admin();
+    act(() =>
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        profil: { name: "Admin", rolle: "admin" },
+        betrieb: { modus: "lokal", modelle: {}, pc: "verbunden", pcSteuerung: "aus" },
+      })),
+    );
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(screen.queryByText(HINWEIS_LAPTOP)).toBeNull();
+    expect(autoHaken()).toBeTruthy();
+  });
+
+  it("gewählt Unterwegs, aber die Sitzung läuft im Büro: der Hinweis auf den Laptop gilt", () => {
+    h.art = "unterwegs";
+    admin();
+    act(() =>
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        profil: { name: "Admin", rolle: "admin" },
+        betrieb: { modus: "buero", modelle: {}, pc: "verbunden", pcSteuerung: "aus" },
+      })),
+    );
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(screen.getByText(HINWEIS_LAPTOP)).toBeTruthy();
   });
 
   it("Browser im Büro mit Sitzung: der Hinweis auf den Laptop bleibt neben dem Ziel stehen", () => {
@@ -78,6 +135,8 @@ describe("PC-Steuerung aus dem Browser", () => {
     expect(schalter()).toBeTruthy();
     expect(screen.queryByText(HINWEIS_LAPTOP)).toBeNull();
     expect(screen.queryByText(HINWEIS_NUR_APP)).toBeNull();
+    expect(screen.queryByText(HINWEIS_OHNE_SITZUNG_FERN)).toBeNull();
+    expect(screen.getByText(HINWEIS_OHNE_SITZUNG)).toBeTruthy();
     expect(autoHaken()).toBeTruthy();
   });
 
@@ -116,5 +175,18 @@ describe("PC-Steuerung aus dem Browser", () => {
     );
     expect(screen.getByText("Angebot.docx liegt in Dokumente\\WAIS.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Öffnen" })).toBeTruthy();
+  });
+  it("Mail im neuen Outlook aus dem Browser: der Hinweis sagt, dass der Entwurf auf dem Laptop offen ist", () => {
+    render(<MailVersandHinweis onZurueckholen={vi.fn(() => true)} />);
+    act(() => wamo.set((s) => ({ ...s, mailVersand: { id: null, zustand: "entwurf", text: "Der Entwurf ist offen." } })));
+    expect(screen.getByText("Der Entwurf ist offen.")).toBeTruthy();
+    expect(screen.getByText("Der Entwurf ist in Outlook auf deinem Laptop offen, dort sendest du ihn.")).toBeTruthy();
+  });
+
+  it("Mail in der Desktop-App: kein Zusatz zum Laptop", () => {
+    desktop(true);
+    render(<MailVersandHinweis onZurueckholen={vi.fn(() => true)} />);
+    act(() => wamo.set((s) => ({ ...s, mailVersand: { id: null, zustand: "entwurf", text: "Der Entwurf ist offen." } })));
+    expect(screen.queryByText(/auf deinem Laptop/)).toBeNull();
   });
 });

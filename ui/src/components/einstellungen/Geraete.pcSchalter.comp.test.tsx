@@ -146,6 +146,7 @@ describe("Schalter PC-Steuerung ohne Gespräch", () => {
     render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
     expect((schalter() as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getAllByText(HINWEIS_PC_GETRENNT)).toHaveLength(1);
+    expect(screen.queryByText(/gilt nur für diese Sitzung/)).toBeNull(); // kein "alles gut" neben "nicht erreichbar"
   });
 
   it("Desktop-App mit ausgeschaltetem 'Still starten beim Tippen': gesperrt, der Hinweis nennt den Weg", () => {

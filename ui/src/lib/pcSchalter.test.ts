@@ -9,6 +9,8 @@ import {
   HINWEIS_LAPTOP,
   HINWEIS_NICHT_BESTAETIGT,
   HINWEIS_NUR_APP,
+  HINWEIS_OHNE_SITZUNG,
+  HINWEIS_OHNE_SITZUNG_FERN,
   HINWEIS_PC_AUS,
   HINWEIS_PC_GESPERRT,
   HINWEIS_PC_GETRENNT,
@@ -227,7 +229,7 @@ test("alle Hinweise: deutsch, ohne Gedankenstrich, nennen die PC-Steuerung", () 
     assert.match(t, /^PC-Steuerung nicht eingeschaltet: /);
     assert.doesNotMatch(t, /[\u2013\u2014]| - /);
   }
-  for (const t of [HINWEIS_STILL_AUS, HINWEIS_IM_GESPRAECH, HINWEIS_LAPTOP, HINWEIS_NUR_APP]) assert.doesNotMatch(t, /[\u2013\u2014]| - /);
+  for (const t of [HINWEIS_STILL_AUS, HINWEIS_IM_GESPRAECH, HINWEIS_LAPTOP, HINWEIS_NUR_APP, HINWEIS_OHNE_SITZUNG_FERN]) assert.doesNotMatch(t, /[\u2013\u2014]| - /);
 });
 
 test("Browser: der Hinweis nennt den Laptop, was fehlt, nennt die Desktop-App; kein 'nur in der Desktop-App verf\u00fcgbar' mehr", () => {
@@ -236,4 +238,10 @@ test("Browser: der Hinweis nennt den Laptop, was fehlt, nennt die Desktop-App; k
   assert.match(HINWEIS_NUR_APP, /automatisch/);
   assert.match(HINWEIS_NUR_APP, /Lichtrahmen/);
   for (const t of [HINWEIS_LAPTOP, HINWEIS_NUR_APP]) assert.doesNotMatch(t, /nur in der Desktop-App verf\u00fcgbar/);
+});
+
+test("Browser ohne Sitzung: der Hinweis sagt, dass ein stiller Start eine laufende Sitzung auf einem anderen Gerät beendet", () => {
+  assert.ok(HINWEIS_OHNE_SITZUNG_FERN.startsWith(HINWEIS_OHNE_SITZUNG));
+  assert.match(HINWEIS_OHNE_SITZUNG_FERN, /anderen Gerät/);
+  assert.match(HINWEIS_OHNE_SITZUNG_FERN, /endet/);
 });
