@@ -13,9 +13,10 @@ Aufrufe (im Repo-Hauptordner; alle ändernden Befehle verlangen --schema ausdrü
 Optionen für alle Befehle: --host sokrates2 (Standard: Umgebung WAMO_SSH_HOST, sonst wamo-sokrates2; erlaubt sind Buchstaben, Ziffern,
 Punkt, Unterstrich und Minus, nie ein Minus am Anfang).
 
-Wichtig: freischalten und zuruecksetzen nur im eigenen Terminal ausführen. Das Startpasswort erscheint genau einmal im Terminal (für das
-Willkommensblatt); kein geteilter Bildschirm, keine Aufzeichnung, kein Log der Sitzung. passwort verlangt ein echtes Terminal (verdeckte
-Eingabe, nie über eine Pipe).
+Wichtig: freischalten, zuruecksetzen und passwort nur im eigenen Terminal ausführen. Das Passwort wird verdeckt eingetippt (zweimal,
+mindestens 12 Zeichen, mindestens 6 verschiedene Zeichen), nie über eine Pipe gelesen und nie ausgegeben; so landet es auch nie im
+Verlauf einer KI-Sitzung oder in einem Log. Das Startpasswort denkt sich der Admin aus oder nimmt es aus seinem Passwortmanager und
+schreibt es auf das Willkommensblatt.
 
 Befehle
   anlegen         Neues Konto mit einem Zufallspasswort, das niemand kennt (nie ausgegeben), anlegen und sofort in GoTrue sperren
@@ -25,8 +26,8 @@ Befehle
                   als Konto gesperrt oder Konto frei; freischalten sperrt ohnehin als Erstes). Danach folgt am Übergabetag freischalten.
   freischalten    Übergabetag: Konto und Profil prüfen, dann in fester Reihenfolge (siehe unten) ein neues Startpasswort setzen, den
                   Merker der Erstanmeldung schreiben (Frist 72 Stunden, einstellbar von 1 bis 168), das Profil aktivieren und die Sperre
-                  aufheben. Das Startpasswort erzeugt die lokale Seite, schickt es nur über stdin an den Server und gibt es genau einmal
-                  nach Erfolg aus (nur für das Willkommensblatt).
+                  aufheben. Das Startpasswort tippt der Admin verdeckt ein; die lokale Seite schickt es nur über stdin an den Server und
+                  gibt es nie aus (nur auf dem Willkommensblatt).
   zuruecksetzen   Wie freischalten, aber die zweiten Faktoren werden immer gelöscht (verlorenes Handy), der Merker wird neu geschrieben.
   passwort        Option Ü: Die Person tippt ihr Passwort am Platz selbst verdeckt ein (zweimal, mindestens 12 Zeichen, mindestens 6
                   verschiedene Zeichen, nicht der Teil der E-Mail vor dem @). Reihenfolge wie freischalten, der Merker wird aber im
@@ -101,9 +102,6 @@ HOST_RE = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._-]*")
 MIN_PASSWORD = 12
 MIN_VERSCHIEDEN = 6  # verschiedene Zeichen im Passwort
 MAX_PASSWORD = 72  # bcrypt schneidet ab 72 Bytes ab, GoTrue lehnt längere Passwörter ab
-PASSWORT_LAENGE = 16
-# Ohne verwechselbare Zeichen: kein 0, O, o, 1, l, I
-PASSWORT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
 FRIST_STANDARD = 72
 FRIST_MAX = 168
 
@@ -715,16 +713,6 @@ def run_remote(host: str, payload: dict) -> subprocess.CompletedProcess:
     )
 
 
-def startpasswort_erzeugen() -> str:
-    """16 Zeichen aus einem Alphabet ohne verwechselbare Zeichen, mit mindestens je einem Groß-, Klein- und Ziffernzeichen
-    und mindestens 6 verschiedenen Zeichen."""
-    while True:
-        pw = "".join(secrets.choice(PASSWORT_ALPHABET) for _ in range(PASSWORT_LAENGE))
-        if (any(c.isupper() for c in pw) and any(c.islower() for c in pw) and any(c.isdigit() for c in pw)
-                and len(set(pw)) >= MIN_VERSCHIEDEN):
-            return pw
-
-
 def passwort_pruefen(pw: str, email: str | None = None) -> None:
     if len(pw) < MIN_PASSWORD:
         sys.exit(f"Passwort zu kurz (mindestens {MIN_PASSWORD} Zeichen).")
@@ -736,8 +724,8 @@ def passwort_pruefen(pw: str, email: str | None = None) -> None:
         sys.exit("Passwort darf nicht der Teil der E-Mail-Adresse vor dem @ sein.")
 
 
-def ask_password(email: str | None = None) -> str:
-    first = getpass.getpass(f"Neues Passwort (mindestens {MIN_PASSWORD} Zeichen): ")
+def ask_password(email: str | None = None, frage: str = "Neues Passwort") -> str:
+    first = getpass.getpass(f"{frage} (mindestens {MIN_PASSWORD} Zeichen): ")
     passwort_pruefen(first, email)
     if getpass.getpass("Passwort wiederholen: ") != first:
         sys.exit("Passwörter stimmen nicht überein.")
@@ -838,13 +826,14 @@ def nutzlast_bauen(args: argparse.Namespace) -> dict:
         nutzlast.update(rolle=args.rolle, anrede=args.anrede)
     if aktion in ("freischalten", "zuruecksetzen"):
         nutzlast["frist"] = args.frist
-        nutzlast["password"] = startpasswort_erzeugen()
     if aktion in ("freischalten", "passwort"):
         nutzlast["faktoren_loeschen"] = args.faktoren_loeschen
-    if aktion == "passwort":
+    if aktion in ("freischalten", "zuruecksetzen", "passwort"):
+        # Passwörter nur verdeckt aus einem Terminal, nie über eine Pipe und nie in einer Ausgabe (auch nicht in einer KI-Sitzung)
         if not sys.stdin.isatty():
-            sys.exit("passwort braucht ein Terminal: Die Person tippt das Passwort verdeckt am Platz, es wird nie über eine Pipe gelesen.")
-        nutzlast["password"] = ask_password(args.email)
+            sys.exit(f"{aktion} braucht ein Terminal: Das Passwort wird verdeckt eingetippt, nie über eine Pipe gelesen.")
+        frage = "Neues Passwort" if aktion == "passwort" else "Startpasswort für das Willkommensblatt"
+        nutzlast["password"] = ask_password(args.email, frage)
     return nutzlast
 
 
@@ -863,9 +852,7 @@ def main(argv: list[str] | None = None, remote=None) -> None:
     if ergebnis.returncode != 0:
         sys.exit(fehler or "Fehler auf Sokrates-2.")
     if args.aktion in ("freischalten", "zuruecksetzen"):
-        # Genau einmal, erst nach Erfolg: Das Passwort ist nur für das Willkommensblatt bestimmt
-        print(f"Startpasswort: {geheim}")
-        print(f"Nur auf das Willkommensblatt, {args.frist} Stunden gültig.")
+        print(f"Das eingetippte Startpasswort gilt jetzt {args.frist} Stunden; es steht nur auf dem Willkommensblatt.")
 
 
 if __name__ == "__main__":

@@ -1012,20 +1012,6 @@ def test_der_rumpf_startet_main_nur_als_programm():
 
 # ---------- Lokale Seite: Passwörter ----------
 
-def test_startpasswort_hat_16_zeichen_aus_dem_alphabet_ohne_verwechselbare_zeichen():
-    gesehen = set()
-    for _ in range(300):
-        pw = wn.startpasswort_erzeugen()
-        assert len(pw) == 16 == wn.PASSWORT_LAENGE and wn.PASSWORT_LAENGE >= wn.MIN_PASSWORD >= 12
-        assert set(pw) <= set(wn.PASSWORT_ALPHABET)
-        assert any(c.isupper() for c in pw) and any(c.islower() for c in pw) and any(c.isdigit() for c in pw)
-        gesehen.add(pw)
-    assert len(gesehen) == 300
-    assert all(len(set(pw)) >= 6 for pw in gesehen)
-    assert not set("0O1lIo|") & set(wn.PASSWORT_ALPHABET), "keine verwechselbaren Zeichen"
-    assert len(wn.PASSWORT_ALPHABET) == len(set(wn.PASSWORT_ALPHABET)) >= 50
-
-
 def test_ask_password_verlangt_mindestlaenge_und_wiederholung(monkeypatch):
     eingaben = iter(["kurz"])
     monkeypatch.setattr(wn.getpass, "getpass", lambda prompt="": next(eingaben))
@@ -1153,37 +1139,61 @@ def test_anlegen_schickt_kein_passwort_und_den_standard_fuer_rolle_und_anrede():
                                    "rolle": "mitglied", "anrede": "du"}
 
 
-def test_freischalten_gibt_das_startpasswort_genau_einmal_nach_erfolg_aus(monkeypatch):
-    monkeypatch.setattr(wn, "startpasswort_erzeugen", lambda: "Abcdefghjkmn2345")
+def _startpasswort(monkeypatch, wert="Abcdefghjkmn2345"):
+    """freischalten und zuruecksetzen fragen das Startpasswort verdeckt ab (zweimal) und verlangen ein Terminal."""
+    eingaben = iter([wert, wert])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(wn.getpass, "getpass", lambda prompt="": next(eingaben))
+
+
+def test_freischalten_fragt_das_startpasswort_verdeckt_und_gibt_es_nie_aus(monkeypatch):
+    _startpasswort(monkeypatch)
     ferne = Ferne(stdout=f"Frist bis: {FRIST_TEXT}\n")
     code, aus, fehl = lokal(["freischalten", "--email", EMAIL, "--schema", "wamo_dev"], ferne)
     assert code == 0
     nutzlast = ferne.aufrufe[0][1]
     assert nutzlast["password"] == "Abcdefghjkmn2345" and nutzlast["frist"] == 72 and nutzlast["faktoren_loeschen"] is False
-    assert aus.count("Abcdefghjkmn2345") == 1 and "Abcdefghjkmn2345" not in fehl
-    assert "nur auf das willkommensblatt" in aus.lower() and "72 Stunden gültig" in aus
+    assert "Abcdefghjkmn2345" not in aus + fehl
+    assert "willkommensblatt" in aus.lower() and "72 Stunden" in aus
     assert FRIST_TEXT in aus
 
 
+def test_freischalten_ohne_terminal_fragt_nichts_und_geht_nie_zum_server(monkeypatch):
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(wn.getpass, "getpass", lambda prompt="": pytest.fail("darf nicht fragen"))
+    ferne = Ferne()
+    for aktion in ("freischalten", "zuruecksetzen"):
+        code, _, _ = lokal([aktion, "--email", EMAIL, "--schema", "wamo_dev"], ferne)
+        assert code != 0 and "Terminal" in str(code)
+    assert ferne.aufrufe == []
+
+
+def test_freischalten_lehnt_ein_zu_einfaches_startpasswort_ab(monkeypatch):
+    _startpasswort(monkeypatch, "aaaaaaaaaaaa")
+    ferne = Ferne()
+    code, _, _ = lokal(["freischalten", "--email", EMAIL, "--schema", "wamo_dev"], ferne)
+    assert code != 0 and ferne.aufrufe == []
+
+
 def test_freischalten_mit_eigener_frist_und_faktorenschalter(monkeypatch):
-    monkeypatch.setattr(wn, "startpasswort_erzeugen", lambda: "Abcdefghjkmn2345")
+    _startpasswort(monkeypatch)
     ferne = Ferne()
     code, aus, _ = lokal(["freischalten", "--email", EMAIL, "--schema", "wamo_test", "--frist-stunden", "24", "--faktoren-loeschen"], ferne)
     nutzlast = ferne.aufrufe[0][1]
     assert code == 0 and nutzlast["frist"] == 24 and nutzlast["faktoren_loeschen"] is True and nutzlast["schema"] == "wamo_test"
-    assert "24 Stunden gültig" in aus
+    assert "24 Stunden" in aus
 
 
-def test_zuruecksetzen_gibt_das_startpasswort_einmal_aus(monkeypatch):
-    monkeypatch.setattr(wn, "startpasswort_erzeugen", lambda: "Abcdefghjkmn2345")
+def test_zuruecksetzen_schickt_das_startpasswort_nur_an_den_server(monkeypatch):
+    _startpasswort(monkeypatch)
     ferne = Ferne()
     code, aus, _ = lokal(["zuruecksetzen", "--email", EMAIL, "--schema", "wamo_dev"], ferne)
-    assert code == 0 and aus.count("Abcdefghjkmn2345") == 1
+    assert code == 0 and "Abcdefghjkmn2345" not in aus
     assert ferne.aufrufe[0][1]["aktion"] == "zuruecksetzen" and ferne.aufrufe[0][1]["password"] == "Abcdefghjkmn2345"
 
 
 def test_bei_einem_fehler_auf_dem_server_erscheint_das_startpasswort_nie(monkeypatch):
-    monkeypatch.setattr(wn, "startpasswort_erzeugen", lambda: "Abcdefghjkmn2345")
+    _startpasswort(monkeypatch)
     ferne = Ferne(stdout="Schritt 1 ok\n", stderr="Fehler: Schritt 4 (Startpasswort setzen): HTTP 500\n", returncode=1)
     code, aus, fehl = lokal(["freischalten", "--email", EMAIL, "--schema", "wamo_dev"], ferne)
     assert code != 0 and "Abcdefghjkmn2345" not in aus + str(code) + fehl
@@ -1191,10 +1201,10 @@ def test_bei_einem_fehler_auf_dem_server_erscheint_das_startpasswort_nie(monkeyp
 
 
 def test_lokal_wird_das_passwort_auch_aus_der_ferne_ausgabe_entfernt(monkeypatch):
-    monkeypatch.setattr(wn, "startpasswort_erzeugen", lambda: "Abcdefghjkmn2345")
+    _startpasswort(monkeypatch)
     ferne = Ferne(stdout="Leck: Abcdefghjkmn2345\n")
     code, aus, _ = lokal(["freischalten", "--email", EMAIL, "--schema", "wamo_dev"], ferne)
-    assert code == 0 and "Leck: ***" in aus and aus.count("Abcdefghjkmn2345") == 1
+    assert code == 0 and "Leck: ***" in aus and "Abcdefghjkmn2345" not in aus
 
 
 def test_passwort_fragt_verdeckt_schickt_es_nur_an_den_server_und_gibt_es_nie_aus(monkeypatch, terminal):

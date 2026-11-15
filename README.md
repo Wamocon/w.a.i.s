@@ -1170,7 +1170,7 @@ ansehen, die Schwellen bei Bedarf anpassen und danach wieder `streng` (Standard)
 | Befehl | Zweck |
 | --- | --- |
 | `python scripts\wamo_nutzer.py anlegen --email … --name … --rolle admin\|mitglied --schema …` | Konto (neu: in GoTrue gesperrt, Zufallspasswort) und inaktives Profil; `--schema` ist bei allen ändernden Befehlen Pflicht |
-| `python scripts\wamo_nutzer.py freischalten --email … --schema … [--frist-stunden 72] [--faktoren-loeschen]` | Übergabetag: Startpasswort (genau einmal im Terminal, für das Willkommensblatt), Merker der Erstanmeldung, Profil aktiv, Sperre auf; nur im eigenen Terminal |
+| `python scripts\wamo_nutzer.py freischalten --email … --schema … [--frist-stunden 72] [--faktoren-loeschen]` | Übergabetag: Startpasswort verdeckt eintippen (steht nur auf dem Willkommensblatt, wird nie ausgegeben), Merker der Erstanmeldung, Profil aktiv, Sperre auf; nur im eigenen Terminal |
 | `python scripts\wamo_nutzer.py zuruecksetzen --email … --schema …` | wie `freischalten`, zweite Faktoren werden gelöscht (verlorenes Handy) |
 | `python scripts\wamo_nutzer.py passwort --email … --schema …` | Übergang: Die Person tippt ihr Passwort selbst am Platz, der Merker steht auf erledigt |
 | `python scripts\wamo_nutzer.py umbenennen --email … --name … --schema …` | Anzeigename ändern (volle Namen) |
