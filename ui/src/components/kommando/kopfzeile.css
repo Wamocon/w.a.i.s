@@ -52,7 +52,7 @@
   display: inline-grid; place-items: center;
   background: var(--ink); color: var(--bg); font: 700 11px/1 var(--hud); letter-spacing: 0;
 }
-.profile-first { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14ch; }
+.profile-first { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 18ch; }
 
 /* ---------- Statusmodule ---------- */
 .status-items {
