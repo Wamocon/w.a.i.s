@@ -60,7 +60,9 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   Fremdinhalt im Zug). Welches Outlook gerade läuft, entscheidet der Weg: Läuft das klassische Outlook allein, sendet W.A.I.S. nach dem
   Klick per COM mit der Outlook-Signatur und hält die Mail 30 Sekunden unter Entwürfe zurück („Zurückholen“ in der Oberfläche);
   läuft das neue Outlook (`olk.exe`), öffnet W.A.I.S. einen fertigen Entwurf mit Anhang (.eml mit `X-Unsent` über den App-Alias
-  `olk.exe`, am PC geprüft) und die Person sendet selbst. Im Zweifel nie senden. Nur Admins, nie im Labor (das Werkzeug heißt
+  `olk.exe`, am PC geprüft) und die Person sendet selbst. Im Zweifel nie senden. Endet die Sitzung in der Frist, holt W.A.I.S. die Mail
+  zurück; nach einem Ruhezustand, bei offener Mail in Outlook oder bei einem Fehler beim Senden geht sie nicht raus, und ein unklarer
+  Ausgang heißt unklar. Nur Admins, nie im Labor (das Werkzeug heißt
   bewusst nicht wie `mail_senden` im Labor), nur mit `WAMO_OFFICE=outlook`, PC-Steuerung und Stimmabdruck-Gate. Host:
   `outlook_mail_anfragen`, `outlook_zurueckholen`, `outlook_versand_status` (`host/office_outlook.py`, `host/office_outlook_com.py`),
   Anhänge nur aus dem Register mit gleicher Prüfsumme, höchstens 10 Empfänger und 10 Mails je Stunde, `office.aus` wirkt auch hier.
