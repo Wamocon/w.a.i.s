@@ -396,6 +396,12 @@ DEV_ABNAHME_BEFEHLE_PROMPT = """- Befehlskriterien sind zugeschaltet: Hat das Pr
 
 # Büro (Kern auf Sokrates-2): Aufträge mit GitHub-Stufe brauchen das Repo, das Projekt leitet der Kern daraus ab
 # (entwicklung_betrieb.buero_projekt). Nur die Recherche kommt ohne Repo aus. Steht nur bei Entwicklungsaufträgen im Büro im Prompt.
+# Mitglieder im Büro (Paket P5, Entscheidung N6): keine Repos bis Folgepaket 1; der Kern lehnt einen Auftrag mit Repo ab.
+DEV_OHNE_REPO_PROMPT = """- Aufträge mit einem GitHub-Repo gibt es für {name} noch nicht, nur Aufträge ohne Repo, etwa eine Recherche. Fragt
+  {name} nach einem Auftrag an einem Repo, sag das in einem Satz und biete einen Auftrag ohne Repo an. Ein anderer Auftrag kann gerade
+  laufen; dann startet der neue nicht, und {name} versucht es in ein paar Minuten noch einmal.
+"""
+
 DEV_REPO_PFLICHT_PROMPT = """- Im Büro braucht jeder Auftrag außer der Recherche das GitHub-Repo als owner/name im Feld repo. Hat {name}
   es nicht genannt, frag genau einmal kurz danach, statt die Karte ohne Repo anzulegen. Das Projekt leitet der Kern aus dem
   Repo ab.
@@ -523,6 +529,7 @@ def build_system_prompt(
     repo_pflicht: bool = False,
     natuerlich: bool | None = None,
     pc_stufe: str | None = None,
+    ohne_repo: bool = False,
 ) -> str:
     """fernzugriff=True (nur Admin mit eingeschaltetem Fernzugriff): WAMO kennt den Fernzugriff auf die Sparks und das Werkzeug
     fernzugriff_oeffnen. pc_erreichbar=False (nur zusammen mit pc_werkzeuge): Hinweis, dass der PC gerade nicht erreichbar ist.
@@ -534,7 +541,8 @@ def build_system_prompt(
     repo_pflicht=True (nur Büro, nur mit entwicklung): Aufträge außer der Recherche brauchen das Repo als owner/name.
     natuerlich: None liest WAMO_PERSONA_NATUERLICH (Standard an), False gibt die frühere ruhige Sprechweise.
     pc_stufe (rechte.pc_stufe): "mitglied" gibt statt des PC-Blocks der Admins den engeren Block PC_MITGLIED_PROMPT, ohne PowerShell,
-    Git, Bildschirm und Office; alles andere (auch None) den bisherigen Block."""
+    Git, Bildschirm und Office; alles andere (auch None) den bisherigen Block.
+    ohne_repo=True (nur Büro, nur Mitglieder mit entwicklung): Aufträge nur ohne Repo (DEV_OHNE_REPO_PROMPT), statt repo_pflicht."""
     values = {"name": clean_inline(name, MAX_NAME_CHARS) or "Gast", "anrede": ANREDE.get(anrede, "du")}
     rueckfragen = persona_rueckfragen_an() if rueckfragen is None else rueckfragen
     pc_ordner = persona_pc_ordner_an() if pc_ordner is None else pc_ordner
@@ -576,7 +584,7 @@ def build_system_prompt(
         parts.append(_fill(FERNZUGRIFF_PROMPT, values))
     if entwicklung:
         dev = DEV_PROMPT + (DEV_ABNAHME_PROMPT + (DEV_ABNAHME_BEFEHLE_PROMPT if abnahme_befehle else "") if abnahme else "")
-        dev += DEV_REPO_PFLICHT_PROMPT if repo_pflicht else ""
+        dev += DEV_OHNE_REPO_PROMPT if ohne_repo else (DEV_REPO_PFLICHT_PROMPT if repo_pflicht else "")
     else:
         dev = DEV_LOCKED_PROMPT
     parts.append(_fill(dev, values))

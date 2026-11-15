@@ -117,10 +117,41 @@ class BueroEntwicklungTests(unittest.IsolatedAsyncioTestCase):
         dev, _ = await self.build(benutzer=ANDERES_PROFIL, WAMO_ENTWICKLUNG_PROFILE=f"{ANDERES_PROFIL},{USER}")
         self.assertTrue(dev.called)  # weitere Admins stehen einzeln in der Liste
 
-    async def test_mitglied_nie_auch_nicht_im_profil(self):
+    async def test_mitglied_nur_mit_schalter_der_mitglieder_und_im_profil(self):
+        # Paket P5: ohne WAMO_ENTWICKLUNG_MITGLIEDER=an nie, auch nicht im Profil
         dev, log = await self.build(rolle="mitglied")
         self.assertFalse(dev.called)
-        self.assertIn("Entwicklungsaufträge aus: Entwicklungsaufträge gibt es nur für Admins", log)
+        self.assertIn("Entwicklungsaufträge aus: Entwicklungsaufträge sind für Mitglieder noch nicht freigeschaltet", log)
+        dev, log = await self.build(rolle="mitglied", WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertTrue(dev.called)
+        zulassung = dev.call_args.kwargs["zulassung"]
+        self.assertEqual((zulassung.user_id, zulassung.mitglied), (USER, True))
+        dev, log = await self.build(rolle="mitglied", benutzer=ANDERES_PROFIL, WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertFalse(dev.called)  # nicht in WAMO_ENTWICKLUNG_PROFILE
+        self.assertIn("Dieses Profil ist für Entwicklungsaufträge im Büro nicht freigegeben", log)
+
+    async def test_mitglied_ausserhalb_des_buero_nie(self):
+        dev, _log = await self.build(rolle="mitglied", WAMO_BETRIEB="", WAMO_ENTWICKLUNG="an", WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertFalse(dev.called)
+
+    async def test_laborprofil_nie_auch_mit_beiden_schaltern(self):
+        from labor_sitzung import LaborSitzung
+
+        with mock.patch.object(LaborSitzung, "starten", mock.AsyncMock(side_effect=RuntimeError("Laborsitzung im Test nicht nötig"))):
+            with self.assertRaises(RuntimeError):  # die Laborsitzung startet vorher: Entwicklung wird gar nicht erst gefragt
+                with mock.patch.dict(os.environ, {**BUERO_ENV, "WAMO_ENTWICKLUNG_MITGLIEDER": "an"}):
+                    await bot.build_session(smoke.FakeTransport(), Identity(USER, "Gast", "mitglied", "du", labor_art="platz"))
+        self.assertIsNone(bot.entwicklung_betrieb.zulassung_fuer(Identity(USER, "Gast", "mitglied", "du", labor_art="platz")))
+
+    async def test_prompt_eines_mitglieds_ohne_repo(self):
+        with mock.patch.object(bot, "build_system_prompt", wraps=bot.build_system_prompt) as prompt:
+            dev, _log = await self.build(rolle="mitglied", WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertTrue(dev.called)
+        kwargs = prompt.call_args.kwargs
+        self.assertEqual((kwargs["ohne_repo"], kwargs["repo_pflicht"]), (True, False))
+        text = bot.build_system_prompt("Erika", "du", entwicklung=True, ohne_repo=True)
+        self.assertIn("Aufträge mit einem GitHub-Repo gibt es für Erika noch nicht", text)
+        self.assertNotIn("braucht jeder Auftrag außer der Recherche das GitHub-Repo", text)
 
     async def test_uebergang_zaehlt_im_buero_wie_keine(self):
         zugang = Zugang(USER, "claude", "zuordnung", claude_schluessel=KEY)

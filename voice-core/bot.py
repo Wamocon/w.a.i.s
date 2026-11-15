@@ -679,18 +679,21 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # nur mit Stufe (Admin oder freigeschaltetes Mitglied) und aktivem Gerät im Register, nie im Labor. Bis dahin gibt es keinen Client und
     # keine PC-Werkzeuge.
     pc_nachholen = False if labor_sitzung else await nachholen_moeglich(identity, zugang_da=geraet_zugang is not None)
-    entwicklung = is_admin and entwicklung_enabled()
+    im_buero = buero()
+    # Entwicklungsaufträge (Paket P5): Admins wie bisher; Mitglieder nur im Büro, nur mit WAMO_ENTWICKLUNG_MITGLIEDER=an im Drop-in und ihrer
+    # user_id in WAMO_ENTWICKLUNG_PROFILE (entwicklung_betrieb.zulassung_fuer), ohne Repos; Laborprofile nie. Rolle und Labor nur aus der Identität.
+    _ent_admin, ent_mitglied, _ent_labor = entwicklung_betrieb.rollen(identity)
+    entwicklung = (is_admin or (im_buero and ent_mitglied)) and entwicklung_enabled()
     # Fernzugriff auf die Sparks (rd_api): WAMO kennt ihn und kann den Dialog öffnen, nur für Admins und nur bei eingeschaltetem Schalter
     from rd_api import aktiv as rd_aktiv
     fernzugriff = is_admin and rd_aktiv()
     problem = entwicklung_problem() if entwicklung else None
-    im_buero = buero()
     if problem and not im_buero:
         logger.error("Entwicklungsaufträge aus: {}", problem)
         entwicklung = False
-    # Büro: Admin, Profilbindung und eigener Zugang (hier und nach zugang_laden), Grund für Log und Statusleiste der Admins;
-    # Unterwegs bleibt alles wie bisher (entwicklung_betrieb.py)
-    ent_grund = entwicklung_betrieb.grund_vorab(identity.user_id, is_admin, problem) if im_buero else None
+    # Büro: Admin oder freigeschaltetes Mitglied, Profilbindung und eigener Zugang (hier und nach zugang_laden), Grund für Log und
+    # Statusleiste (Mitglieder sehen nur ihre eigenen Sätze); Unterwegs bleibt alles wie bisher (entwicklung_betrieb.py)
+    ent_grund = entwicklung_betrieb.grund_fuer(identity, problem) if im_buero else None
     if im_buero:
         entwicklung = ent_grund is None
     if labor_sitzung:  # Entwicklungsgate am labor_art (labor.entwicklung_arten): Fernzugriff nie, Entwicklung bis zur Verdrahtung nie
@@ -714,7 +717,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         return build_system_prompt(
             identity.name, identity.anrede, recall.persoenlich, recall.gemeinsam,
             pc_werkzeuge=pc_enabled, entwicklung=entwicklung, pc_erreichbar=not state["pc_weg"], fernzugriff=fernzugriff,
-            abnahme_befehle=abnahme_befehle_im_betrieb(), repo_pflicht=im_buero, pc_stufe=pc_stufe,
+            abnahme_befehle=abnahme_befehle_im_betrieb(), repo_pflicht=im_buero and not ent_mitglied, pc_stufe=pc_stufe,
+            ohne_repo=im_buero and ent_mitglied,
         )
 
     # Gedächtnis je Sitzung laden (kein prozessweiter Cache: jedes Profil sieht nur seins).
@@ -798,7 +802,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         # Büro: die Zulassung entsteht allein hier, aus der geprüften Identität (Admin, Profil aus WAMO_ENTWICKLUNG_PROFILE);
         # ohne sie wirft der Konstruktor. Unterwegs bleibt sie None.
         dev = DevAgent(memory, auftraggeber=identity.name, vorgaenge=vorgaenge, beurteiler=llm_beurteiler(zugang),
-                       zulassung=entwicklung_betrieb.zulassung_erteilen(identity.user_id, is_admin) if im_buero else None)
+                       zulassung=entwicklung_betrieb.zulassung_fuer(identity) if im_buero else None)
         dev.on_result = turn.taint
         dev.register(llm)
         standard_tools += dev.schemas()
@@ -1068,7 +1072,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                    pc_belegt=state["pc_belegt"], sprache=sprache.anzeige(SONIOX_VOICE),
                                    modell_modus=modus_wirksam(zugang), modell_quelle=zugang.quelle,
                                    modell_hinweis=llm_wahl.grund,
-                                   entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund),
+                                   entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund, mitglied=ent_mitglied),
                                    office=office.anzeige() if office is not None else None,
                                    mail=mail.anzeige() if mail is not None else False,
                                    onenote=onenote is not None and onenote.anzeige(),
