@@ -95,7 +95,7 @@ def test_karte_und_zeitgrenzen_sind_verdrahtet():
     import pc_tunnel
 
     assert "onenote" in activity.FREIGABE_AKTIONEN and onw.WERKZEUG in activity.FREIGABE_WERKZEUGE
-    assert "onenote" in AKTION_TEXT
+    assert "onenote" not in AKTION_TEXT  # pc_freigaben.py bleibt fürs Labor unverändert (test_labor_pc_unveraendert.py)
     assert pc_tunnel.LANGE_WERKZEUGE["onenote_seite_anfragen"] > 30 + 5  # Lesen der Notizbücher bis 30 s am PC
     assert onw.ANFRAGEN_TIMEOUT_SECS > pc_tunnel.LANGE_WERKZEUGE["onenote_seite_anfragen"]
     assert activity._detail(onw.WERKZEUG, {"canvas": "Angebot", "titel": GEHEIM}) == ""  # Zeitleiste ohne Texte
