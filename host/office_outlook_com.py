@@ -254,7 +254,9 @@ def pruefwerte(item) -> dict:
     nach dem Wiederöffnen leer; klassisch_senden setzt es direkt vor dem Senden neu (Echttest 15.11.2026)."""
     return {"betreff": str(item.Subject),
             "empfaenger": sorted((int(r.Type), _smtp(r.AddressEntry).lower()) for r in _liste(item.Recipients)),
-            "anhaenge": sorted((str(a.FileName), int(a.Size)) for a in _liste(item.Attachments)),
+            # Nur Name und Anzahl: Attachment.Size schwankt am Gerät ohne Änderung (Echttest 15.11.2026: 35373 gegen 43438 Byte, je
+            # nachdem, ob Outlook das Element neu geladen hat). Den Inhalt prüft der Host beim Klick per SHA-256 der Kopie.
+            "anhaenge": sorted(str(a.FileName) for a in _liste(item.Attachments)),
             "text": hashlib.sha256(str(item.Body or "").encode("utf-8", "replace")).hexdigest()}
 
 

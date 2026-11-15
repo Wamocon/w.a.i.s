@@ -678,17 +678,33 @@ def test_konto_laesst_sich_vor_dem_senden_nicht_setzen(outlook, tmp_path, monkey
     assert outlook.gesendet == []
 
 
-def test_wie_am_geraet_anhang_waechst_beim_speichern_und_konto_liest_sich_leer(outlook, tmp_path):
-    """Echttest 15.11.2026: Attachment.Size ist nach dem Speichern größer, SendUsingAccount nach GetItemFromID leer. Die Prüfwerte
-    entstehen deshalb vom gespeicherten Stand, das Konto wird vor dem Senden neu gesetzt: Die unveränderte Mail geht raus."""
+def test_wie_am_geraet_anhang_groesse_schwankt_und_konto_liest_sich_leer(outlook, tmp_path):
+    """Echttest 15.11.2026: SendUsingAccount liest sich nach GetItemFromID leer, und Attachment.Size schwankt ohne jede Änderung (im
+    selben Ablauf die Dateigröße, nach dem Neuladen in einem anderen Faden mit MAPI-Verwaltungsdaten: 35373 gegen 43438 Byte). Die Größe
+    ist deshalb kein Prüfwert, das Konto wird vor dem Senden neu gesetzt: Die unveränderte Mail geht raus."""
     m = mail(tmp_path)
     with oo.anhang_dateien(oo.anhaenge_lesen(m.anhaenge)) as pfade:
         item = oc.com_lauf(lambda app: oc.mail_bauen(app, m, KONTO, pfade))
-        groesse_vorher = item.Attachments.e[0].Size
     ort, pruef = oc.speichern(item)
-    assert pruef["anhaenge"] == [("2026-11-15 Angebot.pdf", item.Attachments.e[0].Size)] != [("2026-11-15 Angebot.pdf", groesse_vorher)]
+    assert pruef["anhaenge"] == ["2026-11-15 Angebot.pdf"]
+    item.Attachments.e[0].Size += 8065  # neu geladen: andere Größe, derselbe Inhalt
     oc.klassisch_senden(ort, pruef, konto=KONTO)
     assert outlook.gesendet == [item] and item.gesendet_mit == KONTO
+
+
+def test_anderer_oder_zusaetzlicher_anhang_wird_nicht_gesendet(outlook, tmp_path):
+    m = mail(tmp_path)
+    with oo.anhang_dateien(oo.anhaenge_lesen(m.anhaenge)) as pfade:
+        item = oc.com_lauf(lambda app: oc.mail_bauen(app, m, KONTO, pfade))
+    ort, pruef = oc.speichern(item)
+    item.Attachments.e.append(SimpleNamespace(FileName="zusatz.exe", Size=10, daten=b"x"))
+    with pytest.raises(oo.MailFehler, match="verändert"):
+        oc.klassisch_senden(ort, pruef, konto=KONTO)
+    item.Attachments.e.pop()
+    item.Attachments.e[0].FileName = "anders.pdf"
+    with pytest.raises(oo.MailFehler, match="verändert"):
+        oc.klassisch_senden(ort, pruef, konto=KONTO)
+    assert outlook.gesendet == []
 
 
 def test_zeitgrenze_vor_dem_senden_sendet_nie(outlook, tmp_path):
