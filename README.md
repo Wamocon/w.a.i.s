@@ -193,7 +193,8 @@ copy .env.example .env                    # SONIOX_API_KEY und ANTHROPIC_API_KEY
 python scripts\wamo_db_rolle.py           # Datenbankzugang wamo_core (TLS), schreibt .env und ui\.env.local
 certutil -user -addstore Root infra\sokrates2\wamo-ca.crt   # einmal je PC: WAMO-CA für Browser und Desktop-App
 python scripts\wamo_db_rolle.py --rolle wamo_admin   # nur auf Admin-PCs: Zugang für wamo_admin.py
-python scripts\wamo_nutzer.py anlegen --email vorname.nachname@wamocon.com --name Vorname --rolle admin
+python scripts\wamo_nutzer.py anlegen --email vorname.nachname@wamocon.com --name "Vorname Nachname" --rolle admin --schema wamo_dev   # Konto gesperrt, Profil inaktiv
+python scripts\wamo_nutzer.py freischalten --email vorname.nachname@wamocon.com --schema wamo_dev   # am Übergabetag: Startpasswort (einmal im Terminal), Profil aktiv
 cd voice-core; uv sync; cd ..\host; uv sync; cd ..\ui; npm install; cd ..\desktop; npm install; cd ..
 scripts\wamo-desktop.cmd                  # startet Voice-Core, Oberfläche und Desktop-App
 ```
@@ -874,7 +875,7 @@ Der Test spielt über ein virtuelles Mikrofon Sprechproben und Geräusche gegen 
 WAMOs Ausgabestrom, das Mikrofon und die Lautstärke des Wiedergabeelements mit einer gemeinsamen Uhr auf. Die Person
 spricht immer dann, wenn WAMO in einem bestimmten Zustand ist („seit 5 s am Sprechen“). Szenarien: `fakten`, `kurz`,
 `lang`, `einwurf`, `ein_wort`, `backchannel`, `geraeusch`, `echo`, `schnell`, `pause`, `werkzeug`, `werkzeug_mhm`. Voraussetzung: ein temporäres
-Testkonto (`scripts/wamo_nutzer.py anlegen`, danach `sperren`), `konto.json` im Messordner (nicht im Repo), Oberfläche aus
+Testkonto (`scripts/wamo_nutzer.py anlegen` und `freischalten`, danach `sperren`, jeweils mit `--schema`), `konto.json` im Messordner (nicht im Repo), Oberfläche aus
 einer Kopie gebaut (`NEXT_PUBLIC_VOICE_CORE_URL=http://127.0.0.1:7861`).
 
 ```powershell
@@ -1168,9 +1169,14 @@ ansehen, die Schwellen bei Bedarf anpassen und danach wieder `streng` (Standard)
 
 | Befehl | Zweck |
 | --- | --- |
-| `python scripts\wamo_nutzer.py anlegen --email … --name … --rolle admin\|mitglied` | Konto (falls neu, Passwort wird verdeckt abgefragt) und Profil |
-| `python scripts\wamo_nutzer.py sperren --email …` | Profil sperren |
-| `python scripts\wamo_nutzer.py liste` | Profile anzeigen |
+| `python scripts\wamo_nutzer.py anlegen --email … --name … --rolle admin\|mitglied --schema …` | Konto (neu: in GoTrue gesperrt, Zufallspasswort) und inaktives Profil; `--schema` ist bei allen ändernden Befehlen Pflicht |
+| `python scripts\wamo_nutzer.py freischalten --email … --schema … [--frist-stunden 72] [--faktoren-loeschen]` | Übergabetag: Startpasswort (genau einmal im Terminal, für das Willkommensblatt), Merker der Erstanmeldung, Profil aktiv, Sperre auf; nur im eigenen Terminal |
+| `python scripts\wamo_nutzer.py zuruecksetzen --email … --schema …` | wie `freischalten`, zweite Faktoren werden gelöscht (verlorenes Handy) |
+| `python scripts\wamo_nutzer.py passwort --email … --schema …` | Übergang: Die Person tippt ihr Passwort selbst am Platz, der Merker steht auf erledigt |
+| `python scripts\wamo_nutzer.py umbenennen --email … --name … --schema …` | Anzeigename ändern (volle Namen) |
+| `python scripts\wamo_nutzer.py sperren --schema … (--email … \| --offene)` | Profil, Konto in GoTrue und Sitzungen sperren; `--offene`: alle Konten mit offener oder abgelaufener Erstanmeldung |
+| `python scripts\wamo_nutzer.py austreten --email … --schema …` | wie `sperren`, dazu Faktoren, Geräte, Claude-Schlüssel und Token entfernen |
+| `python scripts\wamo_nutzer.py liste [--schema …]` | Profile mit Stand der Erstanmeldung, Frist, Faktoren und Sperre |
 | `uv run python wamo_admin.py vorschlaege` (in `voice-core/`) | offene Vorschläge für das gemeinsame Gedächtnis |
 | `uv run python wamo_admin.py freigeben <id> --admin <uuid>` | Vorschlag freigeben (`ablehnen` entsprechend) |
 
