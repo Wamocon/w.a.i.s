@@ -54,6 +54,13 @@ insert into __SCHEMA__.model_access (user_id, claude_schluessel, claude_schluess
                                      claude_code_token_at) values
   ('00000000-0000-4000-8000-0000000022b1', decode(repeat('00', 48), 'hex'), 'abcd', decode(repeat('00', 48), 'hex'), 'wxyz', now());
 insert into __SCHEMA__.model_access (user_id, nur_haus) values ('00000000-0000-4000-8000-0000000022b2', true);
+-- Person C: nur API-Schlüssel, ein unbestätigter TOTP-Faktor zählt nicht
+insert into auth.users (id, email, last_sign_in_at) values ('00000000-0000-4000-8000-0000000022b3', 'person-c@wamo-test.invalid', now());
+insert into __SCHEMA__.profiles (user_id, display_name, rolle, aktiv) values ('00000000-0000-4000-8000-0000000022b3', 'Person C', 'mitglied', true);
+insert into auth.mfa_factors (id, user_id, friendly_name, factor_type, status, created_at, updated_at) values
+  (gen_random_uuid(), '00000000-0000-4000-8000-0000000022b3', 'Test', 'totp', 'unverified', now(), now());
+insert into __SCHEMA__.model_access (user_id, claude_schluessel, claude_schluessel_ende) values
+  ('00000000-0000-4000-8000-0000000022b3', decode(repeat('00', 48), 'hex'), 'efgh');
 insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint, consent_at, consent_text_version) values
   ('00000000-0000-4000-8000-0000000022b1', 'Person A', true, array_fill(0.1::real, array[192])::extensions.vector, now(), 'stimme-1');
 
@@ -68,7 +75,9 @@ begin
   perform wamo_testhilfe.gleich(has_function_privilege('anon', v_fn, 'EXECUTE'), false, 'anon nicht');
   perform wamo_testhilfe.gleich(has_function_privilege('authenticated', v_fn, 'EXECUTE'), false, 'authenticated nicht');
   perform wamo_testhilfe.gleich(has_function_privilege('service_role', v_fn, 'EXECUTE'), false, 'service_role nicht');
-  perform wamo_testhilfe.gleich(has_function_privilege('public', v_fn, 'EXECUTE'), false, 'public nicht');
+  perform wamo_testhilfe.gleich(has_function_privilege('wamo_admin', v_fn, 'EXECUTE'), false, 'wamo_admin nicht');
+  perform wamo_testhilfe.gleich((select count(*) from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                                  where p.oid = v_fn and a.grantee = 0), 0::bigint, 'PUBLIC nicht');
   -- genau diese Spalten, keine Geheimnisspalte
   perform wamo_testhilfe.gleich(
     (select array_agg(n order by o) from pg_proc p, unnest(p.proargnames, p.proargmodes) with ordinality as a(n, m, o)
@@ -100,6 +109,10 @@ begin
   perform wamo_testhilfe.gleich(r.stimmabdruck, false, 'ohne Abdruck');
   perform wamo_testhilfe.gleich(r.aktiv, false, 'gesperrtes Profil erscheint als gesperrt');
   perform wamo_testhilfe.gleich(r.letzte_anmeldung, null::timestamptz, 'nie angemeldet');
+  select * into r from __SCHEMA__.neue_mitglieder('00000000-0000-4000-8000-0000000022a1')
+   where user_id = '00000000-0000-4000-8000-0000000022b3';
+  perform wamo_testhilfe.gleich(r.modellzugang, 'schluessel', 'nur Schlüssel');
+  perform wamo_testhilfe.gleich(r.faktor_bestaetigt, false, 'unbestätigter Faktor zählt nicht');
 end $$;
 
 -- 3. Nur ein aktiver Admin ruft auf
@@ -111,12 +124,38 @@ select wamo_testhilfe.fehler($$select * from __SCHEMA__.neue_mitglieder(null)$$,
 select wamo_testhilfe.fehler($$select count(*) from auth.users$$, '42501');
 reset role;
 
--- 4. Ohne wamo_auth bleibt passwort_stand leer (P1a noch nicht eingerichtet)
-do $$ begin
-  if to_regprocedure('wamo_auth.erstanmeldung_stand(uuid)') is null then
-    perform wamo_testhilfe.gleich((select count(*) from __SCHEMA__.neue_mitglieder('00000000-0000-4000-8000-0000000022a1')
-                                    where passwort_stand is not null), 0::bigint, 'ohne wamo_auth kein Passwortstand');
+-- 4. Passwortstand aus wamo_auth (P1a). Fehlt das Schema, legt der Test in der zurückgerollten Transaktion eine Attrappe an:
+--    erst ohne Funktion (null), dann mit gültigem Wert, mit unbekanntem Wert (null), mit Fehler (null, kein Abbruch) und für PUBLIC
+--    ausführbar (wird nicht aufgerufen).
+do $$
+declare
+  v_admin constant uuid := '00000000-0000-4000-8000-0000000022a1';
+  v_a     constant uuid := '00000000-0000-4000-8000-0000000022b1';
+  stand   text;
+begin
+  if to_regprocedure('wamo_auth.erstanmeldung_stand(uuid)') is not null then
+    select passwort_stand into stand from __SCHEMA__.neue_mitglieder(v_admin) where user_id = v_a;
+    perform wamo_testhilfe.gleich(stand is null or stand in ('keine', 'offen', 'abgelaufen', 'erledigt'), true, 'echter Stand');
+    return;
   end if;
+  perform wamo_testhilfe.gleich((select count(*) from __SCHEMA__.neue_mitglieder(v_admin) where passwort_stand is not null),
+                                0::bigint, 'ohne wamo_auth kein Passwortstand');
+  create schema wamo_auth;
+  create function wamo_auth.erstanmeldung_stand(uuid) returns text language sql as $f$ select 'offen' $f$;
+  revoke all on function wamo_auth.erstanmeldung_stand(uuid) from public;
+  select passwort_stand into stand from __SCHEMA__.neue_mitglieder(v_admin) where user_id = v_a;
+  perform wamo_testhilfe.gleich(stand, 'offen', 'Stand aus wamo_auth');
+  create or replace function wamo_auth.erstanmeldung_stand(uuid) returns text language sql as $f$ select 'irgendwas' $f$;
+  select passwort_stand into stand from __SCHEMA__.neue_mitglieder(v_admin) where user_id = v_a;
+  perform wamo_testhilfe.gleich(stand, null::text, 'unbekannter Wert wird null');
+  create or replace function wamo_auth.erstanmeldung_stand(uuid) returns text language plpgsql as $f$
+    begin raise exception 'kaputt'; end $f$;
+  select passwort_stand into stand from __SCHEMA__.neue_mitglieder(v_admin) where user_id = v_a;
+  perform wamo_testhilfe.gleich(stand, null::text, 'Fehler in wamo_auth bricht nicht ab');
+  create or replace function wamo_auth.erstanmeldung_stand(uuid) returns text language sql as $f$ select 'offen' $f$;
+  grant execute on function wamo_auth.erstanmeldung_stand(uuid) to public;
+  select passwort_stand into stand from __SCHEMA__.neue_mitglieder(v_admin) where user_id = v_a;
+  perform wamo_testhilfe.gleich(stand, null::text, 'für PUBLIC ausführbare Fremdfunktion wird nicht gerufen');
 end $$;
 
 select '0022 OK';

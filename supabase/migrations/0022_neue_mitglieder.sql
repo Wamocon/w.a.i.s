@@ -11,15 +11,19 @@
 --
 -- Entwurf: genau eine Lesefunktion neue_mitglieder(p_admin) als SECURITY DEFINER (Eigentümer postgres), nur für wamo_core
 -- ausführbar. Sie liefert genau die Spalten unten und nichts sonst: keine E-Mail, keine Schlüssel, Token oder deren Enden,
--- keinen Fingerabdruck und keinen Stimmvektor, nur Ja oder Nein und Stände als Text. Laborprofile fehlen immer. Der Aufrufer
--- muss ein aktiver Admin ohne Laborkennung sein (die Datenbank prüft das selbst; Anmeldung und zweiten Faktor prüft der Kern
--- vorher, wie bei geraete_verwaltung_liste aus 0014).
---   passwort_stand   Text aus wamo_auth.erstanmeldung_stand(uuid), sobald Paket P1a das Schema wamo_auth eingerichtet hat;
---                    vorher null. Der Aufruf läuft dynamisch (EXECUTE), damit diese Migration ohne wamo_auth gilt.
+-- keinen Fingerabdruck und keinen Stimmvektor, nur Ja oder Nein und Stände als Text. Laborprofile fehlen immer. Die Datenbank
+-- prüft nur, dass die übergebene Kennung ein aktiver Admin ohne Laborkennung ist; den Aufrufer kennt sie nicht (der Kern
+-- arbeitet ohne JWT). Anmeldung, Rolle und zweiten Faktor prüft der Kern vorher, wie bei geraete_verwaltung_liste aus 0014.
+--   passwort_stand   einer von keine, offen, abgelaufen, erledigt aus wamo_auth.erstanmeldung_stand(uuid), sobald Paket P1a
+--                    das Schema wamo_auth eingerichtet hat, sonst null. Der Aufruf läuft dynamisch (EXECUTE), damit diese
+--                    Migration ohne wamo_auth gilt, und nur, wenn die Funktion demselben Eigentümer gehört, text liefert und
+--                    nicht für PUBLIC ausführbar ist. Ein Fehler dort ergibt null, nie den Abbruch der Liste.
 --   geraet_stand     bestes Ergebnis der persönlichen Geräte: aktiv, beantragt, gesperrt, widerrufen oder keins.
---   modellzugang     token_und_schluessel, token, schluessel oder haus (nur die Art, nie ein Wert).
+--   modellzugang     hinterlegte Art: token_und_schluessel, token, schluessel oder haus (nie ein Wert; die Wahl modell_modus
+--                    der Person zählt hier nicht).
 --   stimmabdruck     eingelernter Abdruck des Profilinhabers vorhanden.
--- Keine neue Tabelle, keine Schreibrechte, keine Rechte für anon, authenticated und service_role.
+-- Keine neue Tabelle, keine Schreibrechte, ausführbar nur für wamo_core. Ändern sich später die Spalten, braucht die nächste
+-- Migration drop function davor (create or replace kann den Rückgabetyp nicht ändern) und setzt die Rechte neu.
 set local lock_timeout = '5s';
 
 do $$ begin
@@ -34,8 +38,19 @@ returns table (user_id uuid, anzeigename text, rolle text, aktiv boolean, angele
                faktor_bestaetigt boolean, passwort_stand text, geraet_stand text, modellzugang text, stimmabdruck boolean)
 language plpgsql stable security definer set search_path = '' as $$
 declare
-  v_stand boolean := to_regprocedure('wamo_auth.erstanmeldung_stand(uuid)') is not null;
+  v_fn    regprocedure := to_regprocedure('wamo_auth.erstanmeldung_stand(uuid)');
+  v_stand boolean := false;
+  v_wert  text;
 begin
+  -- Nur eine vertrauenswürdige Fremdfunktion: gleicher Eigentümer wie diese Funktion, Rückgabe text, nicht für PUBLIC
+  if v_fn is not null then
+    select p.proowner = (select r.oid from pg_catalog.pg_roles r where r.rolname = current_user)
+           and p.prorettype = 'pg_catalog.text'::pg_catalog.regtype
+           and not exists (select 1 from pg_catalog.aclexplode(coalesce(p.proacl, pg_catalog.acldefault('f', p.proowner))) a
+                            where a.grantee = 0)
+      into v_stand
+      from pg_catalog.pg_proc p where p.oid = v_fn;
+  end if;
   if p_admin is null or not exists (select 1 from __SCHEMA__.profiles p
                                     where p.user_id = p_admin and p.aktiv and p.rolle = 'admin' and p.labor_art is null) then
     raise exception 'neue_mitglieder: nur für einen aktiven Admin' using errcode = '42501';
@@ -59,12 +74,17 @@ begin
       join auth.users u on u.id = p.user_id
       left join __SCHEMA__.model_access m on m.user_id = p.user_id
      where p.labor_art is null
-     order by p.created_at desc
+     order by p.created_at desc, p.user_id
      limit 200
   loop
     passwort_stand := null;
-    if v_stand then
-      execute 'select wamo_auth.erstanmeldung_stand($1)::text' into passwort_stand using user_id;
+    if coalesce(v_stand, false) then
+      begin
+        execute 'select wamo_auth.erstanmeldung_stand($1)' into v_wert using user_id;
+        passwort_stand := case when v_wert in ('keine', 'offen', 'abgelaufen', 'erledigt') then v_wert end;
+      exception when others then
+        passwort_stand := null; -- ein Fehler in wamo_auth bricht die Übersicht nie ab
+      end;
     end if;
     return next;
   end loop;
@@ -72,20 +92,29 @@ end $$;
 comment on function __SCHEMA__.neue_mitglieder(uuid) is
   'Admin-Übersicht neuer Mitglieder (P7): nur Stände, nie E-Mail, Schlüssel, Token oder Stimmvektor; ohne Laborprofile.';
 
-revoke all on function __SCHEMA__.neue_mitglieder(uuid) from public, anon, authenticated, service_role;
+revoke all on function __SCHEMA__.neue_mitglieder(uuid) from public, anon, authenticated, service_role, wamo_core, wamo_admin;
 grant execute on function __SCHEMA__.neue_mitglieder(uuid) to wamo_core;
 
--- Abschlussprüfung: Funktion ist SECURITY DEFINER mit leerem search_path und nur für wamo_core ausführbar
-do $$ begin
-  if not (select p.prosecdef from pg_proc p where p.oid = '__SCHEMA__.neue_mitglieder(uuid)'::regprocedure)
-     or not exists (select 1 from pg_proc p where p.oid = '__SCHEMA__.neue_mitglieder(uuid)'::regprocedure
-                      and p.proconfig @> array['search_path=""'])
-     or has_function_privilege('anon', '__SCHEMA__.neue_mitglieder(uuid)', 'EXECUTE')
-     or has_function_privilege('authenticated', '__SCHEMA__.neue_mitglieder(uuid)', 'EXECUTE')
-     or has_function_privilege('service_role', '__SCHEMA__.neue_mitglieder(uuid)', 'EXECUTE')
-     or not has_function_privilege('wamo_core', '__SCHEMA__.neue_mitglieder(uuid)', 'EXECUTE')
+-- Abschlussprüfung: SECURITY DEFINER mit leerem search_path; ausführbar außer dem Eigentümer nur für wamo_core (kein PUBLIC);
+-- ein lesender Probeaufruf mit einem vorhandenen Admin zeigt fehlende Rechte des Eigentümers auf auth schon hier, nicht erst im Betrieb
+do $$
+declare
+  v_fn    regprocedure := '__SCHEMA__.neue_mitglieder(uuid)'::regprocedure;
+  v_admin uuid;
+begin
+  if not (select p.prosecdef from pg_proc p where p.oid = v_fn)
+     or not exists (select 1 from pg_proc p where p.oid = v_fn and p.proconfig @> array['search_path=""'])
+     or exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                 where p.oid = v_fn and a.privilege_type = 'EXECUTE' and a.grantee <> p.proowner
+                   and a.grantee is distinct from (select r.oid from pg_roles r where r.rolname = 'wamo_core'))
+     or not has_function_privilege('wamo_core', v_fn, 'EXECUTE')
   then
     raise exception 'neue_mitglieder: unzulässige Rechte oder Form' using errcode = '42501';
+  end if;
+  select p.user_id into v_admin from __SCHEMA__.profiles p
+   where p.aktiv and p.rolle = 'admin' and p.labor_art is null limit 1;
+  if v_admin is not null then
+    perform 1 from __SCHEMA__.neue_mitglieder(v_admin);
   end if;
 end $$;
 

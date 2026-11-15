@@ -3,8 +3,9 @@
   GET /wamo/api/admin/neue-mitglieder   je Profil (ohne Laborprofile), wie weit die Einrichtung ist
 
 Die Daten kommen allein aus der Funktion neue_mitglieder(p_admin) der Datenbank (SECURITY DEFINER, nur für wamo_core). Sie
-liefert nur Stände und Ja oder Nein, nie E-Mail, Schlüssel, Token oder den Stimmvektor; die Datenbank prüft selbst, dass der
-Aufrufer ein aktiver Admin ohne Laborkennung ist. Dieses Modul prüft davor, was die Datenbank nicht sehen kann:
+liefert nur Stände und Ja oder Nein, nie E-Mail, Schlüssel, Token oder den Stimmvektor. Die Datenbank prüft nur, dass die
+übergebene Kennung ein aktiver Admin ohne Laborkennung ist; den Aufrufer kennt sie nicht. Dieses Modul prüft davor, was die
+Datenbank nicht sehen kann:
 
   * Anmeldung wie bei allen Routen (wamo_api.identitaet: Token mit zweitem Faktor, Höchstalter, aktives Profil).
   * Rolle admin und kein Laborprofil (Identity.is_admin), sonst 403 ohne Abfrage.
@@ -35,7 +36,7 @@ STEUER_RE = re.compile("[\x00-\x1f\x7f-\x9f​-‏‪-‮⁠-⁩﻿]")
 ROLLEN = ("admin", "mitglied")
 GERAET_STAENDE = ("aktiv", "beantragt", "gesperrt", "widerrufen", "keins")
 MODELLZUGAENGE = ("token_und_schluessel", "token", "schluessel", "haus")
-PASSWORT_RE = re.compile(r"[a-z_]{1,24}")  # Stände aus wamo_auth (P1a), z. B. offen, erledigt, abgelaufen, keine
+PASSWORT_STAENDE = ("keine", "offen", "abgelaufen", "erledigt")  # Stände aus wamo_auth (P1a), die Datenbank filtert schon
 
 _versuche: dict[str, deque[float]] = {}
 
@@ -78,7 +79,7 @@ def _ja(wert: object) -> bool:
 
 def zeile_pruefen(r: Any) -> dict | None:
     """Eine Zeile der Datenbank auf genau die erlaubten Felder verkleinern; ohne gültige Kennung None."""
-    user_id = normalize_uuid(r["user_id"]) if "user_id" in r else None
+    user_id = normalize_uuid(r["user_id"])  # die Funktion liefert die Spalte immer; asyncpg.Record und dict gleich
     if user_id is None:
         return None
     name = r["anzeigename"] if isinstance(r["anzeigename"], str) else ""
@@ -91,7 +92,7 @@ def zeile_pruefen(r: Any) -> dict | None:
         "angelegt": _zeit(r["angelegt"]),
         "letzte_anmeldung": _zeit(r["letzte_anmeldung"]),
         "faktor_bestaetigt": _ja(r["faktor_bestaetigt"]),
-        "passwort_stand": passwort if isinstance(passwort, str) and PASSWORT_RE.fullmatch(passwort) else None,
+        "passwort_stand": _aus(passwort, PASSWORT_STAENDE),
         "geraet_stand": _aus(r["geraet_stand"], GERAET_STAENDE),
         "modellzugang": _aus(r["modellzugang"], MODELLZUGAENGE),
         "stimmabdruck": _ja(r["stimmabdruck"]),

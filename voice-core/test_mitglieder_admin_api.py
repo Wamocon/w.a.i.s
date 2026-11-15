@@ -167,3 +167,23 @@ def test_route_ist_im_kern_eingetragen():
     import wamo_api
 
     assert "mitglieder_admin_api" in wamo_api.ROUTEN_MODULE
+
+
+class WertZeile(dict):
+    """Wie asyncpg.Record bei "in": prüft Werte statt Schlüssel. Die Route darf sich darauf nicht verlassen."""
+
+    def __contains__(self, wert: object) -> bool:
+        return wert in self.values()
+
+
+def test_zeilen_wie_asyncpg_record_werden_gelesen(client, db):
+    db.liste = [WertZeile(zeile())]
+    mitglieder = client.get(URL).json()["mitglieder"]
+    assert len(mitglieder) == 1
+    assert mitglieder[0]["user_id"] == PERSON
+
+
+def test_passwortstand_nur_die_vier_werte(client, db):
+    db.liste = [zeile(passwort_stand="offen"), zeile(user_id=ADMIN, passwort_stand="beliebig")]
+    staende = [m["passwort_stand"] for m in client.get(URL).json()["mitglieder"]]
+    assert staende == ["offen", None]
