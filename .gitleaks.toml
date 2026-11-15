@@ -14,7 +14,7 @@ paths = [
 ]
 
 [[allowlists]]
-description = "Testdateien mit erfundenen Zugangswerten als Attrappen (Schwärzung, Anmeldung, Prüfung von Texten, zum Beispiel AB12cd… oder sk-ant… mit GEHEIM…). Alle Funde des Historien-Scans vom 10.11.2026 einzeln angesehen, keine echten Werte."
+description = "Testdateien mit erfundenen Zugangswerten als Attrappen (Schwärzung, Anmeldung, Prüfung von Texten, zum Beispiel AB12cd… oder sk-ant… mit GEHEIM…). Alle Funde des Historien-Scans vom 10.11.2026 einzeln angesehen, keine echten Werte. desktop/update.test.js (Paket P3) enthielt in einem frühen Commit ein erfundenes Token in JWT-Form, heute wird es zur Laufzeit gebaut."
 targetRules = ["generic-api-key"]
 paths = [
   '''ui/src/lib/fernzugriff\.test\.ts$''',
@@ -23,6 +23,7 @@ paths = [
   '''voice-core/test_sokrates2_dispatch\.py$''',
   '''geraete/tests/test_fernseher\.py$''',
   '''desktop/dist\.test\.js$''',
+  '''desktop/update\.test\.js$''',
 ]
 
 [[allowlists]]

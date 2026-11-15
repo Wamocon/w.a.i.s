@@ -20,7 +20,6 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 - Verteilen der Oberfläche setzt die Zeit des Verteilens statt 0 (Test zuerst)
 - Anzeigename immer der volle Name, nie der Teil der E-Mail vor dem @ (Test zuerst)
-- Befunde der Reviews zu P3 eingearbeitet
 
 ## [0.2.0] - 2026-11-15
 

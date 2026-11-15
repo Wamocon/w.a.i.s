@@ -53,7 +53,8 @@ const angebot = (teil, schluessel) => {
   return { manifest, signatur: signiere(manifest, schluessel) };
 };
 const pruefe = (a, aktuelleVersion = "0.2.0") => pruefeManifest({ ...a, schluessel: SCHLUESSEL, aktuelleVersion });
-const TOKEN = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXI";
+// Form eines JWT (drei Base64url-Teile), zur Laufzeit gebaut: kein echtes Token und kein Fund für die Geheimnissuche
+const TOKEN = ["kopf", "inhalt", "signatur"].map((t) => Buffer.from(`test-${t}`).toString("base64url")).join(".");
 
 // ---------- Versionen und Schlüssel ----------
 test("vergleicheVersionen: numerisch je Teil", () => {
@@ -156,7 +157,8 @@ test("Manifest: genau die acht Schlüssel, feste Werte und Formate", () => {
 });
 
 test("Manifest: höchstens 4 KB, ohne BOM, Text als Eingabe", () => {
-  const gross = manifestText({ commit: "a".repeat(40) }).replace("{", `{${" ".repeat(4100)}`);
+  const text = manifestText();
+  const gross = `${text.slice(0, 1)}${" ".repeat(4100)}${text.slice(1)}`;
   assert.equal(pruefe(angebot(gross)).ok, false);
   const bom = `\uFEFF${manifestText()}`;
   assert.equal(pruefe(angebot(bom)).ok, false);
