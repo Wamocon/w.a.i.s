@@ -1,11 +1,16 @@
 /**
- * Schalter "PC-Steuerung" auch ohne laufendes Gespräch (nur Desktop-App, nur Admins). Reine Logik ohne Browser und ohne React,
- * damit sie sich mit node:test prüfen lässt (pcSchalter.test.ts). Alle Importe relativ.
+ * Schalter "PC-Steuerung" auch ohne laufendes Gespräch (Desktop-App und Browser gleich, nur Admins). Reine Logik ohne Browser und ohne
+ * React, damit sie sich mit node:test prüfen lässt (pcSchalter.test.ts). Alle Importe relativ.
  *
  * Ablauf: Ein Klick auf "an" ohne Sitzung startet still eine Sitzung (wie der Start beim Tippen, mit allen Regeln aus
  * lib/stillStart.ts: Geräteschalter, Laborkonten, Übernahme durch ein anderes Fenster, Ratenbegrenzung) und merkt sich den Wunsch.
  * Sobald der Kern den PC als verbunden meldet (betrieb.pc), geht der Wunsch einmal an den Kern; was gilt, meldet der Kern in
  * betrieb.pc_steuerung zurück. Bleibt die Rückmeldung aus, nennt ein Hinweis nach der Wartezeit den Zustand des PCs.
+ *
+ * Browser (Entscheidung 11.11.2026, bestätigt 15.11.2026): Der Browser bedient nur. Die PC-Werkzeuge laufen immer auf dem Laptop, den der
+ * Kern der Sitzung aus dem Geräteregister zuordnet (Host und Tunnel dort, eingerichtet mit der Desktop-App), mit PC-Sperre je Sitzung,
+ * Freigabekarten und Gate der Stimmprüfung. Der Schalter sagt das (pcFern, HINWEIS_LAPTOP) und nennt, was nur die Desktop-App kann
+ * (HINWEIS_NUR_APP). Die Oberfläche entscheidet hier nichts, was der Kern nicht ohnehin prüft.
  *
  * Rolle ohne Sitzung: Das Profil (admin oder mitglied) meldet erst der Kern. Damit der Schalter schon vor dem ersten Gespräch da ist,
  * merkt sich die Oberfläche die zuletzt gemeldete Rolle je Person auf diesem Gerät (localStorage, Schlüssel mit der user_id). Das ist
@@ -39,6 +44,11 @@ export const HINWEIS_PC_GESPERRT =
 export const HINWEIS_PC_STILL = "PC-Steuerung nicht eingeschaltet: Der PC hat sich nicht rechtzeitig gemeldet. Bitte noch einmal schalten.";
 export const HINWEIS_NICHT_BESTAETIGT =
   "PC-Steuerung nicht eingeschaltet: Der Kern hat das Einschalten nicht bestätigt. Bitte noch einmal schalten.";
+/** Browser in der Betriebsart Büro: Die Werkzeuge laufen auf dem Laptop aus dem Register, egal wo der Browser läuft. */
+export const HINWEIS_LAPTOP = "Steuert deinen Laptop, den du mit der Desktop-App eingerichtet hast, egal auf welchem Gerät dieser Browser läuft.";
+/** Was aus dem Browser bewusst nicht geht: Beides braucht die Desktop-Brücke (Rechnername, Zeichnen auf dem Bildschirm). */
+export const HINWEIS_NUR_APP =
+  "Aus dem Browser schaltet sie sich nie automatisch ein, und der Lichtrahmen um das Fenster, in dem W.A.I.S. handelt, fehlt. Beides gibt es nur in der Desktop-App.";
 
 // ---------- Rolle je Person merken ----------
 export const ROLLE_PRAEFIX = "wamo.rolle.";
@@ -88,35 +98,60 @@ export function pcAdmin(l: { rolleKern: Rolle | null; rolleGemerkt: Rolle | null
 const istOnline = (p: Presence) => p !== "offline" && p !== "connecting";
 
 // ---------- Anzeige des Schalters ----------
+/** Was der Kern zum PC meldet (betrieb), soweit der Schalter es braucht. */
+export type PcMeldung = Pick<Betrieb, "pc" | "pcSteuerung">;
+
 export type SchalterLage = {
   admin: boolean;
-  /** Browser auf dem Server: PC-Werkzeuge gehören zur Desktop-App (lib/geraet.ts) */
-  serverBrowser: boolean;
-  /** Oberfläche läuft in der Desktop-App */
-  desktop: boolean;
   presence: Presence;
   /** Geräteschalter "Still starten beim Tippen" an und kein Laborkonto (lib/useStillStart.ts) */
   stillErlaubt: boolean;
   /** Ein Klick wartet auf Sitzung und PC (Store, pcEinschalten.wartet) */
   wartet: boolean;
+  /** letzte Betriebsmeldung des Kerns; zählt nur mit Sitzung */
+  betrieb: PcMeldung | null;
 };
 
 export type SchalterAnzeige =
   | { art: "verborgen" }
-  | { art: "nur_desktop" }
   | { art: "bedienbar"; ohneSitzung: boolean }
   | { art: "gesperrt"; hinweis: string };
 
-/** Ob und wie der Schalter erscheint. Ohne Sitzung bedienbar nur in der Desktop-App und nur, wenn der stille Start erlaubt ist. */
+/**
+ * Ob und wie der Schalter erscheint, in der Desktop-App und im Browser gleich. Ohne Sitzung bedienbar, wenn der stille Start erlaubt ist.
+ * In einer Sitzung ohne PC-Host (betrieb.pc "aus") nimmt der Kern das Einschalten nie an (voice-core/bot.py): Statt einer stillen Ablehnung
+ * ist der Schalter dann gesperrt und sagt warum. Ausschalten bleibt immer möglich.
+ */
 export function schalterAnzeige(l: SchalterLage): SchalterAnzeige {
   if (!l.admin) return { art: "verborgen" };
-  if (l.serverBrowser) return { art: "nur_desktop" };
-  if (istOnline(l.presence)) return { art: "bedienbar", ohneSitzung: false };
-  if (!l.desktop) return { art: "gesperrt", hinweis: HINWEIS_IM_GESPRAECH };
+  if (istOnline(l.presence)) {
+    if (l.betrieb?.pc === "aus" && l.betrieb.pcSteuerung !== "an") return { art: "gesperrt", hinweis: HINWEIS_PC_AUS };
+    return { art: "bedienbar", ohneSitzung: false };
+  }
   // Ein Wunsch läuft schon, oder eine Sitzung baut sich gerade auf: kein neuer Start nötig, der Klick merkt sich nur den Wunsch
   if (l.wartet || l.presence === "connecting") return { art: "bedienbar", ohneSitzung: true };
   if (!l.stillErlaubt) return { art: "gesperrt", hinweis: HINWEIS_STILL_AUS };
   return { art: "bedienbar", ohneSitzung: true };
+}
+
+/**
+ * Ein Satz zum PC am Schalter, solange die Steuerung aus ist und der Kern den PC nicht als verbunden meldet (getrennt, gesperrt, kein
+ * PC-Host); null, wenn alles in Ordnung ist oder der PC sich noch verbindet. Nur für eine laufende Sitzung gedacht.
+ */
+export function pcLageHinweis(b: PcMeldung | null | undefined): string | null {
+  if (!b || b.pcSteuerung === "an") return null;
+  if (b.pc === "aus") return HINWEIS_PC_AUS;
+  if (b.pc === "getrennt") return HINWEIS_PC_GETRENNT;
+  if (b.pc === "gesperrt") return HINWEIS_PC_GESPERRT;
+  return null;
+}
+
+/**
+ * Steuert dieses Fenster den Laptop aus der Ferne? Ja im Browser (keine Desktop-App) in der Betriebsart Büro: Dort laufen die Werkzeuge
+ * auf dem Laptop, den der Kern dem Profil aus dem Geräteregister zuordnet. In Unterwegs laufen Kern und Host auf diesem PC.
+ */
+export function pcFern(l: { desktop: boolean; buero: boolean }): boolean {
+  return !l.desktop && l.buero;
 }
 
 // ---------- Klick ----------
@@ -127,18 +162,15 @@ export type KlickLage = {
   online: boolean;
   presence: Presence;
   admin: boolean;
-  desktop: boolean;
-  serverBrowser: boolean;
 };
 
 export type KlickWeg = { art: "senden" } | { art: "nichts" } | { art: "wunsch" } | { art: "still_starten" } | { art: "nein" };
 
-/** Was ein Klick auslöst. Mit Sitzung wie bisher senden; ohne: "an" startet still (Desktop-App), "aus" ist nichts zu tun. */
+/** Was ein Klick auslöst. Mit Sitzung wie bisher senden; ohne: "an" startet still (Desktop-App und Browser), "aus" ist nichts zu tun. */
 export function klickWeg(l: KlickLage): KlickWeg {
   if (!l.admin) return { art: "nein" };
   if (l.online) return { art: "senden" };
   if (!l.an) return { art: "nichts" };
-  if (l.serverBrowser || !l.desktop) return { art: "nein" };
   return l.presence === "connecting" ? { art: "wunsch" } : { art: "still_starten" };
 }
 

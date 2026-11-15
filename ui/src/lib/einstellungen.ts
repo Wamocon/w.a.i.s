@@ -20,7 +20,7 @@ const hoerer = new Set<() => void>();
 
 export function pcAutoLesen(): boolean {
   if (typeof window === "undefined") return false;
-  if (serverBrowser()) return false; // PC-Steuerung nur in der Desktop-App (lib/geraet.ts)
+  if (serverBrowser()) return false; // Autostart nur in der Desktop-App: im Büro braucht er ihren Rechnernamen (useWamo)
   try {
     return window.localStorage.getItem(PC_AUTO) === "an";
   } catch {
