@@ -126,6 +126,28 @@ async def test_registrierung_laeuft_durch_das_stimmabdruck_gate(host):
     handler, kwargs = llm.handler["onenote_seite"]
     assert getattr(handler, stimme_gate.MARKE) is gate
     assert kwargs["timeout_secs"] >= onw.ANFRAGEN_TIMEOUT_SECS + 80
+    assert kwargs["cancel_on_interruption"] is False  # sonst legt der Host die Anfrage an, aber die Karte erscheint nie
+
+
+async def test_je_sitzung_nur_eine_anfrage_zur_zeit(host):
+    s = seiten()
+    await s.schemas()
+    s._laeuft = True  # so, als liefe gerade eine Anfrage
+    p = Params()
+    await s._werkzeug(p)
+    assert p.ergebnis["status"] == "rejected" and "gerade schon" in p.ergebnis["summary"]
+    assert [n for n, _ in host.aufrufe] == ["office_faehigkeiten"]
+
+
+async def test_datenbank_weg_ist_ein_fehler_kein_fremdes_canvas(host):
+    import asyncpg
+
+    s = seiten(Memory(fehler=asyncpg.PostgresConnectionError("weg")))
+    await s.schemas()
+    p = Params()
+    await s._werkzeug(p)
+    assert p.ergebnis["status"] == "error" and "nicht erreichbar" in p.ergebnis["summary"]
+    assert s._laeuft is False
 
 
 # ---------- Werkzeug ----------

@@ -27,8 +27,9 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 import labor
 from activity import APPROVAL_ID_RE
-from canvas_quelle import canvas_lesen
-from office_werkzeuge import ERSTELLEN_TIMEOUT_SECS, FAEHIGKEITEN_TIMEOUT_SECS, KEIN_CANVAS, PC_AUS, OfficeDateien, office_teile
+from canvas_quelle import CanvasNichtErreichbar, canvas_lesen
+from office_werkzeuge import (CANVAS_NICHT_ERREICHBAR, ERSTELLEN_TIMEOUT_SECS, FAEHIGKEITEN_TIMEOUT_SECS, KEIN_CANVAS, PC_AUS,
+                              OfficeDateien, office_teile)
 from pc_host import call_host_tool
 from persona import clean_inline
 
@@ -41,6 +42,7 @@ KARTEN_FELDER = ("status", "approval_id", "aktion", "grund", "detail", "ziel", "
 STATUS = ("success", "rejected", "blocked", "locked", "wartet", "error")
 KEINE_ANTWORT = {"status": "error", "summary": "Der PC hat keine verwertbare Antwort geliefert."}
 ONENOTE_FEHLT = "OneNote für den Desktop ist an diesem PC nicht installiert."
+LAEUFT_SCHON = "Eine OneNote-Seite wird gerade schon vorbereitet. Bitte einen Moment warten."
 RUECKFALL = ("{grund} Stattdessen liegt die Seite als Word-Datei {name} im Ordner {ordner}. Über „An OneNote senden“ lässt sie "
              "sich in OneNote einfügen.")
 
@@ -75,6 +77,7 @@ class OneNoteSeiten:
         self.memory, self._client, self._darf = memory, client, darf
         self._dateien = OfficeDateien(identity, memory, client=client, darf=darf, senden=senden)  # nur für den Rückfall
         self.onenote = self.word = False
+        self._laeuft = False  # je Sitzung höchstens eine Anfrage zur Zeit
 
     # ---------- Fähigkeiten und Registrierung ----------
     async def schemas(self) -> list[FunctionSchema]:
@@ -94,7 +97,9 @@ class OneNoteSeiten:
         return [schema()] if self.onenote or self.word else []
 
     def register(self, llm) -> None:
-        llm.register_function(WERKZEUG, self._werkzeug, timeout_secs=WERKZEUG_TIMEOUT_SECS)
+        # Kein Abbruch bei einem Einwurf: Sonst legt der Host die Anfrage an, aber die Karte erscheint nie, und am PC ruhen die Eingaben
+        # bis zum Ablauf der Anfrage (wie canvas_exportieren)
+        llm.register_function(WERKZEUG, self._werkzeug, cancel_on_interruption=False, timeout_secs=WERKZEUG_TIMEOUT_SECS)
 
     # ---------- Werkzeug ----------
     async def _werkzeug(self, params) -> None:
@@ -104,13 +109,26 @@ class OneNoteSeiten:
         await params.result_callback(await self.anlegen(canvas=canvas, titel=titel))
 
     async def anlegen(self, *, canvas: str | None, titel: str) -> dict:
-        """Freigabe-Anfrage im Host (needs_approval wird zur Karte), Rückfall als Word-Datei oder eine Ablehnung."""
+        """Freigabe-Anfrage im Host (needs_approval wird zur Karte), Rückfall als Word-Datei oder eine Ablehnung. Läuft schon eine
+        Anfrage dieser Sitzung, kommt eine Ablehnung."""
+        if self._laeuft:
+            return {"status": "rejected", "summary": LAEUFT_SCHON}
+        self._laeuft = True  # ohne await dazwischen gesetzt: kein zweiter Aufruf kommt vorbei
+        try:
+            return await self._anlegen(canvas, titel)
+        finally:
+            self._laeuft = False
+
+    async def _anlegen(self, canvas: str | None, titel: str) -> dict:
         if not self._darf():
             return {"status": "rejected", "summary": PC_AUS}
         client = self._client()
         if client is None:
             return {"status": "error", "summary": "Kein Zugriff auf den PC."}
-        gefunden = await canvas_lesen(self.memory, titel=canvas)
+        try:
+            gefunden = await canvas_lesen(self.memory, titel=canvas)
+        except CanvasNichtErreichbar:
+            return {"status": "error", "summary": CANVAS_NICHT_ERREICHBAR}
         if gefunden is None:
             return {"status": "rejected", "summary": KEIN_CANVAS}
         if not self.onenote:
