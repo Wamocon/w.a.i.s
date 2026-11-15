@@ -10,7 +10,9 @@
     "start": "electron .",
     "test": "node --test",
     "dist": "node ../scripts/wamo-dist-vorbereiten.cjs && electron-builder --win nsis --x64 --publish never",
-    "dist:pruefen": "node ../scripts/wamo-dist-pruefen.cjs dist/win-unpacked"
+    "dist:signiert": "node ../scripts/wamo-dist-vorbereiten.cjs && electron-builder --win nsis --x64 --publish never --config.win.forceCodeSigning=true",
+    "dist:pruefen": "node ../scripts/wamo-dist-pruefen.cjs dist/win-unpacked",
+    "dist:codesign": "node ../scripts/wamo-dist-codesign.cjs dist"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",

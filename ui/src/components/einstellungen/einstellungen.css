@@ -209,3 +209,48 @@
 @media (prefers-reduced-motion: reduce) {
   .ez-bahn span { transition: none; }
 }
+
+/* Admin-Übersicht "Neue Mitglieder" (NeueMitglieder.tsx): je Person eine Karte, Schritte mit Zeichen und Wort */
+.nm-liste {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.nm-person {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+.nm-kopf {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0;
+}
+.nm-name {
+  font-weight: 600;
+}
+.nm-rolle {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+.nm-satz {
+  margin: 0.25rem 0 0.5rem;
+}
+.nm-schritte {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.875rem;
+}
+.nm-schritt[data-stand="nein"] {
+  color: var(--fehler-schrift);
+}
+.nm-schritt[data-stand="offen"] {
+  color: var(--ink-soft);
+}

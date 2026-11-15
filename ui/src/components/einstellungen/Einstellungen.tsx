@@ -32,6 +32,7 @@ import { GeraeteAbschnitt } from "./Geraete";
 import { VerbrauchAbschnitt } from "./Verbrauch";
 import { AenderungenAbschnitt } from "./Aenderungen";
 import { GedaechtnisAbschnitt } from "./Gedaechtnis";
+import { NeueMitglieder } from "./NeueMitglieder";
 
 /**
  * Die Einstellungsseite: eine Ansicht der Hauptseite, kein eigener Pfad (siehe lib/einstellungenAbschnitte.ts). Ab 860 px
@@ -225,6 +226,7 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
                 )}
                 {wirksam === "stimme" && <StimmeAbschnitt aktionen={aktionen.stimmabdruck} />}
                 {wirksam === "gedaechtnis" && <GedaechtnisAbschnitt />}
+                {wirksam === "mitglieder" && <NeueMitglieder />}
                 {wirksam === "darstellung" && <DarstellungAbschnitt />}
                 {wirksam === "geraete" && <GeraeteAbschnitt onPcSteuerung={aktionen.pcSteuerung} />}
                 {wirksam === "fernzugriff" && (
