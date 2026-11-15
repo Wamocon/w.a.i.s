@@ -15,7 +15,7 @@ Was durchgeht (alles andere wird abgewiesen, ohne eine Verbindung nach draußen 
     max_tokens wird auf MAX_AUSGABE_TOKEN gekürzt. Der Körper geht neu geschrieben weiter.
   * Höchstens PARALLEL_MAX Anfragen gleichzeitig (damit die Gespräche auf LiteLLM nicht leiden); wer länger als WARTE_S wartet, bekommt 429.
     Der Körper wird erst gelesen, wenn ein Platz frei ist. Offene Verbindungen höchstens VERBINDUNGEN_MAX, je Auftrag VERBINDUNGEN_JE_AUFTRAG.
-  * Token-Budget je Auftrag (max_token aus der Datei des Dispatchers), je Profil und Tag (PROFIL_TAG_TOKEN_MAX) und je Tag für alle
+  * Token-Budget je Lauf (max_token aus der Datei des Dispatchers; jeder Lauf hat ein eigenes Token), je Profil und Tag (PROFIL_TAG_TOKEN_MAX) und je Tag für alle
     Aufträge (TAG_TOKEN_MAX); erschöpft heißt 403.
 Weitergereicht werden nur die Kopfzeilen anthropic-version, anthropic-beta und accept; die Antwort (auch Streaming, SSE) geht gestückelt
 zurück. Eine Antwort von LiteLLM ab Status 400 geht nie wörtlich zurück, nur als eigener Fehler mit demselben Status. Gezählt werden
@@ -55,6 +55,9 @@ WEGE = frozenset({"/v1/messages", "/v1/messages/count_tokens"})
 QUERY_ERLAUBT = frozenset({"", "beta=true"})
 WEITERGEREICHT = ("anthropic-version", "anthropic-beta", "accept")
 WERT_RE = re.compile(r"[\x20-\x7e]{1,512}")
+KOPF_WERT_RE = re.compile(r"[\x20-\x7e]{1,2048}")  # weitergereichte Kopfzeilen; ungültige fallen weg, statt die Anfrage zu kippen
+GROESSE_RE = re.compile(rb"[0-9a-fA-F]{1,8}")
+COUNT_TOKENS = "/v1/messages/count_tokens"
 TOKEN_RE = re.compile(r"wh1-([0-9a-f]{16,32})-[0-9a-f]{64}")
 PROFIL_RE = re.compile(r"[0-9a-f]{8}")
 HASH_RE = re.compile(r"[0-9a-f]{64}")
@@ -114,13 +117,14 @@ class Auftrag:
     profil: str
     bis: int
     max_token: int
+    lauf: str  # <job>-<12 Hexzeichen des Hashs>: jeder Lauf hat ein eigenes Token und damit ein eigenes Budget (max_token je Lauf)
 
 
 @dataclass
 class Verbrauch:
-    """Token je Auftrag und je Tag; gebucht in einer JSON-Zeilen-Datei (nur anhängen), beim Start daraus wiederhergestellt."""
+    """Token je Lauf, je Profil und Tag und je Tag; gebucht in einer JSON-Zeilen-Datei (nur anhängen), beim Start daraus wiederhergestellt."""
     pfad: Path | None
-    je_auftrag: dict[str, int] = field(default_factory=dict)
+    je_lauf: dict[str, int] = field(default_factory=dict)
     je_tag: dict[str, int] = field(default_factory=dict)
     je_profil_tag: dict[tuple[str, str], int] = field(default_factory=dict)
 
@@ -139,20 +143,20 @@ class Verbrauch:
         for zeile in daten.splitlines():
             try:
                 e = json.loads(zeile)
-                job, tag, n = e["job"], e["tag"], int(e["ein"]) + int(e["aus"])
-            except (ValueError, KeyError, TypeError):
+                lauf, tag, n = e.get("lauf") or e["job"], e["tag"], int(e["ein"]) + int(e["aus"])
+            except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
                 continue  # auch die erste, angeschnittene Zeile
-            if isinstance(job, str) and isinstance(tag, str) and n > 0:
-                self._addieren(job, tag, e.get("profil"), n)
+            if isinstance(lauf, str) and isinstance(tag, str) and n > 0:
+                self._addieren(lauf, tag, e.get("profil"), n)
 
-    def _addieren(self, job: str, tag: str, profil: object, n: int) -> None:
-        self.je_auftrag[job] = self.je_auftrag.get(job, 0) + n
+    def _addieren(self, lauf: str, tag: str, profil: object, n: int) -> None:
+        self.je_lauf[lauf] = self.je_lauf.get(lauf, 0) + n
         self.je_tag[tag] = self.je_tag.get(tag, 0) + n
         if isinstance(profil, str):
             self.je_profil_tag[(profil, tag)] = self.je_profil_tag.get((profil, tag), 0) + n
 
     def buchen(self, eintrag: dict) -> None:
-        self._addieren(eintrag["job"], eintrag["tag"], eintrag.get("profil"), int(eintrag["ein"]) + int(eintrag["aus"]))
+        self._addieren(eintrag["lauf"], eintrag["tag"], eintrag.get("profil"), int(eintrag["ein"]) + int(eintrag["aus"]))
         if self.pfad is not None:
             with open(self.pfad, "a", encoding="utf-8") as f:
                 f.write(json.dumps(eintrag, ensure_ascii=True, separators=(",", ":")) + "\n")
@@ -163,7 +167,7 @@ class Zaehler:
     usage der JSON-Antwort. Hält nur angefangene Zeilen bzw. höchstens JSON_ZAEHL_MAX Bytes."""
 
     def __init__(self, sse: bool):
-        self.sse, self.ein, self.aus, self.bytes, self._rest, self._json = sse, 0, 0, 0, b"", bytearray()
+        self.sse, self.ein, self.aus, self.bytes, self._rest, self._json, self._voll = sse, 0, 0, 0, b"", bytearray(), False
 
     @staticmethod
     def _zahl(wert: object) -> int:
@@ -176,8 +180,10 @@ class Zaehler:
     def futter(self, daten: bytes) -> None:
         self.bytes += len(daten)
         if not self.sse:
-            if len(self._json) + len(daten) <= JSON_ZAEHL_MAX:
+            if not self._voll and len(self._json) + len(daten) <= JSON_ZAEHL_MAX:
                 self._json += daten
+            else:
+                self._voll = True  # danach nichts mehr sammeln: zerstückeltes JSON zählte sonst falsch
             return
         zeilen = (self._rest + daten).split(b"\n")
         self._rest = zeilen.pop()[-ANTWORT_KOPF_MAX:]
@@ -188,7 +194,7 @@ class Zaehler:
     def _ereignis(self, roh: bytes) -> None:
         try:
             e = json.loads(roh)
-        except ValueError:
+        except (ValueError, RecursionError):
             return
         if not isinstance(e, dict):
             return
@@ -205,9 +211,11 @@ class Zaehler:
             if self._rest.startswith(b"data:"):
                 self._ereignis(self._rest[5:].strip())
             return
+        if self._voll:
+            return
         try:
             u = json.loads(bytes(self._json)).get("usage")
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, RecursionError):
             return
         if isinstance(u, dict):
             self.ein, self.aus = self._eingabe(u), self._zahl(u.get("output_tokens"))
@@ -272,12 +280,15 @@ class Proxy:
             raise Abweisung(401, "token_falsch", "Auftragstoken unbekannt oder abgelaufen")
         if d["bis"] < self._uhr():
             raise Abweisung(401, "token_abgelaufen", "Auftragstoken unbekannt oder abgelaufen")
-        return Auftrag(job, d["profil"], d["bis"], d["max_token"])
+        return Auftrag(job, d["profil"], d["bis"], d["max_token"], f"{job}-{d['hash'][:12]}")
 
     def budget_pruefen(self, a: Auftrag) -> None:
-        tag = Verbrauch.tag(self._uhr())
-        if self.verbrauch.je_auftrag.get(a.job, 0) >= a.max_token:
-            raise Abweisung(403, "budget_auftrag", "Token-Budget dieses Auftrags ist erschöpft")
+        jetzt = self._uhr()
+        if a.bis < jetzt:  # auch nach dem Warten auf einen Platz
+            raise Abweisung(401, "token_abgelaufen", "Auftragstoken unbekannt oder abgelaufen")
+        tag = Verbrauch.tag(jetzt)
+        if self.verbrauch.je_lauf.get(a.lauf, 0) >= a.max_token:
+            raise Abweisung(403, "budget_lauf", "Token-Budget dieses Laufs ist erschöpft")
         if self.verbrauch.je_profil_tag.get((a.profil, tag), 0) >= self.profil_tag_token_max:
             raise Abweisung(403, "budget_profil", "Token-Budget des Tages für dieses Profil ist erschöpft")
         if self.verbrauch.je_tag.get(tag, 0) >= self.tag_token_max:
@@ -331,11 +342,11 @@ class Proxy:
             token = kopf["authorization"][len("Bearer "):].strip()
         auftrag = self.auftrag_pruefen(token)
         for name in WEITERGEREICHT:
-            if name in kopf and not WERT_RE.fullmatch(kopf[name]):
-                raise Abweisung(400, "kopf_ungueltig", f"Kopfzeile {name} ungültig")
+            if name in kopf and not KOPF_WERT_RE.fullmatch(kopf[name]):
+                del kopf[name]
         return ziel, auftrag, int(laenge)
 
-    def _koerper_pruefen(self, koerper: bytes) -> tuple[str, bytes, int]:
+    def _koerper_pruefen(self, koerper: bytes, weg: str = "/v1/messages") -> tuple[str, bytes, int]:
         """Prüft den Körper und baut ihn neu: nur Felder aus FELDER_ERLAUBT (sonst 400), Modell aus der Liste, metadata nur mit
         user_id, max_tokens auf MAX_AUSGABE_TOKEN gekürzt. Liefert (Modell, neuer Körper, max_tokens für die Schätzung)."""
         try:
@@ -355,6 +366,8 @@ class Proxy:
             if not isinstance(meta, dict):
                 raise Abweisung(400, "feld", "metadata muss ein Objekt sein")
             d["metadata"] = {"user_id": meta["user_id"]} if isinstance(meta.get("user_id"), str) else {}
+        if "max_tokens" not in d and weg != COUNT_TOKENS:
+            d["max_tokens"] = MAX_AUSGABE_TOKEN  # nie die Grenze von LiteLLM oder Ollama
         max_tokens = d.get("max_tokens", 0)
         if "max_tokens" in d:
             if type(max_tokens) is not int or max_tokens < 1:
@@ -389,11 +402,13 @@ class Proxy:
             except asyncio.TimeoutError:
                 raise Abweisung(429, "zu_viele", "Hausmodelle gerade ausgelastet", {"Retry-After": "10"}) from None
             try:
+                self.budget_pruefen(auftrag)  # das Warten kann lang sein: Budget und Frist noch einmal
                 try:
                     koerper = await asyncio.wait_for(r.readexactly(laenge), KOERPER_ZEIT_S)
                 except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError):
                     raise Abweisung(400, "koerper", "Körper unvollständig") from None
-                felder["modell"], koerper, lauf["max_tokens"] = self._koerper_pruefen(koerper)
+                lauf["weg"] = felder["weg"]
+                felder["modell"], koerper, lauf["max_tokens"] = self._koerper_pruefen(koerper, felder["weg"])
                 lauf["koerper"] = len(koerper)
                 try:
                     await self._weiterreichen(ziel, kopf, koerper, w, lauf)
@@ -408,17 +423,23 @@ class Proxy:
             await self._antwort(w, a.status, a.text, a.kopf)
         except Exception as e:  # noqa: BLE001  nie ein Absturz des Proxys durch eine Anfrage, nie ein Inhalt im Protokoll
             self._log("fehler", art=type(e).__name__, **felder)
+            if not lauf.get("kopf_gesendet"):
+                await self._antwort(w, 502, "Proxy: Anfrage nicht ausführbar")
         finally:
-            self._offen -= 1
-            if job is not None:
-                self._offen_je_auftrag[job] -= 1
-                if self._offen_je_auftrag[job] <= 0:
-                    del self._offen_je_auftrag[job]
-            await self._schliesse(w)
+            try:
+                await self._schliesse(w)
+            finally:  # erst nach dem Schließen frei: hängende Verbindungen zählen bis zuletzt mit
+                self._offen -= 1
+                if job is not None:
+                    self._offen_je_auftrag[job] -= 1
+                    if self._offen_je_auftrag[job] <= 0:
+                        del self._offen_je_auftrag[job]
 
     @staticmethod
     def _menge(lauf: dict) -> tuple[int, int, bool]:
         """Token für die Buchung: gezählt, und wenn das nicht reicht, geschätzt (Rückgabe ein, aus, geschätzt)."""
+        if lauf.get("weg") == COUNT_TOKENS:  # Zählen der Eingabe erzeugt nichts und kostet kein Budget
+            return 0, 0, False
         z = lauf.get("zaehler")
         ein, aus = (z.ein, z.aus) if z is not None else (0, 0)
         status = lauf.get("status") or 0
@@ -434,7 +455,8 @@ class Proxy:
         ein, aus, geschaetzt = self._menge(lauf)
         status = lauf.get("status") or 0
         try:
-            self.verbrauch.buchen({"zeit": int(jetzt), "tag": Verbrauch.tag(jetzt), "job": auftrag.job, "profil": auftrag.profil,
+            self.verbrauch.buchen({"zeit": int(jetzt), "tag": Verbrauch.tag(jetzt), "job": auftrag.job, "lauf": auftrag.lauf,
+                                   "profil": auftrag.profil,
                                    "weg": felder.get("weg"), "modell": felder.get("modell"), "status": status, "ein": ein, "aus": aus,
                                    "geschaetzt": geschaetzt, "ms": ms})
         except OSError as e:
@@ -478,10 +500,11 @@ class Proxy:
                         f"Content-Type: {art if WERT_RE.fullmatch(art) else 'application/octet-stream'}",
                         "Transfer-Encoding: chunked", "Connection: close", "Cache-Control: no-store"]
             w.write(("\r\n".join(aus_kopf) + "\r\n\r\n").encode("ascii"))
+            lauf["kopf_gesendet"] = True
             lauf["zaehler"] = zaehler = Zaehler(sse)
             await self._koerper_kopieren(ur, akopf, w, zaehler)
             w.write(b"0\r\n\r\n")
-            await w.drain()
+            await asyncio.wait_for(w.drain(), LEER_ZEIT_S)
             zaehler.ende()
             lauf["vollstaendig"] = True
         finally:
@@ -502,12 +525,16 @@ class Proxy:
         return int(m[1]), kopf
 
     async def _koerper_kopieren(self, ur: asyncio.StreamReader, akopf: dict[str, str], w: asyncio.StreamWriter, zaehler: Zaehler) -> None:
+        """Kopiert den Körper der Antwort gestückelt an den Client. Jede Lese- und Schreiboperation hat eine Frist (LEER_ZEIT_S, insgesamt
+        GESAMT_ZEIT_S): ein Client, der nicht weiterliest, hält keinen Platz unbegrenzt. chunked wird streng gelesen (Größe nur Hex, CRLF
+        nach jedem Stück), große Stücke in Teilen von CHUNK Bytes."""
         ende = time.monotonic() + GESAMT_ZEIT_S
         gesamt = 0
 
-        async def lesen(coro):
+        async def frist(coro):
             rest = ende - time.monotonic()
             if rest <= 0:
+                coro.close()
                 raise asyncio.TimeoutError
             return await asyncio.wait_for(coro, min(LEER_ZEIT_S, rest))
 
@@ -518,31 +545,36 @@ class Proxy:
                 raise ValueError("Antwort zu groß")
             zaehler.futter(daten)
             w.write(f"{len(daten):x}\r\n".encode("ascii") + daten + b"\r\n")
-            await w.drain()
+            await frist(w.drain())
 
         if "chunked" in akopf.get("transfer-encoding", "").lower():
             while True:
-                zeile = await lesen(ur.readuntil(b"\r\n"))
-                groesse = int(zeile.split(b";", 1)[0].strip() or b"0", 16)
+                zeile = (await frist(ur.readuntil(b"\r\n")))[:-2].split(b";", 1)[0].strip()
+                if not GROESSE_RE.fullmatch(zeile):
+                    raise ValueError("Stückgröße ungültig")
+                groesse = int(zeile, 16)
                 if groesse == 0:
-                    while (await lesen(ur.readuntil(b"\r\n"))) != b"\r\n":  # Trailer überspringen
+                    while (await frist(ur.readuntil(b"\r\n"))) != b"\r\n":  # Trailer überspringen
                         pass
                     return
-                if groesse > ANTWORT_MAX:
-                    raise ValueError("Stück zu groß")
-                daten = await lesen(ur.readexactly(groesse))
-                await lesen(ur.readexactly(2))
-                await weiter(daten)
+                if gesamt + groesse > ANTWORT_MAX:
+                    raise ValueError("Antwort zu groß")
+                while groesse > 0:
+                    daten = await frist(ur.readexactly(min(CHUNK, groesse)))
+                    groesse -= len(daten)
+                    await weiter(daten)
+                if await frist(ur.readexactly(2)) != b"\r\n":
+                    raise ValueError("Stück ohne CRLF")
         elif re.fullmatch(r"[0-9]{1,10}", akopf.get("content-length", "")):
             rest = int(akopf["content-length"])
             while rest > 0:
-                daten = await lesen(ur.read(min(CHUNK, rest)))
+                daten = await frist(ur.read(min(CHUNK, rest)))
                 if not daten:
                     raise ConnectionError("Antwort zu kurz")
                 rest -= len(daten)
                 await weiter(daten)
         else:
-            while daten := await lesen(ur.read(CHUNK)):
+            while daten := await frist(ur.read(CHUNK)):
                 await weiter(daten)
 
     @staticmethod
@@ -562,8 +594,11 @@ class Proxy:
         try:
             w.close()
             await asyncio.wait_for(w.wait_closed(), 5)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001  hängt der Client: Verbindung hart abbrechen, damit nichts offen bleibt
+            try:
+                w.transport.abort()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def serve(proxy: Proxy, host: str, port: int) -> asyncio.AbstractServer:
@@ -593,11 +628,22 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--tag-token-max", type=int, default=TAG_TOKEN_MAX)
     a = ap.parse_args(argv)
     host, _, port = a.listen.rpartition(":")
+    try:
+        ok_listen = ipaddress.ip_address(host).is_loopback and port.isdigit() and 1 <= int(port) <= 65535
+    except ValueError:
+        ok_listen = False
+    if not ok_listen:
+        print("haus-proxy: --listen muss eine Loopback-Adresse mit Port sein, etwa 127.0.0.1:18090", file=sys.stderr)
+        return 2
     if not 1 <= a.parallel <= 8 or not 10_000 <= a.tag_token_max <= 1_000_000_000:
         print("haus-proxy: --parallel 1 bis 8, --tag-token-max 10000 bis 1000000000", file=sys.stderr)
         return 2
     verbrauch = Verbrauch(Path(a.verbrauch))
-    verbrauch.laden()
+    try:
+        verbrauch.laden()
+    except OSError as e:
+        print(f"haus-proxy: Verbrauchsdatei nicht lesbar ({type(e).__name__})", file=sys.stderr)
+        return 2
     try:
         proxy = Proxy(Ziel.aus_url(a.ziel), schluessel_lesen(a.schluessel_datei),
                       frozenset(m.strip() for m in a.modelle.split(",") if m.strip()), Path(a.auftraege), verbrauch,

@@ -148,9 +148,11 @@ def probe_echt() -> str | None:
     wamo = pwd.getpwnam("wamo")
     fd = os.open(datei, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
     try:
-        os.write(fd, inhalt.encode())
-        os.fchown(fd, wamo.pw_uid, grp.getgrnam("wamo-haus-proxy").gr_gid)
-        os.close(fd)
+        try:
+            os.write(fd, inhalt.encode())
+            os.fchown(fd, wamo.pw_uid, grp.getgrnam("wamo-haus-proxy").gr_gid)
+        finally:
+            os.close(fd)
         beginn = time.time()
         status, body = asyncio.run(_anfrage(PORT, token))
         if status != 200 or b"message_stop" not in body:
@@ -158,8 +160,9 @@ def probe_echt() -> str | None:
         dauer = time.time() - beginn
         time.sleep(0.5)
         buchung = None
-        with open(VERBRAUCH, encoding="utf-8") as f:
-            for zeile in f.readlines()[-50:]:
+        with open(VERBRAUCH, "rb") as f:  # nur das Ende der Datei, sie wird nicht gedreht
+            f.seek(max(0, os.fstat(f.fileno()).st_size - 65536))
+            for zeile in f.read().splitlines()[-50:]:
                 try:
                     e = json.loads(zeile)
                 except ValueError:

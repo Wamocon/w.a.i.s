@@ -25,6 +25,7 @@ import wamo_haus_proxy as X  # noqa: E402
 SCHLUESSEL = "sk-litellm-test-0123456789"
 JOB = "0123456789abcdef0123"
 TOKEN = f"wh1-{JOB}-{'a' * 64}"
+LAUF = f"{JOB}-{hashlib.sha256(TOKEN.encode()).hexdigest()[:12]}"  # Kennung des Laufs im Proxy (Budget je Lauf)
 MODELL = "qwen3.6-35b"
 
 SSE = (b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":1200,"
@@ -59,6 +60,11 @@ class Attrappe:
             await self.warten.wait()
         if self.art == "abbruch":  # Kopf und ein halbes Stück, dann weg (Antwort zu kurz)
             w.write(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n40\r\nevent: mess")
+        elif self.art == "zaehlen":  # echte Form von count_tokens: nur input_tokens, kein usage
+            body = b'{"input_tokens": 1234}'
+            w.write(f"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {len(body)}\r\n\r\n".encode() + body)
+        elif self.art == "stueck_kaputt":  # Stückgröße kein Hex
+            w.write(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n-5\r\nxxxxx\r\n0\r\n\r\n")
         elif self.art == "ohne_usage":
             body = json.dumps({"type": "message", "content": [{"type": "text", "text": "x" * 400}]}).encode()
             w.write(f"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {len(body)}\r\n\r\n".encode() + body)
@@ -236,7 +242,7 @@ class Durchreichen(unittest.TestCase):
                 self.assertNotIn("x-api-key", anfrage_kopf.lower())
                 self.assertNotIn("x-fremd", anfrage_kopf.lower())
                 self.assertEqual(json.loads(anfrage_body)["model"], MODELL)
-                self.assertEqual(welt.verbrauch.je_auftrag[JOB], 1200 + 300 + 42)
+                self.assertEqual(welt.verbrauch.je_lauf[LAUF], 1200 + 300 + 42)
                 eintrag = json.loads((Path(welt.tmp.name) / "verbrauch.jsonl").read_text(encoding="utf-8").splitlines()[-1])
                 self.assertEqual((eintrag["ein"], eintrag["aus"], eintrag["status"], eintrag["profil"]), (1500, 42, 200, "1a2b3c4d"))
                 text = "\n".join(welt.log)
@@ -245,14 +251,55 @@ class Durchreichen(unittest.TestCase):
                 self.assertIn(f"job={JOB}", text)
         lauf(t())
 
-    def test_json_mit_bearer_und_count_tokens(self):
+    def test_json_mit_bearer(self):
         async def t():
             async with Attrappe("json") as a, Welt(a) as welt:
-                status, _, body = await welt.anfrage(kopf_art="bearer", weg="/v1/messages/count_tokens")
+                status, _, body = await welt.anfrage(kopf_art="bearer", body={"model": MODELL, "messages": []})
                 self.assertEqual(status, 200)
                 self.assertEqual(json.loads(body)["usage"]["output_tokens"], 7)
+                self.assertEqual(welt.verbrauch.je_lauf[LAUF], 57)
+                self.assertEqual(json.loads(a.anfragen[0][1])["max_tokens"], X.MAX_AUSGABE_TOKEN)  # fehlte: nie die Grenze von LiteLLM
+                self.assertEqual((welt.proxy._offen, welt.proxy._offen_je_auftrag), (0, {}))
+        lauf(t())
+
+    def test_count_tokens_kostet_nichts(self):
+        async def t():
+            async with Attrappe("zaehlen") as a, Welt(a) as welt:
+                status, _, body = await welt.anfrage(weg="/v1/messages/count_tokens", body={"model": MODELL, "messages": []})
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body), {"input_tokens": 1234})
                 self.assertTrue(a.anfragen[0][0].startswith("POST /v1/messages/count_tokens HTTP/1.1\r\n"))
-                self.assertEqual(welt.verbrauch.je_auftrag[JOB], 57)
+                self.assertNotIn("max_tokens", json.loads(a.anfragen[0][1]))
+                self.assertEqual(welt.verbrauch.je_lauf.get(LAUF, 0), 0)
+        lauf(t())
+
+    def test_budget_je_lauf(self):
+        async def t():
+            async with Attrappe("sse") as a, Welt(a, max_token=1000) as welt:
+                self.assertEqual((await welt.anfrage())[0], 200)
+                self.assertEqual((await welt.anfrage())[0], 403)
+                # ein neuer Lauf desselben Auftrags (Abnahme-Runde, Fortsetzung) hat ein neues Token und damit ein neues Budget
+                zweites = f"wh1-{JOB}-{'b' * 64}"
+                welt.tokendatei(JOB, zweites, max_token=1000)
+                self.assertEqual((await welt.anfrage(token=zweites))[0], 200)
+                self.assertEqual(len(welt.verbrauch.je_lauf), 2)
+        lauf(t())
+
+    def test_stueckgroesse_streng(self):
+        async def t():
+            async with Attrappe("stueck_kaputt") as a, Welt(a) as welt:
+                await welt.anfrage(body={"model": MODELL, "max_tokens": 100, "messages": []})
+                self.assertTrue(any("abbruch" in z for z in welt.log))
+                self.assertGreaterEqual(welt.verbrauch.je_lauf.get(LAUF, 0), 100)
+                self.assertEqual((welt.proxy._offen, welt.proxy._offen_je_auftrag), (0, {}))
+        lauf(t())
+
+    def test_zu_lange_kopfzeile_faellt_weg(self):
+        async def t():
+            async with Attrappe("json") as a, Welt(a) as welt:
+                status, _, _ = await welt.anfrage(zusatz=["accept: " + "x" * 3000])
+                self.assertEqual(status, 200)
+                self.assertNotIn("accept: xxx", a.anfragen[0][0].lower())
         lauf(t())
 
     def test_fehler_von_litellm_nur_als_eigener_fehler(self):
@@ -295,7 +342,7 @@ class Durchreichen(unittest.TestCase):
                 await welt.anfrage(body={"model": MODELL, "max_tokens": 5000, "stream": True,
                                          "messages": [{"role": "user", "content": "x" * 3000}]})
                 self.assertEqual(len(a.anfragen), 1)
-                self.assertGreaterEqual(welt.verbrauch.je_auftrag.get(JOB, 0), 5000 + 1000)
+                self.assertGreaterEqual(welt.verbrauch.je_lauf.get(LAUF, 0), 5000 + 1000)
                 self.assertTrue(any("abbruch" in z and "geschaetzt=ja" in z for z in welt.log))
         lauf(t())
 
@@ -305,7 +352,7 @@ class Durchreichen(unittest.TestCase):
                 status, _, _ = await welt.anfrage(body={"model": MODELL, "max_tokens": 8,
                                                         "messages": [{"role": "user", "content": "y" * 900}]})
                 self.assertEqual(status, 200)
-                self.assertGreater(welt.verbrauch.je_auftrag.get(JOB, 0), 300)
+                self.assertGreater(welt.verbrauch.je_lauf.get(LAUF, 0), 300)
         lauf(t())
 
     def test_litellm_nicht_erreichbar(self):
@@ -388,13 +435,13 @@ class Grenzen(unittest.TestCase):
             pfad = Path(d) / "verbrauch.jsonl"
             v = X.Verbrauch(pfad)
             jetzt = time.time()
-            v.buchen({"zeit": int(jetzt), "tag": X.Verbrauch.tag(jetzt), "job": JOB, "profil": "1a2b3c4d", "weg": "/v1/messages",
+            v.buchen({"zeit": int(jetzt), "tag": X.Verbrauch.tag(jetzt), "job": JOB, "lauf": LAUF, "profil": "1a2b3c4d", "weg": "/v1/messages",
                       "modell": MODELL, "status": 200, "ein": 10, "aus": 5, "ms": 1})
             with open(pfad, "a", encoding="utf-8") as f:
                 f.write("kaputt\n")
             neu = X.Verbrauch(pfad)
             neu.laden()
-            self.assertEqual(neu.je_auftrag[JOB], 15)
+            self.assertEqual(neu.je_lauf[LAUF], 15)
             self.assertEqual(neu.je_tag[X.Verbrauch.tag(jetzt)], 15)
 
 
