@@ -67,7 +67,8 @@
         "filter": [
           "wamo-tunnel.ps1",
           "wamo-tunnel-einrichten.ps1",
-          "wamo-tunnel-entfernen.ps1"
+          "wamo-tunnel-entfernen.ps1",
+          "wamo-symbol-reparieren.ps1"
         ]
       },
       {

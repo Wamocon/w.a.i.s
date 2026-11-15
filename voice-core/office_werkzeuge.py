@@ -8,9 +8,15 @@ steht nicht in OFFENE_WERKZEUGE.
 
 Was: Der Kern liest das eigene Canvas-Element aus canvas_items (canvas_quelle.py) und schickt dem Host nur dessen feste Struktur, nie
 Dateibytes. Der Host prüft, baut, legt die Datei in Dokumente\\WAIS ab und öffnet sie (office_datei_erstellen, nie in LLM_TOOLS).
-Speichern braucht keine Freigabekarte (Entscheidung vom 14.11.2026: nichts verlässt den PC).
+Speichern braucht keine Freigabekarte (Entscheidung vom 14.11.2026: kein Versand). Die Datei bleibt aber nicht zwingend am PC: Ist
+der Ordner Dokumente auf OneDrive umgeleitet, synchronisiert OneDrive sie; so steht es auch in der Werkzeugbeschreibung.
 
-Rückmeldung: Das Modell bekommt nur gespeichert, Dateiname, geöffnet und den Ordner, nie den vollen Pfad. Die Oberfläche bekommt die
+Ablauf: Je Sitzung läuft höchstens ein Export (ein Doppelklick erzeugt keine zweite Datei). Ein Einwurf bricht den Aufruf nicht ab
+(cancel_on_interruption=False, in Pipecat 1.x ein asynchroner Aufruf: das Ergebnis kommt nach), damit Protokoll und Hinweis in der
+Oberfläche zur Datei passen, die der PC ohnehin anlegt.
+
+Rückmeldung: Das Modell bekommt nur gespeichert, Dateiname, geöffnet und den Ordner, nie den vollen Pfad; ist die Datei nicht geöffnet,
+dazu den bereinigten Grund (hinweis). Die Oberfläche bekommt die
 Nachricht {"type": "datei", "ok", "kennung", "name", "format", "ordner", "pfad", "geoeffnet"} oder {"type": "datei", "ok": false,
 "grund"}. In actions stehen Werkzeug, Format, Canvas-Kennung, Quelle, Dateiname, Größe und Prüfsummenanfang, nie der Inhalt.
 """
@@ -28,7 +34,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 import labor
-from canvas_quelle import canvas_lesen, kennung_gueltig
+from canvas_quelle import CanvasNichtErreichbar, canvas_lesen, kennung_gueltig
 from memory import DB_ERRORS
 from pc_host import call_host_tool
 from persona import clean_inline
@@ -48,6 +54,9 @@ KENNUNG_RE = re.compile(r"[0-9a-f]{16}")
 PC_AUS = "Die PC-Steuerung ist aus. Sie lässt sich in der Oberfläche einschalten."  # wie screen.PC_OFF
 KEIN_CANVAS = ("Kein eigenes Canvas-Element gefunden. Speichern geht nur für Inhalte, die W.A.I.S. für dich auf das Canvas gelegt "
                "hat.")
+CANVAS_NICHT_ERREICHBAR = "Das Canvas ist gerade nicht erreichbar. Bitte gleich noch einmal versuchen."
+KEINE_ANTWORT = "Der PC hat keine verwertbare Antwort geliefert."
+LAEUFT_SCHON = "Eine Datei wird gerade schon gespeichert. Bitte einen Moment warten, dann geht es wieder."
 
 
 def office_teile(wert: str | None = None) -> set[str]:
@@ -74,8 +83,9 @@ def schema(formate: tuple[str, ...]) -> FunctionSchema:
         description=(
             "Speichert ein Canvas-Element als Datei auf dem PC im Ordner WAIS in Dokumente und öffnet sie (Word, Excel, PowerPoint, PDF, "
             "CSV oder Markdown, nur die hier angebotenen). Excel und CSV gibt es nur für Tabellen. Ohne canvas gilt das zuletzt "
-            "gezeigte Element. Es braucht keine Freigabe, die Datei verlässt den PC nicht. Sag danach in einem Satz, dass sie im Ordner "
-            "WAIS liegt und offen ist. Senden oder Teilen kann dieses Werkzeug nicht."
+            "gezeigte Element. Es braucht keine Freigabe. Die Datei liegt danach in Dokumente\\WAIS; ist der Ordner Dokumente auf "
+            "OneDrive umgeleitet, synchronisiert OneDrive sie dorthin. Sag danach in einem Satz, dass sie im Ordner WAIS liegt und offen "
+            "ist, oder nenne den hinweis, wenn sie nicht offen ist. Senden oder Teilen kann dieses Werkzeug nicht."
         ),
         properties={
             "format": {"type": "string", "enum": list(formate)},
@@ -94,6 +104,7 @@ class OfficeDateien:
         self.identity, self.memory = identity, memory
         self._client, self._darf, self._senden = client, darf, senden
         self.formate: tuple[str, ...] = ()
+        self._export_laeuft = False  # je Sitzung höchstens ein Export (Doppelklick, doppelter Werkzeugaufruf)
 
     # ---------- Fähigkeiten und Registrierung ----------
     async def schemas(self) -> list[FunctionSchema]:
@@ -114,7 +125,8 @@ class OfficeDateien:
         return [schema(self.formate)] if self.formate else []
 
     def register(self, llm) -> None:
-        llm.register_function(WERKZEUG, self._werkzeug, timeout_secs=ERSTELLEN_TIMEOUT_SECS + 5)
+        # Kein Abbruch bei einem Einwurf: Der PC legt die Datei ohnehin an, Protokoll und Hinweis dürfen nicht entfallen
+        llm.register_function(WERKZEUG, self._werkzeug, cancel_on_interruption=False, timeout_secs=ERSTELLEN_TIMEOUT_SECS + 5)
 
     def anzeige(self) -> list[str]:
         """Formate für die Oberfläche (Feld office in betrieb): nur, solange die PC-Steuerung an ist."""
@@ -124,17 +136,31 @@ class OfficeDateien:
     async def _werkzeug(self, params) -> None:
         a = params.arguments if isinstance(params.arguments, dict) else {}
         titel = a.get("canvas") if isinstance(a.get("canvas"), str) and a.get("canvas").strip() else None
-        ergebnis = await self.exportieren(a.get("format"), titel=titel, oeffnen=a.get("oeffnen") is not False, quelle="sprache")
+        oeffnen = a.get("oeffnen") is not False
+        ergebnis = await self.exportieren(a.get("format"), titel=titel, oeffnen=oeffnen, quelle="sprache")
         if ergebnis.get("status") == "success":
             datei = ergebnis.get("datei") or {}
-            await params.result_callback({"status": "success", "gespeichert": True, "datei": datei.get("name", ""),
-                                          "geoeffnet": bool(ergebnis.get("geoeffnet")), "ordner": datei.get("ordner", "")})
+            antwort = {"status": "success", "gespeichert": True, "datei": datei.get("name", ""),
+                       "geoeffnet": bool(ergebnis.get("geoeffnet")), "ordner": datei.get("ordner", "")}
+            if oeffnen and not antwort["geoeffnet"] and ergebnis.get("summary"):
+                antwort["hinweis"] = ergebnis["summary"]  # bereinigt in _bereinigen, ohne Pfad: warum sie nicht offen ist
+            await params.result_callback(antwort)
             return
         await params.result_callback({"status": ergebnis.get("status", "error"), "summary": ergebnis.get("summary", "")})
 
     async def exportieren(self, fmt: object, *, canvas_id: object = None, titel: str | None = None, oeffnen: bool = True,
                           quelle: str) -> dict:
-        """Gemeinsamer Weg für Sprache und Klick. Liefert das Ergebnis des Hosts oder eine Ablehnung des Kerns."""
+        """Gemeinsamer Weg für Sprache und Klick. Liefert das Ergebnis des Hosts oder eine Ablehnung des Kerns. Läuft schon ein
+        Export dieser Sitzung, kommt eine Ablehnung (keine zweite Datei)."""
+        if self._export_laeuft:
+            return {"status": "rejected", "summary": LAEUFT_SCHON}
+        self._export_laeuft = True  # ohne await dazwischen gesetzt: kein zweiter Aufruf kommt vorbei
+        try:
+            return await self._exportieren(fmt, canvas_id=canvas_id, titel=titel, oeffnen=oeffnen, quelle=quelle)
+        finally:
+            self._export_laeuft = False
+
+    async def _exportieren(self, fmt: object, *, canvas_id: object, titel: str | None, oeffnen: bool, quelle: str) -> dict:
         if not self._darf():
             return {"status": "rejected", "summary": PC_AUS}
         client = self._client()
@@ -143,7 +169,10 @@ class OfficeDateien:
         if not isinstance(fmt, str) or fmt not in self.formate:
             verfuegbar = ", ".join(FORMAT_NAMEN[f] for f in self.formate) or "keins"
             return {"status": "rejected", "summary": f"Dieses Format geht an diesem PC nicht (möglich: {verfuegbar})."}
-        gefunden = await canvas_lesen(self.memory, canvas_id=canvas_id, titel=titel)
+        try:
+            gefunden = await canvas_lesen(self.memory, canvas_id=canvas_id, titel=titel)
+        except CanvasNichtErreichbar:
+            return {"status": "error", "summary": CANVAS_NICHT_ERREICHBAR}
         if gefunden is None:
             return {"status": "rejected", "summary": KEIN_CANVAS}
         inhalt = gefunden["inhalt"]
@@ -156,9 +185,9 @@ class OfficeDateien:
             ergebnis = json.loads(roh)
         except Exception as e:  # noqa: BLE001 (Tunnel weg, Zeitgrenze, kaputte Antwort)
             logger.warning("Office-Datei: Host antwortet nicht verwertbar ({})", type(e).__name__)
-            ergebnis = {"status": "error", "summary": "Der PC hat keine verwertbare Antwort geliefert."}
+            ergebnis = {"status": "error", "summary": KEINE_ANTWORT}
         if not isinstance(ergebnis, dict):
-            ergebnis = {"status": "error", "summary": "Der PC hat keine verwertbare Antwort geliefert."}
+            ergebnis = {"status": "error", "summary": KEINE_ANTWORT}
         ergebnis = self._bereinigen(ergebnis)
         await self._protokoll(fmt, gefunden["id"], quelle, ergebnis)
         if ergebnis["status"] == "success":
@@ -172,7 +201,7 @@ class OfficeDateien:
         summary = clean_inline(ergebnis.get("summary", ""), 300)
         datei = ergebnis.get("datei") if isinstance(ergebnis.get("datei"), dict) else {}
         if status == "success" and not (isinstance(datei.get("kennung"), str) and KENNUNG_RE.fullmatch(datei["kennung"])):
-            return {"status": "error", "summary": "Der PC hat keine verwertbare Antwort geliefert."}
+            return {"status": "error", "summary": KEINE_ANTWORT}
         if status != "success":
             return {"status": status, "summary": summary}
         sauber = {"kennung": datei["kennung"], "name": clean_inline(datei.get("name", ""), 200),
@@ -209,7 +238,7 @@ class OfficeDateien:
                                                          OEFFNEN_TIMEOUT_SECS))
         except Exception as e:  # noqa: BLE001
             logger.warning("Office-Datei öffnen: Host antwortet nicht verwertbar ({})", type(e).__name__)
-            ergebnis = {"status": "error", "summary": "Der PC hat keine verwertbare Antwort geliefert."}
+            ergebnis = {"status": "error", "summary": KEINE_ANTWORT}
         if not isinstance(ergebnis, dict) or ergebnis.get("status") != "success":
             grund = clean_inline(ergebnis.get("summary", "") if isinstance(ergebnis, dict) else "", 300) or "Nicht geöffnet."
             await self._melden({"type": "datei", "ok": False, "grund": grund})

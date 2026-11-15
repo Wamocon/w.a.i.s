@@ -70,7 +70,8 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   (Werkzeug `canvas_exportieren`) oder per Klick („Als Word speichern“ usw. im Kopf des Canvas) zur Word-, Excel-, PowerPoint-, PDF-, CSV-
   oder Markdown-Datei in `Dokumente\WAIS` (bekannter Ordner, folgt OneDrive) und öffnet sich danach; ein Hinweis nennt Datei und Pfad und
   hat „Öffnen“. Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=dateien` (Standard leer, also aus) und eingeschalteter PC-Steuerung; das
-  Werkzeug läuft durch das Stimmabdruck-Gate. Speichern braucht keine Freigabekarte, nichts verlässt den PC. Der Kern liest nur eigene
+  Werkzeug läuft durch das Stimmabdruck-Gate. Speichern braucht keine Freigabekarte (kein Versand); ist `Dokumente` auf OneDrive
+  umgeleitet, synchronisiert OneDrive die Datei, das sagt auch die Werkzeugbeschreibung. Der Kern liest nur eigene
   Elemente aus `canvas_items` (`voice-core/canvas_quelle.py`) und schickt dem Host nur die feste Struktur; der Host prüft selbst, baut die
   Datei mit `python-docx`, `openpyxl` und `python-pptx` im WMC-Design, PDF über eine eigene, unsichtbare Word-Instanz
   (`host/office_dateien.py`, `host/office_com.py`), legt sie nie überschreibend ab und führt ein Register ohne Inhalte

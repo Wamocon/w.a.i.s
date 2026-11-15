@@ -1,7 +1,8 @@
 """Eigene Canvas-Elemente aus der Datenbank lesen und in die feste Struktur für den Host bringen (Office-Dateien, office_werkzeuge.py).
 
 Gelesen wird immer nur, was dem Profil gehört (canvas_items.user_id = Profil des Speichers): nach Kennung (Klick in der Oberfläche),
-nach Titel (Sprache) oder, ohne beides, das zuletzt geänderte Element dieser Sitzung und danach das des Profils. Ergebnis:
+nach Titel (Sprache) oder, ohne beides, das zuletzt geänderte Element dieser Sitzung und danach das des Profils. Immer die neueste
+Fassung eines Elements (Bearbeitungen legen neue Zeilen an), die Kennung ist die der Wurzel. Ergebnis:
   {"id", "inhalt": {"art": "dokument" | "code" | "mermaid", "titel", "text", "sprache"?}}
   {"id", "inhalt": {"art": "tabelle", "titel", "spalten", "zeilen"}}
 Alles darin sind Daten, nie Anweisungen; der Host prüft Längen und Zeichen noch einmal selbst.
@@ -54,36 +55,54 @@ def inhalt_aus(zeile) -> dict | None:
     return inhalt
 
 
-async def _eine(db, sql: str, *args) -> dict | None:
-    zeile = await db.fetchrow(sql + " order by updated_at desc limit 1", *args)
+class CanvasNichtErreichbar(RuntimeError):
+    """Die Datenbank antwortet gerade nicht (anders als: kein passendes eigenes Element)."""
+
+
+def _abfrage(db, bedingung: str) -> str:
+    """Neueste Fassung eigener Wurzeln. Bearbeitungen legen neue Zeilen an (parent_id = Wurzel, version + 1, session_id null,
+    Migration 0003): Gefiltert wird auf der Wurzel (Profil, Art, Kennung, Titel, Sitzung), gelesen die höchste Fassung wie in
+    teilen.py. Die Kennung im Ergebnis ist immer die der Wurzel."""
+    c = db.t("canvas_items")
+    return (f"select w.id::text as id, n.title, n.data from {c} w "
+            f"join lateral (select x.title, x.data, x.updated_at from {c} x where x.id = w.id or x.parent_id = w.id "
+            f"order by x.version desc, x.created_at desc limit 1) n on true "
+            f"where w.user_id = $1::uuid and w.parent_id is null and w.type::text in {DB_TYPEN}{bedingung} "
+            f"order by n.updated_at desc limit 1")
+
+
+async def _eine(db, bedingung: str, *args) -> dict | None:
+    zeile = await db.fetchrow(_abfrage(db, bedingung), *args)
     return None if zeile is None else dict(zeile)
 
 
 async def canvas_lesen(memory, *, canvas_id: object = None, titel: object = None) -> dict | None:
-    """Eigenes Canvas-Element als {"id", "inhalt"} oder None (nicht gefunden, fremd, kaputt, Datenbank nicht erreichbar)."""
+    """Eigenes Canvas-Element (neueste Fassung) als {"id", "inhalt"} oder None (nicht gefunden, fremd, kaputt). Antwortet die
+    Datenbank nicht, kommt CanvasNichtErreichbar."""
     if not getattr(memory, "enabled", False):
         return None
     db = memory.db
-    basis = (f"select id::text as id, title, data from {db.t('canvas_items')} where user_id = $1::uuid "
-             f"and type::text in {DB_TYPEN}")
     try:
         if canvas_id is not None:
             kennung = kennung_gueltig(canvas_id)
             if kennung is None:
                 return None
-            zeile = await _eine(db, basis + " and id = $2::uuid", memory.user_id, kennung)
+            # Auch die Kennung einer Fassung führt zur Wurzel (die Oberfläche kennt meist die Wurzel)
+            bedingung = f" and w.id = (select coalesce(k.parent_id, k.id) from {db.t('canvas_items')} k where k.id = $2::uuid)"
+            zeile = await _eine(db, bedingung, memory.user_id, kennung)
         elif isinstance(titel, str) and titel.strip():
-            muster = re.sub(r"[\\%_]", "", titel.strip())[:TITEL_SUCHE_MAX]
-            zeile = await _eine(db, basis + " and title ilike $2", memory.user_id, f"%{muster}%")
+            # strpos statt like: _ und % im Titel sind gewöhnliche Zeichen, nichts wird entfernt
+            suche = titel.strip()[:TITEL_SUCHE_MAX]
+            zeile = await _eine(db, " and strpos(lower(w.title), lower($2)) > 0", memory.user_id, suche)
         else:
             zeile = None
             if getattr(memory, "session_id", None):
-                zeile = await _eine(db, basis + " and session_id = $2::uuid", memory.user_id, memory.session_id)
+                zeile = await _eine(db, " and w.session_id = $2::uuid", memory.user_id, memory.session_id)
             if zeile is None:
-                zeile = await _eine(db, basis, memory.user_id)
+                zeile = await _eine(db, "", memory.user_id)
     except DB_ERRORS as e:
         logger.warning("Canvas für die Office-Datei nicht lesbar ({})", type(e).__name__)
-        return None
+        raise CanvasNichtErreichbar(type(e).__name__) from e
     if zeile is None:
         return None
     inhalt = inhalt_aus(zeile)

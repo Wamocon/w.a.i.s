@@ -5,9 +5,21 @@ import { LANGFORM } from "@/lib/anzeigename";
 import { INIT_SKRIPT, LEISTENFARBE } from "@/lib/thema";
 import "./globals.css";
 
-// Drei Schriften, je eine Aufgabe (globals.css): Unbounded für Marke, Überschriften und große Zahlen, JetBrains Mono für
-// Beschriftungen, Zähler und Code, Atkinson Hyperlegible für Fließtext.
-// Die Dateien liegen im Repo (app/fonts, Herkunft und Lizenz dort): Bau und Betrieb holen nichts bei Google.
+// Vier Schriften, je eine Aufgabe (globals.css): Cormorant Garamond nur für den Namen W.A.I.S. (components/Wortmarke.tsx) und
+// seine Langform auf der Anmeldung, Unbounded für Überschriften und große Zahlen, JetBrains Mono für Beschriftungen, Zähler und
+// Code, Atkinson Hyperlegible für Fließtext. Die Dateien liegen im Repo (app/fonts, Herkunft und Lizenz dort): Bau und Betrieb
+// holen nichts bei Google.
+
+// Wortmarke: nur der Schnitt SemiBold (600), Teilmenge latin wie bei den anderen (Name und Langform brauchen nicht mehr, auch ’).
+// Bis die Datei geladen ist, zeigt der Browser einen Ersatz aus Times New Roman mit angepasster Höhe und Breite: Serife statt
+// Grotesk, und nichts springt beim Tausch.
+const marke = localFont({
+  variable: "--font-marke",
+  src: [{ path: "./fonts/cormorant-garamond-latin-600-normal.woff2", weight: "600", style: "normal" }],
+  adjustFontFallback: "Times New Roman",
+  display: "swap",
+});
+
 const display = localFont({
   variable: "--font-display",
   src: [
@@ -65,7 +77,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     // suppressHydrationWarning: das Skript im Kopf setzt data-theme vor dem ersten Zeichnen, der Server kennt die Wahl nicht
-    <html lang="de" className={`${display.variable} ${hud.variable} ${body.variable}`} suppressHydrationWarning>
+    <html lang="de" className={`${marke.variable} ${display.variable} ${hud.variable} ${body.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: INIT_SKRIPT }} />
       </head>

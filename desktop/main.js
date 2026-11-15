@@ -59,7 +59,7 @@ const {
   shell,
   systemPreferences,
 } = require("electron");
-const { spawn, spawnSync } = require("node:child_process");
+const { execFile, spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -72,6 +72,7 @@ const { entladenBehandeln } = require("./entladen");
 const { erzeugeHostUmgebung } = require("./host-umgebung");
 const { adressen, loeseAuf, wirksameBetriebsart } = require("./installation");
 const { erzeugePruefer, ladeCa, pruefeSocket } = require("./zertifikat");
+const { MENUE_TEXT, symbolReparieren } = require("./symbol-reparatur");
 const { taskleisteAbsichern } = require("./taskleiste");
 const { powershellPfad, starteVollbildWaechter } = require("./vollbild");
 const {
@@ -856,6 +857,12 @@ function aktualisiereTray() {
         checked: app.getLoginItemSettings(loginItem()).openAtLogin,
         click: (item) => app.setLoginItemSettings({ ...loginItem(), openAtLogin: item.checked }),
       },
+      {
+        // Leeres Symbol in der Taskleiste nach einem Update (symbol-reparatur.js): fragt vorher nach, startet den Explorer neu
+        label: MENUE_TEXT,
+        visible: process.platform === "win32",
+        click: () => void symbolReparaturAusTray(),
+      },
       { type: "separator" },
       {
         label: "Voice-Core neu starten",
@@ -870,6 +877,33 @@ function aktualisiereTray() {
       { label: "W.A.I.S. beenden", click: () => { quitting = true; app.quit(); } },
     ]),
   );
+}
+
+let symbolReparaturLaeuft = false;
+/** Tray "Taskleisten-Symbol reparieren": Rückfrage, dann scripts\wamo-symbol-reparieren.ps1 (höchstens einmal gleichzeitig). */
+async function symbolReparaturAusTray() {
+  if (symbolReparaturLaeuft) return;
+  symbolReparaturLaeuft = true;
+  try {
+    const ergebnis = await symbolReparieren({
+      plattform: process.platform,
+      ressourcen: PFADE.ressourcen,
+      powershell: powershellPfad(),
+      fragen: (d) => dialog.showMessageBox(d),
+      ausfuehren: (datei, argumente) =>
+        new Promise((resolve, reject) => {
+          execFile(datei, argumente, { windowsHide: true, timeout: 60_000, encoding: "utf8" }, (err, stdout, stderr) => {
+            if (err) reject(Object.assign(err, { stdout, stderr }));
+            else resolve({ stdout });
+          });
+        }),
+      melden: (m) => dialog.showMessageBox(m),
+      log: (text) => schreibeLog("oberflaeche", `${new Date().toISOString()} warn [WAMO-Desktop] ${text}`),
+    });
+    schreibeLog("oberflaeche", `${new Date().toISOString()} info [WAMO-Desktop] Taskleisten-Symbol reparieren: ${ergebnis}`);
+  } finally {
+    symbolReparaturLaeuft = false;
+  }
 }
 
 // ---------- Brücke von der Oberfläche zum Hauptprogramm ----------

@@ -9,6 +9,12 @@
  * NACHLAUF_MS später die Eigenschaften des Knopfs setzen (setAppDetails) und das Fenstersymbol neu zuweisen (setIcon). Dann belegt
  * Windows den Knopf neu.
  *
+ * Gemessen am 14.11.2026 (SHGetPropertyStoreForWindow, installierte App und Test-App): Die vier Eigenschaften stehen danach am
+ * Fenster (AppUserModel ID, RelaunchCommand, RelaunchIconResource, RelaunchDisplayNameResource). Eine frühere Messung mit "leer"
+ * war ein Messfehler (PROPVARIANT ist unter 64 Bit 24 Byte groß, nicht 16). Einen schon hängengebliebenen Eintrag im
+ * App-Zwischenspeicher der Shell repariert das nicht: Dagegen helfen der Installer (build/installer.nsh, Verknüpfung erneuern) und
+ * das Reparaturwerkzeug im Tray (symbol-reparatur.js).
+ *
  * setAppDetails (Electron 44, BrowserWindow): appId muss gesetzt sein, sonst wirkt keine Angabe. relaunchCommand und
  * relaunchDisplayName gelten nur zusammen; fehlt einer, setzt Electron keinen, und Windows nimmt zum Anheften die Verknüpfung mit
  * derselben AppUserModelId. Hier sind beide gesetzt, mit demselben Befehl wie beim Autostart (main.js, loginItem): installiert nur

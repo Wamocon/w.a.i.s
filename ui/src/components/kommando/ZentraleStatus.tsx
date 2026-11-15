@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { LABEL } from "@/components/ActivityFeed";
+import { Wortmarke } from "@/components/Wortmarke";
 import { useSelect } from "@/lib/store";
 import { istOnline, wamo, wartetAufEntscheidung, type Presence } from "@/lib/wamo";
 import { useGespraechsStart } from "./ansicht";
@@ -81,7 +82,9 @@ export const ZentraleStatus = memo(function ZentraleStatus({ presence, zustand }
 
   return (
     <div className="kz-zentrale" data-presence={presence} aria-label={`W.A.I.S. ${zustand}`} role="group">
-      <p className="kz-gross">W.A.I.S.</p>
+      <p className="kz-gross">
+        <Wortmarke />
+      </p>
       <ul className="kz-haken" aria-label="Status">
         {zeilen.map((z) => (
           <li key={z.text} data-art={z.art}>
