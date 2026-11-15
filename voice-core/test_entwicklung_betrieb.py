@@ -48,7 +48,8 @@ class SchrankenVersionTests(unittest.TestCase):
 class KonftestTests(unittest.TestCase):
     def test_conftest_neutralisiert_alle_neuen_variablen(self):
         """Eine Variable aus der Umgebung des Entwicklers oder einer .env darf nie in einen Test hineinwirken."""
-        self.assertEqual(len(eb.ALLE_VARIABLEN), 5)
+        self.assertEqual(len(eb.ALLE_VARIABLEN), 6)
+        self.assertIn(eb.ENV_HAUS, eb.ALLE_VARIABLEN)
         for name in eb.ALLE_VARIABLEN:
             with self.subTest(name=name):
                 self.assertNotIn(name, os.environ)
@@ -162,6 +163,18 @@ class SchalterTests(unittest.TestCase):
                 with mock.patch.object(dev_agent_weg, "_lesbar", side_effect=lambda p: p != hosts):
                     self.assertIn("Hostschlüssel", dev_agent.entwicklung_problem())
 
+    def test_schalter_fuer_hausmodelle_standard_aus_und_ungueltig_heisst_aus(self):
+        self.assertEqual(eb.ENV_HAUS, "WAMO_ENTWICKLUNG_HAUS")
+        for wert, erwartet in (("an", "an"), ("AN", "an"), ("ja", "an"), ("aus", "aus"), ("", "aus"), ("vielleicht", "ungueltig")):
+            with self.subTest(wert=wert), buero(WAMO_ENTWICKLUNG_HAUS=wert):
+                self.assertEqual(eb.haus_schalter(), erwartet)
+                self.assertEqual(eb.haus_an(), erwartet == "an")
+        with buero():
+            self.assertFalse(eb.haus_an())  # ohne Eintrag im Drop-in aus
+        with buero(WAMO_ENTWICKLUNG_HAUS="vielleicht"):
+            self.assertIsNone(eb.buero_problem())  # ein ungültiger Wert schaltet nur die Hausmodelle aus, nicht die Entwicklung
+            self.assertIsNone(eb.grund_vorab(NIKO, True))
+
     def test_echt_unlesbar_ist_eine_datei_die_sich_nicht_oeffnen_laesst(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertTrue(dev_agent._lesbar(_datei(tmp)))
@@ -238,9 +251,30 @@ class SitzungGrundTests(unittest.TestCase):
     def test_uebergang_und_keine_zaehlen_im_buero_gleich(self):
         self.assertIsNone(eb.grund_quelle("token"))
         self.assertIsNone(eb.grund_quelle("api"))
+        self.assertIsNone(eb.grund_quelle("haus"))  # Hausmodell über den Proxy: zählt im Büro als eigener Zugang
         for quelle in ("keine", "uebergang", "unbekannt", ""):
             with self.subTest(quelle=quelle):
                 self.assertTrue(eb.grund_quelle(quelle).startswith("kein eigener Zugang"))
+
+    def test_ehrlicher_grund_wenn_die_hausmodelle_aus_sind(self):
+        with buero():
+            keiner = eb.grund_quelle("keine", "keiner")
+            self.assertTrue(keiner.startswith("kein eigener Zugang"))
+            self.assertIn("Hausmodelle", keiner)  # sagt, dass es mit Hausmodellen ginge, die aber aus sind
+            for zugang_quelle in ("wahl", "festgelegt"):
+                with self.subTest(zugang_quelle=zugang_quelle):
+                    satz = eb.grund_quelle("keine", zugang_quelle)
+                    self.assertIn("nur Hausmodelle", satz)  # nicht "kein eigener Zugang": vielleicht ist ein Token hinterlegt
+                    self.assertNotIn("kein eigener Zugang", satz)
+            for zugang_quelle in ("fehler", "labor", None):
+                self.assertEqual(eb.grund_quelle("keine", zugang_quelle), eb.GRUND_KEIN_ZUGANG)
+        with buero(WAMO_ENTWICKLUNG_HAUS="vielleicht"):
+            for zugang_quelle in ("keiner", "wahl", "festgelegt"):
+                self.assertIn("WAMO_ENTWICKLUNG_HAUS", eb.grund_quelle("keine", zugang_quelle))
+            self.assertEqual(eb.grund_quelle("keine", "fehler"), eb.GRUND_KEIN_ZUGANG)
+        for satz in (eb.GRUND_NUR_HAUS, eb.GRUND_KEIN_ZUGANG_HAUS_AUS, eb.GRUND_HAUS_UNGUELTIG):
+            self.assertLessEqual(len(satz), eb.ANZEIGE_ZEICHEN)
+            self.assertNotRegex(satz, r"[/\\]|[–—]| - ")
 
     def test_anzeige_nur_fuer_admins_und_hoechstens_120_zeichen(self):
         self.assertIsNone(eb.anzeige_grund(False, "irgendein Grund"))
@@ -286,6 +320,28 @@ class ZugangImBueroTests(unittest.IsolatedAsyncioTestCase):
             kopf, zeile = await agent._remote_zugang()
             self.assertEqual(kopf["zugang"], "folgt")  # der eigene Zugang geht wie bisher
             self.assertIsNotNone(zeile)
+
+    async def test_hausmodell_ohne_eigenen_zugang_nur_die_art_und_nie_ein_wert(self):
+        class Memory:
+            user_id = NIKO
+
+        kennung = NIKO.replace("-", "")[:8]
+        with buero(WAMO_ENTWICKLUNG_HAUS="an"):
+            agent = dev_agent.DevAgent(memory=Memory(), auftraggeber="Niko", zulassung=eb.BueroZulassung(NIKO), haus=True)
+            ohne = dev_agent.DevAgent(memory=Memory(), auftraggeber="Niko", zulassung=eb.BueroZulassung(NIKO))
+            with mock.patch.object(dev_agent, "claude_code_zugang_fuer", return_value=None):
+                self.assertEqual(await agent._remote_zugang(), ({"zugang": "haus", "profil": kennung}, None))
+                self.assertIsNone(await ohne._remote_zugang())  # ohne Entscheidung der Sitzung wie bisher: nichts
+            with mock.patch.object(dev_agent, "claude_code_zugang_fuer", return_value={"typ": "oauth", "wert": "sk-ant-oat01-" + "x" * 30}):
+                kopf, zeile = await agent._remote_zugang()
+                self.assertEqual(kopf["zugang"], "folgt")  # ein inzwischen hinterlegter eigener Zugang hat Vorrang
+                self.assertIsNotNone(zeile)
+        # außerhalb des Büros: haus vor dem Zugang des Servers (nur Hausmodelle heißt nichts in die Cloud)
+        kern = {"WAMO_BETRIEB": "", "WAMO_CLAUDE_SCHLUESSEL_PROFIL": NIKO, "WAMO_ENTWICKLUNG_SERVERZUGANG_PROFIL": ""}
+        with mock.patch.dict(os.environ, kern), mock.patch.object(dev_agent, "claude_code_zugang_fuer", return_value=None):
+            agent = dev_agent.DevAgent(memory=Memory(), auftraggeber="Niko", haus=True)
+            self.assertEqual(await agent._remote_zugang(), ({"zugang": "haus", "profil": kennung}, None))
+            self.assertFalse(dev_agent.DevAgent(memory=Memory(), auftraggeber="Niko", haus="ja")._haus)  # nur ein echtes True
 
     def test_befehlskriterien_im_buero_nur_mit_eigenem_schalter(self):
         agent = dev_agent.DevAgent(memory=None, auftraggeber="Niko")
@@ -677,12 +733,41 @@ class GrundSaetzeTests(unittest.TestCase):
         self.assertEqual(g(2, {"kanal_gesperrt": {"grund": "kanal_zu"}}), eb.GRUND_SAETZE["kanal_zu"])
         self.assertIn("läuft schon", g(4, {"belegt": {}}))
         self.assertIn("Claude-Zugang", g(5, {"keine_zugangsdaten": {}}))
+        self.assertEqual(g(5, {"keine_zugangsdaten": {"zugang": "haus", "grund": "WAMO_HAUS ist aus"}}), eb.SATZ_HAUS_NICHT_BEREIT)
+        self.assertIn("Hausmodell", eb.SATZ_HAUS_NICHT_BEREIT)
+        self.assertNotRegex(eb.SATZ_HAUS_NICHT_BEREIT, r"[/\\_=]|[–—]| - ")
+        self.assertEqual(dev_agent.remote_status(5, {"keine_zugangsdaten": {"zugang": "haus"}}), dev_agent.HAUS_NICHT_BEREIT_STATUS)
+        self.assertIn("Hausmodell", dev_agent.HAUS_NICHT_BEREIT_STATUS)
+        self.assertEqual(dev_agent.remote_status(5, {"keine_zugangsdaten": {}}), dev_agent.REMOTE_EREIGNIS_STATUS["keine_zugangsdaten"])
         self.assertIn("Claude-Zugang", g(2, {"zugang_ungueltig": {}}))
         self.assertIn("Selbsttest", g(3, {"selbsttest_fehlgeschlagen": {}}))
         self.assertIn("GitHub", g(8, {"start_abgelehnt": {}}))
         self.assertIn("Hostschlüssel", g(255, {}, "Host key verification failed."))
         self.assertIn("abgewiesen", g(2, {}))
         self.assertIn("nicht gestartet", g(None, {}))
+
+
+class HausLaufTests(BueroFlow):
+    """Ein Büro-Auftrag mit Hausmodell (P6b): die Kopfzeile nennt nur die Art haus und das Profil, nie ein Modell aus
+    WAMO_ENTWICKLUNG_MODELL (der Dispatcher nähme für haus nur Hausmodelle an), und es folgt keine zweite Zeile."""
+
+    async def test_kopfzeile_ohne_wert_ohne_modell_und_ohne_zweite_zeile(self):
+        agent = dev_agent.DevAgent(memory=self.memory, auftraggeber="Niko", zulassung=eb.BueroZulassung(NIKO), haus=True)
+        agent.attach(self.task)
+        proc = self.sk.FakeProc(self.sk.stream())
+        self.start_procs.append(proc)
+        job = self.neuer_job(agent)
+        with mock.patch.dict(os.environ, {"WAMO_ENTWICKLUNG_MODELL": "claude-sonnet-5-5"}), \
+             mock.patch.object(dev_agent, "claude_code_zugang_fuer", return_value=None):
+            await agent.on_client_message("auftrag_start", {"job": job.id, "entscheidung": "ja"})
+            await agent._running
+        zeilen = proc.stdin.data.decode("utf-8").splitlines()
+        self.assertEqual(len(zeilen), 1)
+        kopf = json.loads(zeilen[0])
+        self.assertEqual((kopf["zugang"], kopf["profil"]), ("haus", NIKO.replace("-", "")[:8]))
+        self.assertNotIn("modell", kopf)
+        self.assertFalse(agent._eigener_zugang)  # kein Kontingent eines Abos
+        self.assertEqual(job.status, "fertig")
 
 
 class RepoPflichtTests(BueroFlow):

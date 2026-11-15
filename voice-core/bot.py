@@ -704,12 +704,14 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         zugang = await zugang_laden(identity.user_id, **labor.zugang_parameter(identity))
     else:
         zugang = await zugang_laden(identity.user_id)
-    dev_quelle = entwicklung_quelle(zugang)
-    if im_buero and entwicklung and (quelle_grund := entwicklung_betrieb.grund_quelle(dev_quelle)):
-        ent_grund, entwicklung = quelle_grund, False  # Büro: nur ein eigener Zugang zählt, uebergang wie keine
+    # Hausmodelle für Entwicklungsaufträge (Quelle haus) nur im Büro und nur mit WAMO_ENTWICKLUNG_HAUS=an im Drop-in; nie für die
+    # Quellen fehler und labor (boss.entwicklung_quelle). Der DevAgent bekommt nur diese Entscheidung, nie einen Wert.
+    dev_quelle = entwicklung_quelle(zugang, haus=im_buero and entwicklung_betrieb.haus_an())
+    if im_buero and entwicklung and (quelle_grund := entwicklung_betrieb.grund_quelle(dev_quelle, zugang.quelle)):
+        ent_grund, entwicklung = quelle_grund, False  # Büro: nur ein eigener Zugang oder haus zählt, uebergang wie keine
     elif entwicklung and dev_quelle == "keine":
         # Claude Code läuft über Anthropic, mit dem Zugang der Person (boss.entwicklung_quelle): Claude-Code-Token oder
-        # eigener API-Schlüssel. Ohne beides, oder bei nur Hausmodellen, startet kein Entwicklungsauftrag
+        # eigener API-Schlüssel. Ohne beides, oder bei nur Hausmodellen ohne Schalter, startet kein Entwicklungsauftrag
         logger.warning("Entwicklungsaufträge aus: Profil {} hat keinen eigenen Zugang für Claude Code oder nutzt nur Hausmodelle",
                        zugang.kennung)
         entwicklung = False
@@ -773,7 +775,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         # Büro: die Zulassung entsteht allein hier, aus der geprüften Identität (Admin, Profil aus WAMO_ENTWICKLUNG_PROFILE);
         # ohne sie wirft der Konstruktor. Unterwegs bleibt sie None.
         dev = DevAgent(memory, auftraggeber=identity.name, vorgaenge=vorgaenge, beurteiler=llm_beurteiler(zugang),
-                       zulassung=entwicklung_betrieb.zulassung_erteilen(identity.user_id, is_admin) if im_buero else None)
+                       zulassung=entwicklung_betrieb.zulassung_erteilen(identity.user_id, is_admin) if im_buero else None,
+                       haus=dev_quelle == "haus")
         dev.on_result = turn.taint
         dev.register(llm)
         standard_tools += dev.schemas()

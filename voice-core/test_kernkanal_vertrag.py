@@ -11,6 +11,7 @@ bewusst als Wortlaut im Test: Weicht eine Seite ab, wird dieser Test rot, nicht 
     ssh-Optionen des Rauchtests gegen dev_agent.ssh_argv
     unveränderte Dateien (Prüfsummen von Slot-Skript, Vorprüfung und Slot-Vorlage), Namensvertrag
     Selbstschutz: jeder Name des eigenen Repos (SELF_REPOS, ist_eigenes_repo) auf allen drei Seiten gleich
+    Zugangsart haus (P6b): der Kern sendet nur, was Kern-Kanal und Dispatcher annehmen; das Skript erkennt alle drei Seiten
 
 Alles läuft ohne Netz, ohne Server, ohne ssh und ohne git. Ausführen (im Ordner voice-core/):  python -m pytest -q test_kernkanal_vertrag.py
 """
@@ -18,6 +19,7 @@ Alles läuft ohne Netz, ohne Server, ohne ssh und ohne git. Ausführen (im Ordne
 from __future__ import annotations
 
 import ast
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -453,10 +455,64 @@ def test_die_standardkosten_des_skripts_nimmt_der_kern_an(monkeypatch):
 
 def test_das_dropin_setzt_genau_die_variablen_die_der_kern_liest():
     namen = re.findall(r"echo \"Environment=([A-Z_]+)=", _funktion(SKRIPT, "drop_in_text"))
-    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG}
+    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG, eb.ENV_HAUS}
     assert len(namen) == len(set(namen))
     assert "WAMO_ENTWICKLUNG" not in namen and eb.ENV_BEFEHLE not in namen  # Standard aus, nie nebenbei an
     assert set(eb.ALLE_VARIABLEN) - set(namen) == {eb.ENV_BEFEHLE}
+
+
+def test_das_dropin_schreibt_den_schalter_fuer_hausmodelle_immer_und_standardmaessig_aus():
+    rumpf = _funktion(SKRIPT, "drop_in_text")
+    assert "Environment=WAMO_ENTWICKLUNG_HAUS=${HAUS:-aus}" in rumpf
+
+
+# ================================================================== Zugangsart haus (P6b)
+def test_jede_zugangsart_des_kern_kanals_nimmt_der_dispatcher_an():
+    assert set(K.ZUGAENGE_KERN) <= set(D.ZUGANG_MODI)
+    assert "server" not in K.ZUGAENGE_KERN  # der Zugang des Servers gilt im Büro nie
+
+
+@pytest.mark.parametrize("haus", [False, True])
+def test_der_kern_sendet_im_buero_nur_was_kern_kanal_und_dispatcher_annehmen(haus, monkeypatch):
+    _buero(monkeypatch, WAMO_CLAUDE_SCHLUESSEL_PROFIL=PROFIL, WAMO_ENTWICKLUNG_SERVERZUGANG_PROFIL=PROFIL)
+    monkeypatch.setattr(dev_agent, "claude_code_zugang_fuer", lambda uid: None)  # weder Token noch API-Schlüssel
+
+    class Memory:
+        user_id = PROFIL
+
+    agent = dev_agent.DevAgent(memory=Memory(), auftraggeber="Niko", zulassung=eb.BueroZulassung(PROFIL), haus=haus)
+    ergebnis = asyncio.run(agent._remote_zugang())
+    if not haus:
+        assert ergebnis is None  # wie bisher: ohne eigenen Zugang startet im Büro nichts, auch nicht mit dem Zugang des Servers
+        return
+    kopf, zeile = ergebnis
+    assert zeile is None  # nie eine zweite Zeile, nie ein Wert
+    assert kopf == {"zugang": "haus", "profil": PROFIL.replace("-", "")[:8]}
+    assert kopf["zugang"] in K.ZUGAENGE_KERN
+    roh = (json.dumps({"auftrag": "x", **kopf}) + "\n").encode("utf-8")
+    assert (D.parse_header(roh).zugang, D.parse_header(roh).profil) == ("haus", kopf["profil"])
+
+
+def _skript_muster(name: str) -> re.Pattern:
+    treffer = re.search(rf"^{name}='([^']+)'$", SKRIPT, flags=re.M)
+    assert treffer, f"{name} fehlt im Skript"
+    return re.compile(treffer.group(1), flags=re.M)
+
+
+@pytest.mark.parametrize("name, datei", [
+    ("HAUS_DISPATCHER_RE", INFRA / "wamo_job_dispatch.py"),
+    ("HAUS_KANAL_RE", INFRA / "wamo_job_kernkanal.py"),
+    ("HAUS_KERN_RE", VOICE_CORE / "entwicklung_betrieb.py"),
+])
+def test_schalter_mit_haus_erkennt_dispatcher_kern_kanal_und_release_an_genau_einer_zeile(name, datei):
+    assert len(_skript_muster(name).findall(_text(datei))) == 1
+
+
+def test_die_muster_fuer_haus_greifen_nicht_bei_einer_alten_fassung():
+    alt = {"HAUS_DISPATCHER_RE": 'ZUGANG_MODI = ("folgt", "server")\n', "HAUS_KANAL_RE": "if anfrage.zugang != \"folgt\":\n",
+           "HAUS_KERN_RE": "SCHRANKEN_VERSION = 1\n"}
+    for name, text in alt.items():
+        assert not _skript_muster(name).search(text), name
 
 
 # ================================================================== ssh-Optionen des Rauchtests gegen dev_agent.ssh_argv
@@ -686,7 +742,12 @@ NAMEN_DER_UMSETZUNG = (
 VORHANDENE_VARIABLEN = {"WAMO_BETRIEB", "WAMO_ENTWICKLUNG", "WAMO_ABNAHME_BEFEHLE", "WAMO_CLAUDE_SCHLUESSEL_PROFIL"}
 
 
-@pytest.mark.parametrize("name", NAMEN_AUS_DER_ARBEITSLISTE + NAMEN_DER_UMSETZUNG)
+# Zugangsart haus (P6b, docs/ausrollen-neue-nutzer.md, Abschnitt 4.7)
+NAMEN_HAUS = ("WAMO_ENTWICKLUNG_HAUS", "WAMO_HAUS", "WAMO_HAUS_MAX_TOKEN", "/run/wamo-haus", "ZUGAENGE_KERN", "Zugangsart `haus`",
+              "wamo-haus-proxy")
+
+
+@pytest.mark.parametrize("name", NAMEN_AUS_DER_ARBEITSLISTE + NAMEN_DER_UMSETZUNG + NAMEN_HAUS)
 def test_der_namensvertrag_nennt_den_namen(name):
     assert name in NAMENSVERTRAG, f"{name} fehlt im Namensvertrag (CLAUDE.md)"
 

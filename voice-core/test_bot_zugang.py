@@ -21,5 +21,17 @@ class ZugangNamenTest(unittest.TestCase):
         self.assertNotIn("    zugang = await pc_zugang(identity)", quelle)
 
 
+class HausVerdrahtungTest(unittest.TestCase):
+    """Paket P6b: Entwicklungsaufträge mit Hausmodellen nur im Büro und nur mit dem Schalter im Drop-in (WAMO_ENTWICKLUNG_HAUS). Die
+    Entscheidung fällt einmal je Sitzung in bot.py; der DevAgent bekommt nur das Ergebnis, nie einen Wert."""
+
+    def test_quelle_haus_nur_im_buero_mit_schalter_und_der_devagent_bekommt_die_entscheidung(self):
+        quelle = Path(bot.__file__).read_text(encoding="utf-8")
+        self.assertIn("dev_quelle = entwicklung_quelle(zugang, haus=im_buero and entwicklung_betrieb.haus_an())", quelle)
+        self.assertIn("entwicklung_betrieb.grund_quelle(dev_quelle, zugang.quelle)", quelle)
+        self.assertIn('haus=dev_quelle == "haus"', quelle)
+        self.assertEqual(quelle.count("entwicklung_quelle("), 1)  # nur dieser eine Aufruf
+
+
 if __name__ == "__main__":
     unittest.main()

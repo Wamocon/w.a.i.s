@@ -573,11 +573,17 @@ def test_regel_6_projekt():
     assert start(anfrage(projekt="kern-" + "a" * 46)) == "projekt"
 
 
-def test_regel_7_zugang_nur_folgt_mit_profil():
+def test_regel_7_zugang_nur_folgt_oder_haus_mit_profil():
+    assert K.ZUGAENGE_KERN == ("folgt", "haus")
     assert start(anfrage(zugang=None)) == "zugang"
     assert start(anfrage(zugang="server")) == "zugang"
     assert start(anfrage(zugang="")) == "zugang"
+    assert start(anfrage(zugang="Haus")) == "zugang"
     assert start(anfrage(zugang="folgt", profil=None)) == "zugang"
+    assert start(anfrage(zugang="haus", profil=None)) == "zugang"
+    assert start(anfrage(zugang="haus", profil="")) == "zugang"
+    assert start(anfrage(zugang="folgt")) is None
+    assert start(anfrage(zugang="haus")) is None  # Hausmodell über den Proxy, der Kern schickt kein Geheimnis
 
 
 def test_die_reihenfolge_der_regeln_5_bis_9():

@@ -855,6 +855,8 @@ FP_FORM = "SHA256:" + "A" * 43
     ["schalter", "an", RELEASE, "--profil", "kein-uuid"], ["schalter", "an", RELEASE, "--profil", PROFIL.upper()],
     ["schalter", "an", RELEASE, "--profil", PROFIL, "--kosten-auftrag", "0"], ["schalter", "an", RELEASE, "--profil", PROFIL, "--kosten-tag", "1,5"],
     ["schalter", "aus", RELEASE, "--profil", PROFIL], ["notaus-aufheben", "extra"], ["status", "extra"],
+    ["schalter", "an", RELEASE, "--profil", PROFIL, "--haus", "ja"], ["schalter", "an", RELEASE, "--profil", PROFIL, "--haus"],
+    ["schalter", "an", RELEASE, "--profil", PROFIL, "--haus", "AN"], ["schalter", "aus", RELEASE, "--haus", "aus"],
 ])
 def test_falsche_aufrufformen_enden_mit_exit_2_und_schreiben_nichts(args, welt):
     vorher = dateien_liste(welt["w"])
@@ -1079,7 +1081,7 @@ def test_schalter_an_schreibt_das_dropin_laedt_neu_und_schaltet_dann_um(welt):
     zeilen = text.splitlines()
     assert zeilen[1:] == ["[Service]", "Environment=WAMO_ENTWICKLUNG_BUERO=an", "Environment=WAMO_ENTWICKLUNG_ORT=sokrates2",
                           f"Environment=WAMO_ENTWICKLUNG_PROFILE={PROFIL}", "Environment=WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=3",
-                          "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=10"]
+                          "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=10", "Environment=WAMO_ENTWICKLUNG_HAUS=aus"]
     assert not text.startswith("# gespiegelt")  # keine Spiegel-Marke
     log = [z for z in aufrufe(welt) if z.startswith(("systemctl daemon-reload", "slots umschalten-kern"))]
     assert log == ["systemctl daemon-reload", f"slots umschalten-kern {RELEASE} dropin=ja"]  # erst neu laden, dann umschalten, Drop-in lag schon
@@ -1177,6 +1179,74 @@ def test_jede_vorabpruefung_von_schalter_an_endet_mit_exit_3_ohne_etwas_zu_aende
     assert p.returncode == 3 and erwartet in p.stderr, (p.returncode, p.stdout, p.stderr)
     assert not (w / DROPIN_REL).exists() and not [z for z in aufrufe(welt) if "umschalten-kern" in z]
     assert ohne_spur(dateien_liste(w)) == ohne_spur(vorher)
+
+
+# ---------------------------------------------------------------- schalter --haus (Paket P6b: Entwicklungsaufträge mit Hausmodellen)
+DISPATCHER_HAUS = '#!/usr/bin/python3 -I\nVERSION = "7"\nZUGANG_MODI = ("folgt", "server", "haus")\n'
+RELEASE_HAUS = 'SCHRANKEN_VERSION = 1\nENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"\n'
+
+
+def haus_bereit(welt) -> None:
+    """Dispatcher, Kern-Kanal (aus dem Repo, schon in der Welt) und Release kennen die Zugangsart haus."""
+    welt["schreibe"]("opt/wamo/bin/wamo-job-dispatch", DISPATCHER_HAUS)
+    welt["schreibe"](f"opt/wamo-core/releases/{RELEASE}/voice-core/entwicklung_betrieb.py", RELEASE_HAUS)
+
+
+@braucht_bash
+@pytest.mark.parametrize("haus, erwartet", [(None, "aus"), ("aus", "aus"), ("an", "an")])
+def test_schalter_an_schreibt_den_schalter_fuer_hausmodelle_immer(welt, haus, erwartet):
+    schluessel_einrichten(welt)
+    haus_bereit(welt)
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, *(["--haus", haus] if haus else []))
+    assert p.returncode == 0, p.stdout + p.stderr
+    zeilen = (welt["w"] / DROPIN_REL).read_text(encoding="utf-8").splitlines()
+    assert zeilen[-1] == f"Environment=WAMO_ENTWICKLUNG_HAUS={erwartet}"
+    assert sum(z.startswith("Environment=WAMO_ENTWICKLUNG_HAUS=") for z in zeilen) == 1
+
+
+@braucht_bash
+def test_haus_aus_braucht_keine_neue_fassung_von_dispatcher_und_release(welt):
+    schluessel_einrichten(welt)  # Dispatcher und Release der Welt kennen haus nicht
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--haus", "aus")
+    assert p.returncode == 0, p.stdout + p.stderr
+
+
+@braucht_bash
+@pytest.mark.parametrize("fall, erwartet", [
+    ("dispatcher_alt", "Dispatcher"), ("kern_kanal_alt", "Kern-Kanal"), ("release_alt", "Hausmodelle"),
+])
+def test_haus_an_braucht_dispatcher_kern_kanal_und_release_mit_haus_sonst_exit_3(welt, fall, erwartet):
+    schluessel_einrichten(welt)
+    haus_bereit(welt)
+    w = welt["w"]
+    if fall == "dispatcher_alt":
+        welt["schreibe"]("opt/wamo/bin/wamo-job-dispatch", '#!/usr/bin/python3 -I\nVERSION = "7"\nZUGANG_MODI = ("folgt", "server")\n')
+    elif fall == "kern_kanal_alt":
+        modul = w / "opt/wamo/waechter/wamo_job_kernkanal.py"
+        modul.write_text(re.sub(r"(?m)^ZUGAENGE_KERN = .*$", 'ZUGAENGE_KERN = ("folgt",)', modul.read_text(encoding="utf-8")),
+                         encoding="utf-8")
+    else:
+        welt["schreibe"](f"opt/wamo-core/releases/{RELEASE}/voice-core/entwicklung_betrieb.py", "SCHRANKEN_VERSION = 1\n")
+    vorher = dateien_liste(w)
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--haus", "an")
+    assert p.returncode == 3 and erwartet in p.stderr, (p.returncode, p.stdout, p.stderr)
+    assert not (w / DROPIN_REL).exists() and not [z for z in aufrufe(welt) if "umschalten-kern" in z]
+    assert ohne_spur(dateien_liste(w)) == ohne_spur(vorher)
+
+
+@braucht_bash
+def test_status_zeigt_den_schalter_fuer_hausmodelle_je_slot(welt):
+    schluessel_einrichten(welt)
+    haus_bereit(welt)
+    assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--haus", "an").returncode == 0
+    a, w = welt["a"], welt["w"]
+    (a / "aktiv.txt").write_text("wamo-core@a active\n")
+    (a / "pid_a").write_text("4711\n")
+    env = w / "proc" / "4711" / "environ"
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_bytes(b"WAMO_ENTWICKLUNG_BUERO=an\0WAMO_ENTWICKLUNG_PROFILE=" + PROFIL.encode() + b"\0WAMO_ENTWICKLUNG_HAUS=an\0")
+    o = einr(welt, "status").stdout
+    assert "WAMO_ENTWICKLUNG_HAUS=an" in o and PROFIL not in o
 
 
 # ---------------------------------------------------------------- status und notaus-aufheben

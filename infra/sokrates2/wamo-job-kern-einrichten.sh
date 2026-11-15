@@ -14,9 +14,13 @@
 #       Regeln des Kern-Kanals öffnen oder schließen. Öffnen und Ändern nur ohne laufenden Kern-Auftrag, GitHub-Arten nur, wenn
 #       claude --help (als wamo) --max-turns und --max-budget-usd kennt. kanal zu geht immer.
 #   wamo-job-kern-einrichten.sh schalter an|aus <release> [--profil <user_id>[,<user_id>]] [--kosten-auftrag X] [--kosten-tag X]
+#                               [--haus an|aus]
 #       Drop-in wamo-entwicklung-buero.conf der Slot-Vorlage schreiben (an) oder entfernen (aus), daemon-reload, dann
 #       wamo-core-slots.sh umschalten-kern <release>. Scheitert das vor dem Umschalten, kommt das vorige Drop-in zurück. Wurde schon
-#       umgeschaltet, bleibt es und das Skript endet mit Exit 4. Gleicher Stand ist ein No-op.
+#       umgeschaltet, bleibt es und das Skript endet mit Exit 4. Gleicher Stand ist ein No-op. --haus (Paket P6b, Standard aus, die Zeile
+#       WAMO_ENTWICKLUNG_HAUS steht immer im Drop-in): Entwicklungsaufträge mit Hausmodellen für Profile ohne eigenen Zugang oder mit nur
+#       Hausmodellen. --haus an verlangt Dispatcher, Kern-Kanal und Release mit der Zugangsart haus; am Server zusätzlich WAMO_HAUS=an in
+#       geheim.env und den Proxy wamo-haus-proxy (sonst scheitern solche Aufträge geschlossen).
 #   wamo-job-kern-einrichten.sh notaus-aufheben
 #       Sperrdatei entfernen. Der Kanal bleibt zu (der Notaus hat KANAL=zu gesetzt und das Schlüsselpaar beiseitegelegt): erst schluessel
 #       legt ein neues Paar an und setzt die Zeile neu, erst kanal öffnet. schluessel verweigert, solange die Sperrdatei besteht.
@@ -83,6 +87,11 @@ PROJEKTE="$WURZEL/srv/wamo/projekte"
 PROC="$WURZEL/proc"
 WAECHTER="$APP/waechter"
 NAME_RE='^v[0-9A-Za-z._-]{1,40}$'
+# schalter --haus an: woran Dispatcher, Kern-Kanal und Release die Zugangsart haus erkennen lassen (test_kernkanal_vertrag.py prüft die Muster
+# gegen die echten Dateien)
+HAUS_DISPATCHER_RE='^ZUGANG_MODI = \(.*"haus".*\)$'
+HAUS_KANAL_RE='^ZUGAENGE_KERN = \(.*"haus".*\)$'
+HAUS_KERN_RE='^ENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 KONFIG_SCHLUESSEL=(KANAL ABLAUF ARTEN REPOS DIENSTE MAX_TURNS MAX_BUDGET_USD MAX_START_STUNDE MAX_START_TAG MAX_LAUFZEIT_TAG_S MAX_FOLGEN
   MIN_ABSTAND_S MIN_PLATZ_MB MAX_VERSUCH_STUNDE)
@@ -101,7 +110,7 @@ aufruf() {
   echo "wamo-job-kern-einrichten: $*" >&2
   echo "Aufruf: schluessel [--trocken] [--ablauf JJJJMMTT] [--hostfingerabdruck SHA256:...] | kanal --arten A,B --repos O/N[,O/N]" \
     "[--dienste D] [--max-turns N] [--max-budget-usd X] | kanal zu | schalter an|aus <release> [--profil <user_id>]" \
-    "[--kosten-auftrag X] [--kosten-tag X] | notaus-aufheben | status" >&2
+    "[--kosten-auftrag X] [--kosten-tag X] [--haus an|aus] | notaus-aufheben | status" >&2
   exit 2
 }
 vorbedingung() { echo "wamo-job-kern-einrichten: Vorbedingung nicht erfüllt: $*" >&2; exit 3; }
@@ -356,7 +365,7 @@ KOMMANDO="${1:-}"
 [ -n "$KOMMANDO" ] || aufruf "Befehl fehlt"
 shift
 TROCKEN=0 ABLAUF="" HOSTFP="" ARTEN="" REPOS="" DIENSTE="" MAX_TURNS="" MAX_BUDGET="" PROFIL="" KOSTEN_AUFTRAG="" KOSTEN_TAG=""
-RELEASE="" SCHALTER="" ZU=0 GITHUB_ART=0
+RELEASE="" SCHALTER="" ZU=0 GITHUB_ART=0 HAUS=""
 optionswert() { [ "$#" -ge 2 ] && [ -n "${2:-}" ] && [[ "$2" != --* ]] || aufruf "$1 braucht einen Wert"; }
 case "$KOMMANDO" in
   schluessel)
@@ -400,14 +409,15 @@ case "$KOMMANDO" in
         --profil) optionswert "$@"; PROFIL="$2"; shift 2 ;;
         --kosten-auftrag) optionswert "$@"; KOSTEN_AUFTRAG="$2"; pruefe_betrag --kosten-auftrag "$2" 0.01 100000; shift 2 ;;
         --kosten-tag) optionswert "$@"; KOSTEN_TAG="$2"; pruefe_betrag --kosten-tag "$2" 0.01 100000; shift 2 ;;
+        --haus) optionswert "$@"; HAUS="$2"; case "$HAUS" in an|aus) ;; *) aufruf "--haus braucht an oder aus" ;; esac; shift 2 ;;
         *) aufruf "unbekannte Option für schalter: $1" ;;
       esac
     done
     if [ "$SCHALTER" = an ]; then
       [ -n "$PROFIL" ] || aufruf "schalter an braucht --profil <user_id>"
       pruefe_profil "$PROFIL"
-    elif [ -n "$PROFIL$KOSTEN_AUFTRAG$KOSTEN_TAG" ]; then
-      aufruf "schalter aus kennt weder --profil noch --kosten-auftrag noch --kosten-tag"
+    elif [ -n "$PROFIL$KOSTEN_AUFTRAG$KOSTEN_TAG$HAUS" ]; then
+      aufruf "schalter aus kennt weder --profil noch --kosten-auftrag noch --kosten-tag noch --haus"
     fi ;;
   notaus-aufheben|status)
     [ "$#" -eq 0 ] || aufruf "$KOMMANDO kennt keine weiteren Angaben" ;;
@@ -629,6 +639,7 @@ drop_in_text() {
   echo "Environment=WAMO_ENTWICKLUNG_PROFILE=$PROFIL"
   echo "Environment=WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=${KOSTEN_AUFTRAG:-$STD_KOSTEN_AUFTRAG_USD}"
   echo "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=${KOSTEN_TAG:-$STD_KOSTEN_TAG_USD}"
+  echo "Environment=WAMO_ENTWICKLUNG_HAUS=${HAUS:-aus}"
 }
 
 schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
@@ -643,6 +654,14 @@ schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
     vorbedingung "core.env enthält ein WAMO_ENTWICKLUNG*: es hätte vor dem Drop-in Vorrang (wamo-core-env loeschen)"
   fi
   [ ! -e "$DROPIN_ALT" ] || vorbedingung "${DROPIN_ALT#"$WURZEL"} besteht: das Spiegeln der Drop-ins überschriebe den Schalter"
+  if [ "$HAUS" = an ]; then   # Hausmodelle: alle drei Seiten müssen die Zugangsart haus kennen, sonst bliebe der Schalter wirkungslos
+    grep -Eq "$HAUS_DISPATCHER_RE" "$APP/bin/wamo-job-dispatch" 2>/dev/null \
+      || vorbedingung "der Dispatcher kennt die Zugangsart haus nicht (erst den Dispatcher mit wamo-job-einrichten.sh erneuern)"
+    grep -Eq "$HAUS_KANAL_RE" "$WAECHTER/wamo_job_kernkanal.py" 2>/dev/null \
+      || vorbedingung "der Kern-Kanal kennt die Zugangsart haus nicht (erst den Dispatcher mit wamo-job-einrichten.sh erneuern)"
+    grep -Eq "$HAUS_KERN_RE" "$ziel" 2>/dev/null \
+      || vorbedingung "das Release $RELEASE kennt den Schalter für Hausmodelle nicht (ENV_HAUS in voice-core/entwicklung_betrieb.py fehlt)"
+  fi
   ruhe_pruefen
 }
 
@@ -685,12 +704,13 @@ cmd_notaus_aufheben() {
 }
 
 # ---------------------------------------------------------------- status
-umgebungs_namen() {   # Namen WAMO_ENTWICKLUNG* aus /proc/<pid>/environ, dazu der Wert nur des Schalters
+umgebungs_namen() {   # Namen WAMO_ENTWICKLUNG* aus /proc/<pid>/environ, dazu die Werte nur der Schalter (Büro, Hausmodelle)
   local pid="$1" datei="$PROC/$1/environ" eintrag
   [ -r "$datei" ] || { echo "(nicht lesbar)"; return 0; }
   while IFS= read -r -d '' eintrag; do
     case "$eintrag" in
       WAMO_ENTWICKLUNG_BUERO=*) echo -n "WAMO_ENTWICKLUNG_BUERO=${eintrag#*=} " ;;
+      WAMO_ENTWICKLUNG_HAUS=an|WAMO_ENTWICKLUNG_HAUS=aus) echo -n "$eintrag " ;;
       WAMO_ENTWICKLUNG*=*) echo -n "${eintrag%%=*} " ;;
     esac
   done < "$datei"
