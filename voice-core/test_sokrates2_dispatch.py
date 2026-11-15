@@ -1656,7 +1656,7 @@ class ConsistencyTests(unittest.TestCase):
         runner = (INFRA / "wamo-job.sh").read_text(encoding="utf-8")
         erlaubt = set(re.search(r"ERLAUBT_RE='\^\(([^)]*)\)\$'", runner).group(1).split("|"))
         self.assertLessEqual({"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"}, erlaubt)
-        neu = set(D.HAUS_MODELL_VARIABLEN) | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"}
+        neu = set(D.HAUS_MODELL_VARIABLEN) | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"}
         self.assertIn(len(neu & erlaubt), (0, len(neu)))
         self.assertNotIn("LITELLM_API_KEY", erlaubt)
 
@@ -2188,7 +2188,7 @@ class PersoenlicherZugangStartTests(unittest.TestCase):
 HAUS_TOKEN = f"wh1-{JOB}-" + "5e" * 32
 HAUS_ENV_NAMEN = {"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                   "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL",
-                  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"}
+                  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"}
 # geheim.env mit eingeschalteten Hausmodellen, dazu Werte, die nie in eine Sandbox mit Hausmodell gehören
 HAUS_GEHEIM = {**NIKO_GEHEIM, "WAMO_HAUS": "an", "LITELLM_API_KEY": "sk-litellm-GEHEIMhaus0123456789",
                "ANTHROPIC_BASE_URL": "https://boese.example"}
@@ -2215,9 +2215,32 @@ class HausZugangTests(unittest.TestCase):
         self.assertEqual((D.HAUS_MAX_TOKEN_MIN, D.HAUS_MAX_TOKEN_MAX), (10_000, 20_000_000))
         self.assertEqual(D.HAUS_NACHLAUF_S, 300)
         self.assertEqual(set(D.HAUS_MODELL_VARIABLEN), HAUS_ENV_NAMEN - {"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY",
-                                                                         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"})
+                                                                         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY",
+                                                                         "DISABLE_ERROR_REPORTING"})
         self.assertNotIn("haus", D.ZUGANG_FORMAT)  # haus kommt nie als zweite Zeile mit einem Wert
         self.assertNotIn("haus", D.ZUGANG_VARIABLE)
+
+    def test_einstellungen_ohne_vorabpruefung_nur_bei_haus(self):
+        normal = D.claude_argv("S", "claude-haiku-5-5")
+        haus = D.claude_argv("S", D.HAUS_MODELL, haus=True)
+        self.assertEqual(json.loads(normal[normal.index("--settings") + 1]), {"enabledPlugins": {"ecc@ecc": True}})
+        self.assertEqual(json.loads(haus[haus.index("--settings") + 1]),
+                         {"enabledPlugins": {"ecc@ecc": True}, "skipWebFetchPreflight": True})
+        self.assertEqual(D.claude_argv("S", "m", None, ("5", "1.50"), haus=True)[-4:], ["--max-turns", "5", "--max-budget-usd", "1.50"])
+
+    def test_abgelaufene_tokendateien_werden_geloescht(self):
+        with tempfile.TemporaryDirectory() as d:
+            ordner = Path(d)
+            jetzt = 1_000_000
+            alt, frisch, eigen = "a" * 16, "b" * 16, "c" * 16
+            for job, bis in ((alt, jetzt - 1), (frisch, jetzt + 60), (eigen, jetzt - 1)):
+                (ordner / f"{job}.json").write_text(json.dumps({"v": 1, "job": job, "bis": bis}), encoding="utf-8")
+            (ordner / "fremd.txt").write_text("x", encoding="utf-8")
+            (ordner / ("d" * 16 + ".json")).write_text("kaputt", encoding="utf-8")
+            self.assertEqual(D.haus_alte_dateien_loeschen(ordner, eigen, jetzt=jetzt), 1)
+            self.assertEqual(sorted(p.name for p in ordner.iterdir()),
+                             sorted([f"{frisch}.json", f"{eigen}.json", "fremd.txt", "d" * 16 + ".json"]))
+            self.assertEqual(D.haus_alte_dateien_loeschen(ordner / "fehlt", eigen), 0)
 
     def test_auftragstoken_je_lauf_neu(self):
         a, b = D.haus_token(JOB), D.haus_token(JOB)

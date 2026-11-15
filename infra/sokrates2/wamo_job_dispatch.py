@@ -235,6 +235,8 @@ SPEICHER_DISPATCHER = 1024 * 1024 * 1024  # weiche Adressraumgrenze dieses Proze
 SELFTEST_EVENT = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}}
 SELFTEST_GRUND = "GESPERRT: Force-Push"  # Anfang der erwarteten Ablehnung durch dev_guard.py
 PLUGIN_SETTINGS = json.dumps({"enabledPlugins": {"ecc@ecc": True}})
+# Zugangsart haus: zusätzlich keine Vorabprüfung von WebFetch bei Anthropic (sonst ginge die abgerufene Domain an Anthropic)
+PLUGIN_SETTINGS_HAUS = json.dumps({"enabledPlugins": {"ecc@ecc": True}, "skipWebFetchPreflight": True})
 # Aus der globalen Claude-Konfiguration von wamo nur diese Schlüssel in den Auftrag übernehmen
 CLAUDE_JSON_KEYS = (
     "installMethod", "userID", "machineID", "firstStartTime", "firstStartVersion",
@@ -659,6 +661,36 @@ def _haus_datei_schreiben(ordner: Path, job: str, inhalt: bytes) -> None:
         raise
 
 
+def haus_alte_dateien_loeschen(ordner: Path, eigener_job: str, jetzt: float | None = None, hoechstens: int = 200) -> int:
+    """Löscht abgelaufene Tokendateien (bis vor jetzt) früherer Läufe, etwa nach einem SIGKILL des Dispatchers. Nur Dateien der Form
+    <job>.json, nie die des laufenden Auftrags, höchstens hoechstens Dateien je Aufruf. Unlesbares bleibt liegen (der Proxy weist es ohnehin
+    ab). Liefert die Zahl der gelöschten Dateien; wirft nie."""
+    jetzt = time.time() if jetzt is None else jetzt
+    geloescht = 0
+    try:
+        namen = sorted(os.listdir(ordner))[:hoechstens]
+    except OSError:
+        return 0
+    for name in namen:
+        job = name[:-5] if name.endswith(".json") else ""
+        if not JOB_RE.fullmatch(job) or job == eigener_job:
+            continue
+        inhalt = read_no_follow(ordner / name, 4096)
+        try:
+            bis = json.loads(inhalt or "").get("bis")
+        except (ValueError, AttributeError):
+            continue
+        if type(bis) is int and bis < jetzt:
+            try:
+                os.unlink(ordner / name)
+                geloescht += 1
+            except OSError:
+                pass
+    if geloescht:
+        log(f"haus_token: {geloescht} abgelaufene Tokendateien gelöscht")
+    return geloescht
+
+
 @contextmanager
 def haus_tokendatei(job: str, token: str, profil: str, max_token: int, zeitlimit_s: int, ordner: Path | None = None):
     """Legt für die Dauer des Blocks HAUS_ORDNER/<job>.json für den Proxy an, genau {"v": 1, "job", "hash" (SHA-256 des Tokens als Hex),
@@ -670,6 +702,7 @@ def haus_tokendatei(job: str, token: str, profil: str, max_token: int, zeitlimit
     grund = haus_ordner_problem(ordner)
     if grund is not None:
         raise HausNichtBereit(grund)
+    haus_alte_dateien_loeschen(ordner, job)
     bis = int(time.time()) + int(zeitlimit_s) + HAUS_NACHLAUF_S
     inhalt = json.dumps({"v": 1, "job": check_job(job), "hash": hashlib.sha256(token.encode("utf-8")).hexdigest(), "profil": profil,
                          "bis": bis, "max_token": int(max_token)}).encode("utf-8")
@@ -821,7 +854,8 @@ def sandbox_env(art: str, geheim: dict[str, str], app_modus: bool = False,
         env["ANTHROPIC_API_KEY"] = zugang.wert
         for name in HAUS_MODELL_VARIABLEN:
             env[name] = haus_modell(modell)
-        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        for name in ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"):
+            env[name] = "1"  # kein Verkehr nebenbei zu Anthropic (Telemetrie, Fehlerberichte, Aktualisierung)
     elif zugang is not None:
         env[ZUGANG_VARIABLE[zugang.typ]] = zugang.wert
         if zugang.typ == "api" and zugang.workspace:
@@ -2936,7 +2970,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
         if grund is not None:
             return kanal_abweisen(grund)
         grenzen = (str(konfig.max_turns), konfig.max_budget_usd)  # nur aus kernkanal.conf, die Kopfzeile kann nichts steuern
-    claude = claude_argv(system, modell, session, grenzen) if grenzen else claude_argv(system, modell, session)
+    claude = claude_argv(system, modell, session, grenzen, haus=haus)
     argv = [str(RUNNER), "--auftrag", job, "--projekt", projekt, "--", *claude]
     # Ab hier lebt ggf. ein GitHub-Token: SIGTERM und SIGHUP werden zur Ausnahme, damit Sandbox-Stopp und Widerruf
     # (finally in github_token_fuer_lauf) sicher laufen. SIGKILL lässt sich nicht abfangen: dann läuft das Token
@@ -2982,11 +3016,13 @@ def _start_abgelehnt(jobdir: Path, job: str, projekt: str, art: str, grund: str)
     return EXIT_GITHUB_APP
 
 
-def claude_argv(system: str, modell: str, session: str | None = None, grenzen: tuple[str, str] | None = None) -> list[str]:
+def claude_argv(system: str, modell: str, session: str | None = None, grenzen: tuple[str, str] | None = None,
+                haus: bool = False) -> list[str]:
     """Aufruf von Claude Code in der Sandbox (auch vom Rauchtest genutzt). grenzen (Wendungen, Kosten in USD) gibt es nur im
-    Kern-Kanal und nur aus kernkanal.conf: --max-turns und --max-budget-usd."""
+    Kern-Kanal und nur aus kernkanal.conf: --max-turns und --max-budget-usd. haus: Einstellungen ohne Vorabprüfung von WebFetch."""
     argv = [str(CLAUDE), "-p", "--output-format", "stream-json", "--verbose", "--permission-mode",
-            "bypassPermissions", "--model", modell, "--settings", PLUGIN_SETTINGS, "--append-system-prompt", system]
+            "bypassPermissions", "--model", modell, "--settings", PLUGIN_SETTINGS_HAUS if haus else PLUGIN_SETTINGS,
+            "--append-system-prompt", system]
     if session:
         argv += ["--resume", session]
     if grenzen:
