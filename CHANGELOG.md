@@ -408,6 +408,8 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   hat (`voice-core/canvas_sitzung.py`, dazu gespeicherte Boss-Ergebnisse), eine unbekannte Kennung ergibt einen neuen Reiter mit Hinweis;
   ohne Datenbank gibt es lokale Kennungen ohne Teilen und Speichern. Die Oberfläche meldet den offenen Reiter (Client-Nachricht
   `canvas_aktiv`, nie im Labor); weicht er ab, bekommt das Modell einen kurzen Systemhinweis ohne Antwort, der Titel steht darin als Daten.
+  Ein Reiter außerhalb der Liste (Auftrag, Geräteliste, geteiltes Dokument) gilt dabei als nicht überarbeitbar, Änderungen dazu werden
+  ein neuer Reiter.
   Die Regel steht in der Werkzeugbeschreibung: ändern, ergänzen, kürzen oder umbauen heißt überarbeiten, ein neuer Reiter nur auf
   ausdrücklichen Wunsch. Tests in `voice-core/test_canvas_ersetzen.py`, `ui/src/lib/canvasWahl.test.ts`,
   `ui/src/components/Canvas.comp.test.tsx`, `ui/src/components/Mail.comp.test.tsx` und `ui/src/components/WamoAnsicht.labor.comp.test.tsx`.
