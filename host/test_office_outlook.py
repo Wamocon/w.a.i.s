@@ -101,7 +101,19 @@ class Mail:
         self.app, self.Subject, self.Sent, self.EntryID = app, "", False, ""
         self.HTMLBody, self.Body = "<html><head></head><body lang=DE></body></html>", ""
         self.Recipients, self.Attachments = Empfaengerliste(app), Anlagen()
-        self.SendUsingAccount, self.Parent, self._insp = None, SimpleNamespace(StoreID="store-1"), False
+        self.Parent, self._insp, self.Session = SimpleNamespace(StoreID="store-1"), False, app.Session
+        self._konto, self._konto_gilt, self.gesendet_mit = None, True, None
+
+    @property
+    def SendUsingAccount(self):  # noqa: N802 (am Gerät: nach GetItemFromID liest sich das Konto des Entwurfs leer)
+        return self._konto if self._konto_gilt else None
+
+    @SendUsingAccount.setter
+    def SendUsingAccount(self, wert):  # noqa: N802
+        self._konto, self._konto_gilt = wert, True
+
+    def wieder_geoeffnet(self):
+        self._konto_gilt = False
 
     @property
     def GetInspector(self):  # noqa: N802 (Zugriff fügt wie in Outlook die Standardsignatur ein und öffnet einen Inspector)
@@ -113,9 +125,11 @@ class Mail:
             self.Body = self.app.signatur
         return object()
 
-    def Save(self):  # noqa: N802
-        self.EntryID = f"entry-{len(self.app.gespeichert) + 1}"
+    def Save(self):  # noqa: N802 (am Gerät: die Anhänge sind nach dem Speichern größer, MAPI-Verwaltungsdaten)
+        self.EntryID = self.EntryID or f"entry-{len(self.app.gespeichert) + 1}"
         self.app.gespeichert[self.EntryID] = self
+        for a in self.Attachments.e:
+            a.Size = len(a.daten) + 8065
 
     def Send(self):  # noqa: N802 (wie am Gerät: mit offenem Inspector scheitert Send mit "Falscher Parameter")
         if self.app.send_fehler is not None:
@@ -125,6 +139,7 @@ class Mail:
         if self.app.send_dauer:
             time.sleep(self.app.send_dauer)
         self.Sent = True
+        self.gesendet_mit = self.SendUsingAccount.SmtpAddress if self.SendUsingAccount is not None else None
         self.app.gesendet.append(self)
 
     def Display(self, modal=False):  # noqa: N802
@@ -149,7 +164,9 @@ class Outlook:
     def _holen(self, entry, store):
         if self.lese_dauer:
             time.sleep(self.lese_dauer)
-        return self.gespeichert[entry]
+        item = self.gespeichert[entry]
+        item.wieder_geoeffnet()
+        return item
 
     def CreateItem(self, art):  # noqa: N802
         assert art == 0
@@ -476,6 +493,9 @@ class TraegesKonto(Mail):
         self._oleobj_ = SimpleNamespace(Invoke=self._invoke)
         self._invoke_wirkt = invoke_wirkt
 
+    def wieder_geoeffnet(self):
+        self._konto = None
+
     @property
     def SendUsingAccount(self):  # noqa: N802
         return self._konto
@@ -551,14 +571,16 @@ def test_klassisch_senden_prueft_den_entwurf(outlook, tmp_path):
     m = mail(tmp_path, mit_anhang=False)
     item = oc.com_lauf(lambda app: oc.mail_bauen(app, m, KONTO, []))
     ort, pruef = oc.speichern(item)
-    oc.klassisch_senden(ort, pruef)
+    oc.klassisch_senden(ort, pruef, konto=KONTO)
     assert outlook.gesendet == [item]
     item2 = oc.com_lauf(lambda app: oc.mail_bauen(app, m, KONTO, []))
     ort2, pruef2 = oc.speichern(item2)
     item2.Subject = "geändert in Outlook"
     with pytest.raises(oo.MailFehler, match="verändert"):
-        oc.klassisch_senden(ort2, pruef2)
+        oc.klassisch_senden(ort2, pruef2, konto=KONTO)
     assert outlook.gesendet == [item]
+    with pytest.raises(oo.MailFehler, match="Konto"):  # ohne Konto der Karte nie senden
+        oc.klassisch_senden(ort, pruef)
 
 
 def test_klassischer_entwurf_wird_nur_angezeigt(outlook, tmp_path):
@@ -602,9 +624,8 @@ def test_speichern_schliesst_den_inspector_dann_geht_senden(outlook, tmp_path):
     assert len(outlook.Inspectors.e) == 1
     ort, pruef = oc.speichern(item)
     assert outlook.Inspectors.e == [] and outlook.geschlossen[-1] == 0  # olSave
-    assert pruef["konto"] == KONTO.lower()
     oc.klassisch_senden(ort, pruef, konto=KONTO)
-    assert outlook.gesendet == [item]
+    assert outlook.gesendet == [item] and item.gesendet_mit == KONTO
 
 
 def test_offene_mail_in_outlook_wird_nicht_gesendet(outlook, tmp_path):
@@ -635,15 +656,39 @@ def test_mail_bauen_verwirft_bei_einem_fehler(outlook, tmp_path):
     assert outlook.geschlossen[-1] == 1 and outlook.Inspectors.e == [] and outlook.gespeichert == {}
 
 
-def test_konto_wird_vor_dem_senden_gegen_die_karte_geprueft(outlook, tmp_path):
+def test_konto_der_karte_wird_direkt_vor_dem_senden_gesetzt(outlook, tmp_path):
     item = oc.com_lauf(lambda app: oc.mail_bauen(app, mail(tmp_path, mit_anhang=False), KONTO, []))
     ort, pruef = oc.speichern(item)
+    assert "konto" not in pruef  # nach dem Wiederöffnen liest sich das Konto leer: kein Prüfwert, sondern neu setzen
     with pytest.raises(oo.MailFehler, match="Konto"):
-        oc.klassisch_senden(ort, pruef, konto="anderes@firma.example")
+        oc.klassisch_senden(ort, pruef, konto="anderes@firma.example")  # das Konto der Karte gibt es nicht
     item.SendUsingAccount = SimpleNamespace(SmtpAddress="anderes@firma.example")  # in Outlook umgestellt
-    with pytest.raises(oo.MailFehler, match="verändert"):
+    oc.klassisch_senden(ort, pruef, konto=KONTO)
+    assert outlook.gesendet == [item] and item.gesendet_mit == KONTO  # gesendet mit dem Konto der Karte
+
+
+def test_konto_laesst_sich_vor_dem_senden_nicht_setzen(outlook, tmp_path, monkeypatch):
+    items = []
+    monkeypatch.setattr(outlook, "CreateItem", lambda art: items.append(TraegesKonto(outlook)) or items[-1])
+    item = oc.com_lauf(lambda app: oc.mail_bauen(app, mail(tmp_path, mit_anhang=False), KONTO, []))
+    ort, pruef = oc.speichern(item)
+    item._invoke_wirkt = False  # jetzt greift weder die Zuweisung noch die DISPID
+    with pytest.raises(oo.MailFehler, match="Konto"):
         oc.klassisch_senden(ort, pruef, konto=KONTO)
     assert outlook.gesendet == []
+
+
+def test_wie_am_geraet_anhang_waechst_beim_speichern_und_konto_liest_sich_leer(outlook, tmp_path):
+    """Echttest 15.11.2026: Attachment.Size ist nach dem Speichern größer, SendUsingAccount nach GetItemFromID leer. Die Prüfwerte
+    entstehen deshalb vom gespeicherten Stand, das Konto wird vor dem Senden neu gesetzt: Die unveränderte Mail geht raus."""
+    m = mail(tmp_path)
+    with oo.anhang_dateien(oo.anhaenge_lesen(m.anhaenge)) as pfade:
+        item = oc.com_lauf(lambda app: oc.mail_bauen(app, m, KONTO, pfade))
+        groesse_vorher = item.Attachments.e[0].Size
+    ort, pruef = oc.speichern(item)
+    assert pruef["anhaenge"] == [("2026-11-15 Angebot.pdf", item.Attachments.e[0].Size)] != [("2026-11-15 Angebot.pdf", groesse_vorher)]
+    oc.klassisch_senden(ort, pruef, konto=KONTO)
+    assert outlook.gesendet == [item] and item.gesendet_mit == KONTO
 
 
 def test_zeitgrenze_vor_dem_senden_sendet_nie(outlook, tmp_path):

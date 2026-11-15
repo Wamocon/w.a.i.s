@@ -287,7 +287,6 @@ class Befunde(_Basis):
         r = self.freigeben(self.anfragen(an=("Max Weber",)))
         v = host._versand()._eintraege[r["versand"]["id"]]
         self.assertEqual(v.ort["konto"], "konto@firma.example")
-        self.assertEqual(v.pruef["konto"], "konto@firma.example")
         host._versand().zurueckholen(v.id)
 
     def test_hoststart_raeumt_entwurfsdateien_auf(self):

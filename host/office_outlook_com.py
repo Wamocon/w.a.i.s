@@ -225,14 +225,6 @@ def _schliessen(item, art: int) -> None:
         pass
 
 
-def _konto_von(item) -> str:
-    try:
-        konto = item.SendUsingAccount
-        return (adresse(str(konto.SmtpAddress or "")) or "").lower() if konto is not None else ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
 DISPID_SEND_USING_ACCOUNT = 64209
 
 
@@ -257,12 +249,13 @@ def _konto_setzen(item, konto) -> None:
 
 
 def pruefwerte(item) -> dict:
-    """Was sich zwischen Speichern und Senden nicht ändern darf."""
+    """Was sich zwischen Speichern und Senden nicht ändern darf, immer vom gespeicherten Stand gelesen (GetItemFromID): Die Größe
+    eines Anhangs ändert sich beim Speichern (Verwaltungsdaten), Name und Anzahl nicht. Das Konto steht nicht darin, denn es liest sich
+    nach dem Wiederöffnen leer; klassisch_senden setzt es direkt vor dem Senden neu (Echttest 15.11.2026)."""
     return {"betreff": str(item.Subject),
             "empfaenger": sorted((int(r.Type), _smtp(r.AddressEntry).lower()) for r in _liste(item.Recipients)),
             "anhaenge": sorted((str(a.FileName), int(a.Size)) for a in _liste(item.Attachments)),
-            "text": hashlib.sha256(str(item.Body or "").encode("utf-8", "replace")).hexdigest(),
-            "konto": _konto_von(item)}
+            "text": hashlib.sha256(str(item.Body or "").encode("utf-8", "replace")).hexdigest()}
 
 
 def speichern(item) -> tuple[dict, dict]:
@@ -270,12 +263,14 @@ def speichern(item) -> tuple[dict, dict]:
     (olSave): Bleibt er offen, scheitert Send() über GetItemFromID am Gerät mit "Falscher Parameter" (Echttest 15.11.2026)."""
     try:
         item.Save()
-        ort, pruef = {"entry_id": str(item.EntryID), "store_id": str(item.Parent.StoreID)}, pruefwerte(item)
+        ort = {"entry_id": str(item.EntryID), "store_id": str(item.Parent.StoreID)}
     except BaseException:
         _schliessen(item, OL_DISCARD)
         raise
     item.Close(OL_SAVE)
-    return ort, pruef
+    # Die Vergleichsbasis vom gespeicherten Stand, wie klassisch_senden ihn später liest: Gleiches mit Gleichem
+    gespeichert = item.Session.GetItemFromID(ort["entry_id"], ort["store_id"])
+    return ort, pruefwerte(gespeichert)
 
 
 def _inspector_offen(app, entry_id: str) -> bool:
@@ -313,8 +308,8 @@ def klassisch_senden(ort: dict, pruef: dict, konto: str = "", timeout: float = C
     """Den gespeicherten Entwurf senden, nur wenn er noch derselbe ist, mit dem Konto der Karte und nicht in Outlook geöffnet (sonst
     MailFehler, er bleibt unter Entwürfe). Ein Fehler beim Senden ist nie ein Erfolg; läuft die Zeit während des Sendens ab, ist der
     Ausgang unklar (VersandUnklar)."""
-    if konto and pruef.get("konto") != konto.lower():
-        raise MailFehler(f"Das Konto der Mail passt nicht zur Karte. W.A.I.S. sendet sie deshalb nicht. {NICHT_RAUS}")
+    if not konto:
+        raise MailFehler(f"Ohne das Konto der Karte sendet W.A.I.S. nicht. {NICHT_RAUS}")
     schutz = _Sendeschutz()
 
     def arbeit(app) -> None:
@@ -325,6 +320,7 @@ def klassisch_senden(ort: dict, pruef: dict, konto: str = "", timeout: float = C
             raise MailFehler("Die Mail ist in Outlook geöffnet. W.A.I.S. sendet sie deshalb nicht; sie liegt unter Entwürfe.")
         if pruefwerte(item) != pruef:
             raise MailFehler("Die Mail wurde in Outlook verändert. W.A.I.S. sendet sie deshalb nicht; sie liegt unter Entwürfe.")
+        _konto_setzen(item, _konto(app.Session, konto))  # das Konto der Karte, direkt vor dem Senden gesetzt und nachgeprüft
         schutz.vor_send()
         try:
             item.Send()
