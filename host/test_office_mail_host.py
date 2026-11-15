@@ -68,7 +68,8 @@ class _Basis(unittest.TestCase):
                 "summary": "Der Entwurf ist im neuen Outlook offen. Prüfen und selbst auf Senden drücken."}
 
     def datei(self, name="Angebot", daten=b"%PDF-1.7 Angebot") -> dict:
-        return self.ablage.speichern(daten, name, "pdf")
+        eintrag, _pfad = self.ablage.speichern(daten, name, "pdf")
+        return eintrag
 
     def anfragen(self, an=("max.weber@firma.example",), cc=None, betreff=BETREFF, text=f"Hallo Max,\n{GEHEIM}", anhaenge=None):
         return asyncio.run(host.outlook_mail_anfragen(list(an), betreff, text, list(cc) if cc else None, anhaenge))
