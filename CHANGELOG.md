@@ -70,7 +70,9 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   Fremdinhalt im Zug). Welches Outlook gerade läuft, entscheidet der Weg: Läuft das klassische Outlook allein, sendet W.A.I.S. nach dem
   Klick per COM mit der Outlook-Signatur und hält die Mail 30 Sekunden unter Entwürfe zurück („Zurückholen“ in der Oberfläche);
   läuft das neue Outlook (`olk.exe`), öffnet W.A.I.S. einen fertigen Entwurf mit Anhang (.eml mit `X-Unsent` über den App-Alias
-  `olk.exe`, am PC geprüft) und die Person sendet selbst. Im Zweifel nie senden. Nur Admins, nie im Labor (das Werkzeug heißt
+  `olk.exe`, am PC geprüft) und die Person sendet selbst. Im Zweifel nie senden. Endet die Sitzung in der Frist, holt W.A.I.S. die Mail
+  zurück; nach einem Ruhezustand, bei offener Mail in Outlook oder bei einem Fehler beim Senden geht sie nicht raus, und ein unklarer
+  Ausgang heißt unklar. Nur Admins, nie im Labor (das Werkzeug heißt
   bewusst nicht wie `mail_senden` im Labor), nur mit `WAMO_OFFICE=outlook`, PC-Steuerung und Stimmabdruck-Gate. Host:
   `outlook_mail_anfragen`, `outlook_zurueckholen`, `outlook_versand_status` (`host/office_outlook.py`, `host/office_outlook_com.py`),
   Anhänge nur aus dem Register mit gleicher Prüfsumme, höchstens 10 Empfänger und 10 Mails je Stunde, `office.aus` wirkt auch hier.
@@ -95,6 +97,18 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   (`host/office_dateien.py`, `host/office_com.py`), legt sie nie überschreibend ab und führt ein Register ohne Inhalte
   (`host/office_ablage.py`, `%LOCALAPPDATA%\WAMO\ablage.json`). Excel-Zellen sind immer Text, CSV-Zellen mit `=`, `+`, `-`, `@` bekommen
   ein Hochkomma. Die Datei `%LOCALAPPDATA%\WAMO\office.aus` sperrt alles sofort. Die Host-Werkzeuge stehen nie in `LLM_TOOLS`.
+
+- OneNote-Seite aus dem Canvas (Paket 4 aus `docs/office-und-versand.md`, Teil OneNote, Zweig `feat/onenote`): Auf Zuruf (Werkzeug
+  `onenote_seite`) oder per Klick („Als OneNote-Seite“ im Kopf des Canvas) wird ein Canvas-Element zur neuen Seite im Notizbuch
+  „W.A.I.S.“ im OneDrive der Firma, Abschnitt „W.A.I.S“, aber erst nach dem Klick auf die Freigabekarte (Job `pc`, Aktion `onenote`),
+  die Konto, Notizbuch, Abschnitt (mit „wird neu angelegt“), Titel und den ganzen Inhalt zeigt. Fehlt das Notizbuch, legt W.A.I.S. es
+  erst nach dem Klick dort an; vorhandene andere Notizbücher bleiben unberührt. Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=onenote`
+  und eingeschalteter PC-Steuerung, unter dem Stimmabdruck-Gate. Der Host (`host/office_onenote.py`, Werkzeug `onenote_seite_anfragen`
+  nur für den Kern) bestimmt das Firmenkonto selbst, prüft Inhalt, Länge und Zeichen, baut die Seite im OneNote-XML 2013 mit
+  maskiertem Text (keine Links, keine Bilder) und prüft vor dem Anlegen Konto, Notizbuch und Abschnitt erneut; höchstens 10 Karten je
+  Stunde, Audit ohne Inhalt. Ohne OneNote für den Desktop, ohne eindeutiges OneDrive der Firma oder mit einem Notizbuch „W.A.I.S.“
+  anderswo speichert W.A.I.S. eine Word-Datei in `Dokumente\WAIS`, die sich über „An OneNote senden“ einfügen lässt. `office.aus`
+  sperrt auch OneNote.
 
 - Prüfungen auf GitHub (README Abschnitt „Prüfungen auf GitHub“): Workflow `Prüfungen` (`.github/workflows/ci.yml`) bei jedem Push, jedem
   Pull Request und manuell mit Wahl des Teils, mit Jobs für Oberfläche (ESLint, `tsc`, `node --test`, vitest, `next build`), Kern (pytest in

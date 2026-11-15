@@ -64,6 +64,39 @@ describe("Canvas, Speichern als Datei", () => {
   });
 });
 
+describe("Canvas, als OneNote-Seite", () => {
+  beforeEach(() => resetWamo());
+  afterEach(() => resetWamo());
+
+  it("schickt die Kennung, sperrt bis zur Antwort und zeigt sie als Hinweis", () => {
+    const office = { ...aktionen(), onenote: vi.fn(() => true) };
+    zustand({ id: ID, kind: "dokument", title: "Angebot", text: "# A" }, { ...BETRIEB, onenote: true });
+    render(<CanvasBereich office={office} />);
+    fireEvent.click(screen.getByRole("button", { name: "Als OneNote-Seite" }));
+    expect(office.onenote).toHaveBeenCalledExactlyOnceWith(ID);
+    expect((screen.getByRole("button", { name: "Als OneNote-Seite" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Als Word speichern" }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => applyServerMessage({ type: "onenote", ok: true, text: "Die OneNote-Seite liegt zur Freigabe bereit." }));
+    expect((screen.getByRole("button", { name: "Als OneNote-Seite" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(wamo.get().toast?.text).toBe("Die OneNote-Seite liegt zur Freigabe bereit.");
+  });
+
+  it("geht auch ohne Dateiformate, aber nie ohne Meldung des Kerns oder ohne Aktion", () => {
+    zustand({ id: ID, kind: "tabelle", title: "Liste", columns: ["a"], rows: [["1"]] }, { ...BETRIEB, office: undefined, onenote: true });
+    const eins = render(<CanvasBereich office={{ ...aktionen(), onenote: vi.fn(() => true) }} />);
+    expect(screen.getByRole("button", { name: "Als OneNote-Seite" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /speichern/ })).toBeNull();
+    eins.unmount();
+    zustand({ id: ID, kind: "dokument", title: "A", text: "x" });
+    const zwei = render(<CanvasBereich office={{ ...aktionen(), onenote: vi.fn(() => true) }} />);
+    expect(screen.queryByRole("button", { name: "Als OneNote-Seite" })).toBeNull();
+    zwei.unmount();
+    zustand({ id: ID, kind: "dokument", title: "A", text: "x" }, { ...BETRIEB, onenote: true });
+    render(<CanvasBereich office={aktionen()} />);
+    expect(screen.queryByRole("button", { name: "Als OneNote-Seite" })).toBeNull();
+  });
+});
+
 describe("Hinweis nach dem Speichern", () => {
   beforeEach(() => resetWamo());
   afterEach(() => resetWamo());

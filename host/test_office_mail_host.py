@@ -260,6 +260,41 @@ class Ausfuehren(_Basis):
         self.assertEqual(host.outlook_zurueckholen("../x", SCHLUESSEL)["zustand"], "unbekannt")
 
 
+class Befunde(_Basis):
+    """Echttest und Review vom 15.11.2026."""
+
+    def test_karte_zaehlt_wie_die_oberflaeche_in_utf16(self):
+        emoji = chr(0x1F600)  # zwei UTF-16-Einheiten, ein Codepunkt
+        r = self.anfragen(text=emoji * 4000)  # 4000 Zeichen erlaubt, auf der Karte aber über 8000 Einheiten
+        self.assertEqual(r["status"], "rejected")
+        self.assertIn("Anhang", r["summary"])
+        self.assertEqual(host.PENDING, {})
+
+    def test_registerfehler_werden_abgelehnt_und_protokolliert(self):
+        k = self.datei()
+        with mock.patch.object(self.ablage, "eintraege", side_effect=office_ablage.AblageFehler("Register kaputt")):
+            r = self.anfragen(anhaenge=[k["kennung"]])
+        self.assertEqual(r["status"], "rejected")
+        with mock.patch.object(self.ablage, "eintraege", return_value=[]):  # Datei da, Eintrag inzwischen weg
+            r = self.anfragen(anhaenge=[k["kennung"]])
+        self.assertEqual(r["status"], "rejected")
+        abgelehnt = [a for a in self.audit if a.get("tool") == "outlook_mail_anfragen" and a.get("risk") == "rejected"]
+        self.assertEqual(len(abgelehnt), 2)
+        self.assertEqual(host.PENDING, {})
+
+    def test_konto_der_karte_geht_bis_zum_senden_mit(self):
+        self.weg = KLASSISCH
+        r = self.freigeben(self.anfragen(an=("Max Weber",)))
+        v = host._versand()._eintraege[r["versand"]["id"]]
+        self.assertEqual(v.ort["konto"], "konto@firma.example")
+        host._versand().zurueckholen(v.id)
+
+    def test_hoststart_raeumt_entwurfsdateien_auf(self):
+        quelle = Path(host.__file__).read_text(encoding="utf-8")
+        start = quelle.split('if __name__ == "__main__":', 1)[1]
+        self.assertIn("office_outlook.beim_start_aufraeumen()", start)
+
+
 class NieFuerDasModell(unittest.TestCase):
     def test_mail_werkzeuge_stehen_nicht_in_llm_tools(self):
         quelle = (Path(__file__).resolve().parent.parent / "voice-core" / "pc_host.py").read_text(encoding="utf-8")

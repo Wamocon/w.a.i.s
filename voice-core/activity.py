@@ -51,27 +51,30 @@ def _detail(name: str, args: dict) -> str:
 
 
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
-FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "teams")
-# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken; outlook_senden und
-# teams_nachricht legen ihre Karte selbst über diese Funktion an, outlook_werkzeuge.py und teams_werkzeuge.py)
+FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote", "teams")
+# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
+# über onenote_seite_anfragen, onenote_werkzeuge.py; outlook_senden und teams_nachricht legen ihre Karte selbst über diese Funktion
+# an, outlook_werkzeuge.py und teams_werkzeuge.py)
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
-                                "github_repo_anlegen", "outlook_senden", "teams_nachricht"})
+                                "github_repo_anlegen", "onenote_seite", "outlook_senden", "teams_nachricht"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
 FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails und Teams (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
 _DOMAENE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}")
 
 
-def _karten_text(wert: object, grenze: int, zeilen: bool = False) -> str | None:
+def _karten_text(wert: object, grenze: int, zeilen: bool = False, utf16: bool = False) -> str | None:
     """Text vom Host für die Karte: ohne Steuer-, Format- und unsichtbare Zeichen (persona.sichtbar), zeilen=False
-    ergibt eine Zeile. Länger als grenze: None. Die Karte muss alles zeigen, was ausgeführt wird."""
+    ergibt eine Zeile. Länger als grenze: None. Die Karte muss alles zeigen, was ausgeführt wird. utf16: Länge in UTF-16-Einheiten,
+    wie die Oberfläche zählt (ein Emoji zählt zwei); für die lange Karte der Mails."""
     text = wert if isinstance(wert, str) else ""
     if zeilen:
         text = "\n".join(sichtbar(z).rstrip() for z in text.replace("\r\n", "\n").split("\n"))
     else:
         text = " ".join(sichtbar(text).split())
-    return text if len(text) <= grenze else None
+    laenge = len(text.encode("utf-16-le")) // 2 if utf16 else len(text)
+    return text if laenge <= grenze else None
 
 
 def _als_dict(result) -> dict | None:
@@ -96,8 +99,9 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
     roh = data.get("detail") if isinstance(data.get("detail"), str) else ""
     if aktion == "senden":
         roh = roh.replace("\r\n", "\n").replace("\n", "⏎\n").rstrip("\n")  # jedes Enter sendet: sichtbar machen
-    grenze = FREIGABE_DETAIL_ZEICHEN_MAIL if aktion in ("mail", "teams") else FREIGABE_DETAIL_ZEICHEN
-    detail = _karten_text(roh, grenze, zeilen=True)
+    lang = aktion in ("mail", "teams")  # lange Karte, gezählt wie in der Oberfläche
+    grenze = FREIGABE_DETAIL_ZEICHEN_MAIL if lang else FREIGABE_DETAIL_ZEICHEN
+    detail = _karten_text(roh, grenze, zeilen=True, utf16=lang)
     grund = _karten_text(data.get("grund"), FREIGABE_KURZ_ZEICHEN)
     ziel = _karten_text(data.get("ziel"), FREIGABE_KURZ_ZEICHEN)
     anlass = _karten_text(data.get("anlass"), FREIGABE_KURZ_ZEICHEN)  # vom Modell, nur als Hinweis

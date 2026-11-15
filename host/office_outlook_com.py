@@ -33,11 +33,21 @@ from office_outlook import (
     interne_domaenen,
 )
 
-OL_MAIL, OL_TO, OL_CC, OL_DISCARD = 0, 1, 2, 1
+OL_MAIL, OL_TO, OL_CC, OL_SAVE, OL_DISCARD = 0, 1, 2, 0, 1
+SPAET_SECS = 60  # so weit darf die Frist überschritten sein (zum Beispiel nach dem Ruhezustand), sonst wird nicht gesendet
+NICHT_RAUS = "Die Mail ist nicht rausgegangen und liegt unter Entwürfe."
 OL_EXCHANGE_NUTZER, OL_VERTEILER = (0, 5), (1, 11)
 PR_SMTP = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 ZURUECK_TEXT = "Zurückgeholt: Die Mail ist nicht rausgegangen und liegt in Outlook unter Entwürfe."
 VERSAND_ID_RE = re.compile(r"[0-9a-f]{16}")
+
+
+class ComZeitgrenze(MailFehler):
+    """Outlook hat innerhalb der Zeitgrenze nicht geantwortet (der Faden kann noch laufen)."""
+
+
+class VersandUnklar(MailFehler):
+    """Beim Senden kam keine Antwort: Ob die Mail rausging, ist unklar."""
 
 
 def _outlook_app():
@@ -76,7 +86,7 @@ def com_lauf(arbeit: Callable[[object], object], *, timeout: float = COM_TIMEOUT
     t.start()
     t.join(timeout)
     if t.is_alive():
-        raise MailFehler("Outlook antwortet nicht (vielleicht ist dort ein Dialog offen). Es ist nichts passiert.")
+        raise ComZeitgrenze("Outlook antwortet nicht (vielleicht ist dort ein Dialog offen). Es ist nichts passiert.")
     if "fehler" in stand:
         raise stand["fehler"]
     return stand.get("wert")
@@ -122,7 +132,11 @@ def konto_lesen(ns) -> dict:
 
 def _smtp(eintrag) -> str:
     art = int(getattr(eintrag, "AddressEntryUserType", -1))
-    if art in OL_VERTEILER:
+    try:  # auch Verteiler, die Outlook mit einer anderen Art meldet
+        verteiler = eintrag.GetExchangeDistributionList()
+    except Exception:  # noqa: BLE001 (SMTP-Einträge kennen die Methode nicht)
+        verteiler = None
+    if art in OL_VERTEILER or verteiler is not None:
         raise MailFehler("Verteilerlisten verschickt W.A.I.S. nicht (Schutz vor Massenversand). Bitte einzelne Empfänger nennen.")
     if art in OL_EXCHANGE_NUTZER:
         nutzer = eintrag.GetExchangeUser()
@@ -184,20 +198,31 @@ def mail_bauen(app, mail: Mail, konto_smtp: str, pfade: list[Path]):
     ns = app.Session
     konto = _konto(ns, konto_smtp)
     item = app.CreateItem(OL_MAIL)
-    item.GetInspector  # noqa: B018 (Signatur einsetzen lassen)
-    item.Subject = mail.betreff
-    item.HTMLBody = _mit_text(str(item.HTMLBody or ""), html_text(mail.text))
-    for e in mail.empfaenger:
-        r = item.Recipients.Add(e.smtp)
-        r.Type = OL_TO if e.art == "an" else OL_CC
-        if not r.Resolve():
-            raise MailFehler(f"{e.smtp} lässt sich in Outlook nicht auflösen. Es ist nichts passiert.")
-        if _smtp(r.AddressEntry).lower() != e.smtp.lower():
-            raise MailFehler("Outlook löst eine Adresse anders auf als auf der Karte. Es ist nichts passiert.")
-    for p in pfade:
-        item.Attachments.Add(str(p))
-    _konto_setzen(item, konto)
+    try:
+        item.GetInspector  # noqa: B018 (Signatur einsetzen lassen; öffnet einen unsichtbaren Inspector, speichern schließt ihn)
+        item.Subject = mail.betreff
+        item.HTMLBody = _mit_text(str(item.HTMLBody or ""), html_text(mail.text))
+        for e in mail.empfaenger:
+            r = item.Recipients.Add(e.smtp)
+            r.Type = OL_TO if e.art == "an" else OL_CC
+            if not r.Resolve():
+                raise MailFehler(f"{e.smtp} lässt sich in Outlook nicht auflösen. Es ist nichts passiert.")
+            if _smtp(r.AddressEntry).lower() != e.smtp.lower():
+                raise MailFehler("Outlook löst eine Adresse anders auf als auf der Karte. Es ist nichts passiert.")
+        for p in pfade:
+            item.Attachments.Add(str(p))
+        _konto_setzen(item, konto)
+    except BaseException:
+        _schliessen(item, OL_DISCARD)  # nichts halb Gebautes liegen lassen
+        raise
     return item
+
+
+def _schliessen(item, art: int) -> None:
+    try:
+        item.Close(art)
+    except Exception:  # noqa: BLE001 (schon zu)
+        pass
 
 
 DISPID_SEND_USING_ACCOUNT = 64209
@@ -224,31 +249,93 @@ def _konto_setzen(item, konto) -> None:
 
 
 def pruefwerte(item) -> dict:
-    """Was sich zwischen Speichern und Senden nicht ändern darf."""
+    """Was sich zwischen Speichern und Senden nicht ändern darf, immer vom gespeicherten Stand gelesen (GetItemFromID): Die Größe
+    eines Anhangs ändert sich beim Speichern (Verwaltungsdaten), Name und Anzahl nicht. Das Konto steht nicht darin, denn es liest sich
+    nach dem Wiederöffnen leer; klassisch_senden setzt es direkt vor dem Senden neu (Echttest 15.11.2026)."""
     return {"betreff": str(item.Subject),
             "empfaenger": sorted((int(r.Type), _smtp(r.AddressEntry).lower()) for r in _liste(item.Recipients)),
-            "anhaenge": sorted((str(a.FileName), int(a.Size)) for a in _liste(item.Attachments)),
+            # Nur Name und Anzahl: Attachment.Size schwankt am Gerät ohne Änderung (Echttest 15.11.2026: 35373 gegen 43438 Byte, je
+            # nachdem, ob Outlook das Element neu geladen hat). Den Inhalt prüft der Host beim Klick per SHA-256 der Kopie.
+            "anhaenge": sorted(str(a.FileName) for a in _liste(item.Attachments)),
             "text": hashlib.sha256(str(item.Body or "").encode("utf-8", "replace")).hexdigest()}
 
 
 def speichern(item) -> tuple[dict, dict]:
-    """Unter Entwürfe speichern; liefert den Ort (EntryID, StoreID) und die Prüfwerte."""
-    item.Save()
-    return {"entry_id": str(item.EntryID), "store_id": str(item.Parent.StoreID)}, pruefwerte(item)
+    """Unter Entwürfe speichern; liefert den Ort (EntryID, StoreID) und die Prüfwerte. Danach schließt es den unsichtbaren Inspector
+    (olSave): Bleibt er offen, scheitert Send() über GetItemFromID am Gerät mit "Falscher Parameter" (Echttest 15.11.2026)."""
+    try:
+        item.Save()
+        ort = {"entry_id": str(item.EntryID), "store_id": str(item.Parent.StoreID)}
+    except BaseException:
+        _schliessen(item, OL_DISCARD)
+        raise
+    item.Close(OL_SAVE)
+    # Die Vergleichsbasis vom gespeicherten Stand, wie klassisch_senden ihn später liest: Gleiches mit Gleichem
+    gespeichert = item.Session.GetItemFromID(ort["entry_id"], ort["store_id"])
+    return ort, pruefwerte(gespeichert)
 
 
-def klassisch_senden(ort: dict, pruef: dict) -> None:
-    """Den gespeicherten Entwurf senden, nur wenn er noch derselbe ist (sonst MailFehler, er bleibt unter Entwürfe)."""
+def _inspector_offen(app, entry_id: str) -> bool:
+    """Ist das Element in Outlook geöffnet (ein Inspector mit derselben EntryID)?"""
+    for insp in _liste(app.Inspectors):
+        try:
+            if str(insp.CurrentItem.EntryID) == entry_id:
+                return True
+        except Exception:  # noqa: BLE001 (ein Fenster ohne Element)
+            continue
+    return False
+
+
+class _Sendeschutz:
+    """Zeitgrenze und Senden schließen sich aus: Läuft die Zeit ab, bevor Send() begonnen hat, beginnt es nie mehr; hat es begonnen,
+    ist der Ausgang unklar."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.abgebrochen = self.sendet = False
+
+    def vor_send(self) -> None:
+        with self._lock:
+            if self.abgebrochen:
+                raise MailFehler("Zeitgrenze überschritten, nicht gesendet.")
+            self.sendet = True
+
+    def abbrechen(self) -> bool:
+        with self._lock:
+            self.abgebrochen = True
+            return self.sendet
+
+
+def klassisch_senden(ort: dict, pruef: dict, konto: str = "", timeout: float = COM_TIMEOUT_SECS) -> None:
+    """Den gespeicherten Entwurf senden, nur wenn er noch derselbe ist, mit dem Konto der Karte und nicht in Outlook geöffnet (sonst
+    MailFehler, er bleibt unter Entwürfe). Ein Fehler beim Senden ist nie ein Erfolg; läuft die Zeit während des Sendens ab, ist der
+    Ausgang unklar (VersandUnklar)."""
+    if not konto:
+        raise MailFehler(f"Ohne das Konto der Karte sendet W.A.I.S. nicht. {NICHT_RAUS}")
+    schutz = _Sendeschutz()
 
     def arbeit(app) -> None:
         item = app.Session.GetItemFromID(ort["entry_id"], ort["store_id"])
         if bool(item.Sent):
             raise MailFehler("Die Mail ist schon gesendet.")
+        if _inspector_offen(app, ort["entry_id"]):
+            raise MailFehler("Die Mail ist in Outlook geöffnet. W.A.I.S. sendet sie deshalb nicht; sie liegt unter Entwürfe.")
         if pruefwerte(item) != pruef:
             raise MailFehler("Die Mail wurde in Outlook verändert. W.A.I.S. sendet sie deshalb nicht; sie liegt unter Entwürfe.")
-        item.Send()
+        _konto_setzen(item, _konto(app.Session, konto))  # das Konto der Karte, direkt vor dem Senden gesetzt und nachgeprüft
+        schutz.vor_send()
+        try:
+            item.Send()
+        except Exception as e:  # noqa: BLE001 (com_error und Ähnliches: klare Meldung, nie ein Erfolg)
+            raise MailFehler(f"Outlook hat das Senden abgelehnt ({type(e).__name__}). {NICHT_RAUS}") from e
 
-    com_lauf(arbeit)
+    try:
+        com_lauf(arbeit, timeout=timeout)
+    except ComZeitgrenze as e:
+        if schutz.abbrechen():
+            raise VersandUnklar("Outlook hat beim Senden nicht rechtzeitig geantwortet. Ob die Mail rausging, ist unklar: bitte in "
+                                "Outlook unter Gesendete Elemente und Postausgang nachsehen.") from e
+        raise MailFehler(f"Outlook hat nicht rechtzeitig geantwortet. {NICHT_RAUS}") from e
 
 
 def klassisch_entwurf(app, mail: Mail, konto_smtp: str, pfade: list[Path]) -> dict:
@@ -265,7 +352,8 @@ class Versand:
     frist: float
     ort: dict
     pruef: dict
-    zustand: str = "wartet"  # wartet, sendet, gesendet, zurueckgeholt, fehler
+    frist_wand: float = 0.0  # Ende der Frist nach der Uhrzeit (läuft auch im Ruhezustand weiter)
+    zustand: str = "wartet"  # wartet, sendet, gesendet, zurueckgeholt, fehler, unklar
     meldung: str = ""
     ende: float | None = None
     abbruch: threading.Event = field(default_factory=threading.Event)
@@ -274,11 +362,13 @@ class Versand:
 
 class Versandliste:
     """Geplante Sendungen: genau einmal senden nach der Frist, vorher zurückholbar. senden(versand) sendet wirklich (klassisch_senden),
-    gesperrt() ist der Schalter office.aus (dann geht nichts raus)."""
+    gesperrt() ist der Schalter office.aus (dann geht nichts raus). Ist die Frist nach der Uhrzeit (wand) um mehr als SPAET_SECS
+    überschritten, etwa nach dem Ruhezustand, wird nicht mehr gesendet."""
 
     def __init__(self, senden: Callable[[Versand], None], gesperrt: Callable[[], bool] | None = None,
-                 uhr: Callable[[], float] = time.monotonic, behalten_secs: float = 3600, max_eintraege: int = 50):
-        self._senden, self._gesperrt, self._uhr = senden, gesperrt or (lambda: False), uhr
+                 uhr: Callable[[], float] = time.monotonic, behalten_secs: float = 3600, max_eintraege: int = 50,
+                 wand: Callable[[], float] = time.time):
+        self._senden, self._gesperrt, self._uhr, self._wand = senden, gesperrt or (lambda: False), uhr, wand
         self._behalten, self._max = behalten_secs, max_eintraege
         self._lock = threading.Lock()
         self._eintraege: dict[str, Versand] = {}
@@ -286,7 +376,7 @@ class Versandliste:
     def planen(self, ort: dict, pruef: dict, verzoegerung: float = VERZOEGERUNG_SECS) -> Versand:
         with self._lock:
             self._aufraeumen()
-            v = Versand(secrets.token_hex(8), self._uhr() + verzoegerung, dict(ort), pruef)
+            v = Versand(secrets.token_hex(8), self._uhr() + verzoegerung, dict(ort), pruef, self._wand() + verzoegerung)
             self._eintraege[v.id] = v
         v.faden = threading.Thread(target=self._lauf, args=(v, verzoegerung), name="wais-versand", daemon=True)
         v.faden.start()
@@ -302,10 +392,17 @@ class Versandliste:
                 v.zustand, v.ende = "fehler", self._uhr()
                 v.meldung = "Office ist an diesem PC ausgeschaltet (office.aus). Die Mail ist nicht rausgegangen und liegt unter Entwürfe."
                 return
+            if self._wand() - v.frist_wand > SPAET_SECS:
+                v.zustand, v.ende = "fehler", self._uhr()
+                v.meldung = ("Die Frist ist lange vorbei (zum Beispiel nach dem Ruhezustand). W.A.I.S. sendet die Mail deshalb nicht; "
+                             "sie liegt unter Entwürfe.")
+                return
             v.zustand = "sendet"
         try:
             self._senden(v)
             ergebnis = ("gesendet", "Die Mail ist gesendet.")
+        except VersandUnklar as e:
+            ergebnis = ("unklar", str(e))
         except MailFehler as e:
             ergebnis = ("fehler", str(e))
         except Exception as e:  # noqa: BLE001

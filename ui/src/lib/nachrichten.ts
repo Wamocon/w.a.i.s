@@ -45,6 +45,8 @@ export type Betrieb = {
   office?: OfficeFormat[];
   /** Mail über Outlook am PC geht jetzt (nur Admins mit PC-Steuerung, voice-core/outlook_werkzeuge.py): Knopf "Als E-Mail" */
   mail?: boolean;
+  /** ob der Knopf "Als OneNote-Seite" gehen kann (nur Admins mit PC-Steuerung und OneNote am PC, voice-core/onenote_werkzeuge.py) */
+  onenote?: boolean;
   /** Teams-Nachrichten am PC gehen jetzt (nur Admins mit PC-Steuerung, voice-core/teams_werkzeuge.py): Knopf "Als Teams-Nachricht" */
   teams?: boolean;
 };
@@ -275,6 +277,8 @@ export type ServerMessage =
   | { type: "mail_antwort"; ok: boolean; grund?: string }
   /** Mail über Outlook: Stand nach dem Klick (wartet mit Restzeit und Zurückholen, Endstand oder offener Entwurf); nie ein Inhalt */
   | { type: "mail_versand"; id: string | null; zustand: MailVersandZustand; restS?: number; text: string }
+  /** Antwort auf "Als OneNote-Seite": Karte liegt bereit, Rückfall als Word-Datei (ok) oder der Grund, warum nicht */
+  | { type: "onenote"; ok: boolean; text: string }
   /** Teams-Nachricht: Antwort auf "Zur Freigabe vorbereiten" (ok: die Karte liegt bereit); nie ein Inhalt */
   | { type: "teams_antwort"; ok: boolean; grund?: string }
   // Ohne stand: den Zustand der Startkarte setzt allein die Oberfläche (lib/auftragStart.ts), der Kern kann ihn nicht vorgeben
@@ -669,9 +673,13 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         entwicklungGrund: zeile(m.entwicklung_grund, 120),
         office: officeFormate(m.office),
         mail: m.mail === true ? true : undefined,
+        onenote: m.onenote === true ? true : undefined,
         teams: m.teams === true ? true : undefined,
       };
     }
+    case "onenote":
+      if (typeof m.ok !== "boolean") return null;
+      return { type: "onenote", ok: m.ok, text: zeile(m.text, 400) ?? (m.ok ? "Erledigt." : "Nicht angelegt.") };
     case "datei": {
       if (m.ok === false) return { type: "datei", ok: false, grund: zeile(m.grund, 300) ?? "Nicht gespeichert." };
       const name = zeile(m.name, 200);

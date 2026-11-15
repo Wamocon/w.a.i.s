@@ -54,6 +54,9 @@ Nachrichten von der Oberfläche:
                                           Mail über Outlook am PC zur Freigabe vorbereiten, geplanten Versand zurückholen
                                           (outlook_werkzeuge.py; nur admin mit WAMO_OFFICE=outlook, nie im Labor). Antworten:
                                           {"type": "mail_antwort", "ok", ...} und {"type": "mail_versand", ...}; betrieb trägt "mail"
+  {"type": "onenote_seite", "data": {"canvas_id"}}
+                                          eigenes Canvas-Element als OneNote-Seite, erst nach der Freigabekarte (onenote_werkzeuge.py;
+                                          nur admin mit WAMO_OFFICE=onenote, nie im Labor). Antwort: {"type": "onenote", "ok", "text"}
   {"type": "teams_vorbereiten", "data": {"an", "gruppenname"?, "text"}}
                                           Teams-Chat mit vorbefülltem Text zur Freigabe vorbereiten (teams_werkzeuge.py; nur admin
                                           mit WAMO_OFFICE=teams, nie im Labor; gesendet wird in Teams nur von der Person). Antwort:
@@ -184,6 +187,7 @@ from bildstrom import NICHT_ERLAUBT as BILD_NICHT_ERLAUBT, Bildstrom
 import jira_werkzeuge
 import labor_werkzeuge
 import office_werkzeuge
+import onenote_werkzeuge
 import outlook_werkzeuge
 import teams_werkzeuge
 from pc_freigaben import PcFreigaben
@@ -378,7 +382,8 @@ def betrieb_message(
     pc: str, pc_latenz_ms: int | None = None, pc_steuerung: bool = False, entwicklung: bool = False,
     llm: str | None = None, pc_name: str | None = None, pc_belegt: bool = False, sprache: dict[str, str] | None = None,
     modell_modus: str | None = None, modell_quelle: str | None = None, modell_hinweis: str | None = None,
-    entwicklung_grund: str | None = None, office: list[str] | None = None, mail: bool = False, teams: bool = False,
+    entwicklung_grund: str | None = None, office: list[str] | None = None, mail: bool = False,
+    onenote: bool = False, teams: bool = False,
 ) -> dict:
     """pc: verbindet | verbunden | gesperrt | getrennt | aus (gesperrt: Bildschirm am PC gesperrt, pc_anzeige).
     pc_steuerung: ob die PC-Werkzeuge in dieser Sitzung eingeschaltet sind (Standard aus).
@@ -394,6 +399,7 @@ def betrieb_message(
     Admins durch (entwicklung_betrieb.anzeige_grund), nie für Mitglieder.
     office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld.
     mail: ob Mails über Outlook am PC jetzt gehen (outlook_werkzeuge.OutlookMail.anzeige); nur dann trägt betrieb "mail": true.
+    onenote: ob der Knopf "Als OneNote-Seite" gehen kann (onenote_werkzeuge.OneNoteSeiten.anzeige); False: kein Feld.
     teams: ob Teams-Nachrichten am PC jetzt gehen (teams_werkzeuge.TeamsNachricht.anzeige); nur dann trägt betrieb "teams": true."""
     sprache = sprache or {}
     message = {
@@ -424,6 +430,8 @@ def betrieb_message(
         message["office"] = [f for f in office if f in office_werkzeuge.FORMATE]
     if mail is True:
         message["mail"] = True
+    if onenote is True:
+        message["onenote"] = True
     if teams is True:
         message["teams"] = True
     return message
@@ -777,6 +785,14 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
               if (pc_client is not None and is_admin and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
     if office is not None:
         office.register(llm)
+    # OneNote-Seite aus dem Canvas (onenote_werkzeuge.py): dieselben Bedingungen, aber WAMO_OFFICE=onenote. Die Seite entsteht erst nach dem
+    # Klick auf die Freigabekarte (activity.py, pc_freigaben.py); fehlt OneNote am PC, wird es eine Word-Datei in Dokumente\WAIS.
+    # Der Klick "Als OneNote-Seite" bekommt seine Karte über die PC-Freigaben (freigaben steht weiter unten, gilt beim Klick längst).
+    onenote = (onenote_werkzeuge.OneNoteSeiten(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
+                                               karte=lambda a: freigaben.anfrage(a) if freigaben is not None else None)
+               if (pc_client is not None and is_admin and not labor_sitzung and onenote_werkzeuge.fuer_sitzung(identity)) else None)
+    if onenote is not None:
+        onenote.register(llm)
 
     # Mail über Outlook am PC (outlook_werkzeuge.py): nur admin mit PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=outlook. Auch dieses
     # Werkzeug läuft durch das Stimmabdruck-Gate; die Karte legt PcFreigaben an (unten verdrahtet), den Anhang exportiert office.
@@ -1009,6 +1025,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                    entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund),
                                    office=office.anzeige() if office is not None else None,
                                    mail=mail.anzeige() if mail is not None else False,
+                                   onenote=onenote is not None and onenote.anzeige(),
                                    teams=teams.anzeige() if teams is not None else False))
 
     async def stimme_sagen(text: str) -> None:
@@ -1192,9 +1209,10 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 pc_schemas = schemas_absichern(pc_schemas, stimme.gate)
             office_schemas = await office.schemas() if office is not None else []  # nur Formate, die der Host meldet
             mail_schemas = await mail.schemas() if mail is not None else []  # nur, wenn der Host Mails vorbereiten kann
+            onenote_schemas = await onenote.schemas() if onenote is not None else []  # nur, wenn der Host OneNote oder Word kann
             teams_schemas = await teams.schemas() if teams is not None else []  # nur, wenn der Host Teams öffnen kann
             context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas,
-                                                          *mail_schemas, *teams_schemas]))
+                                                          *mail_schemas, *onenote_schemas, *teams_schemas]))
             state["pc_tools"] = True
             started = time.monotonic()
             with contextlib.suppress(Exception):  # Latenz, Rechnername und Sperre sind nur Anzeigen
@@ -1338,6 +1356,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 logger.warning("Jira-Story ohne Jira-Stories in dieser Sitzung abgewiesen")
                 return
             jira_story.klick_starten(data)
+        elif msg.type == onenote_werkzeuge.NACHRICHT:
+            # Klick "Als OneNote-Seite" (onenote_werkzeuge.py): Freigabekarte, erst danach die Seite; nur in Sitzungen mit OneNote
+            if onenote is None:
+                logger.warning("OneNote-Nachricht ohne OneNote in dieser Sitzung abgewiesen")
+                return
+            await onenote.client_nachricht(data)
         elif msg.type in office_werkzeuge.NACHRICHTEN:
             # Canvas als Datei speichern und gespeicherte Datei öffnen (office_werkzeuge.py): nur in Sitzungen mit Office-Dateien
             if office is None:
@@ -1544,7 +1568,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             with contextlib.suppress(Exception, asyncio.TimeoutError):
                 await asyncio.wait_for(buerogeraete.schliessen(), CLEANUP_DB_TIMEOUT_SECS)
         if mail is not None:
-            await mail.schliessen()  # nur das Nachfragen endet, ein freigegebener Versand läuft am PC weiter
+            with contextlib.suppress(Exception, asyncio.TimeoutError):  # wartende Versände zurückholen, kurz begrenzt
+                await asyncio.wait_for(mail.schliessen(), CLEANUP_DB_TIMEOUT_SECS)
         if jira_story is not None:  # offene Jira-Karten ablehnen, den Client schließen
             with contextlib.suppress(Exception, asyncio.TimeoutError):
                 await asyncio.wait_for(jira_story.schliessen(), CLEANUP_DB_TIMEOUT_SECS)

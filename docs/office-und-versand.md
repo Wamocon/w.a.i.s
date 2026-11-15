@@ -150,7 +150,7 @@ läuft das neue Outlook, öffnet W.A.I.S. einen fertigen Entwurf mit Anhang, und
 | Deep Link `ms-outlook://mail/deeplink/compose?...` | neues Fenster mit "Diese Aktion wird noch nicht unterstützt" | B |
 | `olk.exe` mit `mailto:...&attach=...` | Entwurf mit Empfänger, Betreff, Text und Signatur, ohne Anhang: nur Rückfall, dann zeigt der Explorer den Anhang markiert | B |
 | Standardprogramm für `.eml` und `mailto` | am PC das klassische Outlook, also das falsche, das dafür erst gestartet würde; deshalb nicht ausgeführt und nicht genutzt | B (Zuordnung) |
-| Senden über das klassische Outlook per COM | am PC nicht geprüft: Das klassische Outlook läuft dort nicht, und in keinem Test wird gesendet. Attrappen decken Auflösung, Signatur, Frist, Zurückholen und die Prüfung vor dem Senden ab; der Echttest braucht ein laufendes klassisches Outlook | V |
+| Senden über das klassische Outlook per COM (Echttest am 15.11.2026 mit Nikos Postfach als einzigem Empfänger) | Zurückholen in der Frist und die Prüfung auf Veränderung vor dem Senden gingen. Senden scheiterte zuerst mit "Falscher Parameter": Der unsichtbare Inspector, über den Outlook die Signatur einsetzt, blieb offen. Mit geschlossenem Inspector kam die Mail mit Konto, Signatur unter dem Text, Anhang mit Umlaut im Namen und korrekten Umlauten an. Seitdem schließt der Host den Inspector nach dem Speichern und sendet nicht, solange die Mail in Outlook geöffnet ist | B (Senden mit der Korrektur noch einmal am Gerät bestätigen) |
 
 Die Frist von 30 Sekunden hält der Host selbst (Mail unter Entwürfe, Senden erst danach), nicht Outlooks `DeferredDeliveryTime`: Den Zeitpunkt
 arbeitet dort Exchange ab, Zurückholen hieße ein Element im Postausgang finden, und beides ließe sich nur mit echtem Senden prüfen. Fällt der
@@ -239,7 +239,14 @@ und richtet die Umgebung neu ein, sobald sich der Hash von `uv.lock` ändert (`d
 - **Outlook:** Es gibt nur eine Instanz, COM hängt sich an das laufende klassische Outlook. Empfänger löst der Host über `Namespace.CreateRecipient` und `Resolve` auf,
   ohne Entwurf. Gesendet wird mit festem Konto (`SendUsingAccount`, Konto aus der Host-Konfiguration, nie vom Modell), Text als reiner Text, Anhänge nur aus dem Register.
   Der "Object Model Guard" von Outlook kann beim Senden nachfragen, wenn der Virenschutz nicht als aktuell gemeldet ist (V, Paket 0).
-- **OneNote:** `GetHierarchy`, `CreateNewPage`, `UpdatePageContent` mit OneNote-XML, danach `NavigateTo`. Ziel ist ein fester Abschnitt aus der Host-Konfiguration (Q6).
+- **OneNote (umgesetzt in Paket 4, `host/office_onenote.py`):** comtypes mit der Typbibliothek (die späte Bindung von pywin32 findet `GetHierarchy`
+  nicht), `GetHierarchy`, `OpenHierarchy`, `CreateNewPage`, `UpdatePageContent` mit OneNote-XML im Namensraum 2013, danach `NavigateTo`. Zeitgrenzen: 30 Sekunden
+  zum Lesen vor der Karte, 90 Sekunden zum Anlegen nach dem Klick (ein neues Notizbuch im OneDrive braucht länger). Ziel nach Q6 (Entscheidung von Niko): nur das
+  Notizbuch mit Anzeigenamen `W.A.I.S.` im OneDrive der Firma, Abschnitt `W.A.I.S`, nie ein anderes Notizbuch. Das OneDrive der Firma ist das einzige
+  OneDrive-for-Business-Konto am PC (`HKCU\Software\Microsoft\OneDrive\Accounts\Business*`); bei mehreren Konten grenzt `WAMO_ONENOTE_DOMAENE` (Umgebung des
+  Hosts, Domänen mit Komma) es ein. Fehlt das Notizbuch, legt der Host es erst nach dem Klick an seiner Adresse im OneDrive an (Ordner `W.A.I.S`, weil SharePoint
+  keinen Punkt am Ende eines Ordnernamens erlaubt und aus `W.A.I.S..one` `W.A.I.S_` macht). Ohne OneNote, ohne eindeutiges Firmenkonto oder mit einem Notizbuch
+  `W.A.I.S.` anderswo: Rückfall als Word-Datei in `Dokumente\WAIS`, aber nur, wenn `WAMO_OFFICE` auch `dateien` enthält, sonst eine klare Ablehnung.
 - **Erkennung:** Ein Lese-Werkzeug `office_faehigkeiten` meldet, was am PC geht (Bibliotheken, Word, klassisches Outlook, OneNote, `msteams:` registriert). Der Kern
   registriert nur Werkzeuge, die auch funktionieren, und die Oberfläche zeigt nur diese Formate.
 
@@ -251,7 +258,7 @@ Entwurf unten: bis zu 10 Empfänger (Gruppenchat, `topicName` als Gruppenname nu
 statt `host/teams_link.py`, Link `msteams://teams.microsoft.com/l/chat/0/0?users=...&message=...` (Microsoft Learn, "Deep link to a
 Teams chat": `users` nur als UPN in Mailform, `message` steht als Entwurf im Eingabefeld). Microsoft nennt keine Längengrenze; der Host
 begrenzt den Text auf 1000 Zeichen und den ganzen Link auf 2000 (unter 2083, `INTERNET_MAX_URL_LENGTH`), zu lang heißt Hinweis, nie ein
-gekürzter Text. Empfänger nur intern (wie Mails: `WAMO_MAIL_INTERN`, exakt gleiche Domäne), Namen nur über das Adressbuch des
+gekürzter Text. Empfänger nur intern (wie Mails: `WAMO_MAIL_INTERN`, exakt gleiche Domäne; so entschieden am 15.11.2026), Namen nur über das Adressbuch des
 klassischen Outlooks (`office_outlook_com._aufloesen`), mehrdeutig heißt Rückfrage nach der Adresse. Am PC geprüft: `msteams:` ist
 registriert (`"ms-teams.exe" "%1"`), der Link mit der eigenen Adresse öffnet den Chat mit sich selbst; lag dort schon ein eigener
 Entwurf, ließ Teams ihn stehen und zeigte den Text aus dem Link nicht (nichts überschrieben, nichts gesendet). Ob der Text in einem
@@ -355,7 +362,7 @@ Die vier PC-Werkzeuge verlangen zusätzlich PC-Steuerung und Sperre (`voice-core
 | `office_datei_oeffnen(kennung)` | Datei aus dem Register öffnen | `change` | |
 | `outlook_mail_anfragen(an, cc, betreff, text, anhaenge, anlass)` | auflösen, prüfen, Anfrage | `critical` | `mail` |
 | `teams_chat_anfragen(an, text, gruppenname, anlass)` | auflösen, prüfen, Anfrage | `critical` | `teams` |
-| `onenote_seite_anfragen(inhalt, titel, anlass)` | prüfen, Anfrage | `critical` | `onenote` |
+| `onenote_seite_anfragen(inhalt, titel, anlass, canvas_id)` | prüfen, Firmenkonto und Notizbuch lesen, Anfrage | `critical` | `onenote` |
 
 Ein Hostschalter, die Datei `%LOCALAPPDATA%\WAMO\office.aus`, sperrt alle sechs sofort (bei jedem Aufruf geprüft). `_inhalt_audit` und `_ausfuehren` bekommen die drei
 neuen Arten (`wamo_host.py:2074`, `:2184`).
@@ -381,7 +388,9 @@ Domänen außerhalb ASCII zeigt die Karte in Punycode und markiert sie.
 **Teams (Job `pc`, Aktion `teams`).** Grund "Teams-Chat mit vorbereitetem Text öffnen", Ziel "Microsoft Teams". Detail: An mit Name und Adresse, Text mit Präfix,
 Schlusssatz "W.A.I.S. sendet nicht, du drückst in Teams selbst Enter."
 
-**OneNote (Job `pc`, Aktion `onenote`).** Grund "Seite in OneNote anlegen", Ziel "OneNote" mit Notizbuch und Abschnitt `WAIS`, Detail: Titel und ganzer Inhalt.
+**OneNote (Job `pc`, Aktion `onenote`).** Grund "Seite in OneNote anlegen", Ziel "OneNote" mit Notizbuch `W.A.I.S.` und Abschnitt `W.A.I.S` (jeweils mit
+"wird neu angelegt", wenn sie fehlen) und dem Konto des OneDrive der Firma, Detail: Titel und ganzer Inhalt. Die Karte gilt 300 Sekunden wie die für PowerShell und
+Webseiten. Dieselbe Karte entsteht auch über den Knopf "Als OneNote-Seite" im Canvas.
 
 **Jira (Job `jira`).** Überschrift "Jira-Story freigeben". Ziel "Jira, Projekt WMCNL" mit dem Projektnamen aus Jira. Detail: Typ Story, Epic mit Schlüssel und Titel, Titel,
 Beschreibung und Akzeptanzkriterien, jede Freitextzeile mit dem Präfix "Größer-Zeichen und Leerzeichen" wie bei den Labor-Karten (`labor_freigaben.py:73`).
@@ -500,7 +509,7 @@ Nur echte Entscheidungen; ohne Antwort gilt die Empfehlung. Nikos Hände sind mi
 | Q3 | Ablage und Speichern: Ordner `Dokumente\WAIS` statt `Dokumente\W.A.I.S.` (Windows streicht den Schlusspunkt)? Und Dateien ohne Karte speichern und öffnen, weil nichts den PC verlässt? | Beides ja | vor P1 |
 | Q4 | **N:** eine Stunde am PC für den Prüfauftrag P0 (Outlook, Teams, OneNote, Word) | Mo 30.11. oder Di 1.12. | Mo 30.11. |
 | Q5 | Mail: Sendeverzögerung von 30 Sekunden mit "Zurückholen" in W.A.I.S., und Signatur aus Outlook anhängen? | Verzögerung ja, wenn P0 sie am Gerät belegt; Signatur ja | vor P2 |
-| Q6 | OneNote: In welches Notizbuch sollen die Seiten? | eigenes, nicht geteiltes Notizbuch, Abschnitt "WAIS" | vor P4 |
+| Q6 | OneNote: In welches Notizbuch sollen die Seiten? | entschieden: eigenes Notizbuch `W.A.I.S.` im OneDrive der Firma, Abschnitt `W.A.I.S` (4.4) | vor P4 |
 
 ## 13. Neue Namen (passend zum Namensvertrag in `CLAUDE.md`)
 
@@ -509,7 +518,7 @@ Nur echte Entscheidungen; ohne Antwort gilt die Empfehlung. Nikos Hände sind mi
 | Kern, Werkzeuge | `canvas_exportieren`, `outlook_senden`, `teams_nachricht`, `onenote_seite`, `jira_story_anlegen` |
 | Kern, Module | `voice-core/office_werkzeuge.py`, `voice-core/canvas_quelle.py`, `voice-core/jira_client.py`, `voice-core/jira_freigaben.py`, `voice-core/jira_werkzeuge.py` |
 | Kern, Umgebung | `WAMO_OFFICE` (Liste aus `dateien`, `outlook`, `teams`, `onenote`, Standard leer), `WAMO_JIRA` (an oder aus, Standard aus), `WAMO_JIRA_URL`, `WAMO_JIRA_EMAIL`, `WAMO_JIRA_TOKEN`, `WAMO_JIRA_PROJEKTE` (Standard `WMCNL`), `WAMO_JIRA_STANDARD_PROJEKT` (Standard `WMCNL`) |
-| Kern, Nachrichten | Client `canvas_export`, `datei_oeffnen`; Server `datei`, `jira_ergebnis`; Feld `office` in `betrieb`; Feld `warnung` in Freigabepunkten; Job `jira`; Aktionen `mail`, `teams`, `onenote` |
+| Kern, Nachrichten | Client `canvas_export`, `datei_oeffnen`, `onenote_seite`; Server `datei`, `onenote`, `jira_ergebnis`; Feld `onenote` in `betrieb`; Feld `office` in `betrieb`; Feld `warnung` in Freigabepunkten; Job `jira`; Aktionen `mail`, `teams`, `onenote` |
 | Host, Werkzeuge | `office_faehigkeiten`, `office_datei_erstellen`, `office_datei_oeffnen`, `outlook_mail_anfragen`, `teams_chat_anfragen`, `onenote_seite_anfragen`; Freigabearten `mail`, `teams`, `onenote` |
 | Host, Module und Dateien | `host/office_ablage.py`, `host/office_dateien.py`, `host/office_com.py`, `host/teams_link.py`, `host/vorlagen/wmc-logo.png`; Ordner `Dokumente\WAIS`; Register `%LOCALAPPDATA%\WAMO\ablage.json`; Schalter `%LOCALAPPDATA%\WAMO\office.aus` |
 | Oberfläche | `ui/src/lib/export.ts`, Menü "Exportieren" im Canvas-Kopf |

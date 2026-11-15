@@ -1,7 +1,7 @@
 """Outlook am PC (Paket 2 von docs/office-und-versand.md): welches Outlook aktiv ist, Senden über das klassische Outlook nach der
 Freigabe (30 Sekunden zurückholbar, mit der Outlook-Signatur) und fertige Entwürfe im neuen Outlook, das die Person selbst sendet.
 
-Erkennung (erkennen): Es zählt, welches Outlook gerade läuft, nicht was installiert ist. Am PC von Niko (15.11.2026) ist das klassische
+Erkennung (erkennen): Es zählt, welches Outlook gerade läuft, nicht was installiert ist. Am Büro-PC (15.11.2026) ist das klassische
 Outlook installiert, per COM registriert und hat ein Profil, aktiv ist aber das neue Outlook (olk.exe); der Umschalter UseNewOutlook ist
 dort nicht gesetzt, und mailto sowie .eml gehören dem klassischen Outlook. Registry und Zuordnungen allein führten also in die Irre.
   * Läuft das neue Outlook, gibt es nur den Entwurf im neuen Outlook, auch wenn das klassische zusätzlich läuft (im Zweifel nie senden).
@@ -389,6 +389,11 @@ def erkennen(lage: Lage | None = None, com_ok: Callable[[], bool] | None = None)
 
 
 # ---------- Karte ----------
+def utf16_laenge(text_: str) -> int:
+    """Länge in UTF-16-Einheiten, wie die Oberfläche zählt (ein Emoji zählt zwei)."""
+    return len(text_.encode("utf-16-le")) // 2
+
+
 def _groesse(n: int) -> str:
     if n < 1024:
         return f"{n} Bytes"
@@ -543,12 +548,31 @@ def _entfernen(pfad: Path) -> None:
         pass
 
 
-def _spaeter_loeschen(pfad: Path) -> None:
+def _spaeter_loeschen(pfad: Path, nach: float = ENTWURF_AUFBEWAHREN_SECS) -> None:
     """Die Entwurfsdatei (Text und Anhang) nach ENTWURF_AUFBEWAHREN_SECS löschen; das neue Outlook hat sie dann längst gelesen. Fällt
-    der Host vorher aus, räumt der nächste Entwurf sie weg (_aufraeumen)."""
-    uhr = threading.Timer(ENTWURF_AUFBEWAHREN_SECS, _entfernen, args=(pfad,))
+    der Host vorher aus, räumt der nächste Start (beim_start_aufraeumen) oder der nächste Entwurf (_aufraeumen) sie weg."""
+    uhr = threading.Timer(nach, _entfernen, args=(pfad,))
     uhr.daemon = True
     uhr.start()
+
+
+def beim_start_aufraeumen(ordner: Path | None = None,
+                          loeschen_planen: Callable[[Path, float], None] | None = None) -> None:
+    """Beim Start des Hosts: alte Entwurfsdateien löschen, junge zum Löschen vormerken (der Zeitgeber des vorigen Laufs ist weg)."""
+    ordner, planen = Path(ordner or ENTWURF_ORDNER), loeschen_planen or _spaeter_loeschen
+    try:
+        dateien = list(ordner.glob("*.eml"))
+    except OSError:
+        return
+    for pfad in dateien:
+        try:
+            rest = min(ENTWURF_AUFBEWAHREN_SECS, ENTWURF_AUFBEWAHREN_SECS - (time.time() - pfad.stat().st_mtime))
+        except OSError:
+            continue
+        if rest <= 0:
+            _entfernen(pfad)
+        else:
+            planen(pfad, rest)
 
 
 def _aufraeumen(ordner: Path) -> None:
@@ -573,9 +597,13 @@ def neu_entwurf(mail: Mail, anhang_daten: list[tuple[Anhang, bytes]], *, ordner:
         _aufraeumen(ordner)
         vorher = {w.get("hwnd") for w in fenster() if _passend(w, mail.betreff)}
         pfad = ordner / f"{secrets.token_hex(8)}.eml"
+    except (OSError, ValueError) as e:
+        return _rueckfall(mail, anhang_daten, starten, alias, type(e).__name__)
+    try:
         pfad.write_bytes(eml(mail, anhang_daten))
         starten([str(alias), str(pfad)])
     except (OSError, ValueError) as e:
+        _entfernen(pfad)  # Text und Anhangskopie nicht liegen lassen
         return _rueckfall(mail, anhang_daten, starten, alias, type(e).__name__)
     (loeschen_planen or _spaeter_loeschen)(pfad)
     ende, gesehen = time.monotonic() + warten, False

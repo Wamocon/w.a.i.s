@@ -57,7 +57,8 @@ TEXT_MAX = 6000
 VERSAND_RE = re.compile(r"[0-9a-f]{16}")
 PC_AUS = "Die PC-Steuerung ist aus. Sie lässt sich in der Oberfläche einschalten."
 WARNUNG = ("Im selben Gespräch kamen Inhalte aus Web, Mail oder Bildschirm. Prüfe Empfänger und Text besonders genau.")
-ENDE = ("gesendet", "zurueckgeholt", "fehler", "unbekannt")
+ENDE = ("gesendet", "zurueckgeholt", "fehler", "unklar", "unbekannt")
+SCHLIESSEN_TIMEOUT_SECS = 3.0
 
 
 def outlook_an(wert: str | None = None) -> bool:
@@ -313,7 +314,7 @@ class OutlookMail:
         if zustand == "gesendet":
             text = text or "Die Mail ist gesendet."
         elif zustand == "unklar":
-            text = "Ob die Mail rausging, ließ sich nicht klären. Bitte in Outlook unter Gesendete Elemente und Entwürfe nachsehen."
+            text = text or "Ob die Mail rausging, ließ sich nicht klären. Bitte in Outlook unter Gesendete Elemente und Entwürfe nachsehen."
         await self._melden({"type": "mail_versand", "id": vid, "zustand": zustand, "text": text})
         await self._protokoll(vid, zustand)
         if zustand in ("fehler", "unklar") and self._melden_llm is not None:
@@ -353,9 +354,21 @@ class OutlookMail:
         return antwort if isinstance(antwort, dict) else {}
 
     async def schliessen(self) -> None:
-        """Sitzungsende: nur das Nachfragen endet; ein freigegebener Versand läuft am PC wie freigegeben weiter."""
+        """Sitzungsende: Nachfragen beenden und jeden Versand dieser Sitzung zurückholen, der noch wartet. Ohne Oberfläche gäbe es
+        keinen Knopf "Zurückholen" mehr; die Mail bleibt dann unter Entwürfe (am PC läuft der Versand sonst weiter)."""
         for t in list(self._aufgaben):
             t.cancel()
+        offen = sorted(self._eigene - self._erledigt)
+        client = self._client()
+        schluessel = freigabe_schluessel(client) if client is not None else None
+        if not offen or not schluessel:
+            return
+
+        async def zurueck(vid: str) -> None:
+            await self._host(lambda c: call_host_tool(c, "outlook_zurueckholen", {"versand_id": vid, "schluessel": schluessel}),
+                             SCHLIESSEN_TIMEOUT_SECS)
+
+        await asyncio.gather(*(zurueck(vid) for vid in offen), return_exceptions=True)
 
     # ---------- Ausgaben ----------
     async def _melden(self, nachricht: dict) -> None:

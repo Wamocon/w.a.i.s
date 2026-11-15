@@ -2,7 +2,7 @@
 // Ausführen im Ordner ui/:  npm test
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { exportFormate, hinweisText, knopfText, OFFICE_FORMATE } from "./export.ts";
+import { exportFormate, hinweisText, knopfText, OFFICE_FORMATE, ONENOTE_KNOPF, onenoteMoeglich } from "./export.ts";
 import { parseServerMessage } from "./nachrichten.ts";
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -69,4 +69,29 @@ test("betrieb.office: nur bekannte Formate, leer heißt nichts", () => {
   assert.ok(ohne && ohne.type === "betrieb" && ohne.office === undefined);
   const kaputt = parseServerMessage({ type: "betrieb", modus: "buero", pc: "verbunden", office: "word" });
   assert.ok(kaputt && kaputt.type === "betrieb" && kaputt.office === undefined);
+});
+
+test("Als OneNote-Seite: nur eigene, gespeicherte Elemente und nur, wenn der Kern es meldet", () => {
+  assert.equal(ONENOTE_KNOPF, "Als OneNote-Seite");
+  for (const kind of ["dokument", "tabelle", "code", "mermaid"] as const) assert.equal(onenoteMoeglich({ id: ID, kind }, true), true);
+  assert.equal(onenoteMoeglich({ id: ID, kind: "dokument" }, false), false);
+  assert.equal(onenoteMoeglich({ id: ID, kind: "dokument" }, undefined), false);
+  assert.equal(onenoteMoeglich({ kind: "dokument" }, true), false);
+  assert.equal(onenoteMoeglich({ id: "dev-42", kind: "dokument" }, true), false);
+  assert.equal(onenoteMoeglich({ id: ID, kind: "dokument", teilbar: { id: ID } }, true), false);
+  assert.equal(onenoteMoeglich({ id: ID, kind: "dokument", geteilt: { von: "Anna", recht: "lesen" } }, true), false);
+});
+
+test("betrieb.onenote nur als echtes true, Nachricht onenote mit ok und Text", () => {
+  const an = parseServerMessage({ type: "betrieb", modus: "buero", pc: "verbunden", onenote: true });
+  assert.ok(an && an.type === "betrieb" && an.onenote === true);
+  const kaputt = parseServerMessage({ type: "betrieb", modus: "buero", pc: "verbunden", onenote: "ja" });
+  assert.ok(kaputt && kaputt.type === "betrieb" && kaputt.onenote === undefined);
+  assert.deepEqual(parseServerMessage({ type: "onenote", ok: true, text: "Liegt zur Freigabe bereit." }), {
+    type: "onenote", ok: true, text: "Liegt zur Freigabe bereit.",
+  });
+  assert.deepEqual(parseServerMessage({ type: "onenote", ok: false }), { type: "onenote", ok: false, text: "Nicht angelegt." });
+  assert.equal(parseServerMessage({ type: "onenote", ok: "ja", text: "x" }), null);
+  const lang = parseServerMessage({ type: "onenote", ok: false, text: "x".repeat(5000) });
+  assert.ok(lang && lang.type === "onenote" && lang.text.length <= 400);
 });

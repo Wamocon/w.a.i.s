@@ -14,7 +14,7 @@ untrusted: auch Text aus Websuche, Mails oder Dateien kann im Modell als Anweisu
   critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung durch einen Admin in der UI (auch github_repo_anlegen und,
             nur für den Kern, outlook_mail_anfragen: Senden über das klassische Outlook ist critical, ein Entwurf im neuen Outlook
             ist change, kommt aber ebenso erst nach der Karte; teams_chat_anfragen: Teams-Chat mit Text im Eingabefeld, W.A.I.S.
-            sendet dort nie selbst; Schalter office.aus)
+            sendet dort nie selbst; Schalter office.aus; nur für den Kern auch onenote_seite_anfragen)
   blocked   nie
 Freigaben kann das Modell NICHT selbst erteilen. Solange eine Anfrage offen ist oder eine freigegebene Aktion läuft,
 ruhen alle Eingaben (status=wartet), und die eigene Oberfläche (Freigabekarte) bedient WAMO nie: Das Modell kann die
@@ -55,6 +55,7 @@ import live_bild
 import office_ablage
 import office_com
 import office_dateien
+import office_onenote
 import office_outlook
 import office_outlook_com
 import office_teams
@@ -2133,9 +2134,12 @@ def office_faehigkeiten() -> dict:
         return {**aus, "formate": []}
     faehig = office_com.faehigkeiten()
     mail = office_outlook.verfuegbar()  # welches Outlook gerade läuft, prüft erst die Mail-Anfrage (hier nie COM: schnell bleiben)
+    onenote = office_onenote.onenote_vorhanden()
     teams = office_teams.verfuegbar()  # Teams-App oder Browser; welcher Weg gilt, steht erst auf der Karte
-    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"], "mail": mail, "teams": teams})
-    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE, "mail": mail, "teams": teams}
+    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"], "mail": mail, "onenote": onenote,
+            "teams": teams})
+    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE, "mail": mail,
+            "onenote": onenote, "teams": teams}
 
 
 @mcp.tool()
@@ -2278,7 +2282,7 @@ def _versand() -> office_outlook_com.Versandliste:
 def _mail_versenden(v: office_outlook_com.Versand) -> None:
     """Nach der Frist (im Faden der Versandliste): den gespeicherten Entwurf senden, wenn er noch derselbe ist."""
     try:
-        office_outlook_com.klassisch_senden(v.ort, v.pruef)
+        office_outlook_com.klassisch_senden(v.ort, v.pruef, konto=v.ort.get("konto", ""))
     except Exception as e:
         _audit({"tool": "outlook_versand", "versand_id": v.id, "risk": "critical", "result": "error", "error": str(e)[:200]})
         raise
@@ -2299,7 +2303,9 @@ def _mail_anhaenge(kennungen: object) -> tuple[office_outlook.Anhang, ...]:
             pfad = ablage.pfad(kennung)
         except office_ablage.AblageFehler as e:
             raise office_outlook.MailFehler(str(e)) from e
-        eintrag = register[kennung]
+        eintrag = register.get(kennung)
+        if eintrag is None:  # die Datei liegt noch da, ihr Eintrag ist inzwischen weg
+            raise office_outlook.MailFehler("Diese Datei kennt W.A.I.S. nicht mehr (nur selbst erzeugte Dateien).")
         anhaenge.append(office_outlook.Anhang(kennung=kennung, name=pfad.name, pfad=pfad, groesse=int(eintrag.get("groesse", -1)),
                                               sha256=str(eintrag.get("sha256", ""))))
     office_outlook.anhaenge_lesen(anhaenge)  # Größe und Prüfsumme jetzt schon: eine veränderte Datei kommt nicht auf die Karte
@@ -2340,6 +2346,9 @@ def _mail_anfragen(an: object, cc: object, betreff_roh: object, text_roh: object
     except office_outlook.MailFehler as e:
         _audit({"tool": tool, "risk": "rejected", "error": str(e)[:200]})
         return {"status": "rejected", "summary": str(e)}
+    except (KeyError, office_ablage.AblageFehler) as e:  # Register nicht lesbar oder im Umbau: keine Karte
+        _audit({"tool": tool, "risk": "rejected", "error": type(e).__name__})
+        return {"status": "rejected", "summary": "Der Anhang ist im Register von W.A.I.S. gerade nicht zu finden. Es ist nichts passiert."}
     mail = office_outlook.Mail(tuple(empf), betreff, text, anhaenge)
     senden, extern = weg.weg == "senden", any(e.extern for e in empf)
     if senden:
@@ -2353,8 +2362,12 @@ def _mail_anfragen(an: object, cc: object, betreff_roh: object, text_roh: object
     # Audit am PC: Adressen und Anhangsnamen ja, Betreff und Text nur als Länge und Prüfsumme
     audit = {**protokoll, "adressen": [e.smtp for e in empf], "anhang_namen": [a.name[:120] for a in anhaenge],
              "betreff": _text_audit(betreff), "text": _text_audit(text)}
+    detail = office_outlook.kartentext(mail, weg, konto, signatur)
+    if office_outlook.utf16_laenge(detail) > FREIGABE_DETAIL_MAX_MAIL:  # die Oberfläche zählt UTF-16-Einheiten und kürzte sonst
+        _audit({"tool": tool, "risk": "rejected", "grund": "zu lang für eine Freigabe", **audit})
+        return {"status": "rejected", "summary": MAIL_ZU_LANG}
     antwort = _anfrage(tool, "mail", {"mail": mail, "weg": weg.weg, "programm": weg.programm, "konto": konto["smtp"] if konto else ""},
-                       "mail", grund, office_outlook.kartentext(mail, weg, konto, signatur), ziel, MAIL_KARTE, audit,
+                       "mail", grund, detail, ziel, MAIL_KARTE, audit,
                        uia_control.sicherer_text(anlass, 200) if isinstance(anlass, str) and anlass else "",
                        detail_max=FREIGABE_DETAIL_MAX_MAIL, risiko="critical" if senden else "change", zu_lang=MAIL_ZU_LANG)
     if antwort.get("status") == "needs_approval":
@@ -2397,6 +2410,7 @@ def _mail_planen(mail: office_outlook.Mail, konto: str, daten: list) -> dict:
     with office_outlook.anhang_dateien(daten) as pfade:
         ort, pruef = office_outlook_com.com_lauf(
             lambda app: office_outlook_com.speichern(office_outlook_com.mail_bauen(app, mail, konto, pfade)))
+    ort["konto"] = konto  # das Konto der Karte: vor dem Senden noch einmal verglichen
     v = _versand().planen(ort, pruef, MAIL_VERZOEGERUNG_SECS)
     _audit({"tool": "outlook_mail", "risk": "critical", "versand_id": v.id, "verzoegerung_s": MAIL_VERZOEGERUNG_SECS})
     return {"status": "success", "weg": "senden",
@@ -2425,6 +2439,86 @@ def outlook_versand_status(versand_id: str) -> dict:
     if s is None:
         return {"status": "rejected", "zustand": "unbekannt", "summary": "Diesen Versand kennt W.A.I.S. nicht (mehr)."}
     return {"status": "success", **s}
+# ---------- OneNote-Seite aus dem Canvas (office_onenote.py) ----------
+# Nur für den Kern, nie in LLM_TOOLS: Das Sprachmodell ruft onenote_seite im Kern, der Kern liest das eigene Canvas-Element und schickt
+# hierher nur dessen feste Struktur. Der Host prüft selbst (Inhalt, Titel, Länge, Zeichen), liest nur das Standard-Notizbuch und legt eine
+# Freigabe-Anfrage an (critical, Art onenote). Die Seite entsteht erst nach dem Klick eines Admins (freigabe_entscheiden), genau einmal.
+# Fehlt OneNote für den Desktop oder ist es nicht bereit, gibt es keine Karte, sondern rueckfall "word" (der Kern speichert dann eine
+# Word-Datei). office.aus sperrt auch dieses Werkzeug. Das Audit nennt Notizbuch, Abschnitt und Seitenkennung, Titel und Inhalt nur als
+# Prüfsumme.
+ONENOTE_KARTE = ("Das legt eine Seite in deinem OneNote an. Ein Admin muss sie in der Oberfläche freigeben; bis dahin passiert "
+                 "nichts.")
+ONENOTE_FEHLT = "OneNote für den Desktop ist an diesem PC nicht installiert oder nicht per COM erreichbar."
+ONENOTE_ZU_LANG = (f"Das ist zu lang für die Freigabekarte (höchstens rund {FREIGABE_DETAIL_MAX} Zeichen). Bitte kürzer fassen oder "
+                   "als Word-Datei speichern.")
+ONENOTE_BREMSE = office_onenote.Bremse(office_onenote.SEITEN_JE_STUNDE, 3600)
+
+
+def _onenote_audit(seite: office_onenote.Seite, ziel: office_onenote.Ziel) -> dict:
+    return {"notizbuch": ziel.notizbuch[:80], "notizbuch_neu": not ziel.notizbuch_id, "abschnitt": ziel.abschnitt,
+            "abschnitt_neu": not ziel.abschnitt_id, "titel": _text_audit(seite.titel),
+            "inhalt": _text_audit("\n".join(office_onenote.text_zeilen(seite.inhalt)))}
+
+
+@mcp.tool()
+async def onenote_seite_anfragen(inhalt: dict, titel: str = "", anlass: str = "", canvas_id: str = "") -> dict:
+    """Nur für den Kern: Freigabe-Anfrage für eine neue OneNote-Seite aus einem Canvas-Inhalt (critical, nur per Karte, genau
+    einmal) im Standard-Notizbuch, Abschnitt W.A.I.S. Ohne OneNote für den Desktop: rueckfall "word", keine Karte."""
+    if aus := _office_aus("onenote_seite_anfragen"):
+        return aus
+    if vorab := _eingabe_vorab("onenote_seite_anfragen"):
+        return vorab
+    # Im Thread: OneNote startet beim ersten Zugriff und liest die Notizbücher (bis LESEN_TIMEOUT_SECS)
+    return await asyncio.to_thread(_onenote_anfragen, inhalt, titel, anlass, canvas_id)
+
+
+def _onenote_anfragen(roh: object, titel: object, anlass: object, canvas_id: object) -> dict:
+    tool = "onenote_seite_anfragen"
+    cid = canvas_id if isinstance(canvas_id, str) and CANVAS_ID_RE.fullmatch(canvas_id) else None
+    try:
+        seite = office_onenote.seite_pruefen(roh, titel)
+    except office_dateien.InhaltFehler as e:
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "error": str(e)[:200]})
+        return {"status": "rejected", "summary": str(e)}
+    detail = office_onenote.karten_detail(seite)
+    if len(detail) + detail.count("\n") > FREIGABE_DETAIL_MAX:
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "grund": "zu lang für eine Freigabe"})
+        return {"status": "rejected", "summary": ONENOTE_ZU_LANG}
+    if not office_onenote.onenote_vorhanden():
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "grund": "OneNote fehlt"})
+        return {"status": "rejected", "rueckfall": "word", "summary": ONENOTE_FEHLT}
+    if ONENOTE_BREMSE.voll():
+        _audit({"tool": tool, "risk": "rejected", "grund": "Rate-Grenze"})
+        return {"status": "rejected", "summary": "Zu viele OneNote-Seiten in kurzer Zeit (höchstens 10 je Stunde)."}
+    try:
+        ziel = office_onenote.ziel_pruefen()
+    except office_onenote.OneNoteFehler as e:  # Rückfall nur, wenn OneNote nicht taugt; bei "beschäftigt" oder Zeitgrenze später
+        _audit({"tool": tool, "risk": "rejected", "canvas_id": cid, "grund": "OneNote nicht bereit", "error": str(e)[:200]})
+        return {"status": "rejected", **({"rueckfall": "word"} if e.rueckfall else {}), "summary": str(e)}
+    text = uia_control.sicherer_text(anlass, 200) if isinstance(anlass, str) else ""
+    antwort = _anfrage(tool, "onenote", {"seite": seite, "ziel": ziel}, "onenote", "Seite in OneNote anlegen", detail,
+                       office_onenote.karten_ziel(ziel), ONENOTE_KARTE, {"canvas_id": cid, **_onenote_audit(seite, ziel)}, text)
+    if antwort["status"] == "needs_approval":
+        ONENOTE_BREMSE.zaehlen()  # nur Karten zählen, Fehlversuche verbrauchen nichts
+    return antwort
+
+
+def _onenote_ausfuehren(eintrag: dict) -> dict:
+    """Freigegebene Seite anlegen; Notizbuch und Abschnitt prüft office_onenote direkt davor noch einmal, office.aus auch hier."""
+    if aus := _office_aus("onenote_seite_anfragen"):
+        return aus
+    seite, ziel = eintrag["seite"], eintrag["ziel"]
+    try:
+        angelegt = office_onenote.seite_anlegen(seite, ziel, zeigen=not _ist_gesperrt())
+    except office_onenote.OneNoteFehler as e:
+        _audit({"tool": "onenote_seite_anfragen", "risk": "critical", "result": "error", "error": str(e)[:200]})
+        return {"status": "error", "summary": str(e)}
+    _audit({"tool": "onenote_seite_anfragen", "risk": "critical", "result": "success", "seite_id": angelegt["seite_id"][:80],
+            "notizbuch_neu": angelegt["notizbuch_neu"], "abschnitt_neu": angelegt["abschnitt_neu"]})
+    nb_neu = " (neu angelegt)" if angelegt["notizbuch_neu"] else ""
+    ab_neu = " (neu angelegt)" if angelegt["abschnitt_neu"] else ""
+    return {"status": "success", "summary": f"Seite „{seite.titel}“ liegt in OneNote im Notizbuch {angelegt['notizbuch'][:80]}"
+            f"{nb_neu}, Abschnitt {angelegt['abschnitt']}{ab_neu}, im OneDrive der Firma."}
 
 
 # ---------- Teams-Chat mit vorbereitetem Text (office_teams.py) ----------
@@ -2514,6 +2608,8 @@ def _inhalt_audit(eintrag: dict) -> dict:
     if art == "uia_text":
         return {"ziel": eintrag["titel"][:120], "nummer": eintrag["nummer"], "element": eintrag["knoten"].name[:60],
                 **_text_audit(eintrag["text"])}
+    if art == "onenote":  # Notizbuch und Abschnitt, Titel und Inhalt nur als Prüfsumme
+        return _onenote_audit(eintrag["seite"], eintrag["ziel"])
     if art == "github_anlegen":  # Repository und Sichtbarkeit, die Beschreibung nur als Prüfsumme
         return {"repo": f"{eintrag['org']}/{eintrag['name']}", "privat": eintrag["privat"],
                 **({"beschreibung": _text_audit(eintrag["beschreibung"])} if eintrag["beschreibung"] else {})}
@@ -2654,6 +2750,8 @@ def _ausfuehren(eintrag: dict) -> dict:
         return _github_anlegen_ausfuehren(eintrag)
     if art == "mail":
         return _mail_ausfuehren(eintrag)
+    if art == "onenote":
+        return _onenote_ausfuehren(eintrag)
     if art == "teams":
         return _teams_ausfuehren(eintrag)
     if art == "webseite":
@@ -2670,6 +2768,7 @@ def _ausfuehren(eintrag: dict) -> dict:
 
 
 if __name__ == "__main__":
+    office_outlook.beim_start_aufraeumen()  # Entwurfsdateien des vorigen Laufs (Text und Anhang) nicht liegen lassen
     if "--stdio" in sys.argv:
         mcp.run(transport="stdio")
     elif "--http" in sys.argv:
