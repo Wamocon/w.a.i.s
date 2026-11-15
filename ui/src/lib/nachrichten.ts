@@ -1,5 +1,6 @@
 import type { CanvasItem } from "@/components/Canvas";
 import type { AuftragStand } from "./auftragStart.ts"; // relativ, nur der Typ (beide Dateien laden unter node:test)
+import { JIRA_PROJEKTE_MAX, linkOk, projektOk, schluesselOk, type JiraErgebnis, type JiraStatus } from "./jiraStory.ts";
 import { istOfficeFormat, OFFICE_FORMATE, type DateiMeldung, type OfficeFormat } from "./export.ts";
 import { MAIL_VERSAND_ZUSTAENDE, type MailVersandZustand } from "./mail.ts";
 
@@ -291,7 +292,10 @@ export type ServerMessage =
   /** Einlernen des Stimmabdrucks: Zustand, aufgenommene Sekunden reiner Sprache, Ziel in Sekunden, bei fehler ein Satz dazu */
   | { type: "stimmabdruck"; status: AbdruckStatus; sekunden?: number; ziel?: number; text?: string }
   /** Einwilligungstext zum Stimmabdruck, kommt vom Kern; version geht beim Start in der Antwort mit zurück */
-  | { type: "stimmabdruck_einwilligung"; version: string; text: string };
+  | { type: "stimmabdruck_einwilligung"; version: string; text: string }
+  /** Jira-Stories (lib/jiraStory.ts): der Kern bietet sie an (Knopf am Canvas), und was nach dem Klick auf die Karte geschah */
+  | ({ type: "jira_status" } & JiraStatus)
+  | ({ type: "jira_ergebnis" } & JiraErgebnis);
 
 /** Stimmerkennung des Kerns (voice-core): Stand, Betriebsart und Ergebnis der letzten Äußerung, dazu das Einlernen des Stimmabdrucks. */
 export const STIMME_STATUS = ["aus", "fehlt", "laedt", "kaputt", "bereit"] as const;
@@ -818,6 +822,21 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
       const text = m.text.replace(STEUER, "").trim();
       if (!text || text.length > EINWILLIGUNG_MAX) return null;
       return { type: "stimmabdruck_einwilligung", version: m.version, text };
+    }
+    case "jira_status": {
+      // Nur gültige Projektschlüssel; ohne das Standardprojekt in der Liste gilt die Nachricht nicht (dann kein Knopf)
+      if (!Array.isArray(m.projekte) || !isStr(m.standard)) return null;
+      const projekte = m.projekte.slice(0, JIRA_PROJEKTE_MAX).filter((p): p is string => isStr(p) && projektOk(p));
+      if (!projekte.includes(m.standard)) return null;
+      return { type: "jira_status", projekte, standard: m.standard };
+    }
+    case "jira_ergebnis": {
+      if (typeof m.ok !== "boolean" || !isStr(m.text)) return null;
+      const text = sauber(m.text, 300, false).trim();
+      if (!m.ok) return { type: "jira_ergebnis", ok: false, text }; // nicht angelegt: nie Schlüssel oder Verweis
+      if (!isStr(m.schluessel) || !schluesselOk(m.schluessel)) return null;
+      const link = isStr(m.link) && linkOk(m.link, m.schluessel) ? m.link : undefined;
+      return { type: "jira_ergebnis", ok: true, text, schluessel: m.schluessel, ...(link ? { link } : {}) };
     }
     default:
       return null;

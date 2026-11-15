@@ -18,6 +18,7 @@ import { versandText, type MailVersand } from "./mail.ts"; // relativ aus demsel
 import { fristLoeschen } from "./auftragFrist.ts"; // relativ aus demselben Grund
 import { AUFGABE_LEER, naechsteAufgabe, type Aufgabe } from "./aufgabenanzeige.ts"; // relativ aus demselben Grund
 import { auftraegeNachQuittung } from "./auftragStart.ts"; // relativ aus demselben Grund
+import { JIRA_LEER, type JiraStand } from "./jiraStory.ts"; // relativ aus demselben Grund
 import { liveBildLoeschen } from "./liveBild.ts"; // relativ aus demselben Grund
 import { PC_EIN_LEER, type PcEinschalten } from "./pcSchalter.ts"; // relativ aus demselben Grund
 import { STILL_AUS, type StillStand } from "./stillStart.ts"; // relativ aus demselben Grund
@@ -177,6 +178,8 @@ export type WamoState = {
   ansage: string;
   /** kurzer sichtbarer Hinweis (z. B. "PC-Steuerung automatisch eingeschaltet"), verschwindet selbst */
   toast: { key: number; text: string } | null;
+  /** Jira-Stories (lib/jiraStory.ts): Angebot des Kerns (Knopf am Canvas) und das letzte Ergebnis, bis die Person es schließt */
+  jira: JiraStand;
   /** zuletzt gespeicherte Datei (Canvas als Word, Excel, ...): Hinweis mit "Öffnen", bis die Person ihn schließt */
   datei: Extract<DateiMeldung, { ok: true }> | null;
   /** zählt die Antworten auf "Speichern" (Erfolg oder Fehler): ein gesperrter Knopf im Canvas wird damit wieder frei */
@@ -228,6 +231,7 @@ export const initialState: WamoState = {
   einwilligungAbgelehnt: false,
   ansage: "",
   toast: null,
+  jira: JIRA_LEER,
   datei: null,
   dateiAntworten: 0,
   mailAntwort: { n: 0, ok: true },
@@ -490,6 +494,14 @@ export function abdruckAnsichtSchliessen() {
 export function nachrichtAbgelehnt(roh: unknown) {
   if (typeof roh !== "object" || roh === null || (roh as { type?: unknown }).type !== "stimmabdruck_einwilligung") return;
   wamo.set((s) => ({ ...s, einwilligung: null, einwilligungAbgelehnt: true }));
+}
+
+// ---------- Jira-Stories: Ergebnis schließen ----------
+let jiraKey = 0;
+
+/** Den Hinweis mit dem Ergebnis einer Jira-Story schließen (components/JiraStory.tsx). */
+export function jiraErgebnisSchliessen() {
+  wamo.set((s) => (s.jira.ergebnis ? { ...s, jira: { ...s.jira, ergebnis: null } } : s));
 }
 
 // ---------- Servernachrichten in den Store übernehmen ----------
@@ -756,6 +768,17 @@ export function applyServerMessage(msg: ServerMessage) {
         return { ...s, abdruck, abdruckLokalZu: abdruck ? false : s.abdruckLokalZu, ansage: abdruckAnsage(msg.status) ?? s.ansage };
       });
       return;
+    case "jira_status":
+      wamo.set((s) => ({ ...s, jira: { ...s.jira, status: { projekte: msg.projekte, standard: msg.standard } } }));
+      return;
+    case "jira_ergebnis": {
+      // Ergebnis einer Jira-Story (nach dem Klick auf die Karte oder warum es keine Karte gab): bleibt stehen, bis die Person es schließt
+      jiraKey += 1;
+      const { type: _typ, ...ergebnis } = msg;
+      void _typ;
+      wamo.set((s) => ({ ...s, jira: { ...s.jira, ergebnis: { ...ergebnis, key: jiraKey } }, ansage: `Jira: ${ergebnis.text}` }));
+      return;
+    }
     case "leiser_stopp":
     case "stimme_leiser":
     case "mikrofon":

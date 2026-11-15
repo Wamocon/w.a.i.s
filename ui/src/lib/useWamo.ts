@@ -171,6 +171,9 @@ export type WamoAktionen = {
   modellzugang?: (anfrage: ModellzugangAnfrage) => boolean;
   /** Stimmabdruck einlernen und löschen (lib/stimme.ts). Optional, damit die Vorschau ohne Kern auskommt. */
   stimmabdruck?: StimmabdruckAktionen;
+  /** Knopf "Als User Story in Jira" am Canvas: fragt beim Kern die Freigabekarte für dieses eigene Dokument an (lib/jiraStory.ts), legt
+   *  nie selbst etwas an; true, wenn gesendet. Optional, damit die Vorschau ohne Kern auskommt. */
+  jiraStory?: (canvasId: string) => boolean;
   /** Canvas als Datei am PC speichern und die gespeicherte Datei öffnen (lib/export.ts). Optional, damit die Vorschau ohne Kern auskommt. */
   office?: OfficeAktionen;
   /** Mail über Outlook vorbereiten und einen Versand zurückholen (lib/mail.ts). Optional, damit die Vorschau ohne Kern auskommt. */
@@ -216,6 +219,7 @@ type ClientMessage =
   | { type: "modellzugang"; data: ModellzugangAnfrage }
   | { type: "stimmabdruck"; data: { aktion: "start"; einwilligung: string } | { aktion: "abbrechen" } | { aktion: "loeschen" } }
   | { type: "kontingent"; data: Record<string, never> }
+  | { type: "jira_story"; data: { canvas_id: string } }
   | { type: "canvas_export"; data: { canvas_id: string; format: OfficeFormat } }
   | { type: "datei_oeffnen"; data: { kennung: string } }
   | {
@@ -541,6 +545,7 @@ export function useWamo(): WamoAktionen {
         // Eine Übernahme durch ein anderes Fenster merkt sich die Oberfläche: Das Tippen startet hier dann nicht von selbst neu
         stillStart: { ...STILL_AUS, uebernommen: grund === "getrennt" && istUebernommen(vomKern) },
         pcEinschalten: PC_EIN_LEER, // Wunsch und Hinweis gehören zur beendeten Sitzung
+        jira: { ...s.jira, status: null }, // Jira-Stories bietet nur eine laufende Sitzung an; ein Ergebnis bleibt stehen
         error,
         ansage:
           grund === "frist"
@@ -1303,6 +1308,19 @@ export function useWamo(): WamoAktionen {
     return wamo.subscribe(merken);
   }, []);
 
+  // Jira-Story aus einem eigenen Canvas-Dokument: nur die Kennung geht an den Kern, er prüft Besitz, Rolle und Schalter selbst und legt
+  // nur die Freigabekarte an. Angelegt wird erst nach dem Klick auf "Freigeben" (decide mit Job "jira").
+  const jiraStory = useCallback((canvasId: string) => {
+    const client = clientRef.current;
+    if (!client || !istOnline(wamo.get()) || !wamo.get().jira.status) return false;
+    try {
+      senden(client, { type: "jira_story", data: { canvas_id: canvasId } });
+    } catch {
+      return false;
+    }
+    return true;
+  }, []);
+
   // PC-Steuerung: mit Sitzung nur senden; den Zustand meldet der Kern im Feld betrieb.pc_steuerung zurück. Ohne Sitzung (nur Desktop-App,
   // nur Admins): "an" startet still eine Sitzung und schaltet ein, sobald der Kern den PC als verbunden meldet; "aus" ist nichts zu tun.
   const pcSteuerung = useCallback(
@@ -1734,6 +1752,7 @@ export function useWamo(): WamoAktionen {
       stillStarten,
       sprechen,
       eingabeMelden,
+      jiraStory,
       office,
       mail,
     }),
@@ -1755,6 +1774,7 @@ export function useWamo(): WamoAktionen {
       stillStarten,
       sprechen,
       eingabeMelden,
+      jiraStory,
       office,
       mail,
     ],

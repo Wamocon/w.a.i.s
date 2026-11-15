@@ -66,6 +66,14 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   Anhänge nur aus dem Register mit gleicher Prüfsumme, höchstens 10 Empfänger und 10 Mails je Stunde, `office.aus` wirkt auch hier.
   Kern: `voice-core/outlook_werkzeuge.py`, Freigabeart `mail` in `activity.py` und `pc_freigaben.py` (Protokoll ohne Betreff und Text).
 
+- User Story in Jira aus dem Canvas (Zweig `feat/jira-story`, Paket P3 aus dem Plan Office und Versand): Werkzeug `jira_story_anlegen` und Knopf
+  "Als User Story in Jira" am eigenen Canvas-Dokument, nur für Admins im Büro, nie im Labor, Werkzeug unter dem Gate der Stimmprüfung. Angelegt wird
+  nur nach dem Klick auf "Freigeben" auf der Karte im Kern (Job `jira`, `voice-core/jira_freigaben.py`: Hash über alle Werte, genau einmal, 300
+  Sekunden, höchstens 1800 Zeichen, Freitext nur mit Präfix), mit genau einem Aufruf an Jira Cloud (`voice-core/jira_client.py`, REST v3,
+  Beschreibung als Atlassian Document Format ohne Erwähnungen und Verweise, Epic über `parent`), bei unklarer Antwort einmal nachsehen, nie neu
+  anlegen. Ergebnis mit Schlüssel und geprüftem Verweis in der Oberfläche. Schalter `WAMO_JIRA` (Standard aus) und `WAMO_JIRA_URL`,
+  `WAMO_JIRA_EMAIL`, `WAMO_JIRA_TOKEN`, `WAMO_JIRA_PROJEKTE`, `WAMO_JIRA_STANDARD_PROJEKT` nur über `wamo-core-env`; eigener technischer
+  Jira-Benutzer nur für W.A.I.S. (`docs/jira-benutzer-einrichten.md`). Keine Migration.
 - Canvas als Datei am PC (Paket 1 aus `docs/office-und-versand.md`, Zweig `feat/office-export`): Ein Canvas-Element wird auf Zuruf
   (Werkzeug `canvas_exportieren`) oder per Klick („Als Word speichern“ usw. im Kopf des Canvas) zur Word-, Excel-, PowerPoint-, PDF-, CSV-
   oder Markdown-Datei in `Dokumente\WAIS` (bekannter Ordner, folgt OneDrive) und öffnet sich danach; ein Hinweis nennt Datei und Pfad und

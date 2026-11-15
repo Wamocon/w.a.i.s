@@ -65,7 +65,9 @@ def rules_for(name: str, ort: str = "lokal") -> str:
 
 
 def job_env() -> dict[str, str]:
-    """Umgebung für Claude Code (Allowlist). Job-Pfade stehen bewusst NICHT darin."""
+    """Umgebung für Claude Code (Allowlist). Job-Pfade stehen bewusst NICHT darin. Der Jira-Zugang des Kerns (WAMO_JIRA*, darf Stories
+    anlegen) geht nie an einen Auftrag, auch nicht über WAMO_JOB_ENV_PASSTHROUGH."""
     extra = {n.strip().upper() for n in os.getenv("WAMO_JOB_ENV_PASSTHROUGH", "").split(",") if n.strip()}
     allowed = JOB_ENV_NAMES | extra
-    return {k: v for k, v in os.environ.items() if k.upper() in allowed or k.upper().startswith(JOB_ENV_PREFIXES)}
+    return {k: v for k, v in os.environ.items()
+            if (k.upper() in allowed or k.upper().startswith(JOB_ENV_PREFIXES)) and not k.upper().startswith("WAMO_JIRA")}
