@@ -1,7 +1,7 @@
 // Komponententest des Schalters "PC-Steuerung" ohne laufendes Gespräch (components/einstellungen/Geraete.tsx, lib/pcSchalter.ts):
-// In der Desktop-App ist er für Admins auch ohne Sitzung bedienbar (die Rolle kommt dann aus der gemerkten Rolle dieser Person), im
-// normalen Browser bleibt er ohne Gespräch gesperrt, Laborkonten und Mitglieder sehen ihn nie. Wartet ein Klick auf Sitzung und PC,
-// ist er gesperrt und sagt es; ein Hinweis nach der Wartezeit steht am Schalter.
+// In der Desktop-App und im Browser ist er für Admins auch ohne Sitzung bedienbar (die Rolle kommt dann aus der gemerkten Rolle dieser
+// Person), Laborkonten und Mitglieder sehen ihn nie. Wartet ein Klick auf Sitzung und PC, ist er gesperrt und sagt es; ein Hinweis nach
+// der Wartezeit steht am Schalter. In einer Sitzung ohne verbundenen PC sagt ein Satz am Schalter, warum.
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,7 +11,7 @@ vi.mock("@/lib/supabase", () => ({ getSupabase: () => null, accessToken: async (
 
 import { GeraeteAbschnitt } from "@/components/einstellungen/Geraete";
 import { nutzerSetzen } from "@/lib/nutzer";
-import { HINWEIS_IM_GESPRAECH, HINWEIS_OHNE_SITZUNG, HINWEIS_PC_GETRENNT, HINWEIS_STILL_AUS, TEXT_WARTET } from "@/lib/pcSchalter";
+import { HINWEIS_OHNE_SITZUNG, HINWEIS_PC_AUS, HINWEIS_PC_GETRENNT, HINWEIS_STILL_AUS, TEXT_WARTET } from "@/lib/pcSchalter";
 import { resetWamo, wamo } from "@/lib/wamo";
 
 const ID = "0b7f3c1e-2d4a-4c55-9a10-1a2b3c4d5e6f";
@@ -75,12 +75,78 @@ describe("Schalter PC-Steuerung ohne Gespräch", () => {
     expect(screen.queryByText(/PC-Steuerung beim Start/)).toBeNull();
   });
 
-  it("normaler Browser: ohne Gespräch gesperrt wie bisher", () => {
+  it("Browser (keine Desktop-App): ohne Gespräch bedienbar wie in der App, der Klick geht an useWamo", async () => {
     desktop(false);
     person();
+    const onSchalten = vi.fn(() => true);
+    render(<GeraeteAbschnitt onPcSteuerung={onSchalten} />);
+    const knopf = schalter() as HTMLButtonElement;
+    expect(knopf.disabled).toBe(false);
+    expect(screen.getByText(HINWEIS_OHNE_SITZUNG)).toBeTruthy();
+    expect(screen.queryByText(/nur in der Desktop-App verfügbar/)).toBeNull();
+    await userEvent.click(knopf);
+    expect(onSchalten).toHaveBeenCalledWith(true);
+  });
+
+  it("Browser mit ausgeschaltetem 'Still starten beim Tippen': gesperrt wie in der App, der Hinweis nennt den Weg", () => {
+    desktop(false);
+    person();
+    localStorage.setItem(`wamo.stillStart.${ID}`, "aus");
     render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
     expect((schalter() as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(HINWEIS_IM_GESPRAECH)).toBeTruthy();
+    expect(screen.getByText(HINWEIS_STILL_AUS)).toBeTruthy();
+  });
+
+  it("Sitzung ohne PC-Host: gesperrt mit klarem Satz statt stiller Ablehnung", () => {
+    person();
+    act(() =>
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        profil: { name: "Admin", rolle: "admin" },
+        betrieb: { modus: "buero", modelle: {}, pc: "aus", pcSteuerung: "aus" },
+      })),
+    );
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect((schalter() as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(HINWEIS_PC_AUS)).toBeTruthy();
+  });
+
+  it("nach einem Klick ohne Sitzung auf einen Kern ohne PC-Host steht der Satz nur einmal da", () => {
+    desktop(false);
+    person();
+    act(() =>
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        profil: { name: "Admin", rolle: "admin" },
+        betrieb: { modus: "buero", modelle: {}, pc: "aus", pcSteuerung: "aus" },
+        pcEinschalten: { wartet: false, hinweis: HINWEIS_PC_AUS },
+      })),
+    );
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    const treffer = screen.getAllByText(HINWEIS_PC_AUS);
+    expect(treffer).toHaveLength(1);
+    expect(treffer[0].getAttribute("role")).toBe("status"); // der Status sagt es den Screenreadern
+    expect((schalter() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("Sitzung mit getrenntem PC: bedienbar, der Satz am Schalter nennt den Zustand (nur einmal, auch nach einem Wunsch)", () => {
+    desktop(false);
+    person();
+    act(() =>
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        profil: { name: "Admin", rolle: "admin" },
+        betrieb: { modus: "buero", modelle: {}, pc: "getrennt", pcSteuerung: "aus" },
+        pcEinschalten: { wartet: false, hinweis: HINWEIS_PC_GETRENNT },
+      })),
+    );
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect((schalter() as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getAllByText(HINWEIS_PC_GETRENNT)).toHaveLength(1);
+    expect(screen.queryByText(/gilt nur für diese Sitzung/)).toBeNull(); // kein "alles gut" neben "nicht erreichbar"
   });
 
   it("Desktop-App mit ausgeschaltetem 'Still starten beim Tippen': gesperrt, der Hinweis nennt den Weg", () => {

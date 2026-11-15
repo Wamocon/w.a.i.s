@@ -92,6 +92,17 @@ const STANDARD: Record<MailVersandZustand, string> = {
   entwurf: "Der Entwurf ist offen. Du sendest selbst.",
 };
 
+/**
+ * Zusatz im Browser, der den Laptop aus der Ferne steuert (lib/pcSchalter.ts, pcFern): Outlook läuft auf dem Laptop, nicht auf dem Gerät des
+ * Browsers. Nur wo die Person dort handeln muss (Entwurf im neuen Outlook, unklarer Ausgang); sonst null.
+ */
+export function versandOrtText(zustand: MailVersandZustand, fern: boolean): string | null {
+  if (!fern) return null;
+  if (zustand === "entwurf") return "Der Entwurf ist in Outlook auf deinem Laptop offen, dort sendest du ihn.";
+  if (zustand === "unklar") return "Nachsehen kannst du in Outlook auf deinem Laptop.";
+  return null;
+}
+
 /** Satz für den Hinweis: solange die Mail wartet, mit Restzeit; sonst der Text des Kerns. */
 export function versandText(v: Pick<MailVersand, "zustand" | "text">, rest: number): string {
   if (v.zustand === "wartet") {

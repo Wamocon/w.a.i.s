@@ -12,7 +12,7 @@ import { neuladenPlanen } from "@/lib/laborNeuladen";
 import { aktiverSlot, startUrl } from "@/lib/kernSlot";
 import { pcAutoLesen, rolleGemerktLesen, rolleGemerktSetzen, stillStartLesen } from "@/lib/einstellungen";
 import { einstellungenOeffnen } from "@/lib/einstellungenHash";
-import { serverBrowser, type GeraetBruecke } from "@/lib/geraet";
+import type { GeraetBruecke } from "@/lib/geraet";
 import { bildAnzeigen, liveBildLoeschen } from "@/lib/liveBild";
 import { nutzerLesen, useNutzerHalten } from "@/lib/nutzer";
 import { klickWeg, pcAdmin, PC_EIN_LEER, PC_WUNSCH_NEU, stillNeinHinweis, wunschSchritt, type PcWunsch } from "@/lib/pcSchalter";
@@ -1339,8 +1339,9 @@ export function useWamo(): WamoAktionen {
     return true;
   }, []);
 
-  // PC-Steuerung: mit Sitzung nur senden; den Zustand meldet der Kern im Feld betrieb.pc_steuerung zurück. Ohne Sitzung (nur Desktop-App,
-  // nur Admins): "an" startet still eine Sitzung und schaltet ein, sobald der Kern den PC als verbunden meldet; "aus" ist nichts zu tun.
+  // PC-Steuerung: mit Sitzung nur senden; den Zustand meldet der Kern im Feld betrieb.pc_steuerung zurück. Ohne Sitzung (Desktop-App und
+  // Browser, nur Admins): "an" startet still eine Sitzung und schaltet ein, sobald der Kern den PC als verbunden meldet; "aus" ist nichts
+  // zu tun. Im Browser steuert die Sitzung den Laptop aus dem Geräteregister; was gilt, entscheidet allein der Kern.
   const pcSteuerung = useCallback(
     (an: boolean) => {
       const client = clientRef.current;
@@ -1355,8 +1356,6 @@ export function useWamo(): WamoAktionen {
           rolleGemerkt: rolleGemerktLesen(nutzer.id),
           laborKonto: istLaborKonto(nutzer.email),
         }),
-        desktop: typeof window !== "undefined" && Boolean(window.wamoDesktop?.isDesktop),
-        serverBrowser: serverBrowser(),
       });
       const wunschBeginnen = () => {
         if (pcWunsch.current?.uhr) clearTimeout(pcWunsch.current.uhr);

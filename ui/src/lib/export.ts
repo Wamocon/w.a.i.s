@@ -60,8 +60,13 @@ export const onenoteMoeglich = (item: ExportItem, an: boolean | undefined): bool
 
 export const knopfText = (f: OfficeFormat) => `Als ${FORMAT_NAME[f]} speichern`;
 
-/** Ein Satz für den Hinweis nach dem Speichern (auch die Ansage für Screenreader). */
-export function hinweisText(d: DateiMeldung): string {
+/**
+ * Ein Satz für den Hinweis nach dem Speichern (auch die Ansage für Screenreader). amLaptop: Browser, der den Laptop aus der Ferne steuert
+ * (lib/pcSchalter.ts, pcFern); die Datei liegt dann auf dem Laptop und nicht auf dem Gerät des Browsers.
+ */
+export function hinweisText(d: DateiMeldung, amLaptop = false): string {
   if (!d.ok) return `Nicht gespeichert: ${d.grund}`;
-  return `${d.name} liegt in ${d.ordner || "Dokumente\\WAIS"}${d.geoeffnet ? " und ist geöffnet." : "."}`;
+  const ort = amLaptop ? "auf deinem Laptop in" : "in";
+  const offen = d.geoeffnet ? (amLaptop ? " und ist dort geöffnet." : " und ist geöffnet.") : ".";
+  return `${d.name} liegt ${ort} ${d.ordner || "Dokumente\\WAIS"}${offen}`;
 }
