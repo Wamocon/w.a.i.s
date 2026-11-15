@@ -37,6 +37,18 @@
 /* Als Datei am PC speichern (Canvas.tsx, CanvasSpeichern): eine Zeile kleiner Knöpfe, die bei schmaler Fläche umbricht */
 .canvas-export { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .canvas-export button[aria-busy="true"] { cursor: progress; }
+/* Als E-Mail (MailFormular.tsx): Knopf in der Zeile der Kopfaktionen, darunter das Formular mit Beschriftung über jedem Feld */
+.canvas-mail { margin-top: 6px; }
+.canvas-mail-form { display: grid; gap: 4px; margin-top: 10px; max-width: 640px; }
+.canvas-mail-form label { margin-top: 6px; font-size: 13px; font-weight: 700; color: var(--ink); }
+.canvas-mail-form input, .canvas-mail-form textarea, .canvas-mail-form select {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--kante); border-radius: 6px;
+  background: var(--glas-stark); color: var(--ink); font: 14px/1.4 var(--body);
+}
+.canvas-mail-form textarea { resize: vertical; }
+.canvas-mail-hinweis { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); }
+.canvas-mail-knoepfe { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.canvas-mail-knoepfe button[aria-busy="true"] { cursor: progress; }
 /* Hinweis nach dem Speichern (DateiHinweis.tsx): der volle Pfad darf umbrechen */
 .datei-hinweis .datei-pfad { overflow-wrap: anywhere; }
 

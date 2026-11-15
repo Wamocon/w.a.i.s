@@ -1,6 +1,7 @@
 import type { CanvasItem } from "@/components/Canvas";
 import type { AuftragStand } from "./auftragStart.ts"; // relativ, nur der Typ (beide Dateien laden unter node:test)
 import { istOfficeFormat, OFFICE_FORMATE, type DateiMeldung, type OfficeFormat } from "./export.ts";
+import { MAIL_VERSAND_ZUSTAENDE, type MailVersandZustand } from "./mail.ts";
 
 /**
  * RTVI-Servernachrichten des Voice-Core (kommen über onServerMessage in useWamo.ts an).
@@ -41,6 +42,8 @@ export type Betrieb = {
   entwicklungGrund?: string;
   /** Dateiformate, in denen das Canvas jetzt am PC gespeichert werden kann (nur Admins mit PC-Steuerung, voice-core/office_werkzeuge.py) */
   office?: OfficeFormat[];
+  /** Mail über Outlook am PC geht jetzt (nur Admins mit PC-Steuerung, voice-core/outlook_werkzeuge.py): Knopf "Als E-Mail" */
+  mail?: boolean;
 };
 
 /** Modellwahl je Profil: Automatisch (der Boss wählt) oder Nur Hausmodelle */
@@ -130,6 +133,8 @@ export type FreigabePunkt = {
   ziel?: string;
   /** Begründung des Modells (nur Hinweis, nicht das, was ausgeführt wird) */
   anlass?: string;
+  /** Warnung des Kerns (Mail: im selben Zug kamen Inhalte aus Web, Mail oder Bildschirm) */
+  warnung?: string;
   gueltigS?: number;
 };
 
@@ -263,6 +268,10 @@ export type ServerMessage =
   | ({ type: "gemerkt" } & Gemerkt)
   /** Canvas als Datei gespeichert (Kennung aus dem Register am PC, Name, Ordner, Pfad) oder nicht (Grund); nie ein Dateiinhalt */
   | ({ type: "datei" } & DateiMeldung)
+  /** Mail über Outlook: Antwort auf "Zur Freigabe vorbereiten" (ok: die Karte liegt bereit) */
+  | { type: "mail_antwort"; ok: boolean; grund?: string }
+  /** Mail über Outlook: Stand nach dem Klick (wartet mit Restzeit und Zurückholen, Endstand oder offener Entwurf); nie ein Inhalt */
+  | { type: "mail_versand"; id: string | null; zustand: MailVersandZustand; restS?: number; text: string }
   // Ohne stand: den Zustand der Startkarte setzt allein die Oberfläche (lib/auftragStart.ts), der Kern kann ihn nicht vorgeben
   | ({ type: "auftrag" } & Omit<Auftrag, "stand">)
   /** Antwort des Kerns auf den Klick "Starten": ok, oder nicht ok mit einem Satz als Grund (voice-core/dev_agent.py) */
@@ -351,6 +360,11 @@ function markierung(m: Roh): Markierung | null {
 
 /** Kennung einer Datei im Register am PC (host/office_ablage.py). */
 const DATEI_KENNUNG = /^[0-9a-f]{16}$/;
+/** Kennung eines geplanten Versands am PC (host/office_outlook_com.py). */
+const VERSAND_KENNUNG = /^[0-9a-f]{16}$/;
+/** Längste Freigabekarte: Mails mit ganzem Text (voice-core/activity.py FREIGABE_DETAIL_ZEICHEN_MAIL), alle übrigen Karten kürzer. */
+export const FREIGABE_DETAIL_MAX = 8000;
+export const FREIGABE_DETAIL_KURZ = 2000;
 
 /** Formate aus betrieb.office: nur bekannte, in fester Reihenfolge; leer oder kaputt heißt keine. */
 function officeFormate(v: unknown): OfficeFormat[] | undefined {
@@ -604,11 +618,13 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         .map((it) => ({
           id: (it.id as string).slice(0, 100),
           grund: sauber(it.grund as string, 200, false),
-          detail: sauber(it.detail as string, 2000),
+          // Lange Karte nur für PC-Freigaben (dort begrenzt der Kern jede Aktion außer Mails auf 2000); Labor und Geräte bleiben bei 2000
+          detail: sauber(it.detail as string, m.job === "pc" ? FREIGABE_DETAIL_MAX : FREIGABE_DETAIL_KURZ),
           // erst bereinigen, dann kürzen: so erscheint "(gekürzt)", wenn etwas fehlt
           von: isStr(it.von) && it.von.trim() ? sauber(it.von.trim(), 60, false) : undefined,
           ziel: isStr(it.ziel) && it.ziel.trim() ? sauber(it.ziel.trim(), 200, false) : undefined,
           anlass: isStr(it.anlass) && it.anlass.trim() ? sauber(it.anlass.trim(), 200, false) : undefined,
+          warnung: isStr(it.warnung) && it.warnung.trim() ? zeile(it.warnung, 300) : undefined,
           gueltigS:
             typeof it.gueltig_s === "number" && Number.isInteger(it.gueltig_s) && it.gueltig_s > 0 && it.gueltig_s <= 3600
               ? it.gueltig_s
@@ -644,6 +660,7 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         modellHinweis: optStr(m.modell_hinweis, 200),
         entwicklungGrund: zeile(m.entwicklung_grund, 120),
         office: officeFormate(m.office),
+        mail: m.mail === true ? true : undefined,
       };
     }
     case "datei": {
@@ -659,6 +676,20 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         ordner: zeile(m.ordner, 80),
         pfad: zeile(m.pfad, 400),
         geoeffnet: m.geoeffnet === true,
+      };
+    }
+    case "mail_antwort":
+      if (typeof m.ok !== "boolean") return null;
+      return m.ok ? { type: "mail_antwort", ok: true } : { type: "mail_antwort", ok: false, grund: zeile(m.grund, 300) ?? "Nicht vorbereitet." };
+    case "mail_versand": {
+      const id = m.id ?? null;
+      if ((id !== null && !(isStr(id) && VERSAND_KENNUNG.test(id))) || !oneOf(m.zustand, MAIL_VERSAND_ZUSTAENDE)) return null;
+      return {
+        type: "mail_versand",
+        id,
+        zustand: m.zustand,
+        restS: ganzIn(m.rest_s, 0, 120) ? m.rest_s : undefined,
+        text: zeile(m.text, 300) ?? "",
       };
     }
     case "gemerkt":
