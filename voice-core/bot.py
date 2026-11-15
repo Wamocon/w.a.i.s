@@ -1541,7 +1541,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             with contextlib.suppress(Exception, asyncio.TimeoutError):
                 await asyncio.wait_for(buerogeraete.schliessen(), CLEANUP_DB_TIMEOUT_SECS)
         if mail is not None:
-            await mail.schliessen()  # nur das Nachfragen endet, ein freigegebener Versand läuft am PC weiter
+            with contextlib.suppress(Exception, asyncio.TimeoutError):  # wartende Versände zurückholen, kurz begrenzt
+                await asyncio.wait_for(mail.schliessen(), CLEANUP_DB_TIMEOUT_SECS)
         if jira_story is not None:  # offene Jira-Karten ablehnen, den Client schließen
             with contextlib.suppress(Exception, asyncio.TimeoutError):
                 await asyncio.wait_for(jira_story.schliessen(), CLEANUP_DB_TIMEOUT_SECS)

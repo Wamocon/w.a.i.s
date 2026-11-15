@@ -61,15 +61,17 @@ FREIGABE_KURZ_ZEICHEN = 200
 _DOMAENE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}")
 
 
-def _karten_text(wert: object, grenze: int, zeilen: bool = False) -> str | None:
+def _karten_text(wert: object, grenze: int, zeilen: bool = False, utf16: bool = False) -> str | None:
     """Text vom Host für die Karte: ohne Steuer-, Format- und unsichtbare Zeichen (persona.sichtbar), zeilen=False
-    ergibt eine Zeile. Länger als grenze: None. Die Karte muss alles zeigen, was ausgeführt wird."""
+    ergibt eine Zeile. Länger als grenze: None. Die Karte muss alles zeigen, was ausgeführt wird. utf16: Länge in UTF-16-Einheiten,
+    wie die Oberfläche zählt (ein Emoji zählt zwei); für die lange Karte der Mails."""
     text = wert if isinstance(wert, str) else ""
     if zeilen:
         text = "\n".join(sichtbar(z).rstrip() for z in text.replace("\r\n", "\n").split("\n"))
     else:
         text = " ".join(sichtbar(text).split())
-    return text if len(text) <= grenze else None
+    laenge = len(text.encode("utf-16-le")) // 2 if utf16 else len(text)
+    return text if laenge <= grenze else None
 
 
 def _als_dict(result) -> dict | None:
@@ -95,7 +97,7 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
     if aktion == "senden":
         roh = roh.replace("\r\n", "\n").replace("\n", "⏎\n").rstrip("\n")  # jedes Enter sendet: sichtbar machen
     grenze = FREIGABE_DETAIL_ZEICHEN_MAIL if aktion == "mail" else FREIGABE_DETAIL_ZEICHEN
-    detail = _karten_text(roh, grenze, zeilen=True)
+    detail = _karten_text(roh, grenze, zeilen=True, utf16=aktion == "mail")
     grund = _karten_text(data.get("grund"), FREIGABE_KURZ_ZEICHEN)
     ziel = _karten_text(data.get("ziel"), FREIGABE_KURZ_ZEICHEN)
     anlass = _karten_text(data.get("anlass"), FREIGABE_KURZ_ZEICHEN)  # vom Modell, nur als Hinweis

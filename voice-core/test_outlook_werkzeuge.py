@@ -334,7 +334,7 @@ def freigaben_mit(m, memory):
         m.meldungen.append(t)
 
     f = PcFreigaben(gedaechtnis, client=lambda: CLIENT, darf=lambda: True, melden=melden, fremdinhalt=lambda: None,
-                    senden=m._senden, von="Niko")
+                    senden=m._senden, von="Admin")
     m.karte_anlegen = f.anfrage
     f.nach_ergebnis = m.nach_freigabe
     return f, gedaechtnis
@@ -472,3 +472,38 @@ def bot():
 def test_betrieb_nennt_mail(bot):
     assert "mail" not in bot.betrieb_message("verbunden")
     assert bot.betrieb_message("verbunden", mail=True)["mail"] is True
+
+
+# ---------- Echttest und Review vom 15.11.2026 ----------
+def test_lange_karte_zaehlt_utf16_wie_die_oberflaeche():
+    emoji = chr(0x1F600)  # ein Zeichen, zwei UTF-16-Einheiten
+    detail = "Text:\n> " + emoji * 4100  # 4108 Zeichen, aber mehr als 8000 Einheiten
+    assert activity.freigabe_anfrage("outlook_senden", {}, json.dumps(dict(NEEDS, detail=detail)), "c") is None
+    passt = "Text:\n> " + emoji * 3900
+    assert activity.freigabe_anfrage("outlook_senden", {}, json.dumps(dict(NEEDS, detail=passt)), "c") is not None
+
+
+async def test_unklar_ist_ein_endstand_mit_dem_satz_vom_pc(monkeypatch):
+    satz = "Outlook hat beim Senden nicht rechtzeitig geantwortet. Ob die Mail rausging, ist unklar."
+    h = Host(outlook_versand_status={"status": "success", "zustand": "unklar", "rest_s": 0, "summary": satz})
+    monkeypatch.setattr(om, "call_host_tool", h)
+    m = mail(Memory())
+    await m.nach_freigabe({"aktion": "mail", "werkzeug": "outlook_senden"}, {"status": "success", "versand": {"id": VID, "frist_s": 5}})
+    await fertig(m)
+    assert h.namen().count("outlook_versand_status") == 1  # kein Nachfragen mehr nach einem Endstand
+    assert m.gesendet[-1] == {"type": "mail_versand", "id": VID, "zustand": "unklar", "text": satz}
+    assert m.meldungen and "unklar" in m.meldungen[-1]
+
+
+async def test_sitzungsende_holt_wartende_versaende_zurueck(host):
+    m = mail()
+    andere = "0123456789abcdef"
+    m._eigene.update({VID, andere})
+    m._erledigt.add(andere)  # schon gesendet oder zurückgeholt: nichts mehr zu tun
+    await m.schliessen()
+    assert [a for n, a in host.aufrufe if n == "outlook_zurueckholen"] == [{"versand_id": VID, "schluessel": SCHLUESSEL}]
+    assert m._aufgaben == set()
+
+
+def test_bot_begrenzt_das_aufraeumen_beim_sitzungsende():
+    assert "asyncio.wait_for(mail.schliessen(), CLEANUP_DB_TIMEOUT_SECS)" in BOT
