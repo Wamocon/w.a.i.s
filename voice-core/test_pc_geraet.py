@@ -69,7 +69,8 @@ class FakeRegister:
 
 class ZugangTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        patcher = mock.patch.dict(os.environ, {"WAMO_BETRIEB": "buero", "WAMO_PC_REGISTER": "an", "WAMO_PC_MITGLIEDER": "aus"})
+        patcher = mock.patch.dict(os.environ, {"WAMO_BETRIEB": "buero", "WAMO_PC_REGISTER": "an", "WAMO_PC_MITGLIEDER": "aus",
+                                               "WAMO_PC_MITGLIEDER_PROFILE": ""})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.gelesen: list[str] = []
@@ -109,12 +110,42 @@ class ZugangTests(unittest.IsolatedAsyncioTestCase):
         for fehler in (RegisterFehler("weg"), RegisterFehler("Kennung ungültig")):
             self.assertIsNone(await pc_geraet.pc_zugang_fuer(identitaet(), FakeRegister(fehler=fehler)))
 
-    async def test_mitglied_nur_mit_schalter(self):
+    async def test_mitglied_nur_mit_freischaltung_je_profil(self):
         reg = FakeRegister({ICH: geraet(5, FP_A, "pc-anna")})
         self.assertIsNone(await pc_geraet.pc_zugang_fuer(identitaet(rolle="mitglied"), reg))
         self.assertEqual(reg.abfragen, [])  # gar nicht erst gefragt
-        with mock.patch.dict(os.environ, {"WAMO_PC_MITGLIEDER": "an"}):
-            self.assertIsNotNone(await pc_geraet.pc_zugang_fuer(identitaet(rolle="mitglied"), reg))
+        with mock.patch.dict(os.environ, {"WAMO_PC_MITGLIEDER": "an"}):  # der alte kernweite Schalter wirkt nicht mehr
+            self.assertIsNone(await pc_geraet.pc_zugang_fuer(identitaet(rolle="mitglied"), reg))
+        with mock.patch.dict(os.environ, {"WAMO_PC_MITGLIEDER_PROFILE": ANDERE}):  # nur ein anderes Profil freigeschaltet
+            self.assertIsNone(await pc_geraet.pc_zugang_fuer(identitaet(rolle="mitglied"), reg))
+        self.assertEqual(reg.abfragen, [])
+        with mock.patch.dict(os.environ, {"WAMO_PC_MITGLIEDER_PROFILE": f"{ANDERE},{ICH}"}):
+            zugang = await pc_geraet.pc_zugang_fuer(identitaet(rolle="mitglied"), reg)
+        self.assertEqual(zugang.stufe, "mitglied")
+        self.assertEqual((await pc_geraet.pc_zugang_fuer(identitaet(), reg)).stufe, "admin")
+
+    async def test_laborprofil_bekommt_nie_einen_zugang(self):
+        reg = FakeRegister({ICH: geraet(5, FP_A, "pc-anna")})
+        with mock.patch.dict(os.environ, {"WAMO_PC_MITGLIEDER_PROFILE": ICH}):
+            for art in ("platz", "schaufenster"):
+                labor = Identity(user_id=ICH, name="Gast", rolle="mitglied", anrede="du", labor_art=art)
+                self.assertIsNone(await pc_geraet.pc_zugang_fuer(labor, reg))
+        self.assertEqual(reg.abfragen, [])
+
+    async def test_host_client_filtert_die_werkzeuge_nach_der_stufe(self):
+        reg = FakeRegister({ICH: geraet(5, FP_A, "pc-anna")})
+        admin = pc_host.host_client(await pc_geraet.pc_zugang_fuer(identitaet(), reg))
+        with mock.patch.dict(os.environ, {"WAMO_PC_MITGLIEDER_PROFILE": ICH}):
+            mitglied = pc_host.host_client(await pc_geraet.pc_zugang_fuer(identitaet(rolle="mitglied"), reg))
+        try:
+            self.assertEqual(admin._filter, set(pc_host.LLM_TOOLS))
+            self.assertEqual(mitglied._filter, set(pc_host.LLM_TOOLS_MITGLIED))
+        finally:
+            await admin.close()
+            await mitglied.close()
+        ohne_stufe = pc_geraet.PcZugang(geraet=geraet(5, FP_A, "pc-anna"), user_id=ICH, socket="/x", uid=1, wurzel="/run/wamo-pc",
+                                        geheimnisse=pc_geraet.Geheimnisse(TOKEN_A, FREIGABE_A), register=reg)
+        self.assertIsNone(pc_host.host_client(ohne_stufe))  # ein Zugang ohne Stufe bekommt keinen Client (fail closed)
 
     async def test_geheimnisse_unstimmig_keine_werkzeuge(self):
         def kaputt(g, wurzel, **kw):
@@ -699,5 +730,18 @@ class GeheimnisseTests(unittest.TestCase):
             self.lies()
 
 
+def test_werkzeugliste_der_mitglieder_ist_genau_die_der_admins_ohne_powershell_git_und_github():
+    assert pc_host.LLM_TOOLS_MITGLIED == [w for w in pc_host.LLM_TOOLS
+                                          if w not in ("powershell_lesen", "git_klonen", "github_repo_anlegen")]
+    assert pc_host.werkzeuge_fuer("admin") == pc_host.LLM_TOOLS
+    assert pc_host.werkzeuge_fuer("mitglied") == pc_host.LLM_TOOLS_MITGLIED
+    assert pc_host.werkzeuge_fuer(None) == [] and pc_host.werkzeuge_fuer("gast") == []
+    # Bildschirm, Live-Bild, Office, Outlook, Teams und OneNote ruft nur der Kern auf (screen.py, bildstrom.py, office_werkzeuge.py ...)
+    for nur_kern in ("bildschirmfoto", "maus_klicken", "bild_holen", "office_datei_erstellen", "outlook_mail_anfragen",
+                     "teams_chat_anfragen", "onenote_seite_anfragen", "freigabe_entscheiden", "sperre_pruefen"):
+        assert nur_kern not in pc_host.LLM_TOOLS_MITGLIED
+
+
 if __name__ == "__main__":
     unittest.main()
+

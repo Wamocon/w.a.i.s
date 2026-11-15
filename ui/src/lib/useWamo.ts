@@ -1359,6 +1359,7 @@ export function useWamo(): WamoAktionen {
           rolleKern: s.profil?.rolle ?? null,
           rolleGemerkt: rolleGemerktLesen(nutzer.id),
           laborKonto: istLaborKonto(nutzer.email),
+          pcStufeKern: s.betrieb?.pcStufe ?? null,
         }),
       });
       const wunschBeginnen = () => {

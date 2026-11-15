@@ -91,9 +91,19 @@ export function rolleMerken(speicher: Speicher | null | undefined, userId: strin
   }
 }
 
-/** Sieht diese Person den Schalter? Die Rolle vom Kern gilt zuerst, ohne Sitzung die gemerkte. Laborkonten nie. */
-export function pcAdmin(l: { rolleKern: Rolle | null; rolleGemerkt: Rolle | null; laborKonto: boolean }): boolean {
+/**
+ * Sieht diese Person den Schalter? Die Rolle vom Kern gilt zuerst, ohne Sitzung die gemerkte. Laborkonten nie. Ein Mitglied nur, wenn der Kern
+ * in der laufenden Sitzung die Stufe "mitglied" meldet (pcStufeKern aus betrieb.pc_stufe, Freischaltung je Profil, voice-core/rechte.py); ohne
+ * Sitzung sieht ein Mitglied den Schalter nicht (kein stiller Start). Entscheiden tut immer der Kern.
+ */
+export function pcAdmin(l: {
+  rolleKern: Rolle | null;
+  rolleGemerkt: Rolle | null;
+  laborKonto: boolean;
+  pcStufeKern?: "admin" | "mitglied" | null;
+}): boolean {
   if (l.laborKonto) return false;
+  if (l.pcStufeKern === "mitglied") return true;
   return (l.rolleKern ?? l.rolleGemerkt) === "admin";
 }
 

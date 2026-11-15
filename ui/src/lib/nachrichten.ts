@@ -24,8 +24,11 @@ export type Betrieb = {
   ort?: "cloud" | "haus";
   /** optional: Antwortzeit des PC-Hosts in Millisekunden */
   pcLatenzMs?: number;
-  /** PC-Steuerung dieser Sitzung (Schalter nur für admin); fehlt = aus */
+  /** PC-Steuerung dieser Sitzung (Schalter für Admins und freigeschaltete Mitglieder); fehlt = aus */
   pcSteuerung?: "an" | "aus";
+  /** Stufe der PC-Steuerung dieser Sitzung (voice-core/rechte.py): mitglied nur mit Freischaltung je Profil; fehlt = keine. Der Kern
+   *  entscheidet, die Oberfläche zeigt damit nur den Schalter. */
+  pcStufe?: "admin" | "mitglied";
   /** Entwicklungsaufträge erlaubt? "aus" = gesperrt */
   entwicklung?: "an" | "aus";
   /** optional: Rechnername des gesteuerten PCs (Büro: der PC am anderen Ende des Tunnels) */
@@ -666,6 +669,7 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         ort: oneOf(m.ort, ["cloud", "haus"] as const) ? m.ort : undefined,
         pcLatenzMs: latenz !== undefined ? Math.max(0, Math.round(latenz)) : undefined,
         pcSteuerung: oneOf(m.pc_steuerung, ["an", "aus"] as const) ? m.pc_steuerung : undefined,
+        pcStufe: oneOf(m.pc_stufe, ["admin", "mitglied"] as const) ? m.pc_stufe : undefined,
         entwicklung: oneOf(m.entwicklung, ["an", "aus"] as const) ? m.entwicklung : undefined,
         pcName: isStr(m.pc_name) && /^[A-Za-z0-9._-]{1,63}$/.test(m.pc_name) ? m.pc_name : undefined,
         pcBelegt: m.pc_belegt === true ? true : undefined,

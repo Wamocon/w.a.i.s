@@ -195,6 +195,7 @@ class Stimmpruefer(FrameProcessor):
             self._pruefen(self._zug, self._rate, self._zug_secs, self._zug_ueberlappung, self._gate.uhr(), vorherige, nr), nr
         )
         self._gate.verfolgen(self._task)
+        self._gate.gesprochen()  # für die Pflichtstufe der Mitglieder: seit dem Tippen wurde gesprochen (stimme_gate.pflicht_grund)
 
     def _ausschneiden(self, start: float, ende: float) -> bytes:
         teile = []
