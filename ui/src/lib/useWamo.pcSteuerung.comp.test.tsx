@@ -1,6 +1,6 @@
 // Komponententest des Ablaufs "PC-Steuerung ohne Gespräch einschalten" in useWamo (lib/pcSchalter.ts): Ein Klick auf "an" ohne Sitzung
-// startet in der Desktop-App still eine Sitzung (Regeln des stillen Starts), schickt den Wunsch, sobald der Kern den PC als verbunden
-// meldet, und nennt nach der Wartezeit den Grund, wenn es nicht klappt. Mitglieder, Laborkonten und der normale Browser starten nichts.
+// startet in der Desktop-App und im Browser still eine Sitzung (Regeln des stillen Starts), schickt den Wunsch, sobald der Kern den PC
+// als verbunden meldet, und nennt nach der Wartezeit den Grund, wenn es nicht klappt. Mitglieder und Laborkonten starten nichts.
 // Pipecat-Client und Transport sind Attrappen, der Kern wird über Rückrufe und Betriebsmeldungen nachgestellt; es gibt kein Netz.
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { act, renderHook } from "@testing-library/react";
@@ -233,6 +233,32 @@ describe("useWamo, PC-Steuerung ohne Gespräch einschalten", () => {
     expect(pcGesendet(letzter())).toHaveLength(1);
   });
 
+  it("Browser (keine Desktop-App): startet still wie die App und schickt den Wunsch, sobald der Kern den Laptop als verbunden meldet", async () => {
+    delete (window as unknown as Fenster).wamoDesktop;
+    person();
+    const { result } = renderHook(() => useWamo());
+    await act(async () => {
+      expect(result.current.pcSteuerung(true)).toBe(true);
+    });
+    expect(aktuell().presence).toBe("connecting");
+    expect(aktuell().stillStart.still).toBe(true);
+    await fluss();
+    const c = letzter();
+    expect(clients()).toHaveLength(1);
+    expect(c.opts.enableMic).toBe(false);
+    await bereit(c, { pc: "verbunden", pcName: "WMC-H-04-NS" });
+    expect(pcGesendet(c)).toEqual([["pc_steuerung", { an: true }]]);
+  });
+
+  it("Browser: Laptop nicht erreichbar, nach der Wartezeit derselbe klare Hinweis wie in der App", async () => {
+    delete (window as unknown as Fenster).wamoDesktop;
+    person();
+    await klickUndBereit({ pc: "getrennt" });
+    await fluss(PC_VERBINDEN_MS + 500);
+    expect(aktuell().pcEinschalten).toEqual({ wartet: false, hinweis: HINWEIS_PC_GETRENNT });
+    expect(pcGesendet(letzter())).toHaveLength(0);
+  });
+
   it("'aus' ohne Sitzung: nichts zu tun, keine Sitzung", async () => {
     person();
     const { result } = renderHook(() => useWamo());
@@ -312,9 +338,22 @@ describe("useWamo, PC-Steuerung ohne Gespräch einschalten", () => {
       }
     });
 
-    it("normaler Browser (keine Desktop-App): ohne Gespräch kein Start", async () => {
+    it("Browser mit ausgeschaltetem 'Still starten beim Tippen': kein Start, derselbe Hinweis wie in der App", async () => {
       delete (window as unknown as Fenster).wamoDesktop;
       person();
+      localStorage.setItem(`wamo.stillStart.${ID}`, "aus");
+      const { result } = renderHook(() => useWamo());
+      await act(async () => {
+        expect(result.current.pcSteuerung(true)).toBe(false);
+      });
+      await fluss();
+      expect(clients()).toHaveLength(0);
+      expect(aktuell().pcEinschalten).toEqual({ wartet: false, hinweis: HINWEIS_STILL_AUS });
+    });
+
+    it("Laborkonto im Browser: nie", async () => {
+      delete (window as unknown as Fenster).wamoDesktop;
+      person("labor-schau@wamo.test", "admin");
       const { result } = renderHook(() => useWamo());
       await act(async () => {
         expect(result.current.pcSteuerung(true)).toBe(false);

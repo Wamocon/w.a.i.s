@@ -1,0 +1,120 @@
+// Komponententest: PC-Steuerung aus dem Browser (components/einstellungen/Geraete.tsx, components/DateiHinweis.tsx, lib/pcSchalter.ts).
+// Im Browser in der Betriebsart Büro sagt der Schalter ehrlich, dass er den Laptop aus dem Geräteregister steuert, nicht das Gerät des
+// Browsers, und was nur die Desktop-App kann (Automatik beim Start, Lichtrahmen). Der Haken für die Automatik fehlt dort, weil er aus dem
+// Browser nie wirkt. Gespeicherte Dateien liegen auf dem Laptop; "Öffnen" sagt das. In der Desktop-App bleibt alles wie bisher.
+// Ausführen im Ordner ui/:  npm run test:komponenten
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const h = vi.hoisted(() => ({ art: "buero" as "buero" | "unterwegs" }));
+
+vi.mock("@/lib/supabase", () => ({ getSupabase: () => null, accessToken: async () => null }));
+vi.mock("@/lib/betriebsart", async (orig) => ({
+  ...(await orig<typeof import("@/lib/betriebsart")>()),
+  useBetriebsart: () => h.art,
+}));
+
+import { DateiHinweis } from "@/components/DateiHinweis";
+import { GeraeteAbschnitt } from "@/components/einstellungen/Geraete";
+import { nutzerSetzen } from "@/lib/nutzer";
+import { HINWEIS_LAPTOP, HINWEIS_NUR_APP } from "@/lib/pcSchalter";
+import { applyServerMessage, resetWamo, wamo } from "@/lib/wamo";
+
+const ID = "0b7f3c1e-2d4a-4c55-9a10-1a2b3c4d5e6f";
+type Fenster = { wamoDesktop?: unknown };
+
+function desktop(an: boolean) {
+  if (an) (window as unknown as Fenster).wamoDesktop = { isDesktop: true };
+  else delete (window as unknown as Fenster).wamoDesktop;
+}
+
+function admin() {
+  nutzerSetzen({ id: ID, email: "niko@wamocon.com" });
+  localStorage.setItem(`wamo.rolle.${ID}`, "admin");
+}
+
+const schalter = () => screen.queryByRole("switch", { name: /PC-Steuerung/ });
+const autoHaken = () => screen.queryByRole("checkbox", { name: /automatisch einschalten/ });
+
+describe("PC-Steuerung aus dem Browser", () => {
+  beforeEach(() => {
+    resetWamo();
+    localStorage.clear();
+    nutzerSetzen({ id: null, email: null });
+    h.art = "buero";
+    desktop(false);
+  });
+  afterEach(() => desktop(false));
+
+  it("Browser im Büro: Schalter da, der Hinweis nennt den Laptop und was nur die Desktop-App kann, kein Haken für die Automatik", () => {
+    admin();
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect((schalter() as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText(HINWEIS_LAPTOP)).toBeTruthy();
+    expect(screen.getByText(HINWEIS_NUR_APP)).toBeTruthy();
+    expect(autoHaken()).toBeNull();
+    expect(screen.queryByText(/nur in der Desktop-App verfügbar/)).toBeNull();
+  });
+
+  it("Browser im Büro mit Sitzung: der Hinweis auf den Laptop bleibt neben dem Ziel stehen", () => {
+    admin();
+    act(() =>
+      wamo.set((s) => ({
+        ...s,
+        presence: "idle",
+        profil: { name: "Niko", rolle: "admin" },
+        betrieb: { modus: "buero", modelle: {}, pc: "verbunden", pcSteuerung: "aus", pcName: "WMC-H-04-NS" },
+      })),
+    );
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(screen.getByText("gilt nur für diese Sitzung, Ziel WMC-H-04-NS")).toBeTruthy();
+    expect(screen.getByText(HINWEIS_LAPTOP)).toBeTruthy();
+  });
+
+  it("Desktop-App im Büro: kein Hinweis auf den Laptop, der Haken für die Automatik bleibt", () => {
+    desktop(true);
+    admin();
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(schalter()).toBeTruthy();
+    expect(screen.queryByText(HINWEIS_LAPTOP)).toBeNull();
+    expect(screen.queryByText(HINWEIS_NUR_APP)).toBeNull();
+    expect(autoHaken()).toBeTruthy();
+  });
+
+  it("Browser Unterwegs (Kern und Host auf diesem PC): kein Hinweis auf einen anderen Laptop", () => {
+    h.art = "unterwegs";
+    admin();
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(schalter()).toBeTruthy();
+    expect(screen.queryByText(HINWEIS_LAPTOP)).toBeNull();
+  });
+
+  it("Mitglieder sehen weder Schalter noch Hinweis", () => {
+    nutzerSetzen({ id: ID, email: "anna@wamocon.com" });
+    localStorage.setItem(`wamo.rolle.${ID}`, "mitglied");
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(schalter()).toBeNull();
+    expect(screen.queryByText(HINWEIS_LAPTOP)).toBeNull();
+  });
+
+  it("Datei aus dem Canvas im Browser: der Hinweis sagt, dass sie auf dem Laptop liegt, 'Öffnen' öffnet sie dort", () => {
+    const oeffnen = vi.fn(() => true);
+    render(<DateiHinweis onOeffnen={oeffnen} />);
+    act(() =>
+      applyServerMessage({ type: "datei", ok: true, kennung: "0123456789abcdef", name: "Angebot.docx", format: "word", ordner: "Dokumente\\WAIS", geoeffnet: false }),
+    );
+    expect(screen.getByText("Angebot.docx liegt auf deinem Laptop in Dokumente\\WAIS.")).toBeTruthy();
+    act(() => screen.getByRole("button", { name: "Am Laptop öffnen" }).click());
+    expect(oeffnen).toHaveBeenCalledExactlyOnceWith("0123456789abcdef");
+  });
+
+  it("Datei aus dem Canvas in der Desktop-App: Hinweis und Knopf wie bisher", () => {
+    desktop(true);
+    render(<DateiHinweis onOeffnen={vi.fn(() => true)} />);
+    act(() =>
+      applyServerMessage({ type: "datei", ok: true, kennung: "0123456789abcdef", name: "Angebot.docx", format: "word", ordner: "Dokumente\\WAIS", geoeffnet: false }),
+    );
+    expect(screen.getByText("Angebot.docx liegt in Dokumente\\WAIS.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Öffnen" })).toBeTruthy();
+  });
+});
