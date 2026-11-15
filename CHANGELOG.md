@@ -65,6 +65,15 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   (`host/office_ablage.py`, `%LOCALAPPDATA%\WAMO\ablage.json`). Excel-Zellen sind immer Text, CSV-Zellen mit `=`, `+`, `-`, `@` bekommen
   ein Hochkomma. Die Datei `%LOCALAPPDATA%\WAMO\office.aus` sperrt alles sofort. Die Host-Werkzeuge stehen nie in `LLM_TOOLS`.
 
+- OneNote-Seite aus dem Canvas (Paket 4 aus `docs/office-und-versand.md`, Teil OneNote, Zweig `feat/onenote`): Auf Zuruf (Werkzeug
+  `onenote_seite`) wird ein Canvas-Element zur neuen Seite im Standard-Notizbuch, Abschnitt `W.A.I.S.` (angelegt, wenn er fehlt), aber
+  erst nach dem Klick auf die Freigabekarte (Job `pc`, Aktion `onenote`), die Notizbuch, Abschnitt, Titel und den ganzen Inhalt zeigt.
+  Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=onenote` und eingeschalteter PC-Steuerung, unter dem Stimmabdruck-Gate. Der Host
+  (`host/office_onenote.py`, Werkzeug `onenote_seite_anfragen` nur für den Kern) prüft Inhalt, Länge und Zeichen selbst, baut die Seite
+  im OneNote-XML 2013 mit maskiertem Text (keine Links, keine Bilder), prüft vor dem Anlegen, dass das Notizbuch noch dasselbe ist,
+  höchstens 10 Seiten je Stunde, Audit ohne Inhalt. Fehlt OneNote für den Desktop, speichert W.A.I.S. eine Word-Datei in
+  `Dokumente\WAIS`, die sich über „An OneNote senden“ einfügen lässt. `office.aus` sperrt auch OneNote.
+
 - Prüfungen auf GitHub (README Abschnitt „Prüfungen auf GitHub“): Workflow `Prüfungen` (`.github/workflows/ci.yml`) bei jedem Push, jedem
   Pull Request und manuell mit Wahl des Teils, mit Jobs für Oberfläche (ESLint, `tsc`, `node --test`, vitest, `next build`), Kern (pytest in
   vier Teilen), Python (`compileall`, ruff mit Grundregeln), Labor-Dienst, Gerätedienst, Skripte, Desktop und Host (Windows), Infra
