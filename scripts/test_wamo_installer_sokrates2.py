@@ -79,11 +79,11 @@ def ohne_schluesselliste(monkeypatch, tmp_path):
 
 
 def ssh(befehl: str) -> list[str]:
-    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "wamo-sokrates2", befehl]
+    return ["ssh", *w.SSH_OPTIONEN, "wamo-sokrates2", befehl]
 
 
 def scp(lokal: Path, ziel: str) -> list[str]:
-    return ["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", str(lokal), f"wamo-sokrates2:{ziel}"]
+    return ["scp", "-q", *w.SSH_OPTIONEN, str(lokal), f"wamo-sokrates2:{ziel}"]
 
 
 def bauen(ordner: Path, version: str = "0.3.0", inhalt: bytes | None = None, privat=None, manifest_aendern=None) -> tuple[Path, Path]:
@@ -334,7 +334,7 @@ class TestVerteilen:
     @pytest.mark.parametrize("roh,rc", [
         (b"kein json", 0), (b"[]", 0), (json.dumps({**LEER, "v": True}).encode(), 0), (json.dumps({**LEER, "schluesselliste": "nein"}).encode(), 0),
         (json.dumps({**LEER, "aktuell": {"version": "0.3"}}).encode(), 0), (json.dumps({**LEER, "aktuell": "0.3.0"}).encode(), 0),
-        (json.dumps(LEER).encode(), 1),
+        (json.dumps(LEER).encode(), 1), (json.dumps({k: v for k, v in LEER.items() if k != "aktuell"}).encode(), 0),
     ])
     def test_ein_unklarer_status_bricht_vor_dem_kopieren_ab(self, tmp_path, server, ohne_schluesselliste, roh, rc):
         exe, _ = bauen(tmp_path)
@@ -356,6 +356,7 @@ class TestVerteilen:
     (["status"], f"{SKRIPT} status"),
     (["rueckweg"], f"{SKRIPT} rueckweg"),
     (["rueckweg", "--trocken"], f"{SKRIPT} rueckweg --trocken"),
+    (["rueckweg", "--trocken", "--ohne-signatur"], f"{SKRIPT} rueckweg --trocken --ohne-signatur"),
 ])
 def test_status_und_rueckweg_gehen_an_das_skript_am_server(server, argv, befehl):
     assert w.main(argv) == 0
@@ -368,3 +369,17 @@ def test_falsche_aufrufe(server, argv):
     with pytest.raises(SystemExit) as e:
         w.main(argv)
     assert e.value.code == 2 and server.aufrufe == []
+
+
+def test_zeitgrenzen_fuer_ssh_und_scp(monkeypatch, tmp_path):
+    gesehen: list[float] = []
+
+    def langsam(argv, **kw):
+        gesehen.append(kw.get("timeout"))
+        raise subprocess.TimeoutExpired(argv, kw.get("timeout") or 0)
+
+    monkeypatch.setattr(w.subprocess, "run", langsam)
+    assert w.main(["status"]) == 1
+    with pytest.raises(w.Abbruch):
+        w.scp(tmp_path / "x", "ziel")
+    assert gesehen == [w.SSH_ZEIT, w.SCP_ZEIT]

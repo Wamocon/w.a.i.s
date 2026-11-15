@@ -87,7 +87,7 @@ export function InstallerDownload({ weiter, zurueck }: Partial<EinrichtungsSchri
   const laeuft = download.art === "laeuft";
 
   const laden = async () => {
-    if (stand.art !== "bereit" || laeuft) return;
+    if (stand.art !== "bereit" || laeuft || steuerung.current) return; // auch ein schneller Doppelklick startet nur einen Download
     const c = new AbortController();
     steuerung.current = c;
     setDownload({ art: "laeuft", geladen: 0, gesamt: stand.manifest.groesse });
@@ -99,7 +99,7 @@ export function InstallerDownload({ weiter, zurueck }: Partial<EinrichtungsSchri
         const schritt = gesamt ? Math.floor((geladen / gesamt) * 100) : Math.floor(geladen / 1_048_576);
         if (schritt === zuletzt || c.signal.aborted) return;
         zuletzt = schritt;
-        setDownload({ art: "laeuft", geladen, gesamt });
+        setDownload({ art: "laeuft", geladen, gesamt: gesamt ?? stand.manifest.groesse });
       },
       c.signal,
     );
@@ -189,7 +189,7 @@ export function InstallerDownload({ weiter, zurueck }: Partial<EinrichtungsSchri
               {laeuft
                 ? "Download läuft."
                 : download.art === "fertig"
-                  ? `Die Prüfsumme stimmt. Der Browser speichert ${stand.manifest.datei}, meist im Ordner Downloads.`
+                  ? `Die Datei ist vollständig angekommen, der Browser speichert ${stand.manifest.datei} (meist im Ordner Downloads). Vergleiche vor dem Start die Prüfsumme mit deinem Willkommensblatt.`
                   : download.art === "abgebrochen"
                     ? "Download abgebrochen."
                     : ""}

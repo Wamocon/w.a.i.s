@@ -13,8 +13,10 @@
 #   wamo-verteilung-einrichten.sh status [--json]
 #       Version, SHA-256, Signatur und Zustand der Datei von aktuell und vorher, alle Stände, ob es die Schlüsselliste gibt. --json gibt genau eine
 #       Zeile JSON aus (für das lokale Werkzeug).
-#   wamo-verteilung-einrichten.sh rueckweg [--trocken]
-#       Stellt aktuell atomar auf vorher. Danach gibt es kein vorher mehr, der bisherige Stand bleibt liegen. Ohne vorher bricht es ab.
+#   wamo-verteilung-einrichten.sh rueckweg [--trocken] [--ohne-signatur]
+#       Stellt aktuell atomar auf vorher. Danach gibt es kein vorher mehr, der bisherige Stand bleibt liegen. Ohne vorher bricht es ab. Liegt die
+#       Schlüsselliste und ist der vorige Stand nicht gültig signiert (etwa 0.2.0), bricht es ab; nur mit --ohne-signatur geht es dann (bewusst,
+#       mit Warnung und Eintrag im Journal).
 #
 # Signatur: Liegt die Schlüsselliste /etc/wamo-verteilung/update-schluessel.json (root:root 0644, JSON-Liste von Base64-Texten zu je 32 Byte Ed25519),
 # ist eine gültige Signatur Pflicht, sie muss zu einem Schlüssel der Liste passen. Fehlt die Liste, geht ein unsignierter Stand mit einer deutlichen
@@ -76,6 +78,7 @@ BEFEHL="${1:-}"
 [ "$#" -eq 0 ] || shift
 EINGANG=""
 TROCKEN=nein
+OHNE_SIGNATUR=nein
 JSON=nein
 ZWISCHEN=""
 NEU=""
@@ -92,7 +95,7 @@ fehler() { echo "wamo-verteilung: $*" >&2; exit 1; }
 vorbedingung() { echo "wamo-verteilung: Vorbedingung nicht erfüllt: $*" >&2; exit 3; }
 aufruf() {
   echo "wamo-verteilung: $*" >&2
-  echo "Aufruf: $0 einsetzen <eingangsordner> [--trocken] | status [--json] | rueckweg [--trocken]" >&2
+  echo "Aufruf: $0 einsetzen <eingangsordner> [--trocken] | status [--json] | rueckweg [--trocken] [--ohne-signatur]" >&2
   exit 2
 }
 hinweis() { echo "$*" >&2; }
@@ -110,6 +113,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --trocken) [ "$BEFEHL" = einsetzen ] || [ "$BEFEHL" = rueckweg ] || aufruf "--trocken gibt es nur bei einsetzen und rueckweg"; TROCKEN=ja ;;
     --json) [ "$BEFEHL" = status ] || aufruf "--json gibt es nur bei status"; JSON=ja ;;
+    --ohne-signatur) [ "$BEFEHL" = rueckweg ] || aufruf "--ohne-signatur gibt es nur bei rueckweg"; OHNE_SIGNATUR=ja ;;
     *) aufruf "unbekannte Angabe: $1" ;;
   esac
   shift
@@ -275,9 +279,12 @@ eingang_kopieren() {   # nur reguläre Dateien mit erlaubtem Namen; kopiert ohne
   mkdir "$ZWISCHEN/lieferung"
   for name in aktuell.json aktuell.json.sig "$EXE"; do
     [ -e "$EINGANG/$name" ] || [ -L "$EINGANG/$name" ] || continue
-    cp -P -- "$EINGANG/$name" "$ZWISCHEN/lieferung/$name"
-    [ -f "$ZWISCHEN/lieferung/$name" ] && [ ! -L "$ZWISCHEN/lieferung/$name" ] \
+    [ -f "$EINGANG/$name" ] && [ ! -L "$EINGANG/$name" ] \
       || fehler "$name war beim Kopieren keine reguläre Datei mehr. Nichts wurde geändert."
+    # höchstens ein Byte mehr als erlaubt kopieren: eine nachwachsende Datei im Eingang füllt so nie den Zwischenordner
+    head -c "$((MAX_GROESSE + 1))" -- "$EINGANG/$name" >"$ZWISCHEN/lieferung/$name"
+    [ "$(stat -c %s -- "$ZWISCHEN/lieferung/$name")" -le "$MAX_GROESSE" ] \
+      || fehler "$name ist beim Kopieren über $MAX_GROESSE Byte gewachsen. Nichts wurde geändert."
   done
 }
 
@@ -437,7 +444,9 @@ rueckweg() {
   schluessel_pruefen
   signatur_stand "$STAENDE/$ziel"
   if [ "$SCHLUESSEL_DA" = ja ] && [ "$SIG_STAND" != gueltig ]; then
-    warnung "Der vorige Stand $ziel ist nicht gültig signiert (Signatur: $SIG_STAND)."
+    [ "$OHNE_SIGNATUR" = ja ] || fehler "Der vorige Stand $ziel ist nicht gültig signiert (Signatur: $SIG_STAND), die Schlüsselliste liegt" \
+      "aber. Nur bewusst mit --ohne-signatur. Nichts wurde geändert."
+    warnung "Der vorige Stand $ziel ist nicht gültig signiert (Signatur: $SIG_STAND), Rückweg auf ausdrücklichen Wunsch (--ohne-signatur)."
   fi
   echo "  aktuell: $alt, zurück auf: $ziel (SHA-256 $s, $g Byte, Commit $c)"
   if [ "$TROCKEN" = ja ]; then
@@ -448,7 +457,7 @@ rueckweg() {
   fi
   link_setzen aktuell "staende/$ziel"
   rm -f -- "$BASIS/vorher"
-  journal "rueckweg aktuell=$ziel zuvor=$alt"
+  journal "rueckweg aktuell=$ziel zuvor=$alt signatur=$SIG_STAND"
   echo "  Zurückgesetzt: aktuell -> staende/$ziel. Es gibt jetzt kein vorher mehr, der Stand $alt bleibt liegen."
 }
 

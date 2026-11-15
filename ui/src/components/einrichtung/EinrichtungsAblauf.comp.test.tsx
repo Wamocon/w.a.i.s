@@ -36,9 +36,7 @@ const stand = (o: Roh = {}): Roh => ({
 
 const BYTES = new Uint8Array([87, 46, 65, 46, 73, 46, 83, 46]);
 const SHA = createHash("sha256").update(BYTES).digest("hex");
-const MANIFEST = {
-  manifest: '{"version":"0.2.0"}',
-  signatur: null,
+const FELDER = {
   v: 1,
   produkt: "wais-desktop",
   version: "0.2.0",
@@ -48,6 +46,7 @@ const MANIFEST = {
   bauzeit: "2026-11-15T14:00:00Z",
   commit: "0123456789".repeat(4),
 };
+const MANIFEST = { ...FELDER, manifest: JSON.stringify(FELDER), signatur: null };
 
 let aktuellerStand: Roh = stand();
 let manifest: unknown = MANIFEST;
@@ -175,7 +174,7 @@ describe("InstallerDownload", () => {
   });
 
   it("zeigt Version, Größe und Prüfsumme; die Prüfsumme lässt sich kopieren", async () => {
-    manifest = { ...MANIFEST, groesse: 117_000_000 };
+    manifest = { ...FELDER, groesse: 117_000_000, manifest: JSON.stringify({ ...FELDER, groesse: 117_000_000 }), signatur: null };
     const user = userEvent.setup();
     // nach userEvent.setup, das sonst eine eigene Zwischenablage einhängt
     const writeText = vi.fn(async () => undefined);
@@ -234,7 +233,7 @@ describe("InstallerDownload", () => {
   });
 
   it("ein ungültiges Manifest zeigt einen Fehler und keine ungeprüften Werte", async () => {
-    manifest = { ...MANIFEST, sha256: SHA.toUpperCase() };
+    manifest = { ...FELDER, sha256: SHA.toUpperCase(), manifest: JSON.stringify({ ...FELDER, sha256: SHA.toUpperCase() }), signatur: null };
     render(<InstallerDownload />);
     expect((await screen.findByRole("alert")).textContent).toMatch(/ungültig/);
     expect(screen.queryByText(SHA.toUpperCase())).toBeNull();

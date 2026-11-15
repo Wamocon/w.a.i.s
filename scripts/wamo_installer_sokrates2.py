@@ -15,7 +15,7 @@ Befehle (im Repo-Hauptordner, mit der Python-Umgebung von voice-core, dort liegt
         "sudo bash ~/wamo-infra/wamo-verteilung-einrichten.sh einsetzen ~/wamo-verteilung-eingang/<Version> [--trocken]" auf. Nach einem
         erfolgreichen Lauf wird der Eingang am Server geleert, nach einem Fehler bleibt er zur Prüfung liegen.
   python scripts/wamo_installer_sokrates2.py status
-  python scripts/wamo_installer_sokrates2.py rueckweg [--trocken]
+  python scripts/wamo_installer_sokrates2.py rueckweg [--trocken] [--ohne-signatur]
 
 Die Prüfregel des Manifests kommt aus infra/sokrates2/wamo_verteilung_manifest.py, dieselbe Datei prüft am Server. Das Skript am Server muss dort
 schon liegen (python scripts/wamo_kern_sokrates2.py verteilen bringt infra/sokrates2 nach ~/wamo-infra). scripts/wamo-dist-pruefen.cjs prüft nur
@@ -45,7 +45,9 @@ HOST = os.environ.get("WAMO_SSH_HOST", "wamo-sokrates2")  # SSH-Alias des Dienst
 SKRIPT = "~/wamo-infra/wamo-verteilung-einrichten.sh"
 EINGANG = "wamo-verteilung-eingang"  # relativ zum Home von wamocon
 SCHLUESSEL_DATEI = ROOT / "desktop" / "update-schluessel.json"
-SSH_OPTIONEN = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+SSH_OPTIONEN = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15"]
+SSH_ZEIT = 300    # Sekunden für einen Befehl am Server (einsetzen rechnet die SHA-256 von etwa 117 MB zweimal)
+SCP_ZEIT = 1800   # Sekunden für das Kopieren einer Datei
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 EXE_RE = re.compile(r"WAIS-Setup-(.{5,14})\.exe")
 
@@ -176,7 +178,10 @@ def manifest_schreiben(ordner: Path, roh: bytes) -> Path:
 
 # ---------------------------------------------------------------- Server
 def ssh(befehl: str, ausgabe: bool = True) -> subprocess.CompletedProcess[bytes]:
-    r = subprocess.run(["ssh", *SSH_OPTIONEN, HOST, befehl], capture_output=True)
+    try:
+        r = subprocess.run(["ssh", *SSH_OPTIONEN, HOST, befehl], capture_output=True, timeout=SSH_ZEIT)
+    except subprocess.TimeoutExpired:
+        raise Abbruch(f"Keine Antwort von {HOST} in {SSH_ZEIT} Sekunden.") from None
     if ausgabe and r.stdout:
         sys.stdout.buffer.write(r.stdout)
         sys.stdout.flush()
@@ -187,7 +192,10 @@ def ssh(befehl: str, ausgabe: bool = True) -> subprocess.CompletedProcess[bytes]
 
 
 def scp(lokal: Path, ziel: str) -> None:
-    r = subprocess.run(["scp", "-q", *SSH_OPTIONEN, str(lokal), f"{HOST}:{ziel}"], capture_output=True)
+    try:
+        r = subprocess.run(["scp", "-q", *SSH_OPTIONEN, str(lokal), f"{HOST}:{ziel}"], capture_output=True, timeout=SCP_ZEIT)
+    except subprocess.TimeoutExpired:
+        raise Abbruch(f"Kopieren nach {HOST}:~/{ziel} dauerte länger als {SCP_ZEIT} Sekunden. Am Server wurde nichts eingesetzt.") from None
     if r.returncode != 0:
         sys.stderr.buffer.write(r.stderr)
         raise Abbruch(f"Kopieren nach {HOST}:~/{ziel} ist fehlgeschlagen. Am Server wurde nichts eingesetzt.")
@@ -202,7 +210,8 @@ def status_holen() -> dict:
         d = json.loads(r.stdout.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         raise Abbruch("Der Server lieferte keinen lesbaren Stand (JSON). Nichts wurde kopiert.") from None
-    if not isinstance(d, dict) or type(d.get("v")) is not int or d["v"] != 1 or not isinstance(d.get("schluesselliste"), bool):
+    if (not isinstance(d, dict) or type(d.get("v")) is not int or d["v"] != 1 or not isinstance(d.get("schluesselliste"), bool)
+            or "aktuell" not in d):
         raise Abbruch("Der Stand vom Server hat nicht das erwartete Format. Nichts wurde kopiert.")
     aktuell = d.get("aktuell")
     if aktuell is not None:
@@ -278,6 +287,8 @@ def parser_bauen() -> argparse.ArgumentParser:
     befehle.add_parser("status", help="Stand der Ablage am Server")
     r = befehle.add_parser("rueckweg", help="am Server aktuell auf vorher stellen")
     r.add_argument("--trocken", action="store_true")
+    r.add_argument("--ohne-signatur", action="store_true",
+                   help="bewusst auf einen nicht gültig signierten Stand zurück, obwohl am Server die Schlüsselliste liegt")
     return p
 
 
@@ -298,7 +309,8 @@ def main(argv: list[str] | None = None) -> int:
             return verteilen(args.exe, args.manifest, args.signatur, args.trocken)
         if args.befehl == "status":
             return ssh(f"sudo bash {SKRIPT} status").returncode
-        return ssh(f"sudo bash {SKRIPT} rueckweg" + (" --trocken" if args.trocken else "")).returncode
+        return ssh(f"sudo bash {SKRIPT} rueckweg" + (" --trocken" if args.trocken else "")
+                   + (" --ohne-signatur" if args.ohne_signatur else "")).returncode
     except Abbruch as e:
         print(f"Abbruch: {e}", file=sys.stderr)
         return 1

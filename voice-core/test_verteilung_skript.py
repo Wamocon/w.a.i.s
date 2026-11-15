@@ -348,7 +348,7 @@ def test_feste_orte_python_isoliert_und_openssl_fuer_die_signatur(text):
     assert "PYTHON=/usr/bin/python3" in ohne and "PY_OPT=(-X utf8 -B -I)" in ohne
     assert "openssl pkeyutl -verify -pubin" in ohne and "-rawin" in ohne
     assert "logger -t wamo-verteilung" in ohne and "flock -n" in ohne
-    assert "mv -T" in ohne and "cp -P" in ohne
+    assert "mv -T" in ohne and "head -c \"$((MAX_GROESSE + 1))\"" in ohne
     for verboten in ("systemctl", "docker", "restart", "wamo-core-env"):
         assert verboten not in ohne, verboten  # nichts wird neu gestartet, der Kern bekommt keine Einstellung
 
@@ -722,6 +722,23 @@ class TestRueckwegUndStatus:
         vorher = welt.zustand()
         r = welt.lauf("rueckweg")
         assert r.returncode == 1 and welt.zustand() == vorher
+
+    def test_rueckweg_auf_unsignierten_stand_nur_bewusst_wenn_die_liste_liegt(self, welt):
+        assert welt.lauf("einsetzen", welt.lieferung("0.2.0")).returncode == 0
+        privat, oeffentlich = schluesselpaar()
+        welt.schluessel_setzen(oeffentlich)
+        assert welt.lauf("einsetzen", welt.signierte_lieferung(privat, "0.3.0")).returncode == 0
+        vorher = welt.zustand()
+        r = welt.lauf("rueckweg")
+        assert r.returncode == 1 and "--ohne-signatur" in welt.ausgabe(r) and welt.zustand() == vorher
+        r = welt.lauf("rueckweg", "--ohne-signatur")
+        assert r.returncode == 0, welt.ausgabe(r)
+        assert "WARNUNG" in r.stderr and welt.link("aktuell") == "staende/0.2.0"
+        assert "signatur=keine" in welt.journal_zeilen()[-1]
+
+    def test_ohne_signatur_gibt_es_nur_beim_rueckweg(self, welt):
+        r = welt.lauf("status", "--ohne-signatur")
+        assert r.returncode == 2
 
     def test_status_json(self, welt):
         r = welt.lauf("status", "--json")

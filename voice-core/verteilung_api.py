@@ -20,7 +20,10 @@ Sicherheit
   * Kein Name und kein Pfad vom Client. Der Link aktuell muss innerhalb von staende/ enden, Manifest und Signatur sind reguläre Dateien
     (kein Link) mit Obergrenze, die exe ist eine reguläre Datei mit genau der Größe aus dem Manifest. Vor der ersten Auslieferung eines Stands
     rechnet der Kern die SHA-256 nach (einmal je Datei, gemerkt nach Gerät, Inode, Größe und Zeit); passt sie nicht, gibt es 503.
-  * Ratengrenzen je Profil und Prozess: 3 ganze Downloads je Stunde, 20 Teilabrufe (Range) je Stunde, 30 Abrufe des Manifests je Minute.
+  * Ratengrenzen je Profil und Prozess: 3 ganze Downloads je Stunde, 20 Teilabrufe je Stunde, 30 Abrufe des Manifests je Minute. Als
+    Teilabruf zählt nur genau ein Bereich, der nicht bei 0 beginnt, ohne If-Range; alles andere (auch "bytes=0-", mehrere Bereiche oder
+    If-Range, die die ganze Datei liefern können) zählt als ganzer Download. Gezählt wird erst, wenn die Ablage geprüft ist (ein 503
+    verbraucht nichts).
   * Jeder Download bekommt eine Zeile in actions (Werkzeug installer_download, nur Version und ob Teilabruf, nie Inhalt). Fällt die Datenbank
     aus, wird trotzdem ausgeliefert (der Eintrag ist Protokoll, keine Freigabe).
   * Antworten: Cache-Control no-store, X-Content-Type-Options nosniff, Content-Disposition attachment. Fehler als JSON {"detail", "code"}:
@@ -71,7 +74,7 @@ TEIL_GRENZE = (20, 3600.0)      # Teilabrufe (Range) je Profil und Stunde
 MANIFEST_GRENZE = (30, 60.0)    # Abrufe des Manifests je Profil und Minute
 _versuche: dict[tuple[str, str], deque[float]] = {}
 _pruefsummen: dict[tuple, bool] = {}
-_rechnen = asyncio.Lock()
+PROTOKOLL_SECS = 3.0  # höchstens so lange wartet ein Download auf die Zeile in actions
 
 CODE_LABOR = "installer_labor"
 CODE_FEHLT = "installer_fehlt"
@@ -213,33 +216,42 @@ def _sha256_datei(pfad: Path) -> str:
 
 
 async def _pruefsumme_stimmt(s: Stand) -> bool:
-    """SHA-256 der exe wie im Manifest? Einmal je Datei gerechnet (in einem Thread), dann gemerkt."""
+    """SHA-256 der exe wie im Manifest? Einmal je Datei gerechnet (in einem Thread), dann gemerkt. Ohne Sperre: Laufen zwei erste
+    Abrufe gleichzeitig, rechnen beide (selten, nur direkt nach dem Einsetzen); eine Sperre auf Modulebene hinge an einer Ereignisschleife."""
     st = s.exe_stat
     schluessel = (str(s.exe), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, s.felder["sha256"])
     if schluessel in _pruefsummen:
         return _pruefsummen[schluessel]
-    async with _rechnen:
-        if schluessel not in _pruefsummen:
-            try:
-                ok = await asyncio.to_thread(_sha256_datei, s.exe) == s.felder["sha256"]
-            except OSError:
-                return False
-            if len(_pruefsummen) > 16:
-                _pruefsummen.clear()
-            _pruefsummen[schluessel] = ok
-    return _pruefsummen[schluessel]
+    try:
+        ok = await asyncio.to_thread(_sha256_datei, s.exe) == s.felder["sha256"]
+    except OSError as e:
+        logger.error("Installer: {} nicht lesbar ({}), nichts ausgeliefert", s.felder["datei"], type(e).__name__)
+        return False
+    if not ok:
+        logger.error("Installer: SHA-256 von {} passt nicht zum Manifest, nichts ausgeliefert", s.felder["datei"])
+    if len(_pruefsummen) > 16:
+        _pruefsummen.clear()
+    _pruefsummen[schluessel] = ok
+    return ok
 
 
 async def _stand_geprueft() -> Stand | None:
     try:
-        s = stand_lesen()
+        s = await asyncio.to_thread(stand_lesen)
     except AblageFehler as e:
         logger.warning("Installer: Ablage nicht nutzbar ({})", e)
         return None
-    if not await _pruefsumme_stimmt(s):
-        logger.error("Installer: SHA-256 von {} passt nicht zum Manifest, nichts ausgeliefert", s.felder["datei"])
-        return None
-    return s
+    return s if await _pruefsumme_stimmt(s) else None
+
+
+TEIL_RE = re.compile(r"bytes=([1-9][0-9]{0,11})-([0-9]{0,12})")
+
+
+def ist_teilabruf(request: Request) -> bool:
+    """Nur genau ein Bereich, der nicht bei 0 beginnt, und kein If-Range zählt als Teilabruf. Alles andere kann die ganze Datei liefern
+    (bytes=0-, mehrere Bereiche, ein nicht passendes If-Range) und zählt deshalb als ganzer Download."""
+    werte = request.headers.getlist("range")
+    return len(werte) == 1 and "if-range" not in request.headers and TEIL_RE.fullmatch(werte[0].strip()) is not None
 
 
 # ---------- Grenzen, Antworten, Protokoll ----------
@@ -268,13 +280,14 @@ async def _protokollieren(user_id: str, version: str, teil: bool) -> None:
         db = shared_database()
         if not db.configured:
             return
-        await db.execute(
-            f"insert into {db.t('actions')} (user_id, tool, params, reason, risk, status, result, finished_at) "
-            f"values ($1::uuid, $2, $3::text::jsonb, $4, 'read'::{db.t('risk_class')}, 'done'::{db.t('action_status')}, "
-            "'{}'::jsonb, now())",
-            user_id, WERKZEUG, json.dumps({"version": version, "teil": teil}), "Installer der Desktop-App geladen",
-        )
-    except (*DB_ERRORS, ValueError, TypeError) as e:
+        async with asyncio.timeout(PROTOKOLL_SECS):
+            await db.execute(
+                f"insert into {db.t('actions')} (user_id, tool, params, reason, risk, status, result, finished_at) "
+                f"values ($1::uuid, $2, $3::text::jsonb, $4, 'read'::{db.t('risk_class')}, 'done'::{db.t('action_status')}, "
+                "'{}'::jsonb, now())",
+                user_id, WERKZEUG, json.dumps({"version": version, "teil": teil}), "Installer der Desktop-App geladen",
+            )
+    except (*DB_ERRORS, TimeoutError, ValueError, TypeError) as e:
         logger.warning("Installer: Download nicht in actions protokolliert ({})", type(e).__name__)
 
 
@@ -297,12 +310,12 @@ async def installer_datei(request: Request):
     ich = await identitaet(request)
     if labor.ist_labor(ich):
         return _fehler(403, SATZ_LABOR, CODE_LABOR)
-    teil = "range" in request.headers
-    if not _zulassen(ich.user_id, "teil" if teil else "datei", TEIL_GRENZE if teil else DATEI_GRENZE):
-        return _fehler(429, SATZ_ZU_OFT, CODE_ZU_OFT)
     s = await _stand_geprueft()
     if s is None:
         return _fehler(503, SATZ_FEHLT, CODE_FEHLT)
+    teil = ist_teilabruf(request)
+    if not _zulassen(ich.user_id, "teil" if teil else "datei", TEIL_GRENZE if teil else DATEI_GRENZE):
+        return _fehler(429, SATZ_ZU_OFT, CODE_ZU_OFT)
     await _protokollieren(ich.user_id, s.felder["version"], teil)
     logger.info("Installer {} an Profil {} ({})", s.felder["version"], ich.user_id[:8], "Teil" if teil else "ganz")
     return FileResponse(s.exe, media_type="application/octet-stream", filename=s.felder["datei"], stat_result=s.exe_stat,

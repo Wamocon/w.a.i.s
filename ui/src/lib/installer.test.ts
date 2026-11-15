@@ -20,9 +20,7 @@ import {
 
 const SHA = "0123456789abcdef".repeat(4);
 const COMMIT = "89abcdef01".repeat(4);
-const ANTWORT = {
-  manifest: '{"version":"0.2.0"}',
-  signatur: "AAAA" + "b".repeat(84),
+const FELDER = {
   v: 1,
   produkt: "wais-desktop",
   version: "0.2.0",
@@ -32,6 +30,14 @@ const ANTWORT = {
   bauzeit: "2026-11-15T14:00:00Z",
   commit: COMMIT,
 };
+const SIGNATUR = "AAAA" + "b".repeat(82) + "==";
+
+/** Antwort des Kerns, deren Manifesttext genau zu den Feldern passt (wie der Kern sie baut). */
+function antwort(ueber: Record<string, unknown> = {}): Record<string, unknown> {
+  const felder = { ...FELDER, ...ueber };
+  return { ...felder, manifest: JSON.stringify(felder), signatur: SIGNATUR };
+}
+const ANTWORT = antwort();
 const GEDANKENSTRICH = /[–—]|\s-\s/;
 
 test("Manifest: gültige Antwort wird übernommen, fremde Felder fallen weg", () => {
@@ -39,9 +45,25 @@ test("Manifest: gültige Antwort wird übernommen, fremde Felder fallen weg", ()
   assert.deepEqual(m, ANTWORT);
   assert.ok(m && !("pfad" in m));
   assert.equal(manifestAusAntwort({ ...ANTWORT, signatur: null })?.signatur, null);
-  assert.equal(manifestAusAntwort({ ...ANTWORT, version: "0.10.0", datei: "WAIS-Setup-0.10.0.exe" })?.version, "0.10.0");
-  assert.equal(manifestAusAntwort({ ...ANTWORT, groesse: 536_870_912 })?.groesse, 536_870_912);
-  assert.equal(manifestAusAntwort({ ...ANTWORT, bauzeit: "2026-11-15T14:00:00+00:00" })?.bauzeit, "2026-11-15T14:00:00+00:00");
+  assert.equal(manifestAusAntwort(antwort({ version: "0.10.0", datei: "WAIS-Setup-0.10.0.exe" }))?.version, "0.10.0");
+  assert.equal(manifestAusAntwort(antwort({ groesse: 268_435_456 }))?.groesse, 268_435_456);
+  assert.equal(manifestAusAntwort(antwort({ bauzeit: "2026-11-15T14:00:00.123Z" }))?.bauzeit, "2026-11-15T14:00:00.123Z");
+});
+
+test("Manifest: alle Werte kommen aus dem Text, Einzelfelder müssen genau gleich sein", () => {
+  // ein Kern, der eine andere Prüfsumme zeigt als der (signierte) Text, fällt durch
+  assert.equal(manifestAusAntwort({ ...ANTWORT, sha256: "f".repeat(64) }), null);
+  assert.equal(manifestAusAntwort({ ...ANTWORT, groesse: 1 }), null);
+  assert.equal(manifestAusAntwort({ ...ANTWORT, manifest: JSON.stringify({ ...FELDER, version: "0.3.0" }) }), null);
+  // Text mit Zusatzfeld, fehlendem Feld, kein Objekt oder kein JSON
+  assert.equal(manifestAusAntwort({ ...ANTWORT, manifest: JSON.stringify({ ...FELDER, zusatz: 1 }) }), null);
+  const ohneCommit: Record<string, unknown> = { ...FELDER };
+  delete ohneCommit.commit;
+  assert.equal(manifestAusAntwort({ ...ANTWORT, manifest: JSON.stringify(ohneCommit) }), null);
+  for (const text of ["[]", "null", "{", "", "x".repeat(5000)]) assert.equal(manifestAusAntwort({ ...ANTWORT, manifest: text }), null, text.slice(0, 20));
+  // derselbe Inhalt in anderer Schreibweise bleibt gültig, der Text wird unverändert weitergegeben
+  const eingerueckt = JSON.stringify(FELDER, null, 2) + "\n";
+  assert.equal(manifestAusAntwort({ ...ANTWORT, manifest: eingerueckt })?.manifest, eingerueckt);
 });
 
 test("Manifest: alles außerhalb der Regeln wird verworfen", () => {
@@ -58,7 +80,7 @@ test("Manifest: alles außerhalb der Regeln wird verworfen", () => {
     { groesse: 0 },
     { groesse: -1 },
     { groesse: 1.5 },
-    { groesse: 536_870_913 },
+    { groesse: 268_435_457 },
     { groesse: "117000000" },
     { sha256: SHA.toUpperCase() },
     { sha256: SHA.slice(1) },
@@ -68,14 +90,15 @@ test("Manifest: alles außerhalb der Regeln wird verworfen", () => {
     { v: 2 },
     { v: "1" },
     { produkt: "anderes" },
-    { manifest: 5 },
-    { manifest: "x".repeat(20_000) },
-    { signatur: "kein base64!" },
-    { signatur: 12 },
     { bauzeit: "gestern" },
+    { bauzeit: "2026-11-15T14:00:00+00:00" },
+    { bauzeit: "2026-11-15T14:00Z" },
     { bauzeit: 1731679200 },
   ];
-  for (const f of falsch) assert.equal(manifestAusAntwort({ ...ANTWORT, ...f }), null, JSON.stringify(f).slice(0, 80));
+  for (const f of falsch) assert.equal(manifestAusAntwort(antwort(f)), null, JSON.stringify(f).slice(0, 80));
+  for (const f of [{ manifest: 5 }, { manifest: "x".repeat(20_000) }, { signatur: "kein base64!" }, { signatur: 12 }, { signatur: "AAAA" }]) {
+    assert.equal(manifestAusAntwort({ ...ANTWORT, ...f }), null, JSON.stringify(f).slice(0, 80));
+  }
   for (const feld of Object.keys(ANTWORT).filter((k) => k !== "signatur")) {
     const ohne: Record<string, unknown> = { ...ANTWORT };
     delete ohne[feld];
@@ -102,7 +125,7 @@ test("Versionshinweis: im Browser nie, in der App ohne Version Update empfohlen,
   assert.equal(versionsHinweis(null, M, true), "Update empfohlen.");
   assert.equal(versionsHinweis(null, null, true), "Update empfohlen.");
   assert.equal(versionsHinweis("kaputt", M, true), "Update empfohlen.");
-  const neu = manifestAusAntwort({ ...ANTWORT, version: "0.3.0", datei: "WAIS-Setup-0.3.0.exe" });
+  const neu = manifestAusAntwort(antwort({ version: "0.3.0", datei: "WAIS-Setup-0.3.0.exe" }));
   assert.equal(versionsHinweis("0.2.0", neu, true), "Update auf Version 0.3.0 verfügbar.");
   assert.equal(versionsHinweis("0.2.0", M, true), null);
   assert.equal(versionsHinweis("0.4.0", neu, true), null);

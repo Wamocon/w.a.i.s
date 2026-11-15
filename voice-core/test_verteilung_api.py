@@ -71,9 +71,11 @@ def basis(tmp_path, monkeypatch):
     monkeypatch.setattr(va, "ORDNER", tmp_path)
     va._versuche.clear()
     va._pruefsummen.clear()
-    yield tmp_path
-    va._versuche.clear()
-    va._pruefsummen.clear()
+    try:
+        yield tmp_path
+    finally:
+        va._versuche.clear()
+        va._pruefsummen.clear()
 
 
 @pytest.fixture
@@ -233,6 +235,48 @@ def test_teilabrufe_haben_eine_eigene_grenze(client, basis):
     assert client.get("/wamo/api/installer/datei", headers={"Range": "bytes=100-"}).status_code == 206
 
 
+@pytest.mark.parametrize("kopf", [{"Range": "bytes=0-"}, {"Range": "bytes=0-99"}, {"Range": "bytes=1-2,5-6"},
+                                  {"Range": "bytes=100-", "If-Range": '"falsch"'}, {"Range": "bytes=-500"}, {"Range": "items=1-2"}])
+def test_bereiche_die_alles_liefern_koennen_zaehlen_als_ganzer_download(client, basis, kopf):
+    _stand(basis)
+    for _ in range(3):
+        assert client.get("/wamo/api/installer/datei").status_code == 200
+    r = client.get("/wamo/api/installer/datei", headers=kopf)
+    assert r.status_code == 429 and r.json()["code"] == "installer_zu_oft"
+
+
+def test_teilabrufe_sind_begrenzt(client, basis):
+    _stand(basis)
+    for _ in range(va.TEIL_GRENZE[0]):
+        assert client.get("/wamo/api/installer/datei", headers={"Range": "bytes=100-199"}).status_code == 206
+    assert client.get("/wamo/api/installer/datei", headers={"Range": "bytes=100-199"}).status_code == 429
+
+
+def test_ohne_ablage_wird_nichts_vom_kontingent_verbraucht(client, basis):
+    for _ in range(5):
+        assert client.get("/wamo/api/installer/datei").status_code == 503
+    _stand(basis)
+    assert client.get("/wamo/api/installer/datei").status_code == 200
+
+
+def test_manifest_abrufe_sind_begrenzt(client, basis):
+    _stand(basis)
+    for _ in range(va.MANIFEST_GRENZE[0]):
+        assert client.get("/wamo/api/installer").status_code == 200
+    r = client.get("/wamo/api/installer")
+    assert r.status_code == 429 and r.json()["code"] == "installer_zu_oft"
+
+
+def test_lesefehler_beim_nachrechnen_ist_503(client, basis, monkeypatch):
+    _stand(basis)
+
+    def kaputt(_pfad):
+        raise PermissionError("nicht lesbar")
+
+    monkeypatch.setattr(va, "_sha256_datei", kaputt)
+    assert client.get("/wamo/api/installer/datei").status_code == 503
+
+
 def test_eintrag_in_actions_ohne_inhalt(client, basis, db):
     _stand(basis)
     client.get("/wamo/api/installer/datei")
@@ -359,3 +403,15 @@ def test_konstanten_gleich_wie_am_server():
     assert va.SCHLUESSEL == server.SCHLUESSEL and va.PRODUKT == server.PRODUKT
     assert va.MAX_MANIFEST == server.MAX_MANIFEST and va.MAX_GROESSE == server.MAX_GROESSE
     assert va.SIGNATUR_RE.pattern == server.SIGNATUR_RE.pattern.decode("ascii")
+    for name in ("VERSION_RE", "SHA256_RE", "COMMIT_RE", "BAUZEIT_RE"):
+        assert getattr(va, name).pattern == getattr(server, name).pattern, name
+
+
+@pytest.mark.parametrize("roh", [f for f in FAELLE if f])
+def test_kern_und_server_liefern_dieselben_felder(roh):
+    server = _server_regel()
+    try:
+        erwartet = server.manifest_pruefen(roh)
+    except ValueError:
+        return
+    assert va.manifest_pruefen(roh) == erwartet and list(va.manifest_pruefen(roh)) == list(va.SCHLUESSEL)

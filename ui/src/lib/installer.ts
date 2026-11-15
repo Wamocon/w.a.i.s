@@ -14,12 +14,19 @@ const VERSION_MUSTER = new RegExp(`^${TEIL}\\.${TEIL}\\.${TEIL}$`);
 const DATEI_MUSTER = new RegExp(`^WAIS-Setup-${TEIL}\\.${TEIL}\\.${TEIL}\\.exe$`);
 const SHA256_MUSTER = /^[0-9a-f]{64}$/;
 const COMMIT_MUSTER = /^[0-9a-f]{40}$/;
-const BASE64_MUSTER = /^[A-Za-z0-9+/]{1,1024}={0,2}$/;
-const ZEIT_MUSTER = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})$/;
+/** eine Zeile Base64 für genau 64 Byte (Ed25519), wie aktuell.json.sig */
+const SIGNATUR_MUSTER = /^[A-Za-z0-9+/]{86}==$/;
+/** wie am Server und im Kern: UTC mit Z, optional bis zu drei Nachkommastellen */
+const ZEIT_MUSTER = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+const FELDER = ["v", "produkt", "version", "datei", "groesse", "sha256", "bauzeit", "commit"] as const;
+type Feld = (typeof FELDER)[number];
 
-/** Größte erlaubte Datei (512 MiB), wie im Kern. */
-export const MAX_GROESSE = 536_870_912;
-const MAX_MANIFEST = 8192;
+/**
+ * Größte Datei, die die Oberfläche lädt (256 MiB). Der Kern erlaubt bis 512 MiB, im Browser liegen beim Laden aber Puffer,
+ * Prüfsumme und Blob gleichzeitig im Speicher (etwa das Dreifache); der Installer hat heute etwa 117 MB.
+ */
+export const MAX_GROESSE = 268_435_456;
+const MAX_MANIFEST = 4096;
 
 export type InstallerManifest = {
   /** genauer Text von aktuell.json (für die spätere Prüfung der Signatur in der App) */
@@ -37,31 +44,51 @@ export type InstallerManifest = {
 
 const istText = (v: unknown): v is string => typeof v === "string";
 
-/** Antwort des Kerns als geprüftes Manifest, oder null, wenn auch nur ein Feld nicht passt. Fremde Felder fallen weg. */
+/** Der exakte Text von aktuell.json als Objekt mit genau den acht Feldern, sonst null. */
+function manifestText(text: string): Record<Feld, unknown> | null {
+  let roh: unknown;
+  try {
+    roh = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof roh !== "object" || roh === null || Array.isArray(roh)) return null;
+  const schluessel = Object.keys(roh);
+  if (schluessel.length !== FELDER.length || !FELDER.every((f) => schluessel.includes(f))) return null;
+  return roh as Record<Feld, unknown>;
+}
+
+/**
+ * Antwort des Kerns als geprüftes Manifest, oder null, wenn auch nur ein Wert nicht passt. Alle Werte stammen aus dem exakten
+ * Text von aktuell.json (den prüft die App später gegen die Signatur), die Einzelfelder der Antwort müssen genau gleich sein:
+ * So kann ein Kern nie eine Prüfsumme zeigen, die der Text nicht enthält. Fremde Felder fallen weg.
+ */
 export function manifestAusAntwort(daten: unknown): InstallerManifest | null {
   if (typeof daten !== "object" || daten === null || Array.isArray(daten)) return null;
   const d = daten as Record<string, unknown>;
-  if (d.v !== 1 || d.produkt !== "wais-desktop") return null;
   if (!istText(d.manifest) || d.manifest.length === 0 || d.manifest.length > MAX_MANIFEST) return null;
   const signatur = d.signatur ?? null;
-  if (signatur !== null && !(istText(signatur) && BASE64_MUSTER.test(signatur))) return null;
-  if (!istText(d.version) || !VERSION_MUSTER.test(d.version)) return null;
-  if (d.datei !== `WAIS-Setup-${d.version}.exe`) return null;
-  if (typeof d.groesse !== "number" || !Number.isInteger(d.groesse) || d.groesse < 1 || d.groesse > MAX_GROESSE) return null;
-  if (!istText(d.sha256) || !SHA256_MUSTER.test(d.sha256)) return null;
-  if (!istText(d.commit) || !COMMIT_MUSTER.test(d.commit)) return null;
-  if (!istText(d.bauzeit) || !ZEIT_MUSTER.test(d.bauzeit) || Number.isNaN(Date.parse(d.bauzeit))) return null;
+  if (signatur !== null && !(istText(signatur) && SIGNATUR_MUSTER.test(signatur))) return null;
+  const m = manifestText(d.manifest);
+  if (!m || FELDER.some((f) => d[f] !== m[f])) return null;
+  if (m.v !== 1 || m.produkt !== "wais-desktop") return null;
+  if (!istText(m.version) || !VERSION_MUSTER.test(m.version)) return null;
+  if (m.datei !== `WAIS-Setup-${m.version}.exe`) return null;
+  if (typeof m.groesse !== "number" || !Number.isInteger(m.groesse) || m.groesse < 1 || m.groesse > MAX_GROESSE) return null;
+  if (!istText(m.sha256) || !SHA256_MUSTER.test(m.sha256)) return null;
+  if (!istText(m.commit) || !COMMIT_MUSTER.test(m.commit)) return null;
+  if (!istText(m.bauzeit) || !ZEIT_MUSTER.test(m.bauzeit) || Number.isNaN(Date.parse(m.bauzeit))) return null;
   return {
     manifest: d.manifest,
     signatur,
     v: 1,
     produkt: "wais-desktop",
-    version: d.version,
-    datei: d.datei,
-    groesse: d.groesse,
-    sha256: d.sha256,
-    bauzeit: d.bauzeit,
-    commit: d.commit,
+    version: m.version,
+    datei: m.datei,
+    groesse: m.groesse,
+    sha256: m.sha256,
+    bauzeit: m.bauzeit,
+    commit: m.commit,
   };
 }
 

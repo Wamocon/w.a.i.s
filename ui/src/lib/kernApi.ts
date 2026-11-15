@@ -29,8 +29,8 @@ export class KernFehler extends Error {
 
 const ZEITLIMIT_MS = 20_000;
 const ZEITLIMIT_DATEI_MS = 150_000;
-/** Zeitgrenze für große Dateien (Installer, etwa 117 MB) einschließlich Lesen */
-const ZEITLIMIT_STROM_MS = 600_000;
+/** Zeitgrenze für große Dateien (Installer, etwa 117 MB) einschließlich Lesen: 30 Minuten reichen auch bei etwa 0,6 Mbit/s */
+const ZEITLIMIT_STROM_MS = 1_800_000;
 const ABGEBROCHEN = "Abgebrochen";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const ABGELAUFEN = "Die Anmeldung ist abgelaufen. Bitte neu anmelden.";
@@ -229,7 +229,7 @@ async function stromLesen(
 
 /**
  * Große Datei gestreamt laden (Installer, lib/installerApi.ts), mit denselben Regeln wie jede Anfrage an den Kern (Token,
- * Erneuerung bei 401, kein Cache, keine Cookies, keine Umleitung). Zeitgrenze 10 Minuten einschließlich Lesen, Abbruch über
+ * Erneuerung bei 401, kein Cache, keine Cookies, keine Umleitung). Zeitgrenze 30 Minuten einschließlich Lesen, Abbruch über
  * signal (endet mit KernFehler(0, "Abgebrochen")). hoechstens: mehr Bytes nimmt die Oberfläche nicht an (413). Die Bytes
  * bleiben im Speicher des Aufrufers; hier wird nichts gespeichert oder angeboten.
  */
