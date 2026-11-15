@@ -5,7 +5,9 @@ merken         Fakt, Vorliebe oder Lektion ins Gedächtnis, persönlich oder gem
 websuche       Aktuelle Infos aus dem Web: Anthropic-Websuche in einem eigenen Haiku-Aufruf
                (WAMO_SUCHE=anthropic, Standard) oder eigene SearXNG-Instanz (WAMO_SUCHE=searxng, suche.py).
                Das Ergebnis ist in beiden Fällen als unvertrauenswürdige Daten gekennzeichnet.
-canvas_zeigen  Tabelle, Code, Dokument oder Mermaid-Diagramm auf das Canvas der UI legen.
+canvas_zeigen  Tabelle, Code, Dokument oder Mermaid-Diagramm auf das Canvas der UI legen. Liefert die Kennung des Elements
+               (c1, c2, ...); mit ersetzt=<Kennung> ersetzt die Oberfläche ein Element dieser Sitzung an derselben Stelle
+               (canvas_sitzung.py), gespeichert wird jede Fassung als neue Zeile.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallParams
 
 from auth_gate import Identity
+from canvas_sitzung import CanvasSitzung
 from labor_limit import GRUND_SUCHEN, SuchZaehler
 from llm_anbieter import Zugang, verbrauch_loggen
 from memory import BEREICHE, ZEITZONE, MemoryStore, initial_status
@@ -167,7 +170,11 @@ CANVAS_SCHEMA = FunctionSchema(
     description=(
         "Legt etwas Sichtbares auf das Canvas neben der Stimmlinie: Tabellen, Code (z. B. SQL), "
         "Dokumente oder Diagramme. Immer nutzen, wenn etwas besser gelesen als gehört wird. "
-        "Danach nur kurz sagen, was du zeigst, nicht vorlesen."
+        "Danach nur kurz sagen, was du zeigst, nicht vorlesen. Das Ergebnis nennt die canvas_id. "
+        "Will die Person das Gezeigte ändern, ergänzen, kürzen oder umbauen, schick die ganze neue Fassung "
+        "mit ersetzt=canvas_id des offenen Reiters: Sie ersetzt ihn. Offen ist das zuletzt Gezeigte, außer ein "
+        "Systemhinweis nennt einen anderen Reiter. Einen neuen Reiter nur, wenn sie ausdrücklich etwas Neues "
+        "oder Zusätzliches will."
     ),
     properties={
         "typ": {"type": "string", "enum": list(CANVAS_TYPE)},
@@ -188,6 +195,7 @@ CANVAS_SCHEMA = FunctionSchema(
             "Bei mermaid: Mermaid-Quelltext (flowchart, sequenceDiagram, erDiagram ...).",
         },
         "sprache": {"type": "string", "description": "Nur bei typ=code, z. B. sql, python"},
+        "ersetzt": {"type": "string", "description": "canvas_id (z. B. c2) des Elements, das du überarbeitest; leer = neuer Reiter"},
     },
     required=["typ", "titel"],
 )
@@ -323,6 +331,7 @@ def jetzt_text(now: datetime | None = None) -> dict:
 def register_tools(
     llm, memory: MemoryStore, identity: Identity, turn: TurnState | None = None, *, zugang: Zugang, fernzugriff: bool = False,
     erlaubt: Collection[str] | None = None, suchen_max: int | None = None, suchen_zaehler: SuchZaehler | None = None,
+    canvas: CanvasSitzung | None = None,
 ) -> ToolsSchema:
     """Registriert die Handler am LLM und liefert das Schema für den Kontext. zugang: Modellzugang des
     Profils (Websuche über Anthropic nur mit eigenem Schlüssel, sonst SearXNG). fernzugriff: nur für Admins bei
@@ -331,8 +340,11 @@ def register_tools(
     alle anderen (merken, fernzugriff_oeffnen) gibt es in der Sitzung nicht. None: alle wie bisher.
     suchen_max: höchstens so viele Aufrufe von websuche in dieser Sitzung (Laborprofile, labor_limit.suchen_max), danach gibt es keine Suche mehr
     und der Schlüssel wird nicht berührt. suchen_zaehler: stattdessen ein fertiger, gemeinsamer Zähler (bot.py reicht den je Profil und Durchlauf,
-    labor_limit.LIMITS, damit eine Neuverbindung die Suchen nicht zurücksetzt); er geht vor suchen_max. Beides None: unbegrenzt wie bisher."""
+    labor_limit.LIMITS, damit eine Neuverbindung die Suchen nicht zurücksetzt); er geht vor suchen_max. Beides None: unbegrenzt wie bisher.
+    canvas: Liste der Canvas-Elemente dieser Sitzung (canvas_sitzung.py); bot.py reicht sie, damit auch die Meldung des offenen Reiters
+    und die Ergebnisse von Boss-Aufgaben dort landen. None: eine eigene Liste nur für diese Werkzeuge."""
     turn = turn or TurnState()
+    canvas = canvas if canvas is not None else CanvasSitzung()
     frei = (lambda name: True) if erlaubt is None else (lambda name: name in erlaubt)
     suchen = suchen_zaehler if suchen_zaehler is not None else (None if suchen_max is None else SuchZaehler(suchen_max))
 
@@ -391,10 +403,25 @@ def register_tools(
         if fehler:
             await params.result_callback({"angezeigt": False, "fehler": fehler})
             return
-        item["id"] = await memory.save_canvas(CANVAS_TYPE[item["kind"]], item["title"], item)
-        await params.llm.push_frame(RTVIServerMessageFrame(data={"type": "canvas", "item": item}))
-        logger.info("canvas: {}", item["kind"])
-        await params.result_callback({"angezeigt": True})
+        gewuenscht = params.arguments.get("ersetzt")
+        # Jede Fassung ist eine neue Zeile (die vorige bleibt in der Datenbank); ohne Datenbank eine lokale Kennung, damit die Oberfläche
+        # das Element später trotzdem ersetzen kann
+        item["id"] = await memory.save_canvas(CANVAS_TYPE[item["kind"]], item["title"], item) or canvas.lokale_id()
+        # erst nach dem Speichern und ohne await bis zum Ersetzen: eine gleichzeitige Überarbeitung ersetzt die jeweils neueste Fassung
+        alt = canvas.finden(gewuenscht)  # nur Elemente dieser Sitzung, nie ein fremdes
+        nachricht = {"type": "canvas", "item": item}
+        ergebnis: dict = {"angezeigt": True}
+        if alt is not None:
+            nachricht["ersetzt"] = alt.ui_id
+            ergebnis["canvas_id"] = canvas.ersetzen(alt.kennung, item["id"], item["title"])
+            ergebnis["ueberarbeitet"] = True
+        else:
+            ergebnis["canvas_id"] = canvas.neu(item["id"], item["title"])
+            if gewuenscht not in (None, ""):
+                ergebnis["hinweis"] = "Kein Element dieser Sitzung mit dieser canvas_id: als neuer Reiter gezeigt."
+        await params.llm.push_frame(RTVIServerMessageFrame(data=nachricht))
+        logger.info("canvas: {}{}", item["kind"], " (überarbeitet)" if alt is not None else "")
+        await params.result_callback(ergebnis)
 
     async def fernzugriff_oeffnen(params: FunctionCallParams):
         # Nur die Aufforderung an die Oberfläche, den Abschnitt zu zeigen. Die Sitzung startet der Nutzer dort selbst, mit einem echten

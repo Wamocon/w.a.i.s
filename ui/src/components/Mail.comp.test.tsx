@@ -87,6 +87,21 @@ describe("Canvas, Als E-Mail", () => {
     render(<CanvasBereich mail={mailAktionen()} />);
     expect(screen.queryByRole("button", { name: "Als E-Mail" })).toBeNull();
   });
+
+  it("überarbeitet W.A.I.S. das Element, bleibt das offene Formular stehen und schickt die neue Fassung", () => {
+    const NEU = "22222222-2222-4222-8222-222222222222";
+    const mail = mailAktionen();
+    zustand(DOKUMENT);
+    render(<CanvasBereich mail={mail} />);
+    fireEvent.click(screen.getByRole("button", { name: "Als E-Mail" }));
+    fireEvent.change(screen.getByLabelText("An"), { target: { value: "max@firma.example" } });
+    act(() =>
+      applyServerMessage({ type: "canvas", item: { id: NEU, kind: "dokument", title: DOKUMENT.title, text: "# Angebot, überarbeitet" }, ersetzt: ID }),
+    );
+    expect((screen.getByLabelText("An") as HTMLInputElement).value).toBe("max@firma.example");
+    fireEvent.click(screen.getByRole("button", { name: "Zur Freigabe vorbereiten" }));
+    expect(mail.vorbereiten.mock.calls[0][0].canvasId).toBe(NEU);
+  });
 });
 
 describe("Versand mit Zurückholen", () => {

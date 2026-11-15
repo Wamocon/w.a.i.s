@@ -257,7 +257,8 @@ export type LiveBildFrame = {
 export type ServerMessage =
   | ({ type: "bildstrom" } & LiveBildMeldung)
   | ({ type: "bild" } & LiveBildFrame)
-  | { type: "canvas"; item: CanvasItem }
+  /** ersetzt: Kennung des Elements, das dieses überarbeitet (voice-core/canvas_sitzung.py); die Oberfläche setzt es an dieselbe Stelle */
+  | { type: "canvas"; item: CanvasItem; ersetzt?: string }
   | ({ type: "markierung" } & Markierung)
   | ({ type: "aktivitaet" } & Pick<Activity, "id" | "name" | "detail" | "status">)
   | { type: "vorgang"; vorgang: Vorgang }
@@ -574,7 +575,8 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
   switch (m.type) {
     case "canvas": {
       const item = canvasItem(m.item);
-      return item ? { type: "canvas", item } : null;
+      if (!item) return null;
+      return isStr(m.ersetzt) && m.ersetzt && m.ersetzt.length <= 100 ? { type: "canvas", item, ersetzt: m.ersetzt } : { type: "canvas", item };
     }
     case "bild": {
       const frame = liveBildFrame(m);

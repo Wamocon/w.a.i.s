@@ -24,6 +24,8 @@ export type CanvasItem = (
   teilbar?: { id: string; projekt?: string };
   /** von jemand anderem geteilt (geöffnet über geteilte Arbeit) */
   geteilt?: { von: string | null; recht: "lesen" | "bearbeiten" };
+  /** nur in der Oberfläche: Kennung der ersten Fassung an dieser Stelle (lib/canvasWahl.ts), bleibt bei Überarbeitungen gleich */
+  stelle?: string;
 };
 
 const KIND_LABEL: Record<CanvasItem["kind"], string> = {
@@ -50,15 +52,18 @@ export const CanvasBereich = memo(function CanvasBereich({
   jiraStory,
   office,
   mail,
+  aktiv,
 }: {
   jiraStory?: (canvasId: string) => boolean;
   office?: OfficeAktionen;
   mail?: MailAktionen;
+  /** offener Reiter an den Kern (Nachricht canvas_aktiv, voice-core/canvas_sitzung.py), null für ein Element ohne Kennung; fehlt im Labor */
+  aktiv?: (canvasId: string | null) => void;
 }) {
   const items = useSelect(wamo, (s) => s.canvas);
   // PC-Werkzeuge gibt es vorerst nur für admin; Mitgliedern den Hinweis darauf ersparen
   const mitglied = useSelect(wamo, (s) => s.profil?.rolle === "mitglied");
-  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} mail={mail} />;
+  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} mail={mail} aktiv={aktiv} />;
   return (
     <div className="canvas-empty">
       <p className="eyebrow">Canvas</p>
@@ -81,11 +86,13 @@ function Canvas({
   jiraStory,
   office,
   mail,
+  aktiv,
 }: {
   items: CanvasItem[];
   jiraStory?: (canvasId: string) => boolean;
   office?: OfficeAktionen;
   mail?: MailAktionen;
+  aktiv?: (canvasId: string | null) => void;
 }) {
   const [picked, setPicked] = useState<number | null>(null);
   // "Ergebnis ansehen" in der Tafel Vorgänge (lib/canvasWahl.ts): ein neuer Wunsch wählt das Element mit dieser Kennung, noch im
@@ -100,6 +107,15 @@ function Canvas({
   // Ohne eigene Auswahl zeigt das Canvas immer das Neueste.
   const index = picked !== null && picked < items.length ? picked : items.length - 1;
   const item = items[index];
+  // Den offenen Reiter dem Kern melden: beim Zeigen, beim Wechsel, nach einer Überarbeitung (neue Kennung) und wenn ein Element dazukommt,
+  // während ein älterer Reiter gewählt bleibt (sonst hielte das Modell das Neue für offen). Fortschritt am selben Element meldet nichts.
+  const offeneId = item.id ?? null;
+  const kennungen = items.map((it) => it.id ?? "").join("|");
+  useEffect(() => {
+    aktiv?.(offeneId);
+  }, [offeneId, kennungen, aktiv]);
+  // Knöpfe und Formulare am Element bleiben über Überarbeitungen stehen (ein offenes Mail-Formular schickt dann die neue Fassung)
+  const stelle = item.stelle ?? item.id ?? item.title;
 
   return (
     <div className="canvas-board">
@@ -129,8 +145,8 @@ function Canvas({
           )}
           <CanvasTeilen item={item} />
           <JiraStoryKnopf item={item} anfragen={jiraStory} />
-          {office && <CanvasSpeichern key={item.id ?? item.title} item={item} office={office} />}
-          {mail && <CanvasMail key={`mail-${item.id ?? item.title}`} item={item} mail={mail} />}
+          {office && <CanvasSpeichern key={stelle} item={item} office={office} />}
+          {mail && <CanvasMail key={`mail-${stelle}`} item={item} mail={mail} />}
         </header>
         <CanvasBody item={item} />
       </article>

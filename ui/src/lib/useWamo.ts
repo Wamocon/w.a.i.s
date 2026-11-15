@@ -178,6 +178,10 @@ export type WamoAktionen = {
   office?: OfficeAktionen;
   /** Mail über Outlook vorbereiten und einen Versand zurückholen (lib/mail.ts). Optional, damit die Vorschau ohne Kern auskommt. */
   mail?: MailAktionen;
+  /** Offenen Reiter des Canvas an den Kern melden (voice-core/canvas_sitzung.py): Will die Person etwas ändern, überarbeitet W.A.I.S.
+   *  diesen Reiter. Nur die Kennung geht hinaus (null: ein Element ohne Kennung), der Kern überarbeitet nur Elemente seiner Sitzung;
+   *  true, wenn gesendet. Nie im Labor. */
+  canvasAktiv?: (canvasId: string | null) => boolean;
 };
 
 /** Die drei Aktionen am Stimmabdruck; der Kern prüft sie und antwortet mit stimmabdruck-Nachrichten. true, wenn gesendet. */
@@ -227,7 +231,8 @@ type ClientMessage =
       data: { canvas_id: string | null; an: string[]; cc: string[]; betreff: string; text: string; anhang: OfficeFormat | null };
     }
   | { type: "mail_zurueckholen"; data: { id: string } }
-  | { type: "onenote_seite"; data: { canvas_id: string } };
+  | { type: "onenote_seite"; data: { canvas_id: string } }
+  | { type: "canvas_aktiv"; data: { canvas_id: string | null } };
 
 function senden(client: PipecatClient, msg: ClientMessage) {
   client.sendClientMessage(msg.type, msg.data);
@@ -1322,6 +1327,18 @@ export function useWamo(): WamoAktionen {
     return true;
   }, []);
 
+  // Offener Reiter des Canvas: nur senden, ohne Verbindung geht nichts verloren (eine neue Sitzung kennt die alten Kennungen ohnehin nicht)
+  const canvasAktiv = useCallback((canvasId: string | null) => {
+    const client = clientRef.current;
+    if (!client || !istOnline(wamo.get()) || (canvasId !== null && (!canvasId || canvasId.length > 100))) return false;
+    try {
+      senden(client, { type: "canvas_aktiv", data: { canvas_id: canvasId } });
+    } catch {
+      return false;
+    }
+    return true;
+  }, []);
+
   // PC-Steuerung: mit Sitzung nur senden; den Zustand meldet der Kern im Feld betrieb.pc_steuerung zurück. Ohne Sitzung (nur Desktop-App,
   // nur Admins): "an" startet still eine Sitzung und schaltet ein, sobald der Kern den PC als verbunden meldet; "aus" ist nichts zu tun.
   const pcSteuerung = useCallback(
@@ -1759,6 +1776,7 @@ export function useWamo(): WamoAktionen {
       jiraStory,
       office,
       mail,
+      canvasAktiv,
     }),
     [
       connect,
@@ -1781,6 +1799,7 @@ export function useWamo(): WamoAktionen {
       jiraStory,
       office,
       mail,
+      canvasAktiv,
     ],
   );
 }

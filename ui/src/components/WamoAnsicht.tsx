@@ -190,11 +190,13 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
       canvas={
         <>
           {aktionen.liveBild && <BildschirmAnsicht aktionen={aktionen.liveBild} />}
-          {/* Speichern als Datei nie für Laborkonten (der Kern schickt dort ohnehin keine Formate) */}
+          {/* Speichern als Datei nie für Laborkonten (der Kern schickt dort ohnehin keine Formate); den offenen Reiter melden Laborkonten
+              nicht, die Laborsitzung nimmt diese Nachricht nicht an */}
           <CanvasBereich
             jiraStory={aktionen.jiraStory}
             office={ansicht.labor ? undefined : aktionen.office}
             mail={ansicht.labor ? undefined : aktionen.mail}
+            aktiv={ansicht.labor ? undefined : aktionen.canvasAktiv}
           />
         </>
       }

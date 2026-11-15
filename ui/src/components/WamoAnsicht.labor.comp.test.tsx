@@ -82,8 +82,13 @@ function aktionen(): WamoAktionen {
     schliesseFehler: vi.fn(),
     mikrofone: vi.fn(async () => []),
     mikrofonWaehlen: vi.fn(() => true),
+    canvasAktiv: vi.fn(() => true),
   };
 }
+
+const CANVAS_ID = "aaaaaaaa-0000-4000-8000-000000000001";
+const einElementImCanvas = () =>
+  wamo.set((s) => ({ ...s, canvas: [{ id: CANVAS_ID, kind: "dokument", title: "Entwurf", text: "Hallo" }] }));
 
 function zeige(email: string, opt: { rolle?: "admin" | "mitglied"; hash?: string } = {}) {
   if (opt.hash) history.replaceState(null, "", opt.hash);
@@ -167,6 +172,14 @@ describe("Hauptansicht eines Laborkontos: was fehlt", () => {
     expect(meldungen).not.toBeNull();
     expect(within(meldungen!).queryByText(/wartet auf die Freigabe durch einen Admin/)).toBeNull();
     expect(within(meldungen!).queryByText(/offene[nr]? Hinweis/)).toBeNull();
+  });
+
+  it("meldet den offenen Reiter des Canvas nicht an den Kern (die Laborsitzung nimmt diese Nachricht nicht an)", async () => {
+    einElementImCanvas();
+    const { a } = zeige(PLATZ);
+    await ruhe();
+    expect(screen.getAllByText("Entwurf").length).toBeGreaterThan(0);
+    expect(a.canvasAktiv).not.toHaveBeenCalled();
   });
 });
 
@@ -297,6 +310,13 @@ describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
     expect(screen.getByRole("button", { name: "Verlauf öffnen", hidden: true })).toBeTruthy();
     expect(screen.getByText("Modellzugang", { selector: "dt" })).toBeTruthy();
     expect(document.querySelector(".kz-gespraech")?.getAttribute("data-verlauf")).toBe("true");
+  });
+
+  it("meldet den offenen Reiter des Canvas an den Kern", async () => {
+    einElementImCanvas();
+    const { a } = zeige(ADMIN);
+    await ruhe();
+    expect(a.canvasAktiv).toHaveBeenCalledExactlyOnceWith(CANVAS_ID);
   });
 
   it("ruft Verlauf, Modellzugang und Hinweise ab", async () => {

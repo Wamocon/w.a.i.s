@@ -384,6 +384,19 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Behoben
 
+- Canvas überarbeitet das offene Element statt einen neuen Reiter anzulegen (Zweig `feat/canvas-ersetzen`, Befund vom 15.11.2026): Bisher
+  legte jede Änderung am Canvas einen neuen Reiter an und ließ die alte Fassung offen, denn `canvas_zeigen` meldete dem Modell nur
+  „angezeigt“ ohne Kennung. Jetzt liefert das Werkzeug eine kurze Kennung (`canvas_id` wie `c2`, je Sitzung, bleibt über alle
+  Überarbeitungen gleich) und kennt den Parameter `ersetzt`. Eine Überarbeitung wird als neue Zeile in `canvas_items` gespeichert (die
+  vorige Fassung bleibt, keine Migration, kein Update-Recht nötig), die Nachricht `canvas` trägt die neue Kennung und `ersetzt` mit der
+  alten. Die Oberfläche setzt das neue Element an dieselbe Stelle und zeigt den Reiter; Speichern, OneNote, Jira-Story, Teilen und
+  „Als E-Mail“ nutzen damit die neue Fassung, ein offenes Mail-Formular bleibt stehen. Ersetzt wird nur, was diese Sitzung selbst gezeigt
+  hat (`voice-core/canvas_sitzung.py`, dazu gespeicherte Boss-Ergebnisse), eine unbekannte Kennung ergibt einen neuen Reiter mit Hinweis;
+  ohne Datenbank gibt es lokale Kennungen ohne Teilen und Speichern. Die Oberfläche meldet den offenen Reiter (Client-Nachricht
+  `canvas_aktiv`, nie im Labor); weicht er ab, bekommt das Modell einen kurzen Systemhinweis ohne Antwort, der Titel steht darin als Daten.
+  Die Regel steht in der Werkzeugbeschreibung: ändern, ergänzen, kürzen oder umbauen heißt überarbeiten, ein neuer Reiter nur auf
+  ausdrücklichen Wunsch. Tests in `voice-core/test_canvas_ersetzen.py`, `ui/src/lib/canvasWahl.test.ts`,
+  `ui/src/components/Canvas.comp.test.tsx`, `ui/src/components/Mail.comp.test.tsx` und `ui/src/components/WamoAnsicht.labor.comp.test.tsx`.
 - Selbstschutz der Entwicklungsaufträge nach der Umbenennung des Repos (Zweig `fix/selbstschutz-neuer-reponame`): Seit dem 14.11.2026 heißt
   das Repo auf GitHub `Wamocon/w.a.i.s`, der Selbstschutz erkannte es nur am Namen `wamo`. Ein Auftrag mit `w.a.i.s` wäre nicht als eigenes
   Repo abgelehnt worden. Kern (`voice-core/dev_guard.py`), Dispatcher und Kern-Kanal halten jetzt je eine Liste `SELF_REPOS = ("wamo",

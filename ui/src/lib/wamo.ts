@@ -16,6 +16,7 @@ import type {
 import { hinweisText, type DateiMeldung } from "./export.ts"; // relativ aus demselben Grund
 import { versandText, type MailVersand } from "./mail.ts"; // relativ aus demselben Grund
 import { fristLoeschen } from "./auftragFrist.ts"; // relativ aus demselben Grund
+import { canvasEinordnen, canvasWaehlen } from "./canvasWahl.ts"; // relativ aus demselben Grund
 import { AUFGABE_LEER, naechsteAufgabe, type Aufgabe } from "./aufgabenanzeige.ts"; // relativ aus demselben Grund
 import { auftraegeNachQuittung } from "./auftragStart.ts"; // relativ aus demselben Grund
 import { JIRA_LEER, type JiraStand } from "./jiraStory.ts"; // relativ aus demselben Grund
@@ -520,22 +521,18 @@ export function applyServerMessage(msg: ServerMessage) {
       levelsRef.current.speaker = msg.index;
       return;
     case "canvas": {
-      // canvas_zeigen im Voice-Core: gleiche id = Aktualisierung (z. B. Fortschritt eines Auftrags)
+      // canvas_zeigen im Voice-Core: gleiche id = Aktualisierung (z. B. Fortschritt eines Auftrags), ersetzt = Überarbeitung an derselben
+      // Stelle (der Reiter wird gezeigt), sonst neu (höchstens 20 Elemente, das älteste fällt heraus); lib/canvasWahl.ts
       const item = msg.item;
-      wamo.set((s) => {
-        const i = item.id ? s.canvas.findIndex((it) => it.id === item.id) : -1;
-        if (i >= 0) {
-          const canvas = [...s.canvas];
-          canvas[i] = item;
-          return { ...s, canvas };
-        }
-        // höchstens 20 Elemente, das älteste fällt heraus
-        return {
-          ...s,
-          canvas: [...s.canvas, item].slice(-CANVAS_MAX_ELEMENTE),
-          ansage: `Neues Ergebnis auf dem Canvas: ${item.title}`,
-        };
-      });
+      const e = canvasEinordnen(wamo.get().canvas, item, msg.ersetzt, CANVAS_MAX_ELEMENTE);
+      const ansage =
+        e.art === "ersetzt"
+          ? `Auf dem Canvas überarbeitet: ${item.title}`
+          : e.art === "neu"
+            ? `Neues Ergebnis auf dem Canvas: ${item.title}`
+            : undefined;
+      wamo.set((s) => ({ ...s, canvas: e.items, ...(ansage ? { ansage } : {}) }));
+      if (e.art === "ersetzt" && item.id) canvasWaehlen(item.id);
       return;
     }
     case "aktivitaet": {
