@@ -139,6 +139,54 @@ class Erstellen(_Basis):
         b = self.erstellen("csv", TABELLE, oeffnen=False)["datei"]["name"]
         self.assertNotEqual(a, b)
 
+    def test_pfad_kommt_aus_dem_speichern(self):
+        """Kein zweites Nachschlagen im Register zwischen Speichern und Öffnen."""
+        with mock.patch.object(self.ablage, "pfad", side_effect=AssertionError("nicht noch einmal nachschlagen")):
+            antwort = self.erstellen("word", DOKUMENT)
+        self.assertEqual(antwort["status"], "success", antwort)
+        self.assertEqual(self.geoeffnet, [Path(antwort["datei"]["pfad"])])
+
+    def test_bei_offener_freigabe_gespeichert_aber_nicht_geoeffnet(self):
+        with mock.patch.object(host, "_eingabe_vorab", return_value=dict(host.WARTET)) as vorab:
+            antwort = self.erstellen("word", DOKUMENT)
+        vorab.assert_called_once_with("office_datei_erstellen")
+        self.assertEqual(antwort["status"], "success")
+        self.assertFalse(antwort["geoeffnet"])
+        self.assertEqual(self.geoeffnet, [])
+        self.assertIn("Freigabe", antwort["summary"])
+
+    def test_ohne_oeffnen_keine_vorabpruefung(self):
+        with mock.patch.object(host, "_eingabe_vorab", side_effect=AssertionError("nicht nötig")):
+            self.assertEqual(self.erstellen("markdown", DOKUMENT, oeffnen=False)["status"], "success")
+
+    def test_hoechstens_ein_bau_gleichzeitig(self):
+        self.assertTrue(host._OFFICE_BAU.acquire(blocking=False))
+        try:
+            antwort = self.erstellen("word", DOKUMENT)
+        finally:
+            host._OFFICE_BAU.release()
+        self.assertEqual(antwort["status"], "rejected")
+        self.assertIn("gerade", antwort["summary"])
+        self.assertEqual(self.ablage.eintraege(), [])
+        self.assertEqual(self.erstellen("word", DOKUMENT)["status"], "success")  # danach wieder frei
+
+    def test_bau_ueber_der_frist_wird_verworfen(self):
+        with mock.patch.object(host, "OFFICE_FRIST_SECS", -1):
+            antwort = self.erstellen("word", DOKUMENT)
+        self.assertEqual(antwort["status"], "error")
+        self.assertIn("zu lange", antwort["summary"])
+        self.assertEqual(self.ablage.eintraege(), [])  # nichts gespeichert
+        self.assertEqual(list(self.ablage.wurzel.rglob("*.docx")), [])
+        self.assertEqual(self.geoeffnet, [])
+        self.assertTrue(any(a.get("grund") == "Frist" for a in self.audit))
+        self.assertEqual(self.erstellen("word", DOKUMENT)["status"], "success")  # die Sperre ist wieder frei
+
+    def test_frist_liegt_vor_dem_abbruch_im_tunnel(self):
+        tunnel = (Path(__file__).resolve().parent.parent / "voice-core" / "pc_tunnel.py").read_text(encoding="utf-8")
+        self.assertIn('"office_datei_erstellen": 80', tunnel)
+        self.assertLess(host.OFFICE_FRIST_SECS, 80 - 5)
+        self.assertGreater(host.OFFICE_FRIST_SECS, office_com.PDF_TIMEOUT_SECS + 20)
+
 
 class Oeffnen(_Basis):
     def test_nur_registerdateien(self):
@@ -154,6 +202,65 @@ class Oeffnen(_Basis):
         with mock.patch.object(host, "_ist_gesperrt", return_value=True):
             self.assertEqual(host.office_datei_oeffnen(datei["kennung"])["status"], "locked")
         self.assertEqual(self.geoeffnet, [])
+
+    def test_offene_freigabe(self):
+        datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
+        with mock.patch.object(host, "_eingabe_vorab", return_value=dict(host.WARTET)):
+            self.assertEqual(host.office_datei_oeffnen(datei["kennung"])["status"], "wartet")
+        self.assertEqual(self.geoeffnet, [])
+
+    def test_doppelklick_bekommt_eine_freundliche_meldung(self):
+        datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
+        self.assertEqual(host.office_datei_oeffnen(datei["kennung"])["status"], "success")
+        zweiter = host.office_datei_oeffnen(datei["kennung"])
+        self.assertEqual(zweiter["status"], "duplicate")
+        self.assertEqual(zweiter["summary"], host.OFFICE_SCHON_GEOEFFNET)
+        self.assertIn("geöffnet", zweiter["summary"])  # für Menschen, mit Umlauten, nicht der Satz für das Modell
+        self.assertEqual(len(self.geoeffnet), 1)
+
+
+class DateiOeffnen(unittest.TestCase):
+    """_datei_oeffnen selbst: nur die sechs festen Endungen gehen an das Standardprogramm."""
+
+    def test_nur_feste_endungen(self):
+        with mock.patch.object(host.platform, "system", return_value="Windows"), \
+             mock.patch.object(host.os, "startfile", create=True) as starten:
+            for name in ("a.exe", "a.lnk", "a.docm", "a.html", "a", "a.docx."):
+                with self.assertRaises(RuntimeError, msg=name):
+                    host._datei_oeffnen(Path("C:/WAIS") / name)
+            starten.assert_not_called()
+            for endung in (".docx", ".xlsx", ".pptx", ".pdf", ".csv", ".md"):
+                host._datei_oeffnen(Path("C:/WAIS") / f"a{endung}")
+            self.assertEqual(starten.call_count, 6)
+
+
+class Einmalig(unittest.TestCase):
+    def test_ablage_wird_nur_einmal_angelegt_auch_aus_threads(self):
+        import threading
+        import time
+
+        aufrufe = []
+
+        def langsam():
+            aufrufe.append(1)
+            time.sleep(0.05)
+            return object()
+
+        vorher = host._OFFICE_ABLAGE
+        host._OFFICE_ABLAGE = None
+        try:
+            ergebnisse = []
+            with mock.patch.object(office_ablage.Ablage, "standard", side_effect=langsam):
+                faeden = [threading.Thread(target=lambda: ergebnisse.append(host._office_ablage())) for _ in range(8)]
+                for f in faeden:
+                    f.start()
+                for f in faeden:
+                    f.join(5)
+        finally:
+            host._OFFICE_ABLAGE = vorher
+        self.assertEqual(len(aufrufe), 1)
+        self.assertEqual(len({id(e) for e in ergebnisse}), 1)
+        self.assertEqual(len(ergebnisse), 8)
 
 
 class NieFuerDasModell(unittest.TestCase):

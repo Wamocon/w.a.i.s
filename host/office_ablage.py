@@ -5,15 +5,21 @@
   HOME\\Documents.
 * Der Unterordner heißt WAIS (Windows streicht den Schlusspunkt von "W.A.I.S."). Er darf weder Verknüpfung noch Abzweigpunkt
   sein (Reparse-Punkt mit Namensersatz); Platzhalter von OneDrive (Cloud-Reparse-Punkte ohne Namensersatz) sind erlaubt.
-* Dateiname: "JJJJ-MM-TT <Titel>.<Endung>", Titel ohne die von Windows verbotenen Zeichen, ohne Steuer- und Richtungszeichen,
-  höchstens TITEL_MAX Zeichen, ohne Punkt oder Leerzeichen am Rand. Gibt es die Datei schon, folgt " (2)", nie Überschreiben
-  (exklusives Anlegen, auch gegen gleichzeitige Aufrufe).
+* Dateiname: "JJJJ-MM-TT <Titel>.<Endung>", Titel ohne die von Windows verbotenen Zeichen, ohne Steuer-, Richtungs- und andere
+  unsichtbare Zeichen, höchstens TITEL_MAX Zeichen, ohne Punkt oder Leerzeichen am Rand. Gibt es die Datei schon (auch als
+  hängender Verweis), folgt " (2)", nie Überschreiben (exklusives Anlegen, auch gegen gleichzeitige Aufrufe). Windows folgt beim
+  exklusiven Anlegen einem hängenden Verweis; deshalb muss der Endpfad der neuen Datei danach im Ordner WAIS liegen, sonst wird sie
+  wieder entfernt.
 * Register %LOCALAPPDATA%\\WAMO\\ablage.json: je Datei Kennung, Name, Format, Größe, SHA-256, Zeit, Canvas-Kennung, nie Inhalte;
-  höchstens REGISTER_MAX Einträge. Nur Dateien aus dem Register öffnet der Host (office_datei_oeffnen).
+  höchstens REGISTER_MAX Einträge. Nur Dateien aus dem Register mit der festen Endung ihres Formats öffnet der Host
+  (office_datei_oeffnen). Fehlt das Register, ist es leer; ist es kaputt, wird es als .kaputt beiseitegelegt; ist es gesperrt
+  (Virenscanner, Indexdienst), wird kurz wiederholt, dann gilt das als Fehler (nie ein neues Register ohne die alten Einträge).
+  Lesen und Schreiben laufen unter einer Sperre je Ablage.
 """
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import hashlib
 import json
@@ -23,6 +29,7 @@ import secrets
 import stat
 import sys
 import threading
+import time
 import unicodedata
 import uuid
 from datetime import date, datetime, timezone
@@ -33,11 +40,15 @@ ORDNER_ANZEIGE = "Dokumente\\WAIS"
 REGISTER_MAX = 500
 TITEL_MAX = 80
 NAMEN_VERSUCHE = 99
-ENDUNGEN = {"word": ".docx", "excel": ".xlsx", "powerpoint": ".pptx", "pdf": ".pdf", "csv": ".csv", "markdown": ".md"}
+VERSUCHE = 4  # Register lesen oder ersetzen, solange ein anderer Prozess (Virenscanner, Indexdienst) es kurz offen hat
+WARTEN_SECS = 0.05
+ENDUNGEN ={"word": ".docx", "excel": ".xlsx", "powerpoint": ".pptx", "pdf": ".pdf", "csv": ".csv", "markdown": ".md"}
 KENNUNG_RE = re.compile(r"[0-9a-f]{16}")
-# Steuer-, Richtungs- und Nullbreitenzeichen (könnten eine Endung vortäuschen) fallen weg, von Windows verbotene Zeichen werden
-# zu Leerzeichen.
-_UNSICHTBAR = re.compile("[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+# Steuer-, Richtungs-, Nullbreiten- und weitere unsichtbare Zeichen (könnten eine Endung vortäuschen) fallen weg, ebenso einzelne
+# Ersatzzeichen; von Windows verbotene Zeichen werden zu Leerzeichen. Bereiche als Codepunkte, ohne Escape-Folgen im Quelltext.
+_UNSICHTBAR = re.compile("[" + "".join(re.escape(chr(a)) + "-" + re.escape(chr(b)) for a, b in (
+    (0x00, 0x1F), (0x7F, 0x9F), (0xAD, 0xAD), (0x061C, 0x061C), (0x180E, 0x180E), (0x200B, 0x200F), (0x202A, 0x202E),
+    (0x2060, 0x2069), (0xD800, 0xDFFF), (0xFEFF, 0xFEFF))) + "]")
 _VERBOTEN = re.compile(r'[<>:"/\\|?*]')
 _UNERLAUBT = re.compile(_UNSICHTBAR.pattern[:-1] + r'<>:"/\\|?*]')
 _FOLDERID_DOCUMENTS = uuid.UUID("{FDD39AD0-238F-46AF-ADB4-6C85480369C7}")
@@ -110,6 +121,25 @@ def _gleich(a: Path, b: Path) -> bool:
     return os.path.normcase(str(a)) == os.path.normcase(str(b))
 
 
+def _existiert(pfad: Path) -> bool:
+    """Gibt es den Namen schon, auch als hängenden Verweis?"""
+    return os.path.lexists(pfad)
+
+
+def _endpfad_entfernen(pfad: Path) -> None:
+    """Die eben exklusiv angelegte Datei wieder entfernen, dort, wo sie wirklich liegt (nie den Verweis selbst)."""
+    with contextlib.suppress(OSError):
+        os.remove(os.path.realpath(pfad))
+
+
+def _endpfad_pruefen(pfad: Path) -> None:
+    """Die neue Datei muss genau unter ihrem Namen im Ordner WAIS liegen: kein Verweis, dem das Anlegen gefolgt ist (Wettlauf
+    mit der Vorprüfung). Sonst wird sie entfernt."""
+    if ist_verweis(pfad) or not _gleich(Path(os.path.realpath(pfad)), pfad):
+        _endpfad_entfernen(pfad)
+        raise AblageFehler("Im Ordner WAIS liegt ein Verweis mit diesem Namen; dort legt W.A.I.S. nichts ab")
+
+
 class Ablage:
     """Ordner und Register. wurzel: der Ordner Dokumente; register: Pfad der Registerdatei."""
 
@@ -148,59 +178,129 @@ class Ablage:
 
     # ---------- Register ----------
     def eintraege(self) -> list[dict]:
-        """Einträge des Registers (älteste zuerst). Fehlt oder ist es kaputt, gilt es als leer."""
+        """Einträge des Registers (älteste zuerst). Fehlt es, ist es leer; kaputt wird es beiseitegelegt. Wirft AblageFehler,
+        wenn es sich auch nach kurzem Warten nicht lesen lässt."""
+        with self._lock:
+            return self._lesen()
+
+    def _lesen(self) -> list[dict]:
+        """Wie eintraege, ohne Sperre (der Aufrufer hält sie)."""
+        text = None
+        for versuch in range(VERSUCHE):
+            try:
+                text = self.register.read_text(encoding="utf-8")
+                break
+            except FileNotFoundError:
+                return []
+            except UnicodeDecodeError:
+                break  # kaputt, unten beiseitelegen
+            except OSError as e:  # gesperrt (Virenscanner, Indexdienst): kurz warten, nie still als leer werten
+                if versuch == VERSUCHE - 1:
+                    raise AblageFehler(f"Das Register der Dateien ist gerade nicht lesbar ({type(e).__name__})") from e
+                time.sleep(WARTEN_SECS * (versuch + 1))
         try:
-            daten = json.loads(self.register.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return []
+            daten = json.loads(text) if text is not None else None
+        except ValueError:
+            daten = None
         dateien = daten.get("dateien") if isinstance(daten, dict) else None
-        return [e for e in dateien if isinstance(e, dict) and isinstance(e.get("kennung"), str)] if isinstance(dateien, list) else []
+        if not isinstance(dateien, list):
+            self._beiseitelegen()
+            return []
+        return [e for e in dateien if isinstance(e, dict) and isinstance(e.get("kennung"), str)]
+
+    def _beiseitelegen(self) -> None:
+        """Kaputtes Register als <Name>.<Zeit>.kaputt aufheben (nichts still verwerfen), danach gilt es als leer."""
+        ziel = self.register.with_name(f"{self.register.name}.{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}.kaputt")
+        try:
+            os.replace(self.register, ziel)
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            raise AblageFehler(f"Das Register der Dateien ist kaputt und lässt sich nicht beiseitelegen ({type(e).__name__})") from e
 
     def _schreiben(self, eintraege: list[dict]) -> None:
-        self.register.parent.mkdir(parents=True, exist_ok=True)
+        """Register atomar ersetzen; ist es gerade offen (PermissionError unter Windows), kurz wiederholen. Keine Reste."""
         tmp = self.register.with_name(f".{self.register.name}.{secrets.token_hex(4)}.tmp")
-        tmp.write_text(json.dumps({"version": 1, "dateien": eintraege[-self.max_eintraege:]}, ensure_ascii=False),
-                       encoding="utf-8")
-        os.replace(tmp, self.register)
+        try:
+            self.register.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps({"version": 1, "dateien": eintraege[-self.max_eintraege:]}, ensure_ascii=False),
+                           encoding="utf-8")
+            for versuch in range(VERSUCHE):
+                try:
+                    os.replace(tmp, self.register)
+                    return
+                except PermissionError:
+                    if versuch == VERSUCHE - 1:
+                        raise
+                    time.sleep(WARTEN_SECS * (versuch + 1))
+        except OSError as e:
+            raise AblageFehler(f"Das Register der Dateien ließ sich nicht schreiben ({type(e).__name__})") from e
+        finally:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
 
     # ---------- Speichern ----------
     def speichern(self, daten: bytes, titel: object, fmt: str, canvas_id: str | None = None,
-                  datum: date | None = None) -> dict:
-        """Legt die Datei neu an (nie überschreiben) und trägt sie ins Register ein. Liefert den Eintrag."""
+                  datum: date | None = None) -> tuple[dict, Path]:
+        """Legt die Datei neu an (nie überschreiben) und trägt sie ins Register ein. Liefert Eintrag und Pfad. Scheitert das
+        Register, wird die neue Datei wieder entfernt."""
         name = dateiname(titel, fmt, datum or date.today())
-        stamm, endung = name[: -len(ENDUNGEN[fmt])], ENDUNGEN[fmt]
         with self._lock:
             ordner = self.ordner()
-            for nr in range(1, NAMEN_VERSUCHE + 1):
-                kandidat = name if nr == 1 else f"{stamm} ({nr}){endung}"
-                pfad = ordner / kandidat
-                try:
-                    with open(pfad, "xb") as f:
-                        f.write(daten)
-                except FileExistsError:
-                    continue
-                except OSError as e:
-                    raise AblageFehler(f"Die Datei ließ sich nicht speichern ({type(e).__name__})") from e
-                break
-            else:
-                raise AblageFehler("Zu viele Dateien mit diesem Titel an diesem Tag")
-            eintrag = {"kennung": secrets.token_hex(8), "name": kandidat, "format": fmt, "groesse": len(daten),
+            bisher = self._lesen()  # vor dem Anlegen: ist das Register nicht lesbar, entsteht keine Datei
+            pfad = self._anlegen(ordner, name, ENDUNGEN[fmt], daten)
+            eintrag = {"kennung": secrets.token_hex(8), "name": pfad.name, "format": fmt, "groesse": len(daten),
                        "sha256": hashlib.sha256(daten).hexdigest(), "zeit": datetime.now(timezone.utc).isoformat(),
                        "canvas_id": canvas_id}
-            self._schreiben([*self.eintraege(), eintrag])
-        return eintrag
+            try:
+                self._schreiben([*bisher, eintrag])
+            except AblageFehler:
+                with contextlib.suppress(OSError):
+                    pfad.unlink()
+                raise
+        return eintrag, pfad
+
+    @staticmethod
+    def _anlegen(ordner: Path, name: str, endung: str, daten: bytes) -> Path:
+        """Neue Datei exklusiv anlegen: name, sonst "<Stamm> (2)<Endung>" usw. Was es schon gibt, auch als hängender Verweis,
+        bleibt unberührt."""
+        stamm = name[: -len(endung)]
+        for nr in range(1, NAMEN_VERSUCHE + 1):
+            pfad = ordner / (name if nr == 1 else f"{stamm} ({nr}){endung}")
+            if _existiert(pfad):  # Windows folgte einem hängenden Verweis beim exklusiven Anlegen
+                continue
+            try:
+                datei = open(pfad, "xb")  # noqa: SIM115 (Fehler beim Schreiben räumt unten auf)
+            except FileExistsError:
+                continue
+            except OSError as e:
+                raise AblageFehler(f"Die Datei ließ sich nicht speichern ({type(e).__name__})") from e
+            try:
+                with datei:
+                    datei.write(daten)
+            except OSError as e:
+                _endpfad_entfernen(pfad)
+                raise AblageFehler(f"Die Datei ließ sich nicht speichern ({type(e).__name__})") from e
+            _endpfad_pruefen(pfad)
+            return pfad
+        raise AblageFehler("Zu viele Dateien mit diesem Titel an diesem Tag")
 
     # ---------- Öffnen ----------
     def pfad(self, kennung: object) -> Path:
-        """Pfad einer Datei aus dem Register: gültige Kennung, Name ohne Pfadteile, im Ordner WAIS, vorhanden, kein Verweis."""
+        """Pfad einer Datei aus dem Register: gültige Kennung, Name ohne Pfadteile mit der festen Endung seines Formats, im Ordner
+        WAIS, vorhanden, kein Verweis."""
         if not isinstance(kennung, str) or not KENNUNG_RE.fullmatch(kennung):
             raise AblageFehler("Unbekannte Datei")
-        eintrag = next((e for e in reversed(self.eintraege()) if e.get("kennung") == kennung), None)
+        with self._lock:
+            eintraege = self._lesen()
+        eintrag = next((e for e in reversed(eintraege) if e.get("kennung") == kennung), None)
         if eintrag is None:
             raise AblageFehler("Diese Datei kennt W.A.I.S. nicht (nur selbst erzeugte Dateien)")
-        name = eintrag.get("name")
+        name, fmt = eintrag.get("name"), eintrag.get("format")
         if not isinstance(name, str) or Path(name).name != name or _UNERLAUBT.search(name) or name in ("", ".", ".."):
             raise AblageFehler("Der Eintrag im Register ist ungültig")
+        if not isinstance(fmt, str) or fmt not in ENDUNGEN or not name.endswith(ENDUNGEN[fmt]):
+            raise AblageFehler("Der Eintrag im Register ist ungültig (Endung passt nicht zum Format)")
         ordner = self.ordner()
         pfad = ordner / name
         if ist_verweis(pfad) or not pfad.is_file() or not _gleich(pfad.resolve().parent, ordner):
