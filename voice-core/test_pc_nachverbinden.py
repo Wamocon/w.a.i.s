@@ -548,18 +548,19 @@ async def test_abgeloeste_sitzung_holt_nichts_mehr_nach(buero):
     await session.cleanup()
 
 
-async def test_office_onenote_und_outlook_entstehen_auch_beim_nachholen_und_fragen_das_gate(buero):
+async def test_office_onenote_outlook_und_teams_entstehen_auch_beim_nachholen_und_fragen_das_gate(buero):
     """Die Teile, die den PC über lambda: pc_client erreichen, gibt es auch in einer Sitzung, die ihren Zugang erst nachholt; ihre Werkzeuge
     laufen durch das Gate der Stimmprüfung, und ohne Client sagen sie nur, dass es nicht geht."""
     import office_werkzeuge
     import onenote_werkzeuge
     import outlook_werkzeuge
+    import teams_werkzeuge
 
-    buero.setenv("WAMO_OFFICE", "dateien,outlook,onenote")
+    buero.setenv("WAMO_OFFICE", "dateien,outlook,teams,onenote")
     Lage(buero, [None, pc_zugang_test()])
     session, _stufen, llm = await bauen(admin())
     gate = session.stimme.gate
-    for name in (office_werkzeuge.WERKZEUG, onenote_werkzeuge.WERKZEUG, outlook_werkzeuge.WERKZEUG):
+    for name in (office_werkzeuge.WERKZEUG, onenote_werkzeuge.WERKZEUG, outlook_werkzeuge.WERKZEUG, teams_werkzeuge.WERKZEUG):
         assert getattr(llm._functions[name].handler, MARKE, None) is gate, name
     await klick(session, True)
     assert betrieb(session)["pc_steuerung"] == "an"

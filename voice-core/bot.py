@@ -817,7 +817,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # muss die Person selbst.
     teams = (teams_werkzeuge.TeamsNachricht(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
                                             fremd=lambda: turn.tainted)
-             if (pc_client is not None and is_admin and not labor_sitzung and teams_werkzeuge.fuer_sitzung(identity)) else None)
+             if (pc_teile and is_admin and not labor_sitzung and teams_werkzeuge.fuer_sitzung(identity)) else None)
     if teams is not None:
         teams.register(llm)
 
