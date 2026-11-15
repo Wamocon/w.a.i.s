@@ -54,6 +54,18 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Hinzugefügt
 
+- PC-Steuerung auch im Browser (Wunsch 3 aus `docs/komfort-paket.md`, Teil KP-3B ohne Kern, Zweig `feat/pc-browser`): Der Schalter
+  „PC-Steuerung“ erscheint für Admins im Browser wie in der Desktop-App, auch im Build für Sokrates-2 (`NEXT_PUBLIC_WAMO_NUR_BUERO=ja`).
+  Mit Sitzung ist er bedienbar, ohne Sitzung startet „an“ still eine Sitzung nach denselben Regeln wie der Start beim Tippen
+  (`ui/src/lib/stillStart.ts`: Geräteschalter „Still starten beim Tippen“, nie Laborkonten, Übernahme, Ratenbegrenzung). Der Browser
+  bedient nur: Die Werkzeuge laufen auf dem Laptop, den der Kern dem Profil aus dem Geräteregister zuordnet; im Browser in der
+  Betriebsart Büro steht das am Schalter, dazu, was nur die Desktop-App kann (Autostart, Lichtrahmen am Zielfenster). Den Haken für den
+  Autostart gibt es dort nicht. In einer Sitzung ohne PC-Host ist der Schalter mit klarem Satz gesperrt (statt stiller Ablehnung im
+  Kern), bei getrenntem oder gesperrtem PC nennt ein Satz den Zustand. Der Hinweis nach dem Speichern aus dem Canvas sagt im Browser „auf
+  deinem Laptop“ und „Am Laptop öffnen“. Live-Bild, Freigabekarten, Export und OneNote laufen über den Kern und bleiben unverändert. Nur
+  Oberfläche (`ui/src/lib/pcSchalter.ts`, `usePcSchalter.ts`, `geraet.ts`, `export.ts`, `useWamo.ts`,
+  `ui/src/components/einstellungen/Geraete.tsx`, `ui/src/components/DateiHinweis.tsx`); der Kern entscheidet weiter (Rolle admin,
+  Register, PC-Sperre je Sitzung, Freigabekarten, Gate der Stimmprüfung). Ablauf, Quelle und Anzeige am Laptop (KP-3A, KP-3C) sind offen.
 - User Story in Jira aus dem Canvas (Zweig `feat/jira-story`, Paket P3 aus dem Plan Office und Versand): Werkzeug `jira_story_anlegen` und Knopf
   "Als User Story in Jira" am eigenen Canvas-Dokument, nur für Admins im Büro, nie im Labor, Werkzeug unter dem Gate der Stimmprüfung. Angelegt wird
   nur nach dem Klick auf "Freigeben" auf der Karte im Kern (Job `jira`, `voice-core/jira_freigaben.py`: Hash über alle Werte, genau einmal, 300
