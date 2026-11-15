@@ -283,6 +283,16 @@ async def test_story_aus_canvas_mit_kriterien_und_karte_gleich_gesendet():
     assert params["canvas_id"] == CANVAS and params["quelle"] == "sprache"
 
 
+@pytest.mark.parametrize("leer", [[], ["", "  "]])
+async def test_leere_kriterienliste_nimmt_die_kriterien_aus_dem_canvas(leer):
+    # Modelle füllen optionale Listen gern mit []: das heißt "keine eigenen Kriterien", der Abschnitt des Dokuments darf nicht wegfallen
+    a = Aufbau()
+    ergebnis = await a.werkzeug(canvas="login per stimme", akzeptanzkriterien=leer)
+    assert ergebnis["status"] == "wartet_auf_klick"
+    detail = a.karten()[0]["items"][0]["detail"].split("\n")
+    assert detail[-3:] == ["Akzeptanzkriterien:", "> 1. Die Karte zeigt alles", "> 2. Angelegt wird erst nach dem Klick"]
+
+
 async def test_injection_aus_dem_canvas_aendert_weder_projekt_noch_epic():
     zeilen = [{"id": CANVAS, "user_id": ADMIN, "type": "document", "title": "Recherche",
                "data": {"kind": "dokument", "title": "Recherche", "text": INJEKTION}}]

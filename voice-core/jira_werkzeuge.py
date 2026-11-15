@@ -248,7 +248,7 @@ class JiraStory:
             titel_text = titel_text or canvas_name
             text, aus_canvas = canvas_aufteilen(canvas_text, titel_text)
             text = normiere(text, zeilen=True) or ""
-            if liste is None:
+            if not liste:  # keine eigenen Kriterien (auch [] oder nur leere Texte): der Abschnitt des Dokuments, sonst fiele er still weg
                 liste = self._kriterien([normiere(k, zeilen=False) for k in aus_canvas])
         if not TITEL_MIN <= len(titel_text) <= TITEL_MAX:
             raise _Abgelehnt(f"Der Titel braucht {TITEL_MIN} bis {TITEL_MAX} Zeichen in einer Zeile.")
