@@ -566,7 +566,7 @@ def beim_start_aufraeumen(ordner: Path | None = None,
         return
     for pfad in dateien:
         try:
-            rest = ENTWURF_AUFBEWAHREN_SECS - (time.time() - pfad.stat().st_mtime)
+            rest = min(ENTWURF_AUFBEWAHREN_SECS, ENTWURF_AUFBEWAHREN_SECS - (time.time() - pfad.stat().st_mtime))
         except OSError:
             continue
         if rest <= 0:
