@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 import { WmcLogo } from "@/components/WmcLogo";
+import { Wortmarke } from "@/components/Wortmarke";
 import {
   anmeldeZeitpunktFehlt,
   anmeldungAbgelaufen,
@@ -273,10 +274,10 @@ export function LoginGate({
         <section className="gate-card" aria-labelledby="gate-title">
           <header className="gate-head">
             <h1 className="gate-title" id="gate-title">
-              W.A.I.S.
+              <Wortmarke />
             </h1>
             <p className="gate-sub gate-sub-lang" title={LANGFORM_DEUTSCH}>
-              {LANGFORM}
+              <span className="marke">{LANGFORM}</span>
             </p>
             <p className="gate-sub">Sprachassistent der WAMOCON GmbH</p>
           </header>

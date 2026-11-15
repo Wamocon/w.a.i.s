@@ -27,8 +27,8 @@
    WAMO Kommandozentrale im WMC-Corporate-Design (WAMOCON GmbH)
    Nachtschwarz mit Sternenstaub, in der Mitte ein glühender Kern in WMC-Rot. Zwei Stimmen, zwei Farben:
    der Mensch warmes Weiß, WAMO Rot. Dunkel ist der Standard, Hell wählbar (Block data-theme="light" weiter unten).
-   Schriften: Unbounded für Marke, Überschriften und große Zahlen, JetBrains Mono für Beschriftungen und
-   Zähler, Atkinson Hyperlegible für Fließtext (app/fonts).
+   Schriften: Cormorant Garamond nur für den Namen W.A.I.S. und seine Langform (Klasse .marke, components/Wortmarke.tsx), Unbounded
+   für Überschriften und große Zahlen, JetBrains Mono für Beschriftungen und Zähler, Atkinson Hyperlegible für Fließtext (app/fonts).
    Kontrast: #F40E0E auf dem Hintergrund 4,7:1. Schrift auf roten Flächen fast schwarz (#140202, 4,9:1).
    Kein Blau. Neben Rot gibt es Bernstein für "wartet" und Pink für Fehler, damit sich beides vom Marken-Rot abhebt.
    Farbwerte als Hex lassen: Kern (WebGL) und Stimmlinie lesen sie per getComputedStyle.
@@ -84,6 +84,7 @@
   --kern-fremd: #cfcdd8; /* dasselbe bei einer weiteren Stimme */
   --logo-plate: transparent; /* dunkel: Logo in Weiß und Rot ohne Platte (wmc-logo-dunkel.png) */
 
+  --marke: var(--font-marke), Georgia, "Times New Roman", serif; /* nur über die Klasse .marke (Wortmarke) */
   --display: var(--font-display), "Segoe UI", system-ui, sans-serif;
   --hud: var(--font-hud), ui-monospace, "Cascadia Code", Consolas, monospace;
   --body: var(--font-body), "Segoe UI", system-ui, sans-serif;
@@ -189,6 +190,12 @@ p, li { text-wrap: pretty; }
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--ink-soft);
 }
+/* Wortmarke W.A.I.S. (components/Wortmarke.tsx) und Langform auf der Anmeldung: Schrift, Schnitt und Sperrung nur hier, Größe und
+   Zeilenhöhe setzt die Stelle (Kopfzeile, Anmeldung, Namensschild und Zentrale am Kern). Cormorant hat kleinere Versalien als
+   Unbounded (Versalhöhe 0,625 statt 0,75 der Schriftgröße), deshalb stehen die Größen dort um ein Fünftel höher als vorher.
+   Der negative Rand gleicht die Sperrung nach dem letzten Zeichen aus, damit der Name mittig steht. Die Punkte in WMC-Rot. */
+.marke { font-family: var(--marke); font-weight: 600; letter-spacing: 0.06em; margin-inline-end: -0.06em; font-kerning: normal; }
+.marke-punkt { color: var(--core); }
 .logo-plate {
   display: inline-flex; flex: none; line-height: 0;
   background: var(--logo-plate); padding: 4px 8px; border-radius: 4px;
