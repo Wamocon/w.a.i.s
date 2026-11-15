@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import type { Profil } from "@/lib/nachrichten";
+import { profilAnzeige } from "@/lib/profilName";
 import { useSelect } from "@/lib/store";
 import { wamo } from "@/lib/wamo";
 
@@ -14,10 +15,10 @@ function kuerzel(name: string) {
 }
 
 /**
- * Profil-Chip: Kürzel im schwarzen Kreis, Vorname und Rolle als kleines Kennzeichen.
+ * Profil-Chip: Kürzel im schwarzen Kreis, voller Name (lib/profilName.ts) und Rolle als kleines Kennzeichen.
  * Das Popover (HTML-Popover-API, keine Abhängigkeit) zeigt Name, E-Mail, Rolle und "Abmelden";
  * Profil wechseln heißt abmelden und neu anmelden. Bis die Meldung "profil" vom Kern kommt,
- * steht die Anmelde-E-Mail da.
+ * steht der aus der Anmelde-E-Mail abgeleitete Name da ("vorname.nachname" wird "Vorname Nachname").
  */
 export const ProfilChip = memo(function ProfilChip({
   email,
@@ -27,8 +28,7 @@ export const ProfilChip = memo(function ProfilChip({
   onAbmelden: () => void;
 }) {
   const profil = useSelect(wamo, (s) => s.profil);
-  const anzeige = profil?.name ?? email ?? "Profil";
-  const vorname = profil ? profil.name.split(/\s+/)[0] : email ? email.split("@")[0] : "Profil";
+  const anzeige = profilAnzeige(profil?.name, email); // immer der volle Name, nie der Teil der E-Mail vor dem @
 
   return (
     <div className="profile">
@@ -42,7 +42,7 @@ export const ProfilChip = memo(function ProfilChip({
           {kuerzel(anzeige)}
         </span>
         <span className="profile-first" aria-hidden="true">
-          {vorname}
+          {anzeige}
         </span>
         {profil && (
           <span className="role-tag" data-rolle={profil.rolle} aria-hidden="true">
@@ -52,7 +52,7 @@ export const ProfilChip = memo(function ProfilChip({
       </button>
       <div id="profil-popover" popover="auto" className="popover profile-pop">
         <p className="eyebrow">Angemeldet</p>
-        <p className="pop-name">{profil?.name ?? "Profil noch unbekannt"}</p>
+        <p className="pop-name">{anzeige}</p>
         {email && <p className="pop-mail">{email}</p>}
         {profil && (
           <p className="pop-role">
