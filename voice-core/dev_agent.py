@@ -787,7 +787,8 @@ class DevAgent:
         try:  # ausdrücklich genannt (Werkzeugaufruf) oder eindeutig als GitHub-Adresse im Auftrag
             repo = repo_pruefen(repo_arg) if isinstance(repo_arg, str) and repo_arg.strip() else repo_aus_auftrag(auftrag)
             if im_buero:  # Repo-Pflicht für Arten mit GitHub-Stufe, Projekt kern-<Name aus dem Repo>
-                projekt = validate_project(entwicklung_betrieb.buero_projekt(art, repo, params.arguments.get("projekt")), self._ort)
+                projekt = validate_project(entwicklung_betrieb.buero_projekt(art, repo, params.arguments.get("projekt"), self._zulassung),
+                                           self._ort)
         except ValueError as e:
             await params.result_callback({"ok": False, "fehler": str(e)})
             return
@@ -1011,7 +1012,7 @@ class DevAgent:
         Schleife sofort; _run_locked beendet dabei Claude Code und jeden Prüfbefehl."""
         async with self._run_lock:
             while True:
-                if self._buch is not None and entwicklung_betrieb.auftragsgrenze_erreicht(job.cost_usd):
+                if self._buch is not None and entwicklung_betrieb.auftragsgrenze_erreicht(job.cost_usd, self._zulassung):
                     await self._kostengrenze_erreicht(job)  # Büro: vor jedem weiteren Lauf die Grenze je Auftrag
                     return
                 job.weiter, job.lauf_beginn = None, self._jetzt()
@@ -1048,8 +1049,8 @@ class DevAgent:
         (kein gestartet) kostet nichts. Idempotent: ein zweiter Aufruf ändert nichts."""
         if self._buch is None or "gestartet" not in job.ereignisse or job.kosten_gemeldet:
             return
-        if entwicklung_betrieb.kosten_auftrag() is not None:
-            job.cost_usd = entwicklung_betrieb.kosten_mit_untergrenze(job.cost_usd)
+        if entwicklung_betrieb.kosten_auftrag(self._zulassung) is not None:
+            job.cost_usd = entwicklung_betrieb.kosten_mit_untergrenze(job.cost_usd, self._zulassung)
             job.kosten_geschaetzt = True
 
     async def _aktion_abschliessen(self, job: Job, status: str | None = None) -> None:

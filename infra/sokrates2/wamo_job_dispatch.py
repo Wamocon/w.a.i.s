@@ -82,6 +82,8 @@ Existiert ein Kern-Schlüssel oder /etc/wamo/kernkanal.conf, gilt der strikte Mo
 endet mit dem Ereignis kanal_gesperrt (herkunft_unklar) und Exit 2, vor jedem Lesen von geheim.env. Im Kern-Kanal gelten Befehlsliste,
 nur eigene Aufträge (auftrag.json mit kanal=kern), Namensraum kern-, nur zugang=folgt und die Grenzen aus kernkanal.conf (Wendungen und
 Kosten je Lauf als Flags von Claude Code, Starts, Laufzeit, Folgen, Abstand, Platz); eine Notaus-Datei lässt nur ping und status zu.
+Version 8 trennt die Profile: Projektname kern-<Kennung>-<Name> mit der Kennung aus profil, die Kennung steht in auftrag.json, ein
+Projektordner eines anderen Profils ist gesperrt (projekt), dazu feste Grenzen je Profil (grenze_profil).
 Die Regeln stehen in wamo_job_kernkanal.py, hier nur die Einhängepunkte. Jeder Verstoß: {"type": "wamo", "ereignis":
 "kanal_gesperrt", "grund": <Code>} und Exit 2. ping meldet kanal und kernkanal.
 
@@ -115,7 +117,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-VERSION = "7"
+VERSION = "8"  # 8: Trennung je Profil im Kern-Kanal (Projektname kern-<Kennung>-<Name>, Kennung in auftrag.json, Grenzen je Profil)
 
 HEIM = Path("/srv/wamo")
 APP = Path("/opt/wamo")  # root-eigen; Programme in bin/, Wächter in waechter/ (in der Sandbox derselbe Pfad)
@@ -1314,19 +1316,25 @@ def claude_konfiguration(claude_dir: Path, geheim: dict[str, str]) -> None:
     (claude_dir / "settings.local.json").unlink(missing_ok=True)
 
 
-def vorbereiten(jobdir: Path, job: str, projekt: str, art: str, repo: str | None = None, kanal: str | None = None) -> None:
+def vorbereiten(jobdir: Path, job: str, projekt: str, art: str, repo: str | None = None, kanal: str | None = None,
+                profil: str | None = None) -> None:
     """Legt den Auftragsordner an oder prüft die Bindung an Projekt, Art und Ziel-Repo (unter der Auftragssperre).
     Das Repo begrenzt das GitHub-Token; eine Fortsetzung mit einem anderen Repo wird abgewiesen. Neue Aufträge aus dem
-    Kern-Kanal oder dem PC-Kanal tragen kanal (kern oder pc); ein Auftrag ohne das Feld gehört nie dem Kern-Kanal."""
+    Kern-Kanal oder dem PC-Kanal tragen kanal (kern oder pc); ein Auftrag ohne das Feld gehört nie dem Kern-Kanal. Im Kern-Kanal
+    steht auch die Kennung des Profils darin (profil), eine Fortsetzung aus einem anderen Profil wird abgewiesen."""
     meta_path = jobdir / "auftrag.json"
     meta = read_json(meta_path, None)
+    kern_profil = profil if kanal == "kern" and isinstance(profil, str) and PROFIL_RE.fullmatch(profil) else None
     if meta is None:
         write_json_atomic(meta_path, {"job": job, "projekt": projekt, "art": art, "repo": repo,
-                                      "erstellt": int(time.time()), **({"kanal": kanal} if kanal in ("kern", "pc") else {})})
+                                      "erstellt": int(time.time()), **({"kanal": kanal} if kanal in ("kern", "pc") else {}),
+                                      **({"profil": kern_profil} if kern_profil else {})})
     elif not isinstance(meta, dict) or meta.get("projekt") != projekt or meta.get("art") != art:
         raise Abgewiesen("Auftrag gehört zu einem anderen Projekt oder einer anderen Art")
     elif meta.get("repo") != repo:
         raise Abgewiesen("Auftrag gehört zu einem anderen Ziel-Repo")
+    elif kanal == "kern" and meta.get("profil") != kern_profil:
+        raise Abgewiesen("Auftrag gehört zu einem anderen Profil")
     for sub in ("claude", "zustand", "etc"):
         _no_symlink(jobdir / sub).mkdir(mode=0o700, exist_ok=True)
     claude_konfiguration(jobdir / "claude", lese_geheimnisse())
@@ -2529,12 +2537,14 @@ def kern_befehl_pruefen(name: str, args: list[str]) -> str | None:
     return grund
 
 
-def kern_projekt_lage(projekt: str, repo: str | None) -> tuple[bool, bool]:
-    """(fremd, kollision) für den Projektordner eines Starts im Kern-Kanal. fremd: der Ordner besteht (oder ein Link steht dort), aber kein Auftrag
-    mit kanal=kern hat ihn angelegt (die Auftragsordner sind für die Sandbox unsichtbar, ein Marker im Projektordner wäre fälschbar): der
-    Kern-Auftrag liefe sonst in fremdem Inhalt. kollision: ein Kern-Auftrag hat denselben Ordner mit einem anderen Repo belegt (my_repo und
-    my-repo ergeben beide kern-my-repo)."""
+def kern_projekt_lage(projekt: str, repo: str | None, profil: str | None = None) -> tuple[bool, bool, bool]:
+    """(fremd, kollision, profil_fremd) für den Projektordner eines Starts im Kern-Kanal. fremd: der Ordner besteht (oder ein Link steht dort),
+    aber kein Auftrag mit kanal=kern hat ihn angelegt (die Auftragsordner sind für die Sandbox unsichtbar, ein Marker im Projektordner wäre
+    fälschbar): der Kern-Auftrag liefe sonst in fremdem Inhalt. kollision: ein Kern-Auftrag hat denselben Ordner mit einem anderen Repo belegt
+    (my_repo und my-repo ergeben beide kern-my-repo). profil_fremd: ein Kern-Auftrag eines anderen Profils (oder einer ohne Kennung) hat
+    denselben Ordner angelegt; so sieht ein Profil nie die Ergebnisse eines anderen."""
     belegt: list[str | None] = []
+    profile: list[object] = []
     gefunden = False
     if JOBS.is_dir():
         for meta_pfad in JOBS.glob("*/auftrag.json"):
@@ -2542,9 +2552,11 @@ def kern_projekt_lage(projekt: str, repo: str | None) -> tuple[bool, bool]:
             if isinstance(meta, dict) and meta.get("kanal") == "kern" and meta.get("projekt") == projekt:
                 gefunden = True
                 belegt.append(meta.get("repo") if isinstance(meta.get("repo"), str) else None)
+                profile.append(meta.get("profil"))
     ordner = PROJEKTE / projekt
     fremd = (ordner.is_symlink() or os.path.lexists(ordner)) and (ordner.is_symlink() or not gefunden)
-    return fremd, kern_modul().repo_kollision(repo, belegt)
+    k = kern_modul()
+    return fremd, k.repo_kollision(repo, belegt), k.profil_fremd(profil, profile)
 
 
 def kern_start_pruefen(job: str, projekt: str, art: str, kopf: Kopf, app_modus: bool, eigener_versuch: bool = False):
@@ -2556,12 +2568,12 @@ def kern_start_pruefen(job: str, projekt: str, art: str, kopf: Kopf, app_modus: 
     zustand = kern_zustand()
     wk = werkzeugkarte()
     meta_pfad = JOBS / job / "auftrag.json"
-    projekt_fremd, projekt_kollision = kern_projekt_lage(projekt, kopf.repo)
+    projekt_fremd, projekt_kollision, projekt_profil_fremd = kern_projekt_lage(projekt, kopf.repo, kopf.profil)
     anfrage = k.StartAnfrage(
         job=job, projekt=projekt, art=art, repo=kopf.repo, zugang=kopf.zugang, profil=kopf.profil,
         github=wk.github_stufe(art) is not None, dienste=tuple(sorted(set(wk.KARTEN[art].zugaenge) - {"github", "github_lesen"})),
         app_modus=app_modus, fremd=meta_pfad.exists() and k.pruefe_eigener_auftrag(read_json(meta_pfad, None)) is not None,
-        projekt_fremd=projekt_fremd, projekt_kollision=projekt_kollision)
+        projekt_fremd=projekt_fremd, projekt_kollision=projekt_kollision, projekt_profil_fremd=projekt_profil_fremd)
     try:
         ereignisse = k.zaehler_lesen(pfade.zaehler)
     except OSError:
@@ -2574,12 +2586,13 @@ def kern_start_pruefen(job: str, projekt: str, art: str, kopf: Kopf, app_modus: 
     return grund, zustand.konfig
 
 
-def kern_versuch_buchen(job: str) -> bool:
-    """Bucht den Versuch (Ereignis versuch im Zähler), sobald ein Start die erste Prüfung besteht: auch Starts, die später an einer Sperre
-    scheitern (belegt, zugang_erweitert, App-Fehler), zählen so gegen die Grenze je Stunde. False, wenn der Zähler nicht schreibbar ist."""
+def kern_versuch_buchen(job: str, profil: str | None = None) -> bool:
+    """Bucht den Versuch (Ereignis versuch im Zähler, mit der Kennung des Profils), sobald ein Start die erste Prüfung besteht: auch Starts,
+    die später an einer Sperre scheitern (belegt, zugang_erweitert, App-Fehler), zählen so gegen die Grenze je Stunde (gesamt und je
+    Profil). False, wenn der Zähler nicht schreibbar ist."""
     k = kern_modul()
     try:
-        k.zaehler_schreiben((KERN_PFADE or k.PFADE).zaehler, job, "versuch", time.time())
+        k.zaehler_schreiben((KERN_PFADE or k.PFADE).zaehler, job, "versuch", time.time(), profil=profil)
     except OSError:
         return False
     return True
@@ -2597,21 +2610,21 @@ def kern_fork_grund(repo: str | None, token: str) -> str | None:
 
 
 @contextmanager
-def kern_buchung(job: str):
-    """Im Kern-Kanal Start und Ende des Laufs in den Zähler schreiben (kernkanal.jsonl). Lässt sich der Start nicht buchen, startet
-    nichts (die Grenzen wären nicht mehr prüfbar). Das Ende wird auch bei einer Ausnahme oder einem Signal gebucht."""
+def kern_buchung(job: str, profil: str | None = None):
+    """Im Kern-Kanal Start und Ende des Laufs in den Zähler schreiben (kernkanal.jsonl, mit der Kennung des Profils). Lässt sich der Start
+    nicht buchen, startet nichts (die Grenzen wären nicht mehr prüfbar). Das Ende wird auch bei einer Ausnahme oder einem Signal gebucht."""
     if KANAL != "kern":
         yield
         return
     k = kern_modul()
     zaehler = (KERN_PFADE or k.PFADE).zaehler
     beginn = time.time()
-    k.zaehler_schreiben(zaehler, job, "start", beginn)
+    k.zaehler_schreiben(zaehler, job, "start", beginn, profil=profil)
     try:
         yield
     finally:
         try:
-            k.zaehler_schreiben(zaehler, job, "ende", time.time(), dauer_s=max(0, int(time.time() - beginn)))
+            k.zaehler_schreiben(zaehler, job, "ende", time.time(), dauer_s=max(0, int(time.time() - beginn)), profil=profil)
         except OSError:
             log(f"kernkanal: Ende von {job} nicht gebucht")
 
@@ -2628,7 +2641,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
         grund, _konfig = kern_start_pruefen(job, projekt, art, kopf, app_modus=True)
         if grund is not None:
             return kanal_abweisen(grund)
-        if not kern_versuch_buchen(job):  # ohne Zähler lassen sich die Grenzen nicht erzwingen
+        if not kern_versuch_buchen(job, kopf.profil):  # ohne Zähler lassen sich die Grenzen nicht erzwingen
             return kanal_abweisen("grenze_start")
     elif KANAL == "pc" and projekt.startswith(KERN_PRAEFIX):
         raise Abgewiesen("Projektnamen mit kern- sind dem Kern-Kanal vorbehalten")
@@ -2653,7 +2666,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
     if not gehalten[0].versuchen():
         wamo_event("belegt", grund="Dieser Auftrag läuft bereits")
         return EXIT_BELEGT
-    vorbereiten(jobdir, job, projekt, art, repo, KANAL)
+    vorbereiten(jobdir, job, projekt, art, repo, KANAL, kopf.profil)
     gehalten.append(Sperre(sperren / f"projekt-{projekt}"))
     if not gehalten[-1].versuchen():
         wamo_event("belegt", grund="Im Projekt läuft schon ein anderer Auftrag")
@@ -2716,7 +2729,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
     # Ab hier lebt ggf. ein GitHub-Token: SIGTERM und SIGHUP werden zur Ausnahme, damit Sandbox-Stopp und Widerruf
     # (finally in github_token_fuer_lauf) sicher laufen. SIGKILL lässt sich nicht abfangen: dann läuft das Token
     # nach spätestens einer Stunde ab.
-    with _signale(_als_ausnahme), kern_buchung(job):
+    with _signale(_als_ausnahme), kern_buchung(job, kopf.profil):
         try:
             with github_token_fuer_lauf(job, art, repo, app) as gh_token:
                 if gh_token is not None:

@@ -135,7 +135,7 @@ class SichtbarkeitImBueroTests(tb.BueroFlow):
         ergebnis = await self.vorbereiten(repo=None, art="recherche", projekt="Markt" + versteckt("evil") + "​studie‮")
         self.assertTrue(ergebnis["ok"])
         karte = next(m for m in self.task.messages() if m.get("type") == "auftrag")
-        self.assertEqual(karte["projekt"], "kern-marktstudie")
+        self.assertEqual(karte["projekt"], "kern-0f6c2b1e-marktstudie")
         self.assertTrue(karte["projekt"].isascii())
 
 
@@ -171,7 +171,7 @@ class KostenAusEreignisTests(unittest.TestCase):
         """Produktiv wird sie nur für einen gestarteten Lauf ohne gemeldete Kosten gerufen: der Parameter ohne_ergebnis entfällt."""
         import inspect
 
-        self.assertEqual(list(inspect.signature(eb.kosten_mit_untergrenze).parameters), ["kosten_usd"])
+        self.assertEqual(list(inspect.signature(eb.kosten_mit_untergrenze).parameters), ["kosten_usd", "zulassung"])
 
 
 def ereignisse_mit_kosten(wert, tool=False):

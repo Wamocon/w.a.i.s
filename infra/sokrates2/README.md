@@ -1393,6 +1393,26 @@ und auf dem Server steht kein Zugangswert im Klartext.
 im Dispatcher zusätzlich die GitHub-ID `SELF_REPO_IDS`, dazu die Fork-Prüfung), Supabase und `deployment` in der Sandbox, der Befehl `pruefen` im Kern-Kanal (auch mit
 `WAMO_PRUEFEN=an`), Jira und Vercel, bis ein enges Konto in `DIENSTE` steht. `PARALLEL_MAX = 1` gilt für beide Kanäle.
 
+### 18.1 Mitglieder und Trennung je Profil (Dispatcher 8, Ausrollen P5, vorbereitet am 15.11.2026)
+
+Plan: `docs/ausrollen-neue-nutzer.md` (4.6, P5, Entscheidungen N6 und N13). Dispatcher 8 trennt die Profile im Kern-Kanal: Der Projektname lautet
+`kern-<Kennung>-<Name>` (Kennung = `profil` der Kopfzeile, 8 Hexzeichen, die Kurzkennung der user_id), die Kennung steht in `auftrag.json` und in jeder
+Zeile von `kernkanal.jsonl`. Ein Projektordner, den ein Kern-Auftrag eines anderen Profils (oder einer ohne Kennung) angelegt hat, ist gesperrt (`projekt`),
+ebenso eine Fortsetzung aus einem anderen Profil. Zusätzlich zu den Grenzen aus `kernkanal.conf` gelten feste Grenzen je Profil (`grenze_profil`): höchstens 3 neue
+Aufträge je Stunde und 8 je Tag (Folgen desselben Auftrags zählen nicht), 10 Versuche je Stunde, 7200 Sekunden Laufzeit je Tag. `PARALLEL_MAX = 1` bleibt; ist der
+Platz belegt, sagt der Kern "Ein anderer Auftrag läuft gerade. Bitte versuche es in ein paar Minuten noch einmal." (einfache Form der Warteschlange).
+
+Mitglieder starten Aufträge nur mit `WAMO_ENTWICKLUNG_MITGLIEDER=an` im Drop-in und mit ihrer `user_id` in `WAMO_ENTWICKLUNG_PROFILE`, Laborprofile nie. Für sie gelten
+höchstens 2 USD je Auftrag und 10 USD je Tag (der kleinere Wert mit dem Drop-in), keine Repos bis Folgepaket 1, dieselben Arten wie im Kanal freigegeben.
+
+Reihenfolge: (1) Kern-Release mit `SCHRANKEN_VERSION = 2` (der neue Kern schickt schon `kern-<Kennung>-<Name>`, Dispatcher 7 nimmt das für Aufträge ohne Repo
+an). (2) Bei Ruhe `wamo-job-einrichten.sh` (Dispatcher 8 und Modul), dann `wamo-job-kern-einrichten.sh schluessel --ablauf <JJJJMMTT> --hostfingerabdruck
+<SHA256:...>` (installiert den neuen Rauchtest mit der Probe "Start mit fremder Kennung", der Kanal bleibt, wie er ist), dann `wamo-job-kern-rauchtest --produktiv`.
+(3) Gesamtgrenzen für mehrere Personen anheben: `kanal --arten recherche --max-start-stunde 12 --max-start-tag 40 --max-laufzeit-tag-s 28800`. (4) `schalter an
+<release> --profil <niko>,<pilot> --kosten-auftrag 3 --kosten-tag 10 --mitglieder an --trocken`, dann ohne `--trocken` (verlangt `SCHRANKEN_VERSION` 2 im
+Zielrelease; ohne `--mitglieder` schreibt das Skript `aus`). Rückweg: sofort `wamo-job-kern-rueckweg.sh notaus`; für Mitglieder allein `schalter an <release>
+--profil <niko> --mitglieder aus`.
+
 ## 19. Labor-Dienst (Test-Jira des Testlabors, Betrieb, vorbereitet am 12.11.2026, noch nicht ausgerollt)
 
 Der Dienst selbst liegt im Repo unter `labor-dienst/` (Vertrag `docs/labor-dienst-vertrag.md`, Umgebung `WAMO_LABOR_DIENST_*`, Weboberflächen `/board`, `/betreuer` und

@@ -6,7 +6,7 @@ bewusst als Wortlaut im Test: Weicht eine Seite ab, wird dieser Test rot, nicht 
 
     I2  Standardwerte und Bereiche der Datei kernkanal.conf (Skript und Dispatcher)
     I3  Büro-Variablen und Release-Nachweis SCHRANKEN_VERSION (Kern und Skript)
-    I5  Projektname (Kern und Dispatcher, dieselbe Wertetabelle)
+    I5  Projektname (Kern und Dispatcher, dieselbe Wertetabelle), seit Dispatcher 8 mit der Kennung des Profils
     I6  Grund-Codes des Ereignisses kanal_gesperrt (Dispatcher und Kern)
     ssh-Optionen des Rauchtests gegen dev_agent.ssh_argv
     unveränderte Dateien (Prüfsummen von Slot-Skript, Vorprüfung und Slot-Vorlage), Namensvertrag
@@ -76,11 +76,12 @@ def test_geprueft_wird_der_code_dieses_arbeitsbaums():
 
 # ================================================================== I6: Grund-Codes
 I6_CODES = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt", "dienst",
-            "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit", "grenze_folgen", "abstand", "platz")
+            "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit", "grenze_folgen", "abstand", "platz",
+            "grenze_profil")
 
 # Funktionen von wamo_job_kernkanal.py, deren Rückgabe ein Code aus KANAL_GRUENDE ist
 CODE_FUNKTIONEN = {"pruefe_befehl", "pruefe_eigener_auftrag", "projekt_pruefen", "pruefe_grenzen", "pruefe_start", "fork_pruefen",
-                   "kanal_zustand", "kern_projektname"}
+                   "kanal_zustand", "kern_projektname", "pruefe_grenzen_profil"}
 
 
 def test_i6_die_feste_liste_gilt_auf_beiden_seiten():
@@ -300,8 +301,8 @@ def _zeilen_im_muster(muster: str, quelle: str) -> list[str]:
 def test_i3_genau_eine_zeile_passt_zum_muster_von_schalter():
     muster = _muster_von_schalter()
     assert muster == "^SCHRANKEN_VERSION = [1-9][0-9]*$"
-    assert _zeilen_im_muster(muster, EB_QUELLE) == ["SCHRANKEN_VERSION = 1"]
-    assert eb.SCHRANKEN_VERSION == 1
+    assert _zeilen_im_muster(muster, EB_QUELLE) == ["SCHRANKEN_VERSION = 2"]
+    assert eb.SCHRANKEN_VERSION == 2
     assert "\r" not in (VOICE_CORE / "entwicklung_betrieb.py").read_bytes().decode("utf-8"), "ein Zeilenende mit CR bricht das $ im grep"
 
 
@@ -453,7 +454,7 @@ def test_die_standardkosten_des_skripts_nimmt_der_kern_an(monkeypatch):
 
 def test_das_dropin_setzt_genau_die_variablen_die_der_kern_liest():
     namen = re.findall(r"echo \"Environment=([A-Z_]+)=", _funktion(SKRIPT, "drop_in_text"))
-    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG}
+    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG, eb.ENV_MITGLIEDER}
     assert len(namen) == len(set(namen))
     assert "WAMO_ENTWICKLUNG" not in namen and eb.ENV_BEFEHLE not in namen  # Standard aus, nie nebenbei an
     assert set(eb.ALLE_VARIABLEN) - set(namen) == {eb.ENV_BEFEHLE}
@@ -672,7 +673,7 @@ NAMEN_AUS_DER_ARBEITSLISTE = (
     "wamo-kern-jobs", "authorized_keys.d/wamo-kern", "kernkanal.conf", "kernkanal.notaus", "wamo-entwicklung-buero.conf",
     "wamo-job-kern-einrichten.sh", "wamo-job-kern-rueckweg.sh", "wamo_job_kern_rauchtest.py", "wamo_job_kernkanal.py",
     "WAMO_ENTWICKLUNG_BUERO", "WAMO_ENTWICKLUNG_PROFILE", "WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD", "WAMO_ENTWICKLUNG_KOSTEN_TAG_USD",
-    "WAMO_ENTWICKLUNG_BEFEHLE_BUERO", "Dispatcher 7", "/var/backups/wamo-job-kern", "/var/log/wamo-job-kern", "kernkanal.jsonl",
+    "WAMO_ENTWICKLUNG_BEFEHLE_BUERO", "Dispatcher 8", "/var/backups/wamo-job-kern", "/var/log/wamo-job-kern", "kernkanal.jsonl",
 )
 NAMEN_DER_UMSETZUNG = (
     "MAX_VERSUCH_STUNDE", "`versuch`", ".notaus-", "als_kern", "wamo-job-kern-rauchtest", "entwicklung_betrieb.py", "SCHRANKEN_VERSION",
@@ -681,6 +682,8 @@ NAMEN_DER_UMSETZUNG = (
     "ExposeAuthInfo", "%u-kern", "/opt/wamo/waechter", "WAMO_ENTWICKLUNG_ORT", "wamo.conf.vorher", "slot_betrieb",
     "test_kernkanal_vertrag.py", "test_entwicklung_betrieb.py", "test_kernkanal.py", "test_job_kern_skripte.py",
     "test_wamo_kern_sokrates2.py", "auftragStart.test.ts", "docs/entwicklung-im-betrieb.md",
+    # Ausrollen P5: Mitglieder und Trennung je Profil
+    "WAMO_ENTWICKLUNG_MITGLIEDER", "kern-<Kennung>-<Name>", "grenze_profil", "--mitglieder", "SATZ_ANDERER_AUFTRAG", "MAX_NEU_STUNDE_PROFIL",
 )
 # Variablen, die es schon vor dem Vorhaben gab (stehen in der README und in den .env.example, nicht im Namensvertrag)
 VORHANDENE_VARIABLEN = {"WAMO_BETRIEB", "WAMO_ENTWICKLUNG", "WAMO_ABNAHME_BEFEHLE", "WAMO_CLAUDE_SCHLUESSEL_PROFIL"}
@@ -698,3 +701,81 @@ def test_jede_variable_der_neuen_dateien_steht_im_namensvertrag():
     assert len(gefunden) >= 8
     fehlen = sorted(n for n in gefunden - VORHANDENE_VARIABLEN if n not in NAMENSVERTRAG)
     assert not fehlen, f"nicht im Namensvertrag: {fehlen}"
+
+
+# ================================================================== Ausrollen P5: Trennung je Profil auf beiden Seiten
+KENNUNG = eb.BueroZulassung(PROFIL).kennung  # "aaaaaaaa"
+
+
+def seite_kern_k(repo, wort, kennung=KENNUNG):
+    try:
+        return eb.kern_projektname(repo, wort, kennung)
+    except eb.ProjektnameFehler as e:
+        return ("abgelehnt", e.grund)
+
+
+def seite_dispatcher_k(repo, wort, kennung=KENNUNG):
+    try:
+        return K.kern_projektname(repo, wort, kennung)
+    except K.ProjektnameFehler as e:
+        return ("abgelehnt", e.grund)
+
+
+def test_p5_die_kennung_ist_auf_allen_seiten_dieselbe_form():
+    assert KENNUNG == "aaaaaaaa" and K.PROFIL_RE.fullmatch(KENNUNG) and D.PROFIL_RE.fullmatch(KENNUNG)
+    assert K.PROFIL_RE.pattern == D.PROFIL_RE.pattern == eb.KENNUNG_RE.pattern == "[0-9a-f]{8}"
+    assert eb.kennung_von(PROFIL) == KENNUNG  # Log und Audit
+    # die Kopfzeile des Kerns trägt dieselbe Kennung, die im Projektnamen steht
+    assert "profil = kennung.replace(\"-\", \"\")[:8]" in (VOICE_CORE / "dev_agent.py").read_text(encoding="utf-8")
+
+
+def test_p5_beide_seiten_geben_mit_kennung_bei_jeder_eingabe_dasselbe():
+    eingaben = _zufaellige_eingaben(1500)
+    abweichungen = [(e, seite_kern_k(*e), seite_dispatcher_k(*e)) for e in eingaben if seite_kern_k(*e) != seite_dispatcher_k(*e)]
+    assert not abweichungen, abweichungen[:5]
+    for kennung in ("AAAAAAAA", "aaaaaaa", "aaaaaaaaa", "", "../aaaa"):
+        assert seite_kern_k(None, "x", kennung) == seite_dispatcher_k(None, "x", kennung) == ("abgelehnt", "projekt")
+
+
+def test_p5_der_dispatcher_nimmt_jeden_namen_des_kerns_nur_mit_demselben_profil_an():
+    for repo, wort in _zufaellige_eingaben(1500):
+        name = seite_kern_k(repo, wort)
+        if isinstance(name, tuple):
+            continue
+        assert name.startswith(f"kern-{KENNUNG}-"), name
+        assert K.projekt_pruefen(name, repo, KENNUNG) is None, (repo, wort, name)
+        assert K.projekt_pruefen(name, repo, "bbbbbbbb") == "projekt", (repo, wort, name)
+
+
+def test_p5_der_buero_auftrag_traegt_die_kennung_der_zulassung():
+    z = eb.BueroZulassung(PROFIL)
+    name = eb.buero_projekt("recherche", None, "Marktstudie", z)
+    assert name == "kern-aaaaaaaa-marktstudie" and K.projekt_pruefen(name, None, z.kennung) is None
+
+
+def test_p5_grenze_profil_hat_im_kern_einen_satz_und_belegt_den_satz_der_einfachen_warteschlange():
+    assert "grenze_profil" in K.KANAL_GRUENDE and eb.GRUND_SAETZE["grenze_profil"].endswith(".")
+    assert eb.ablehn_grund(4, {"belegt": {"grund": "Es läuft schon ein Auftrag"}}) == eb.SATZ_ANDERER_AUFTRAG
+    assert D.PARALLEL_MAX == 1  # ein Auftrag gleichzeitig (Entscheidung N13)
+
+
+def test_p5_das_skript_verlangt_fuer_mitglieder_die_schranken_version_des_kerns():
+    std = _std_werte(SKRIPT)
+    assert std["MITGLIEDER"] == "aus"
+    assert re.search(r"^MIN_SCHRANKEN_MITGLIEDER=2\b", SKRIPT, flags=re.M)
+    assert eb.SCHRANKEN_VERSION >= 2
+    rumpf = _funktion(SKRIPT, "drop_in_text")
+    assert f"Environment={eb.ENV_MITGLIEDER}=${{MITGLIEDER:-$STD_MITGLIEDER}}" in rumpf
+    assert _an_aus_werte_gleich()
+
+
+def _an_aus_werte_gleich() -> bool:
+    """Das Skript schreibt nur an oder aus, und genau diese Werte versteht der Kern (alles andere heißt dort ungueltig, also aus)."""
+    return eb._AN[0] == "an" and eb._AUS[0] == "aus" and 'an|aus) ;; *) aufruf "--mitglieder braucht an oder aus"' in SKRIPT
+
+
+def test_p5_die_grenzen_je_profil_sind_fest_und_liegen_unter_den_standards_der_konfiguration():
+    std = _std_werte(SKRIPT)
+    assert K.MAX_NEU_STUNDE_PROFIL <= int(std["MAX_START_STUNDE"]) and K.MAX_NEU_TAG_PROFIL <= int(std["MAX_START_TAG"])
+    assert K.MAX_VERSUCH_STUNDE_PROFIL <= K.MAX_VERSUCH_STUNDE_FEST
+    assert K.MAX_LAUFZEIT_TAG_S_PROFIL <= int(std["MAX_LAUFZEIT_TAG_S"])

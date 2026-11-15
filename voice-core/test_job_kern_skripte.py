@@ -1079,7 +1079,7 @@ def test_schalter_an_schreibt_das_dropin_laedt_neu_und_schaltet_dann_um(welt):
     zeilen = text.splitlines()
     assert zeilen[1:] == ["[Service]", "Environment=WAMO_ENTWICKLUNG_BUERO=an", "Environment=WAMO_ENTWICKLUNG_ORT=sokrates2",
                           f"Environment=WAMO_ENTWICKLUNG_PROFILE={PROFIL}", "Environment=WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=3",
-                          "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=10"]
+                          "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=10", "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=aus"]
     assert not text.startswith("# gespiegelt")  # keine Spiegel-Marke
     log = [z for z in aufrufe(welt) if z.startswith(("systemctl daemon-reload", "slots umschalten-kern"))]
     assert log == ["systemctl daemon-reload", f"slots umschalten-kern {RELEASE} dropin=ja"]  # erst neu laden, dann umschalten, Drop-in lag schon
@@ -1146,6 +1146,96 @@ def test_schalter_aus_entfernt_das_dropin_und_schaltet_um(welt):
     assert not (welt["w"] / DROPIN_REL).exists()
     assert [z for z in aufrufe(welt) if z.startswith("slots umschalten-kern")][-1] == "slots umschalten-kern v0.1.1-def5678 dropin=nein"
     assert list((welt["w"] / "var/backups/wamo-job-kern").glob("*/wamo-entwicklung-buero.conf"))  # das alte Drop-in ist gesichert
+
+
+@braucht_bash
+def test_kanal_setzt_die_gesamtgrenzen_fuer_mehrere_profile(welt):
+    schluessel_einrichten(welt)
+    p = einr(welt, "kanal", "--arten", "recherche", "--max-start-stunde", "12", "--max-start-tag", "40", "--max-laufzeit-tag-s", "28800")
+    assert p.returncode == 0, p.stdout + p.stderr
+    k = konfig_von(welt)
+    assert (k["MAX_START_STUNDE"], k["MAX_START_TAG"], k["MAX_LAUFZEIT_TAG_S"], k["KANAL"]) == ("12", "40", "28800", "offen")
+    for option, wert in (("--max-start-stunde", "61"), ("--max-start-tag", "0"), ("--max-laufzeit-tag-s", "59"), ("--max-start-tag", "x")):
+        assert einr(welt, "kanal", "--arten", "recherche", option, wert).returncode == 2, option
+    assert konfig_von(welt)["MAX_START_TAG"] == "40"  # eine falsche Angabe ändert nichts
+
+
+def release_version(welt, version: int) -> None:
+    (welt["w"] / f"opt/wamo-core/releases/{RELEASE}/voice-core/entwicklung_betrieb.py").write_text(f"SCHRANKEN_VERSION = {version}\n")
+
+
+@braucht_bash
+def test_schalter_mit_mitgliedern_verlangt_schranken_version_2_und_schreibt_den_schalter(welt):
+    schluessel_einrichten(welt)
+    vorher = dateien_liste(welt["w"])
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")  # das Release der Welt hat Version 1
+    assert p.returncode == 3 and "Schranken der Mitglieder" in p.stderr and "SCHRANKEN_VERSION 1" in p.stderr, p.stdout + p.stderr
+    assert not (welt["w"] / DROPIN_REL).exists() and not [z for z in aufrufe(welt) if "umschalten-kern" in z]
+    assert ohne_spur(dateien_liste(welt["w"])) == ohne_spur(vorher)
+    release_version(welt, 2)
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
+    assert p.returncode == 0, p.stdout + p.stderr
+    text = (welt["w"] / DROPIN_REL).read_text(encoding="utf-8")
+    assert text.splitlines()[-1] == "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=an"
+    # ohne die Option schreibt der nächste Aufruf wieder aus (nie nebenbei an)
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL)
+    assert p.returncode == 0 and (welt["w"] / DROPIN_REL).read_text(encoding="utf-8").splitlines()[-1] == "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=aus"
+
+
+@braucht_bash
+def test_schalter_mit_mitgliedern_aus_braucht_keine_neue_version(welt):
+    schluessel_einrichten(welt)
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "aus")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=aus" in (welt["w"] / DROPIN_REL).read_text(encoding="utf-8")
+
+
+@braucht_bash
+@pytest.mark.parametrize("args", [("an", RELEASE, "--profil", PROFIL, "--mitglieder", "vielleicht"),
+                                  ("an", RELEASE, "--profil", PROFIL, "--mitglieder"),
+                                  ("aus", RELEASE, "--mitglieder", "an"), ("aus", RELEASE, "--mitglieder", "aus")])
+def test_schalter_mit_falschen_mitglieder_angaben_ist_eine_falsche_aufrufform(welt, args):
+    schluessel_einrichten(welt)
+    p = einr(welt, "schalter", *args)
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert not (welt["w"] / DROPIN_REL).exists()
+
+
+@braucht_bash
+def test_schalter_trocken_prueft_zeigt_das_dropin_und_aendert_nichts(welt):
+    schluessel_einrichten(welt)
+    release_version(welt, 2)
+    vorher = dateien_liste(welt["w"])
+    anzahl = len(aufrufe(welt))
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an", "--trocken")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "[trocken]" in p.stdout and "WAMO_ENTWICKLUNG_MITGLIEDER=an" in p.stdout and "Nichts geschrieben" in p.stdout
+    assert not (welt["w"] / DROPIN_REL).exists()
+    assert [z for z in aufrufe(welt)[anzahl:] if "umschalten-kern" in z or "daemon-reload" in z] == []
+    assert ohne_spur(dateien_liste(welt["w"])) == ohne_spur(vorher)
+    # die Vorabprüfung gilt auch trocken: ein altes Release scheitert mit Exit 3
+    release_version(welt, 1)
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an", "--trocken")
+    assert p.returncode == 3 and "Schranken der Mitglieder" in p.stderr
+    # schalter aus trocken: das Drop-in bleibt
+    assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL).returncode == 0
+    p = einr(welt, "schalter", "aus", RELEASE, "--trocken")
+    assert p.returncode == 0 and "würde entfernt" in p.stdout and (welt["w"] / DROPIN_REL).exists()
+
+
+@braucht_bash
+def test_status_nennt_den_schalter_der_mitglieder(welt):
+    schluessel_einrichten(welt)
+    release_version(welt, 2)
+    assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an").returncode == 0
+    a, w = welt["a"], welt["w"]
+    (a / "aktiv.txt").write_text("wamo-core@a active\n")
+    (a / "pid_a").write_text("4711\n")
+    env = w / "proc" / "4711" / "environ"
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_bytes(b"WAMO_ENTWICKLUNG_BUERO=an\0WAMO_ENTWICKLUNG_MITGLIEDER=an\0WAMO_ENTWICKLUNG_PROFILE=" + PROFIL.encode() + b"\0")
+    o = einr(welt, "status").stdout
+    assert "Mitglieder: an" in o and "WAMO_ENTWICKLUNG_MITGLIEDER=an" in o and PROFIL not in o
 
 
 @braucht_bash
@@ -1356,7 +1446,7 @@ def test_das_einrichtungsskript_schreibt_nie_in_die_pc_datei_und_hat_die_standar
     std = dict(re.findall(r"^STD_([A-Z_]+)=(\S+)$", text, re.M))
     assert std == {"KANAL": "zu", "ABLAUF_TAGE": "30", "MAX_TURNS": "40", "MAX_BUDGET_USD": "2.00", "MAX_START_STUNDE": "4", "MAX_START_TAG": "8",
                    "MAX_LAUFZEIT_TAG_S": "14400", "MAX_FOLGEN": "5", "MIN_ABSTAND_S": "60", "MIN_PLATZ_MB": "2048",
-                   "MAX_VERSUCH_STUNDE": "20", "KOSTEN_AUFTRAG_USD": "3", "KOSTEN_TAG_USD": "10"}
+                   "MAX_VERSUCH_STUNDE": "20", "KOSTEN_AUFTRAG_USD": "3", "KOSTEN_TAG_USD": "10", "MITGLIEDER": "aus"}
     schluessel = re.search(r"^KONFIG_SCHLUESSEL=\((.*?)\)$", text, re.M | re.S).group(1).split()
     assert schluessel == ["KANAL", "ABLAUF", "ARTEN", "REPOS", "DIENSTE", "MAX_TURNS", "MAX_BUDGET_USD", "MAX_START_STUNDE", "MAX_START_TAG",
                           "MAX_LAUFZEIT_TAG_S", "MAX_FOLGEN", "MIN_ABSTAND_S", "MIN_PLATZ_MB", "MAX_VERSUCH_STUNDE"]  # genau die Schlüssel, die der Dispatcher kennt

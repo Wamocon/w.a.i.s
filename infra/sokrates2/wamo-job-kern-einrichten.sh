@@ -10,13 +10,17 @@
 #       lokalen Hostschlüssel (Abgleich gegen --hostfingerabdruck, Pflicht außer mit --trocken), Zeile in authorized_keys.d/wamo-kern,
 #       kernkanal.conf mit KANAL=zu, Rauchtest installieren, Ja-Probe ping, bei Fehler Rücknahme der Zeile. --trocken schreibt nichts.
 #   wamo-job-kern-einrichten.sh kanal --arten A,B --repos O/N[,O/N] [--dienste D[,D]] [--max-turns N] [--max-budget-usd X]
+#                               [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N]
 #   wamo-job-kern-einrichten.sh kanal zu
 #       Regeln des Kern-Kanals öffnen oder schließen. Öffnen und Ändern nur ohne laufenden Kern-Auftrag, GitHub-Arten nur, wenn
 #       claude --help (als wamo) --max-turns und --max-budget-usd kennt. kanal zu geht immer.
 #   wamo-job-kern-einrichten.sh schalter an|aus <release> [--profil <user_id>[,<user_id>]] [--kosten-auftrag X] [--kosten-tag X]
+#                               [--mitglieder an|aus] [--trocken]
 #       Drop-in wamo-entwicklung-buero.conf der Slot-Vorlage schreiben (an) oder entfernen (aus), daemon-reload, dann
 #       wamo-core-slots.sh umschalten-kern <release>. Scheitert das vor dem Umschalten, kommt das vorige Drop-in zurück. Wurde schon
-#       umgeschaltet, bleibt es und das Skript endet mit Exit 4. Gleicher Stand ist ein No-op.
+#       umgeschaltet, bleibt es und das Skript endet mit Exit 4. Gleicher Stand ist ein No-op. --mitglieder an (Standard aus, jeder
+#       Aufruf ohne die Option schreibt aus) lässt auch Mitglieder aus --profil Aufträge starten und verlangt SCHRANKEN_VERSION 2 oder
+#       höher im Zielrelease. --trocken prüft alles wie echt und zeigt das Drop-in, schreibt aber nichts und schaltet nicht um.
 #   wamo-job-kern-einrichten.sh notaus-aufheben
 #       Sperrdatei entfernen. Der Kanal bleibt zu (der Notaus hat KANAL=zu gesetzt und das Schlüsselpaar beiseitegelegt): erst schluessel
 #       legt ein neues Paar an und setzt die Zeile neu, erst kanal öffnet. schluessel verweigert, solange die Sperrdatei besteht.
@@ -58,6 +62,8 @@ STD_MIN_PLATZ_MB=2048
 STD_MAX_VERSUCH_STUNDE=20
 STD_KOSTEN_AUFTRAG_USD=3
 STD_KOSTEN_TAG_USD=10
+STD_MITGLIEDER=aus
+MIN_SCHRANKEN_MITGLIEDER=2   # erst ab dieser SCHRANKEN_VERSION kennt der Kern WAMO_ENTWICKLUNG_MITGLIEDER und die Grenzen der Mitglieder
 
 KERN_IP=192.168.178.136
 APP="$WURZEL/opt/wamo"
@@ -100,8 +106,8 @@ fehler() { echo "wamo-job-kern-einrichten: $*" >&2; exit 1; }
 aufruf() {
   echo "wamo-job-kern-einrichten: $*" >&2
   echo "Aufruf: schluessel [--trocken] [--ablauf JJJJMMTT] [--hostfingerabdruck SHA256:...] | kanal --arten A,B --repos O/N[,O/N]" \
-    "[--dienste D] [--max-turns N] [--max-budget-usd X] | kanal zu | schalter an|aus <release> [--profil <user_id>]" \
-    "[--kosten-auftrag X] [--kosten-tag X] | notaus-aufheben | status" >&2
+    "[--dienste D] [--max-turns N] [--max-budget-usd X] [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N] | kanal zu | schalter an|aus <release> [--profil <user_id>]" \
+    "[--kosten-auftrag X] [--kosten-tag X] [--mitglieder an|aus] [--trocken] | notaus-aufheben | status" >&2
   exit 2
 }
 vorbedingung() { echo "wamo-job-kern-einrichten: Vorbedingung nicht erfüllt: $*" >&2; exit 3; }
@@ -355,8 +361,8 @@ konfig_schreiben() {   # sichert die alte Datei, schreibt atomar, nur wenn sich 
 KOMMANDO="${1:-}"
 [ -n "$KOMMANDO" ] || aufruf "Befehl fehlt"
 shift
-TROCKEN=0 ABLAUF="" HOSTFP="" ARTEN="" REPOS="" DIENSTE="" MAX_TURNS="" MAX_BUDGET="" PROFIL="" KOSTEN_AUFTRAG="" KOSTEN_TAG=""
-RELEASE="" SCHALTER="" ZU=0 GITHUB_ART=0
+TROCKEN=0 ABLAUF="" HOSTFP="" ARTEN="" REPOS="" DIENSTE="" MAX_TURNS="" MAX_BUDGET="" PROFIL="" KOSTEN_AUFTRAG="" KOSTEN_TAG="" MITGLIEDER=""
+RELEASE="" SCHALTER="" ZU=0 GITHUB_ART=0 MAX_START_STUNDE="" MAX_START_TAG="" MAX_LAUFZEIT=""
 optionswert() { [ "$#" -ge 2 ] && [ -n "${2:-}" ] && [[ "$2" != --* ]] || aufruf "$1 braucht einen Wert"; }
 case "$KOMMANDO" in
   schluessel)
@@ -383,6 +389,11 @@ case "$KOMMANDO" in
           --dienste) optionswert "$@"; DIENSTE="$2"; shift 2 ;;
           --max-turns) optionswert "$@"; MAX_TURNS="$2"; pruefe_zahl --max-turns "$2" 1 200; shift 2 ;;
           --max-budget-usd) optionswert "$@"; MAX_BUDGET="$2"; pruefe_betrag --max-budget-usd "$2" 0.01 20; shift 2 ;;
+          # Gesamtgrenzen für alle Profile (mit Mitgliedern sind die Standards 4 je Stunde und 8 je Tag zu knapp; je Profil gelten
+          # zusätzlich die festen Grenzen in wamo_job_kernkanal.py)
+          --max-start-stunde) optionswert "$@"; MAX_START_STUNDE="$2"; pruefe_zahl --max-start-stunde "$2" 1 60; shift 2 ;;
+          --max-start-tag) optionswert "$@"; MAX_START_TAG="$2"; pruefe_zahl --max-start-tag "$2" 1 200; shift 2 ;;
+          --max-laufzeit-tag-s) optionswert "$@"; MAX_LAUFZEIT="$2"; pruefe_zahl --max-laufzeit-tag-s "$2" 60 86400; shift 2 ;;
           *) aufruf "unbekannte Option für kanal: $1" ;;
         esac
       done
@@ -400,14 +411,17 @@ case "$KOMMANDO" in
         --profil) optionswert "$@"; PROFIL="$2"; shift 2 ;;
         --kosten-auftrag) optionswert "$@"; KOSTEN_AUFTRAG="$2"; pruefe_betrag --kosten-auftrag "$2" 0.01 100000; shift 2 ;;
         --kosten-tag) optionswert "$@"; KOSTEN_TAG="$2"; pruefe_betrag --kosten-tag "$2" 0.01 100000; shift 2 ;;
+        --mitglieder) optionswert "$@"; MITGLIEDER="$2"; shift 2
+          case "$MITGLIEDER" in an|aus) ;; *) aufruf "--mitglieder braucht an oder aus" ;; esac ;;
+        --trocken) TROCKEN=1; shift ;;
         *) aufruf "unbekannte Option für schalter: $1" ;;
       esac
     done
     if [ "$SCHALTER" = an ]; then
       [ -n "$PROFIL" ] || aufruf "schalter an braucht --profil <user_id>"
       pruefe_profil "$PROFIL"
-    elif [ -n "$PROFIL$KOSTEN_AUFTRAG$KOSTEN_TAG" ]; then
-      aufruf "schalter aus kennt weder --profil noch --kosten-auftrag noch --kosten-tag"
+    elif [ -n "$PROFIL$KOSTEN_AUFTRAG$KOSTEN_TAG$MITGLIEDER" ]; then
+      aufruf "schalter aus kennt weder --profil noch --kosten-auftrag noch --kosten-tag noch --mitglieder"
     fi ;;
   notaus-aufheben|status)
     [ "$#" -eq 0 ] || aufruf "$KOMMANDO kennt keine weiteren Angaben" ;;
@@ -600,6 +614,9 @@ cmd_kanal() {
   K[DIENSTE]="$DIENSTE"
   [ -z "$MAX_TURNS" ] || K[MAX_TURNS]="$MAX_TURNS"
   [ -z "$MAX_BUDGET" ] || K[MAX_BUDGET_USD]="$MAX_BUDGET"
+  [ -z "$MAX_START_STUNDE" ] || K[MAX_START_STUNDE]="$MAX_START_STUNDE"
+  [ -z "$MAX_START_TAG" ] || K[MAX_START_TAG]="$MAX_START_TAG"
+  [ -z "$MAX_LAUFZEIT" ] || K[MAX_LAUFZEIT_TAG_S]="$MAX_LAUFZEIT"
   K[KANAL]=offen
   konfig_schreiben
   echo "Kanal offen für: ${K[ARTEN]}${K[REPOS]:+ mit Repos ${K[REPOS]}}. Ablauf ${K[ABLAUF]} ($tage Tage)."
@@ -629,6 +646,11 @@ drop_in_text() {
   echo "Environment=WAMO_ENTWICKLUNG_PROFILE=$PROFIL"
   echo "Environment=WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=${KOSTEN_AUFTRAG:-$STD_KOSTEN_AUFTRAG_USD}"
   echo "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=${KOSTEN_TAG:-$STD_KOSTEN_TAG_USD}"
+  echo "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=${MITGLIEDER:-$STD_MITGLIEDER}"
+}
+
+schranken_version() {   # die Zahl aus der Zeile SCHRANKEN_VERSION des Zielrelease (leer, wenn sie fehlt)
+  sed -n 's/^SCHRANKEN_VERSION = \([1-9][0-9]*\)$/\1/p' "$1" 2>/dev/null | head -n1
 }
 
 schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
@@ -639,6 +661,12 @@ schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
   [ -x "$RAUCHTEST" ] || vorbedingung "der Rauchtest ${RAUCHTEST#"$WURZEL"} fehlt (erst schluessel)"
   grep -Eq '^SCHRANKEN_VERSION = [1-9][0-9]*$' "$ziel" 2>/dev/null \
     || vorbedingung "das Release $RELEASE kennt die Büro-Schranken nicht (SCHRANKEN_VERSION in voice-core/entwicklung_betrieb.py fehlt): ein altes Release ließe den Schalter wirkungslos"
+  if [ "${MITGLIEDER:-$STD_MITGLIEDER}" = an ]; then
+    local version
+    version="$(schranken_version "$ziel")"
+    [ -n "$version" ] && [ "$version" -ge "$MIN_SCHRANKEN_MITGLIEDER" ] \
+      || vorbedingung "das Release $RELEASE kennt die Schranken der Mitglieder nicht (SCHRANKEN_VERSION ${version:-?}, nötig ab $MIN_SCHRANKEN_MITGLIEDER): ein altes Release ließe --mitglieder an wirkungslos"
+  fi
   if "$COREENV" liste 2>/dev/null | grep -q '^WAMO_ENTWICKLUNG'; then
     vorbedingung "core.env enthält ein WAMO_ENTWICKLUNG*: es hätte vor dem Drop-in Vorrang (wamo-core-env loeschen)"
   fi
@@ -648,8 +676,14 @@ schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
 
 cmd_schalter() {
   local neu vorhanden=0 alt_inhalt
-  AKTION=schalter
+  [ "$TROCKEN" = 1 ] || AKTION=schalter   # trocken: keine Zeile in der Bedienspur
   schalter_vorabpruefung_wenn_an
+  if [ "$TROCKEN" = 1 ]; then
+    if [ "$SCHALTER" = an ]; then echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde so lauten:"; drop_in_text | sed 's/^/  /'
+    else echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde entfernt"; fi
+    echo "[trocken] danach: systemctl daemon-reload, wamo-core-slots.sh umschalten-kern $RELEASE. Nichts geschrieben, nichts umgeschaltet."
+    return 0
+  fi
   if [ "$SCHALTER" = an ]; then
     neu="$(drop_in_text)"
     if gleich_wie "$DROPIN" "$neu" && release_laeuft "$RELEASE"; then echo "Schalter steht schon auf an, Release $RELEASE läuft: nichts zu tun."; return 0; fi
@@ -691,6 +725,7 @@ umgebungs_namen() {   # Namen WAMO_ENTWICKLUNG* aus /proc/<pid>/environ, dazu de
   while IFS= read -r -d '' eintrag; do
     case "$eintrag" in
       WAMO_ENTWICKLUNG_BUERO=*) echo -n "WAMO_ENTWICKLUNG_BUERO=${eintrag#*=} " ;;
+      WAMO_ENTWICKLUNG_MITGLIEDER=*) echo -n "WAMO_ENTWICKLUNG_MITGLIEDER=${eintrag#*=} " ;;
       WAMO_ENTWICKLUNG*=*) echo -n "${eintrag%%=*} " ;;
     esac
   done < "$datei"
@@ -732,7 +767,9 @@ cmd_status() {
   fi
   soll=aus
   [ -f "$DROPIN" ] && soll=an
-  echo "== Schalter (Drop-in: $soll)"
+  local mitglieder_soll=""
+  [ -f "$DROPIN" ] && mitglieder_soll="$(sed -n 's/^Environment=WAMO_ENTWICKLUNG_MITGLIEDER=//p' "$DROPIN" | head -n1)"
+  echo "== Schalter (Drop-in: $soll, Mitglieder: ${mitglieder_soll:-aus})"
   for s in a b; do
     zustand="$(systemctl is-active "wamo-core@$s.service" 2>/dev/null || true)"
     release="$(slot_release "$s")"
