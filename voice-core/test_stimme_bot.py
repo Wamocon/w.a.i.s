@@ -166,6 +166,7 @@ async def test_werkzeuge_des_modells_laufen_durch_das_gate_ausser_den_offenen():
 BUERO_ENV = {  # Büro-Kern mit Entwicklungsaufträgen für dieses Profil (wie test_entwicklung_betrieb.py)
     "WAMO_BETRIEB": "buero", "WAMO_ENTWICKLUNG_BUERO": "an", "WAMO_ENTWICKLUNG_ORT": "sokrates2", "WAMO_ENTWICKLUNG_PROFILE": USER,
     "WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD": "3", "WAMO_ENTWICKLUNG_KOSTEN_TAG_USD": "10",
+    "WAMO_OFFICE": "dateien,onenote,outlook",  # auch die Office-Werkzeuge (Dateien, OneNote, Mail) müssen durch das Gate
 }
 
 
@@ -210,7 +211,7 @@ async def test_jedes_werkzeug_einer_voll_gebauten_sitzung_fragt_das_gate(monkeyp
         schemas = [s for s in nutzer.context.tools.standard_tools if isinstance(s, FunctionSchema) and s.handler is not None]
         namen = set(llm._functions) | {s.name for s in schemas}
         erwartet = {"merken", "fernzugriff_oeffnen", "aufgabe_verteilen", "entwicklung_vorbereiten", "bildschirm_ansehen",
-                    "buerogeraet_status", "programm_oeffnen", "datei_schreiben"}
+                    "buerogeraet_status", "programm_oeffnen", "datei_schreiben", "canvas_exportieren", "outlook_senden"}
         assert erwartet <= namen, erwartet - namen  # die Sitzung ist wirklich voll gebaut
         offen = [n for n, f in llm._functions.items() if n not in OFFENE_WERKZEUGE and getattr(f.handler, MARKE, None) is not gate]
         offen += [s.name for s in schemas if s.name not in OFFENE_WERKZEUGE and getattr(s.handler, MARKE, None) is not gate]
