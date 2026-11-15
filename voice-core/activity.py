@@ -48,12 +48,13 @@ def _detail(name: str, args: dict) -> str:
 
 
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
-FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail")
-# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken; outlook_senden legt
-# seine Karte selbst über diese Funktion an, outlook_werkzeuge.py)
+FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote")
+# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
+# über onenote_seite_anfragen, onenote_werkzeuge.py; outlook_senden legt seine Karte selbst über diese Funktion an,
+# outlook_werkzeuge.py)
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
-                                "github_repo_anlegen", "outlook_senden"})
+                                "github_repo_anlegen", "onenote_seite", "outlook_senden"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
 FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200

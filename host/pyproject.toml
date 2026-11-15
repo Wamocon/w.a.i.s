@@ -26,4 +26,4 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["."]
 python_files = ["test_*.py"]
-markers = ["office: braucht Word am Windows-PC (nur mit WAMO_OFFICE_ECHT=1)"]
+markers = ["office: braucht Word oder OneNote am Windows-PC (nur mit WAMO_OFFICE_ECHT=1)"]

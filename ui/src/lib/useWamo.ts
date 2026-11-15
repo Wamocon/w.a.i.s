@@ -226,7 +226,8 @@ type ClientMessage =
       type: "mail_vorbereiten";
       data: { canvas_id: string | null; an: string[]; cc: string[]; betreff: string; text: string; anhang: OfficeFormat | null };
     }
-  | { type: "mail_zurueckholen"; data: { id: string } };
+  | { type: "mail_zurueckholen"; data: { id: string } }
+  | { type: "onenote_seite"; data: { canvas_id: string } };
 
 function senden(client: PipecatClient, msg: ClientMessage) {
   client.sendClientMessage(msg.type, msg.data);
@@ -1647,6 +1648,9 @@ export function useWamo(): WamoAktionen {
         istOfficeFormat(format) && schicken({ type: "canvas_export", data: { canvas_id: canvasId, format } }, "Nicht gespeichert"),
       oeffnen: (kennung) =>
         /^[0-9a-f]{16}$/.test(kennung) && schicken({ type: "datei_oeffnen", data: { kennung } }, "Nicht geöffnet"),
+      onenote: (canvasId) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(canvasId) &&
+        schicken({ type: "onenote_seite", data: { canvas_id: canvasId } }, "Keine OneNote-Seite"),
     };
   }, []);
 

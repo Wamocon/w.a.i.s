@@ -838,6 +838,9 @@ Der Router bleibt ausschließlich lesbar. Mögliche Schreibaktionen stehen nur a
   Werkzeugergebnis, das während WAMOs Sprechen eintrifft, und schiebt den Verlauf beim nächsten „Bot stopped speaking“
   noch einmal an, auch wenn der neue Zug der Person schon beantwortet wird. Die Turn-Wache vor und hinter dem Modell
   verwirft solche Anfragen (gleicher Verlauf wie zuletzt, oder der Verlauf endet mit WAMOs Antwort).
+- **OneNote im Host** (Paket 4, `host/office_onenote.py`): Seiten gehen nur in das Notizbuch `W.A.I.S.` im OneDrive der Firma. Das ist das
+  einzige OneDrive-for-Business-Konto am PC; sind dort mehrere angemeldet, grenzt `WAMO_ONENOTE_DOMAENE` aus der Umgebung des Hosts (Domänen mit
+  Komma) es ein, sonst gibt es keine OneNote-Seite, sondern den Rückfall als Word-Datei (nur mit `WAMO_OFFICE` mit `dateien`).
 
 ### Start beim Tippen (stiller Start, nur Oberfläche)
 
