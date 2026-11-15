@@ -71,12 +71,19 @@ TAB = zeile("tabelle", "Liste", columns=["a", "b"], rows=[["1", "2"]])
 
 
 # ---------- canvas_quelle ----------
+def _filter(sql: str) -> str:
+    """Bedingungen der äußeren Abfrage (auf der Wurzel), ohne den Teil der neuesten Fassung."""
+    return sql.split(") n on true", 1)[1]
+
+
 async def test_lesen_nach_kennung_nur_eigene():
     m = Memory([DOK])
     gefunden = await cq.canvas_lesen(m, canvas_id=CID)
     assert gefunden == {"id": CID, "inhalt": {"art": "dokument", "titel": "Angebot", "text": f"# Angebot\n{GEHEIM}"}}
     sql, args = m.db.abfragen[0]
-    assert "user_id = $1::uuid" in sql and "id = $2::uuid" in sql and args == (UID, CID)
+    filt = _filter(sql)
+    assert "w.user_id = $1::uuid" in filt and "w.parent_id is null" in filt and args == (UID, CID)
+    assert "coalesce(k.parent_id, k.id)" in filt and "k.id = $2::uuid" in filt  # auch die Kennung einer Fassung führt zur Wurzel
 
 
 @pytest.mark.parametrize("kennung", ["", "x", "../" + CID, CID + "0", "' or 1=1 --"])
@@ -86,11 +93,30 @@ async def test_ungueltige_kennung_fragt_die_datenbank_nicht(kennung):
     assert m.db.abfragen == []
 
 
-async def test_lesen_nach_titel_ohne_platzhalter_aus_der_eingabe():
+async def test_export_liest_die_neueste_fassung_der_wurzel():
+    """Bearbeitungen legen neue Zeilen an (parent_id = Wurzel, version + 1, session_id null): gelesen wird immer die höchste
+    Fassung, gefiltert und gezählt wird über die Wurzel."""
+    fassung = {"id": CID, "title": "Angebot", "data": json.dumps({"kind": "dokument", "title": "Angebot", "text": "Fassung 3"})}
+    m = Memory([fassung])
+    gefunden = await cq.canvas_lesen(m, canvas_id=CID)
+    assert gefunden == {"id": CID, "inhalt": {"art": "dokument", "titel": "Angebot", "text": "Fassung 3"}}
+    sql, _ = m.db.abfragen[0]
+    kopf, rest = sql.split("join lateral", 1)
+    assert "w.id::text as id" in kopf and "n.title" in kopf and "n.data" in kopf  # Kennung der Wurzel, Inhalt der Fassung
+    neueste = rest.split(") n on true", 1)[0]
+    assert "x.id = w.id or x.parent_id = w.id" in neueste
+    assert "order by x.version desc" in neueste and "limit 1" in neueste
+    assert "order by n.updated_at desc limit 1" in _filter(sql)
+
+
+@pytest.mark.parametrize("titel", ["Test_Plan", "Umsatz in %", r"Pfad C:\Daten"])
+async def test_lesen_nach_titel_ohne_platzhalter(titel):
+    """Titel mit _ oder % treffen genau diesen Text: keine LIKE-Muster, nichts wird entfernt."""
     m = Memory([DOK])
-    await cq.canvas_lesen(m, titel="An%ge_bot\\")
+    await cq.canvas_lesen(m, titel=f"  {titel} ")
     sql, args = m.db.abfragen[0]
-    assert "title ilike $2" in sql and args == (UID, "%Angebot%")
+    assert "strpos(lower(w.title), lower($2)) > 0" in _filter(sql) and "like" not in sql.lower()
+    assert args == (UID, titel)
 
 
 async def test_ohne_angabe_erst_diese_sitzung_dann_das_profil():
@@ -98,9 +124,15 @@ async def test_ohne_angabe_erst_diese_sitzung_dann_das_profil():
     gefunden = await cq.canvas_lesen(m)
     assert gefunden["inhalt"] == {"art": "tabelle", "titel": "Liste", "spalten": ["a", "b"], "zeilen": [["1", "2"]]}
     (sql1, args1), (sql2, args2) = m.db.abfragen
-    assert "session_id = $2::uuid" in sql1 and args1 == (UID, SID)
-    assert "session_id" not in sql2 and args2 == (UID,)
-    assert all("order by updated_at desc limit 1" in s for s, _ in m.db.abfragen)
+    assert "w.session_id = $2::uuid" in _filter(sql1) and args1 == (UID, SID)
+    assert "session_id" not in _filter(sql2) and args2 == (UID,)
+    assert all("order by n.updated_at desc limit 1" in s for s, _ in m.db.abfragen)
+
+
+async def test_datenbankfehler_ist_nicht_nicht_gefunden():
+    with pytest.raises(cq.CanvasNichtErreichbar):
+        await cq.canvas_lesen(Memory(fehler=OSError("weg")), canvas_id=CID)
+    assert await cq.canvas_lesen(Memory([None]), canvas_id=CID) is None
 
 
 async def test_arten_und_kaputte_daten():
@@ -112,7 +144,6 @@ async def test_arten_und_kaputte_daten():
     for kaputt in ({"id": CID, "title": "x", "data": "{kein json"}, zeile("bild", text="x"), zeile(text=5)):
         assert await cq.canvas_lesen(Memory([kaputt]), canvas_id=CID) is None
     assert await cq.canvas_lesen(Memory([DOK], enabled=False), canvas_id=CID) is None
-    assert await cq.canvas_lesen(Memory(fehler=OSError("weg")), canvas_id=CID) is None
 
 
 # ---------- Schalter und Zugang ----------
@@ -275,6 +306,23 @@ async def test_registrierung_laeuft_durch_das_stimmabdruck_gate(host):
     handler, kwargs = llm.handler["canvas_exportieren"]
     assert getattr(handler, stimme_gate.MARKE) is gate
     assert kwargs["timeout_secs"] >= 75
+    # Ein Einwurf bricht den Aufruf nicht ab: Datei, Protokoll und Hinweis in der Oberfläche entfallen sonst, obwohl der PC
+    # die Datei schon anlegt (Pipecat 1.x: asynchroner Aufruf, das Ergebnis kommt nach)
+    assert kwargs["cancel_on_interruption"] is False
+
+
+def test_pipecat_kennt_asynchrone_werkzeuge():
+    import inspect
+
+    from pipecat.services.llm_service import LLMService
+
+    assert "cancel_on_interruption" in inspect.signature(LLMService.register_function).parameters
+
+
+def test_beschreibung_sagt_wo_die_datei_liegt():
+    text = ow.schema(("word",)).description
+    assert "verlässt den PC nicht" not in text
+    assert "Dokumente" in text and "OneDrive" in text
 
 
 async def test_word_per_sprache(host):
@@ -331,6 +379,17 @@ async def test_kein_eigenes_canvas(host):
     assert host.aufrufe == []
 
 
+async def test_datenbank_weg_ist_eine_eigene_meldung(host):
+    o = office(Memory(fehler=OSError("weg")))
+    o.formate = ("word",)
+    p = Params(format="word")
+    await o._werkzeug(p)
+    assert p.ergebnis == {"status": "error", "summary": ow.CANVAS_NICHT_ERREICHBAR}
+    assert ow.CANVAS_NICHT_ERREICHBAR.startswith("Das Canvas ist gerade nicht erreichbar")
+    assert ow.KEIN_CANVAS != ow.CANVAS_NICHT_ERREICHBAR
+    assert host.aufrufe == []
+
+
 async def test_ablehnung_des_hosts_wird_weitergegeben(monkeypatch):
     monkeypatch.setattr(ow, "call_host_tool", Host(ergebnis={"status": "blocked", "summary": "Office-Dateien sind aus."}))
     m = Memory([DOK])
@@ -351,7 +410,105 @@ async def test_host_nicht_erreichbar(monkeypatch):
     o.formate = ("word",)
     p = Params(format="word")
     await o._werkzeug(p)
-    assert p.ergebnis["status"] == "error"
+    assert p.ergebnis == {"status": "error", "summary": ow.KEINE_ANTWORT}
+
+
+async def test_host_zeitgrenze(monkeypatch):
+    async def haengt(*_a):
+        raise TimeoutError
+
+    monkeypatch.setattr(ow, "call_host_tool", haengt)
+    m = Memory([DOK])
+    o = office(m)
+    o.formate = ("word",)
+    p = Params(format="word")
+    await o._werkzeug(p)
+    assert p.ergebnis == {"status": "error", "summary": ow.KEINE_ANTWORT}
+    assert "failed" in m.db.geschrieben[-1][1]
+    assert o.gesendet == []
+
+
+@pytest.mark.parametrize("datei", [None, {}, {"kennung": "../x"}, {"kennung": "0123456789ABCDEF"}, "kaputt"])
+async def test_erfolg_ohne_gueltige_datei_ist_ein_fehler(monkeypatch, datei):
+    monkeypatch.setattr(ow, "call_host_tool", Host(ergebnis={"status": "success", "geoeffnet": True, "datei": datei}))
+    o = office()
+    o.formate = ("word",)
+    p = Params(format="word")
+    await o._werkzeug(p)
+    assert p.ergebnis == {"status": "error", "summary": ow.KEINE_ANTWORT}
+    assert o.gesendet == []
+    assert ow.KEINE_ANTWORT == "Der PC hat keine verwertbare Antwort geliefert."
+
+
+async def test_nicht_geoeffnet_nennt_dem_modell_den_grund(monkeypatch):
+    ergebnis = {"status": "success", "geoeffnet": False,
+                "summary": "2026-11-14 Angebot.docx liegt in Dokumente\\WAIS. Der Bildschirm ist gesperrt, deshalb ist sie noch "
+                           "nicht geöffnet." + chr(0x202E),
+                "datei": {"kennung": "0123456789abcdef", "name": "2026-11-14 Angebot.docx", "format": "word", "groesse": 1,
+                          "sha256": "ab" * 32, "ordner": "Dokumente\\WAIS", "pfad": "C:\\Users\\niko\\x.docx"}}
+    monkeypatch.setattr(ow, "call_host_tool", Host(ergebnis=ergebnis))
+    o = office()
+    o.formate = ("word",)
+    p = Params(format="word")
+    await o._werkzeug(p)
+    assert p.ergebnis["geoeffnet"] is False
+    assert "gesperrt" in p.ergebnis["hinweis"] and chr(0x202E) not in p.ergebnis["hinweis"]
+    assert "C:\\Users" not in json.dumps(p.ergebnis)
+
+
+async def test_geoeffnet_ohne_hinweis(host):
+    o = office()
+    o.formate = ("word",)
+    p = Params(format="word")
+    await o._werkzeug(p)
+    assert "hinweis" not in p.ergebnis
+
+
+class LangsamerHost(Host):
+    def __init__(self):
+        super().__init__()
+        import asyncio
+
+        self.weiter = asyncio.Event()
+
+    async def __call__(self, client, name, arguments):
+        if name == "office_datei_erstellen":
+            await self.weiter.wait()
+        return await super().__call__(client, name, arguments)
+
+
+async def test_doppelklick_erzeugt_keine_zweite_datei(monkeypatch):
+    import asyncio
+
+    h = LangsamerHost()
+    monkeypatch.setattr(ow, "call_host_tool", h)
+    o = office(Memory([TAB, TAB, TAB]))
+    o.formate = ("excel",)
+    erster = asyncio.create_task(o.client_nachricht("canvas_export", {"canvas_id": CID, "format": "excel"}))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    await o.client_nachricht("canvas_export", {"canvas_id": CID, "format": "excel"})
+    assert o.gesendet[-1] == {"type": "datei", "ok": False, "grund": ow.LAEUFT_SCHON}
+    h.weiter.set()
+    await erster
+    assert [n for n, _ in h.aufrufe].count("office_datei_erstellen") == 1
+    assert o.gesendet[-1]["ok"] is True
+    # danach geht es wieder
+    await o.client_nachricht("canvas_export", {"canvas_id": CID, "format": "excel"})
+    assert [n for n, _ in h.aufrufe].count("office_datei_erstellen") == 2
+
+
+async def test_sperre_faellt_auch_nach_einem_fehler(monkeypatch):
+    async def kaputt(*_a):
+        raise OSError("weg")
+
+    monkeypatch.setattr(ow, "call_host_tool", kaputt)
+    o = office(Memory([DOK, DOK]))
+    o.formate = ("word",)
+    for _ in range(2):
+        p = Params(format="word")
+        await o._werkzeug(p)
+        assert p.ergebnis["summary"] == ow.KEINE_ANTWORT
 
 
 # ---------- Klicks aus der Oberfläche ----------

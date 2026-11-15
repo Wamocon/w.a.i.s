@@ -2071,21 +2071,34 @@ def _github_anlegen_ausfuehren(eintrag: dict) -> dict:
 # Nur für den Kern, nie in LLM_TOOLS (voice-core/pc_host.py): Das Sprachmodell ruft canvas_exportieren im Kern, der Kern liest das eigene
 # Canvas-Element aus der Datenbank und schickt hierher nur dessen feste Struktur, nie Dateibytes. Der Host prüft alles selbst (Format,
 # Art, Grenzen, Zeichen), baut die Datei, legt sie in Dokumente\WAIS ab (nie überschreiben) und öffnet sie. Speichern ist change ohne
-# Freigabe (Entscheidung vom 14.11.2026: nichts verlässt den PC). Die Datei %LOCALAPPDATA%\WAMO\office.aus sperrt alle drei Werkzeuge
-# sofort; geprüft wird bei jedem Aufruf. Das Audit nennt Format, Name, Größe und SHA-256, nie den Inhalt.
+# Freigabe (Entscheidung vom 14.11.2026: kein Versand; ist Dokumente auf OneDrive umgeleitet, synchronisiert OneDrive die Datei). Die
+# Datei %LOCALAPPDATA%\WAMO\office.aus sperrt alle drei Werkzeuge sofort; geprüft wird bei jedem Aufruf. Das Audit nennt Format, Name,
+# Größe und SHA-256, nie den Inhalt. Höchstens ein Bau gleichzeitig; dauert er länger als OFFICE_FRIST_SECS (der Tunnel bricht nach
+# 80 s ab, voice-core/pc_tunnel.py), wird das Ergebnis verworfen und nichts geöffnet. Öffnen nur ohne Sperre und ohne offene Freigabe
+# (_eingabe_vorab), und nur die sechs festen Endungen.
 OFFICE_AUS = Path(_LOCAL or str(Path.home() / "AppData" / "Local")) / "WAMO" / "office.aus"
 OFFICE_PRO_MINUTE = 10
+OFFICE_FRIST_SECS = 70.0
+OFFICE_ENDUNGEN = frozenset(office_ablage.ENDUNGEN.values())
 OFFICE_AUS_TEXT = ("Office-Dateien sind an diesem PC ausgeschaltet (Datei office.aus im Ordner WAMO). Wieder einschalten kann nur "
                    "die Person am PC.")
+OFFICE_BAU_LAEUFT = "Eine andere Datei wird gerade gebaut. Bitte einen Moment warten und dann noch einmal versuchen."
+OFFICE_ZU_LANGE = ("Das Erstellen hat zu lange gedauert, die Datei wurde verworfen. Bitte den Inhalt kürzen oder als Markdown oder "
+                   "Excel speichern.")
+OFFICE_SCHON_GEOEFFNET = "Die Datei wird gerade schon geöffnet."
 CANVAS_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _OFFICE_ABLAGE: office_ablage.Ablage | None = None
+_OFFICE_ABLAGE_LOCK = threading.Lock()
+_OFFICE_BAU = threading.BoundedSemaphore(1)
 
 
 def _office_ablage() -> office_ablage.Ablage:
+    """Die eine Ablage des Hosts (Ordner und Register mit eigener Sperre), angelegt beim ersten Aufruf unter einer Modulsperre."""
     global _OFFICE_ABLAGE
-    if _OFFICE_ABLAGE is None:
-        _OFFICE_ABLAGE = office_ablage.Ablage.standard()
-    return _OFFICE_ABLAGE
+    with _OFFICE_ABLAGE_LOCK:
+        if _OFFICE_ABLAGE is None:
+            _OFFICE_ABLAGE = office_ablage.Ablage.standard()
+        return _OFFICE_ABLAGE
 
 
 def _office_aus(tool: str) -> dict | None:
@@ -2097,7 +2110,10 @@ def _office_aus(tool: str) -> dict | None:
 
 
 def _datei_oeffnen(pfad: Path) -> None:
-    """Öffnet eine selbst erzeugte Datei mit dem Standardprogramm (Word, Excel, PowerPoint, PDF-Anzeige)."""
+    """Öffnet eine selbst erzeugte Datei mit dem Standardprogramm (Word, Excel, PowerPoint, PDF-Anzeige). Nur die sechs festen
+    Endungen, sonst RuntimeError (kein Programm, keine Verknüpfung)."""
+    if pfad.suffix not in OFFICE_ENDUNGEN:  # "a.docx." hat keine Endung
+        raise RuntimeError("Endung nicht erlaubt")
     if platform.system() != "Windows":
         raise RuntimeError("Host laeuft nicht unter Windows")
     os.startfile(str(pfad))  # noqa: S606 (nur Dateien aus dem Register im Ordner WAIS, Endung fest)
@@ -2127,46 +2143,78 @@ async def office_datei_erstellen(format: str, inhalt: dict, oeffnen: bool = True
     return await asyncio.to_thread(_office_erstellen, format, inhalt, oeffnen, canvas_id)
 
 
+class _OfficeAbbruch(Exception):
+    """Bau oder Ablage gescheitert; antwort geht so an den Kern (das Audit ist schon geschrieben)."""
+
+    def __init__(self, antwort: dict):
+        super().__init__(antwort.get("summary", ""))
+        self.antwort = antwort
+
+
+def _office_bauen(tool: str, fmt: str, inhalt: office_dateien.Inhalt, cid: str | None, start: float) -> tuple[dict, Path]:
+    """Datei bauen (PDF über Word), nach der Frist verwerfen, sonst ablegen. Liefert Registereintrag und Pfad."""
+    try:
+        daten = office_dateien.erzeugen(inhalt, "word" if fmt == "pdf" else fmt)
+        if fmt == "pdf":
+            daten = office_com.pdf_aus_docx(daten)
+        dauer = time.monotonic() - start
+        if dauer > OFFICE_FRIST_SECS:  # der Kern hat schon aufgegeben oder gibt gleich auf: nichts ablegen, nichts öffnen
+            _audit({"tool": tool, "risk": "change", "format": fmt, "result": "error", "grund": "Frist", "dauer": round(dauer, 1)})
+            raise _OfficeAbbruch({"status": "error", "summary": OFFICE_ZU_LANGE})
+        eintrag, pfad = _office_ablage().speichern(daten, inhalt.titel, fmt, cid)
+    except (office_dateien.InhaltFehler, office_ablage.AblageFehler) as e:
+        _audit({"tool": tool, "risk": "rejected", "format": fmt, "error": str(e)[:200]})
+        raise _OfficeAbbruch({"status": "rejected", "summary": str(e)}) from e
+    except office_com.PdfFehler as e:
+        _audit({"tool": tool, "risk": "change", "format": fmt, "result": "error", "error": str(e)[:200]})
+        raise _OfficeAbbruch({"status": "error", "summary": str(e)}) from e
+    except _OfficeAbbruch:
+        raise
+    except Exception as e:  # noqa: BLE001 (Bibliothek oder Dateisystem: nur melden, nichts weiter versuchen)
+        _audit({"tool": tool, "risk": "change", "format": fmt, "result": "error", "error": type(e).__name__})
+        raise _OfficeAbbruch({"status": "error", "summary": f"Die Datei ließ sich nicht erzeugen ({type(e).__name__})."}) from e
+    _audit({"tool": tool, "risk": "change", "format": fmt, "name": eintrag["name"][:120], "groesse": eintrag["groesse"],
+            "sha256": eintrag["sha256"], "kennung": eintrag["kennung"], "canvas_id": cid})
+    return eintrag, pfad
+
+
+def _office_oeffnen_danach(tool: str, pfad: Path) -> tuple[bool, str]:
+    """Nach dem Speichern öffnen wie andere PC-Werkzeuge: nicht bei Sperre, nicht bei offener Freigabe (gespeichert ist sie
+    trotzdem). Liefert (geöffnet, Hinweis für die Zusammenfassung)."""
+    if vorab := _eingabe_vorab(tool):
+        if vorab.get("status") == "locked":
+            return False, " Der Bildschirm ist gesperrt, deshalb ist sie noch nicht geöffnet."
+        return False, " Eine Freigabe ist noch offen, deshalb ist sie noch nicht geöffnet."
+    try:
+        _datei_oeffnen(pfad)
+    except (OSError, RuntimeError) as e:
+        return False, f" Öffnen hat nicht geklappt ({type(e).__name__})."
+    return True, ""
+
+
 def _office_erstellen(fmt: object, roh: object, oeffnen: object, canvas_id: object) -> dict:
     tool = "office_datei_erstellen"
+    start = time.monotonic()
     try:
         fmt = office_dateien.format_pruefen(fmt)
         inhalt = office_dateien.pruefen(roh)
-        office_dateien.passt(inhalt, fmt)
+        office_dateien.passt(inhalt, fmt)  # auch die Grenzen für die Laufzeit des Baus
         if fmt == "pdf" and not office_com.word_vorhanden():
             raise office_dateien.InhaltFehler("PDF geht nur mit installiertem Word")
     except office_dateien.InhaltFehler as e:
         _audit({"tool": tool, "risk": "rejected", "format": str(fmt)[:20], "error": str(e)[:200]})
         return {"status": "rejected", "summary": str(e)}
     cid = canvas_id if isinstance(canvas_id, str) and CANVAS_ID_RE.fullmatch(canvas_id) else None
-    ablage = _office_ablage()
+    if not _OFFICE_BAU.acquire(blocking=False):  # höchstens ein Bau: keine Warteschlange von Threads
+        _audit({"tool": tool, "risk": "rejected", "format": fmt, "grund": "Bau läuft"})
+        return {"status": "rejected", "summary": OFFICE_BAU_LAEUFT}
     try:
-        daten = office_dateien.erzeugen(inhalt, "word" if fmt == "pdf" else fmt)
-        if fmt == "pdf":
-            daten = office_com.pdf_aus_docx(daten)
-        eintrag = ablage.speichern(daten, inhalt.titel, fmt, cid)
-        pfad = ablage.pfad(eintrag["kennung"])
-    except (office_dateien.InhaltFehler, office_ablage.AblageFehler) as e:
-        _audit({"tool": tool, "risk": "rejected", "format": fmt, "error": str(e)[:200]})
-        return {"status": "rejected", "summary": str(e)}
-    except office_com.PdfFehler as e:
-        _audit({"tool": tool, "risk": "change", "format": fmt, "result": "error", "error": str(e)[:200]})
-        return {"status": "error", "summary": str(e)}
-    except Exception as e:  # noqa: BLE001 (Bibliothek oder Dateisystem: nur melden, nichts weiter versuchen)
-        _audit({"tool": tool, "risk": "change", "format": fmt, "result": "error", "error": type(e).__name__})
-        return {"status": "error", "summary": f"Die Datei ließ sich nicht erzeugen ({type(e).__name__})."}
-    _audit({"tool": tool, "risk": "change", "format": fmt, "name": eintrag["name"][:120], "groesse": eintrag["groesse"],
-            "sha256": eintrag["sha256"], "kennung": eintrag["kennung"], "canvas_id": cid})
-    geoeffnet, hinweis = False, ""
-    if oeffnen is True:
-        if _ist_gesperrt():
-            hinweis = " Der Bildschirm ist gesperrt, deshalb ist sie noch nicht geöffnet."
-        else:
-            try:
-                _datei_oeffnen(pfad)
-                geoeffnet = True
-            except (OSError, RuntimeError) as e:
-                hinweis = f" Öffnen hat nicht geklappt ({type(e).__name__})."
+        eintrag, pfad = _office_bauen(tool, fmt, inhalt, cid, start)
+    except _OfficeAbbruch as e:
+        return e.antwort
+    finally:
+        _OFFICE_BAU.release()
+    geoeffnet, hinweis = _office_oeffnen_danach(tool, pfad) if oeffnen is True else (False, "")
     return {"status": "success", "geoeffnet": geoeffnet,
             "summary": f"{eintrag['name']} liegt in {office_ablage.ORDNER_ANZEIGE}" + (" und ist geöffnet." if geoeffnet else ".")
             + hinweis,
@@ -2179,15 +2227,15 @@ def office_datei_oeffnen(kennung: str) -> dict:
     """Nur für den Kern: öffnet eine Datei, die W.A.I.S. selbst erzeugt hat (Kennung aus dem Register, change)."""
     if aus := _office_aus("office_datei_oeffnen"):
         return aus
-    if locked := _gesperrt("office_datei_oeffnen"):
-        return locked
+    if vorab := _eingabe_vorab("office_datei_oeffnen"):  # Sperre oder offene Freigabe: kein neues Fenster nach vorn
+        return vorab
     try:
         pfad = _office_ablage().pfad(kennung)
     except office_ablage.AblageFehler as e:
         _audit({"tool": "office_datei_oeffnen", "kennung": str(kennung)[:20], "risk": "rejected", "error": str(e)[:200]})
         return {"status": "rejected", "summary": str(e)}
-    if dup := _duplicate("office_datei_oeffnen", kennung=kennung):
-        return dup
+    if _duplicate("office_datei_oeffnen", kennung=kennung):  # Doppelklick: ein Satz für Menschen, nicht der für das Modell
+        return {"status": "duplicate", "summary": OFFICE_SCHON_GEOEFFNET}
     _audit({"tool": "office_datei_oeffnen", "kennung": kennung, "name": pfad.name[:120], "risk": "change"})
     try:
         _datei_oeffnen(pfad)

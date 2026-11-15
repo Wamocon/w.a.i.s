@@ -10,6 +10,8 @@ Schutzregeln (Planpapier docs/office-und-versand.md, Abschnitt 8):
   * Excel: jede Zelle ist Text (Typ s, Zahlenformat @, Präfix-Markierung), nie eine Formel. CSV: Zellen, die mit = + - @ Tab oder
     Wagenrücklauf beginnen, bekommen ein Hochkomma davor.
   * Grenzen: Text TEXT_MAX Zeichen, Tabelle ZEILEN_MAX Zeilen und SPALTEN_MAX Spalten, Zelle ZELLE_MAX Zeichen, Datei DATEI_MAX.
+    Laufzeit (python-docx wird mit jedem Absatz langsamer): Word und PDF höchstens ABSAETZE_MAX Absätze, Tabellen je Format höchstens
+    ZELLEN_MAX Zellen, PowerPoint höchstens PPTX_SPALTEN_MAX Spalten; so bleibt jeder Bau unter etwa 20 s (gemessen in den Tests).
   * Firmendesign im Code: Kopfzeile mit Anschrift und Logo (vorlagen/wmc-logo.png), Fußzeile mit Seitenzahl, Arial Narrow, Rot
     #F40E0E, Schwarz und Grautöne.
 PDF entsteht nicht hier, sondern über Word aus der Word-Datei (office_com.py).
@@ -21,7 +23,7 @@ import csv
 import io
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 FORMATE = ("word", "excel", "powerpoint", "pdf", "csv", "markdown")
@@ -37,6 +39,12 @@ TITEL_EINGABE_MAX = 300
 TITEL_MAX = 200
 DATEI_MAX = 20 * 1024 * 1024
 FOLIEN_MAX = 300
+# Laufzeit: Word mit 5000 Aufzählungspunkten rund 3 s, mit 25 000 rund 50 s (wächst quadratisch); Tabellen an der Grenze 2 bis 4 s
+ABSAETZE_MAX = 5000
+ZELLEN_MAX = {"word": 50_000, "pdf": 50_000, "powerpoint": 12_000}
+PPTX_SPALTEN_MAX = 12
+KOPF_TITEL_MAX = 150  # Druckkopf in Excel: alle Teile zusammen höchstens 255 Zeichen
+SPRACHE_MAX = 20
 ANSCHRIFT = "WAMOCON GmbH, Mergenthalerallee 79-81, 65760 Eschborn"
 FIRMA = "WAMOCON GmbH"
 LOGO = Path(__file__).resolve().parent / "vorlagen" / "wmc-logo.png"
@@ -52,9 +60,11 @@ def _klasse(*bereiche: tuple[int, int]) -> str:
 
 # In XML nicht erlaubt (und in Office-Dateien kaputt): Steuerzeichen außer Tab und Zeilenumbruch, einzelne Ersatzzeichen
 _XML_UNGUELTIG = re.compile(_klasse((0, 8), (11, 12), (14, 31), (0xD800, 0xDFFF), (0xFFFE, 0xFFFF)))
-# Im Titel zusätzlich: Richtungs- und Nullbreitenzeichen, Tab und Zeilenumbruch
-_TITEL_WEG = re.compile(_klasse((0, 31), (127, 159), (0x200B, 0x200F), (0x202A, 0x202E), (0x2066, 0x2069), (0xFEFF, 0xFEFF)))
-_SPRACHE = re.compile(r"[a-z0-9+#._-]{0,20}")
+# Im Titel zusätzlich: Richtungs-, Nullbreiten- und weitere unsichtbare Zeichen (weiches Trennzeichen, Wortverbinder, arabisches
+# Richtungszeichen, mongolischer Vokaltrenner), einzelne Ersatzzeichen, Tab und Zeilenumbruch
+_TITEL_WEG = re.compile(_klasse((0, 31), (127, 159), (0xAD, 0xAD), (0x061C, 0x061C), (0x180E, 0x180E), (0x200B, 0x200F),
+                                (0x202A, 0x202E), (0x2060, 0x2069), (0xD800, 0xDFFF), (0xFEFF, 0xFEFF)))
+_SPRACHE_WEG = re.compile(r"[^a-z0-9+#._-]")
 _UEBERSCHRIFT = re.compile(r"^(#{1,3})\s+(.*)$")
 _PUNKT = re.compile(r"^\s*[-*]\s+(.*)$")
 _INLINE = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`)")
@@ -109,10 +119,13 @@ def pruefen(roh: object) -> Inhalt:
         kopf = tuple(_text(s, ZELLE_MAX, "Spalte") for s in spalten)
         koerper = []
         zeichen = sum(len(s) for s in kopf)
-        for zeile in zeilen:
+        for nr, zeile in enumerate(zeilen, start=1):
             if not isinstance(zeile, list) or len(zeile) > SPALTEN_MAX:
                 raise InhaltFehler("Jede Zeile ist eine Liste von Texten")
-            werte = [_text(z, ZELLE_MAX, "Zelle") for z in zeile[: len(kopf)]]
+            if len(zeile) > len(kopf):  # nicht still kürzen: Werte gingen verloren
+                raise InhaltFehler(f"Zeile {nr} hat mehr Werte ({len(zeile)}) als die Tabelle Spalten ({len(kopf)}). Bitte die "
+                                   "Tabelle im Canvas korrigieren.")
+            werte = [_text(z, ZELLE_MAX, "Zelle") for z in zeile]
             zeichen += sum(len(w) for w in werte)
             if zeichen > TABELLE_ZEICHEN_MAX:  # 2000 Zeilen mal 50 Spalten mal 2000 Zeichen wären 200 Millionen Zeichen
                 raise InhaltFehler(f"Tabelle zu groß (höchstens {TABELLE_ZEICHEN_MAX} Zeichen insgesamt)")
@@ -121,10 +134,13 @@ def pruefen(roh: object) -> Inhalt:
     text = _text(roh.get("text"), TEXT_MAX, "text")
     if not text.strip():
         raise InhaltFehler("Der Inhalt ist leer")
-    sprache = roh.get("sprache", "") or ""
-    if not isinstance(sprache, str) or not _SPRACHE.fullmatch(sprache.strip().lower()):
-        raise InhaltFehler("Ungültige Sprache des Codes")
-    return Inhalt(art, titel, text=text, sprache=sprache.strip().lower() if art == "code" else "")
+    return Inhalt(art, titel, text=text, sprache=_sprache(roh.get("sprache")) if art == "code" else "")
+
+
+def _sprache(wert: object) -> str:
+    """Sprache des Codes (vom Modell): nicht ablehnen, sondern auf erlaubte Zeichen kürzen. Ohne Backtick und Zeilenumbruch bleibt
+    der Zaun in Markdown dicht."""
+    return _SPRACHE_WEG.sub("", wert.strip().lower())[:SPRACHE_MAX] if isinstance(wert, str) else ""
 
 
 def format_pruefen(fmt: object) -> str:
@@ -134,8 +150,23 @@ def format_pruefen(fmt: object) -> str:
 
 
 def passt(inhalt: Inhalt, fmt: str) -> None:
+    """Passt der Inhalt zum Format, auch in der Größe (Laufzeit des Baus)? Wirft InhaltFehler mit einem Hinweis auf ein besseres
+    Format."""
     if fmt not in FORMATE_JE_ART[inhalt.art]:
         raise InhaltFehler(f"Als {fmt} geht nur eine Tabelle" if fmt in ("excel", "csv") else f"{fmt} passt nicht zu {inhalt.art}")
+    if inhalt.art == "tabelle":
+        if fmt == "powerpoint" and len(inhalt.spalten) > PPTX_SPALTEN_MAX:
+            raise InhaltFehler(f"Für PowerPoint hat die Tabelle zu viele Spalten (höchstens {PPTX_SPALTEN_MAX}). Bitte als Excel "
+                               "speichern.")
+        if fmt in ZELLEN_MAX and len(inhalt.zeilen) * len(inhalt.spalten) > ZELLEN_MAX[fmt]:
+            raise InhaltFehler(f"Die Tabelle ist für {fmt} zu groß (höchstens {ZELLEN_MAX[fmt]} Zellen). Bitte als Excel speichern.")
+    elif fmt in ("word", "pdf") and _absaetze(inhalt) > ABSAETZE_MAX:
+        raise InhaltFehler(f"Der Text hat für {fmt} zu viele Absätze (höchstens {ABSAETZE_MAX}). Bitte als Markdown speichern.")
+
+
+def _absaetze(inhalt: Inhalt) -> int:
+    """Absätze, die Word anlegt: ein Block je Zeile im Dokument, eine Zeile je Codezeile."""
+    return len(bloecke(inhalt.text)) if inhalt.art == "dokument" else inhalt.text.count("\n") + 1
 
 
 def erzeugen(inhalt: Inhalt, fmt: str) -> bytes:
@@ -158,6 +189,12 @@ def _logo() -> str:
 
 def _stand() -> str:
     return f"Stand: {date.today():%d.%m.%Y}"
+
+
+def _jetzt() -> datetime:
+    """Erstellt und geändert in Word und PowerPoint: jetzt in UTC ohne Zeitzone (sonst stünde das Datum der Bibliotheksvorlage
+    darin)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
 
 # ---------- Markdown des Canvas ----------
@@ -370,15 +407,24 @@ def _word(inhalt: Inhalt) -> bytes:
     eig = doc.core_properties
     eig.author = eig.last_modified_by = FIRMA
     eig.title, eig.comments, eig.keywords, eig.subject = inhalt.titel, "", "", ""
+    eig.created = eig.modified = _jetzt()
     puffer = io.BytesIO()
     doc.save(puffer)
     return puffer.getvalue()
 
 
 # ---------- Excel ----------
-def _excel_kopftext(text: str) -> str:
-    """& steuert Druckkopf und Fußzeile (&P, &D): im Text verdoppeln."""
-    return text.replace("&", "&&")
+def _excel_kopftext(text: str, grenze: int = KOPF_TITEL_MAX) -> str:
+    """& steuert Druckkopf und Fußzeile (&P, &D): im Text verdoppeln. Höchstens grenze Zeichen (der ganze Druckkopf darf nur 255
+    haben), gekürzt nie mitten in einem verdoppelten &."""
+    aus, laenge = [], 0
+    for zeichen in text:
+        stueck = "&&" if zeichen == "&" else zeichen
+        if laenge + len(stueck) > grenze - 1:  # Platz für die Auslassungspunkte
+            return "".join(aus).rstrip() + "…"
+        aus.append(stueck)
+        laenge += len(stueck)
+    return "".join(aus)
 
 
 def _blattname(titel: str) -> str:
@@ -543,6 +589,7 @@ class _Folien:
         eig = self.prs.core_properties
         eig.author = eig.last_modified_by = FIRMA
         eig.title, eig.subject, eig.keywords, eig.comments = self.titel, "", "", ""
+        eig.created = eig.modified = _jetzt()
         puffer = io.BytesIO()
         self.prs.save(puffer)
         return puffer.getvalue()
