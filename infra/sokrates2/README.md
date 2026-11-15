@@ -644,8 +644,8 @@ python scripts/wamo_kern_sokrates2.py status                     # WAMO_PC_HOST_
 ## 12. Oberfläche im Browser auf Sokrates-2 (Variante A, eingerichtet am 21.10.2026)
 
 WAMO läuft damit im Browser jedes Geräts im Büronetz (oder über WireGuard), nicht nur in der Desktop-App auf Nikos PC.
-Der Browser dort kennt nur die Betriebsart Büro (Kern auf Sokrates-2); PC-Werkzeuge gehören zur Desktop-App, die
-Oberfläche zeigt „nur in der Desktop-App verfügbar“.
+Der Browser dort kennt nur die Betriebsart Büro (Kern auf Sokrates-2). Die PC-Steuerung gibt es dort seit dem 15.11.2026
+wie in der App: Sie steuert den Laptop, den der Kern dem Profil aus dem Geräteregister zuordnet, und der Schalter sagt das.
 
 ```text
 Browser ──HTTPS 55445──> wamo-caddy ──HTTP 3000, Netz wamo-ui-netz (internal)──> wamo-ui-blau  oder  wamo-ui-gruen (Next.js, Standalone)
@@ -728,7 +728,8 @@ Voraussetzung: Der PC ist im Büronetz oder über WireGuard verbunden und die Pe
    `scripts\wamo-app.cmd https://192.168.178.136:55445` (eigenes Chrome-Profil `%LOCALAPPDATA%\wamo-chrome`, das Mikrofon
    wird dort einmal erlaubt und gemerkt).
 
-Grenzen: Im Browser gibt es nur die Betriebsart Büro und keine PC-Steuerung (dafür die Desktop-App auf dem jeweiligen PC).
+Grenzen: Im Browser gibt es nur die Betriebsart Büro. Die PC-Steuerung bedient von dort den eigenen Laptop aus dem
+Geräteregister; Autostart, Lichtrahmen und Einrichtung des Laptops gibt es nur in der Desktop-App.
 Außerhalb des Büronetzes zuerst WireGuard verbinden.
 
 ### 12.4 Später: Variante B (eigene Domain, öffentlich vertrautes Zertifikat)
@@ -757,9 +758,10 @@ Die WAMO-CA kann bleiben (Desktop-App im Notfall über die IP), sollte aber nich
   Der Container hält keine Geheimnisse, Tokens liegen nur in den Browsern. Wer das schließen will, setzt in der Site 55443
   (`wamo-caddy/Caddyfile`) und in `wamo-caddy/kern/wamo-core.caddy` als erste Anweisung `@ui_netz remote_ip 172.25.0.0/24`
   und `abort @ui_netz`. Das ändert zwei gemeinsam genutzte Dateien und gehört in die Übernahme der Geräte-Änderungen.
-- **PC-Steuerung „nur in der Desktop-App“** ist eine Entscheidung der Oberfläche, kein Schutz: Der Kern nimmt den Wunsch von
-  jeder Admin-Sitzung an. Maßgeblich bleiben die Bindung des PCs an ein Profil (`WAMO_PC_HOST_PROFILE`), die PC-Sperre je
-  Sitzung und die Freigabe-Karten. Eine Erzwingung im Kern (Herkunft der Oberfläche gleich PC-Steuerung aus) ist möglich und offen.
+- **PC-Steuerung aus dem Browser** (seit 15.11.2026, nur Oberfläche): Der Kern nimmt den Wunsch wie bisher von jeder
+  Admin-Sitzung an, ob App oder Browser. Maßgeblich bleiben Rolle admin, die Bindung des Laptops an das Profil im Geräteregister,
+  die PC-Sperre je Sitzung, die Freigabekarten und das Gate der Stimmprüfung. Ablauf, Quelle und Notaus für Browser-Sitzungen im
+  Kern sowie die Anzeige am Laptop (`docs/komfort-paket.md`, KP-3A und KP-3C) sind offen.
 - **CSP mit `'unsafe-inline'`** für Skripte und Stile, weil Next.js Inline-Skripte zur Hydration setzt; eine Nonce-CSP wäre
   der nächste Schritt. Caddy führt kein Zugriffslog für die Oberfläche und setzt keine Timeouts für langsame Clients
   (globaler Block `timeouts` im Caddyfile, gemeinsam genutzt).

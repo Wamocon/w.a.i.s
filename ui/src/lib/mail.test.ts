@@ -2,7 +2,15 @@
 // Warnung und lange Karte bei Freigaben). Ausführen im Ordner ui/:  npm test
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { anhangVorschlag, empfaengerListe, formularFehler, MAIL_EMPFAENGER_MAX, restSekunden, versandText } from "./mail.ts";
+import {
+  anhangVorschlag,
+  empfaengerListe,
+  formularFehler,
+  MAIL_EMPFAENGER_MAX,
+  restSekunden,
+  versandOrtText,
+  versandText,
+} from "./mail.ts";
 import { parseServerMessage } from "./nachrichten.ts";
 
 test("Empfänger: Komma, Semikolon und Zeilen trennen, Leerraum fällt weg", () => {
@@ -88,4 +96,13 @@ test("Freigabe: Warnung und lange Karte bis 8000 Zeichen ohne Kürzung", () => {
   // Labor und Geräte bleiben bei 2000 (ihre Grenzen im Kern rechnen damit)
   const labor = parseServerMessage({ type: "freigaben", job: "labor", projekt: "P", items: [{ id: "a", grund: "g", detail }] });
   assert.ok(labor?.type === "freigaben" && labor.items[0].detail.includes("gekürzt"));
+});
+
+test("Mail aus dem Browser: Entwurf und unklarer Ausgang nennen Outlook auf dem Laptop, sonst kein Zusatz", () => {
+  assert.equal(versandOrtText("entwurf", true), "Der Entwurf ist in Outlook auf deinem Laptop offen, dort sendest du ihn.");
+  assert.equal(versandOrtText("unklar", true), "Nachsehen kannst du in Outlook auf deinem Laptop.");
+  assert.equal(versandOrtText("gesendet", true), null);
+  assert.equal(versandOrtText("wartet", true), null);
+  assert.equal(versandOrtText("entwurf", false), null);
+  assert.equal(versandOrtText("unklar", false), null);
 });

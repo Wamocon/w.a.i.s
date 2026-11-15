@@ -240,6 +240,16 @@ Anmeldung. Reviews: `database-reviewer` vor jedem Apply, `security-reviewer` fü
 
 ### 3.3 Wunsch 3: PC-Steuerung und App-Funktionen im Browser (KP-3: 27 h, optional S2 14 h)
 
+**Stand 15.11.2026 (Zweig `feat/pc-browser`, nur Oberfläche).** Umgesetzt ist der Teil der Oberfläche aus KP-3B ohne Kern: Der Schalter
+erscheint für Admins im Browser wie in der App, auch ohne Sitzung mit stillem Start nach den Regeln aus `ui/src/lib/stillStart.ts`, nie
+Autostart (der Haken entfällt im Browser), dazu der Satz „Steuert deinen Laptop, den du mit der Desktop-App eingerichtet hast, egal auf
+welchem Gerät dieser Browser läuft.“ und der Hinweis auf das, was nur die App kann (Autostart, Lichtrahmen). Ohne PC-Host ist der
+Schalter mit klarem Satz gesperrt, bei getrenntem oder gesperrtem PC nennt ein Satz den Zustand. Live-Bild, Freigabekarten, Export und
+OneNote liefen schon über den Kern und bleiben; der Datei-Hinweis sagt im Browser „auf deinem Laptop“. **Offen:** KP-3A (im Kern
+`quelle`, `WAMO_PC_BROWSER`, Ablauf 30 und 10 Minuten, Notaus-Datei, Feld `pcEndet` und Chip), KP-3C (Anzeige am Laptop) und der Test
+am Gerät (KP-3D). Bis dahin gelten für den Browser nur die Grenzen, die schon für App und Handy galten: Rolle, Register, PC-Sperre,
+Karten und Gate der Stimmprüfung.
+
 **Grundgedanke.** Die Technik ist da: Der Kern erreicht den Laptop über Profil, Register und Rücktunnel, egal woher die Sitzung kommt. Was fehlt, sind der Schalter in der Oberfläche und Schutzmaßnahmen, die dort wirken, wo die Desktop-App bisher
 unbemerkt mitgeschützt hat: Die App ist am Laptop und zeigt Rand und Lichtrahmen. Der Browser sitzt irgendwo im Büro.
 
