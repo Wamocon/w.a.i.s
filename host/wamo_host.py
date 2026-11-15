@@ -2260,8 +2260,9 @@ ONENOTE_BREMSE = office_onenote.Bremse(office_onenote.SEITEN_JE_STUNDE, 3600)
 
 
 def _onenote_audit(seite: office_onenote.Seite, ziel: office_onenote.Ziel) -> dict:
-    return {"notizbuch": ziel.notizbuch[:80], "abschnitt": ziel.abschnitt, "abschnitt_neu": not ziel.abschnitt_id,
-            "titel": _text_audit(seite.titel), "inhalt": _text_audit("\n".join(office_onenote.text_zeilen(seite.inhalt)))}
+    return {"notizbuch": ziel.notizbuch[:80], "notizbuch_neu": not ziel.notizbuch_id, "abschnitt": ziel.abschnitt,
+            "abschnitt_neu": not ziel.abschnitt_id, "titel": _text_audit(seite.titel),
+            "inhalt": _text_audit("\n".join(office_onenote.text_zeilen(seite.inhalt)))}
 
 
 @mcp.tool()
@@ -2318,10 +2319,11 @@ def _onenote_ausfuehren(eintrag: dict) -> dict:
         _audit({"tool": "onenote_seite_anfragen", "risk": "critical", "result": "error", "error": str(e)[:200]})
         return {"status": "error", "summary": str(e)}
     _audit({"tool": "onenote_seite_anfragen", "risk": "critical", "result": "success", "seite_id": angelegt["seite_id"][:80],
-            "abschnitt_neu": angelegt["abschnitt_neu"]})
-    neu = " (neu angelegt)" if angelegt["abschnitt_neu"] else ""
-    return {"status": "success", "summary": f"Seite „{seite.titel}“ liegt in OneNote im Notizbuch {angelegt['notizbuch'][:80]}, "
-            f"Abschnitt {angelegt['abschnitt']}{neu}."}
+            "notizbuch_neu": angelegt["notizbuch_neu"], "abschnitt_neu": angelegt["abschnitt_neu"]})
+    nb_neu = " (neu angelegt)" if angelegt["notizbuch_neu"] else ""
+    ab_neu = " (neu angelegt)" if angelegt["abschnitt_neu"] else ""
+    return {"status": "success", "summary": f"Seite „{seite.titel}“ liegt in OneNote im Notizbuch {angelegt['notizbuch'][:80]}"
+            f"{nb_neu}, Abschnitt {angelegt['abschnitt']}{ab_neu}, im OneDrive der Firma."}
 
 
 UNBEKANNT = {"status": "error", "summary": "Unbekannte oder abgelaufene Freigabe."}

@@ -1,8 +1,9 @@
-"""Tests für OneNote per COM (office_onenote.py): Erkennung, Wahl des Standard-Notizbuchs, Abschnitt, Seiten-XML, Kartentext,
-Ablauf mit einer Attrappe von OneNote, Zeitgrenze und Sperre.
+"""Tests für OneNote per COM (office_onenote.py): Erkennung, OneDrive der Firma, Notizbuch W.A.I.S., Abschnitt, Seiten-XML,
+Kartentext, Ablauf mit einer Attrappe von OneNote, Zeitgrenze und Sperre. Konten und Adressen sind erfunden.
 
-OneNote läuft hier nie wirklich. Nur der letzte Test spricht mit dem echten OneNote am PC (WAMO_OFFICE_ECHT=1): Er legt einen eigenen
-Test-Abschnitt an, schreibt eine Seite hinein, liest sie zurück und löscht danach genau diesen Abschnitt wieder.
+OneNote läuft hier nie wirklich. Nur der letzte Test spricht mit dem echten OneNote am PC (WAMO_OFFICE_ECHT=1): Im vorhandenen Notizbuch
+W.A.I.S. im OneDrive der Firma legt er einen eigenen Test-Abschnitt an, schreibt Seiten hinein, liest sie zurück und löscht danach genau
+diesen Abschnitt wieder. Fehlt das Notizbuch, überspringt er sich; er legt es nie an.
 """
 
 from __future__ import annotations
@@ -25,9 +26,14 @@ GEHEIM = "Vertrauliche Zeile im Angebot"
 NB_ID, NB2_ID, AB_ID, SEITE_ID = "{nb-1}", "{nb-2}", "{ab-1}", "{seite-1}"
 
 
-def hierarchie(*buecher: tuple[str, str, str]) -> str:
-    """Antwort von GetHierarchy für die Notizbücher: (ID, Name, Pfad)."""
-    innen = "".join(f'<one:Notebook name="{n}" nickname="{n}" ID="{i}" path="{p}" />' for i, n, p in buecher)
+KONTO = on.Firmenkonto("anna@firma.example", "https://firma-my.sharepoint.com/personal/anna_firma_example")
+FIRMA_NB = f"{KONTO.site}/Documents/W.A.I.S/"
+ADRESSE = f"{KONTO.site}/Documents/W.A.I.S"
+
+
+def hierarchie(*buecher: tuple[str, str, str, str]) -> str:
+    """Antwort von GetHierarchy für die Notizbücher: (ID, Name, Anzeigename, Pfad)."""
+    innen = "".join(f'<one:Notebook name="{n}" nickname="{k}" ID="{i}" path="{p}" />' for i, n, k, p in buecher)
     return f'<?xml version="1.0"?><one:Notebooks xmlns:one="{on.NS}">{innen}</one:Notebooks>'
 
 
@@ -40,8 +46,14 @@ def abschnitt(name: str, sid: str = AB_ID, **attr) -> str:
     return f'<one:Section name="{name}" ID="{sid}" path="p"{extra} />'
 
 
-BUECHER = hierarchie((NB_ID, "Arbeit", "https://d.docs.live.net/abc/Dokumente/Arbeit/"),
-                     (NB2_ID, "Privat", "C:\\Users\\n\\OneNote\\Privat"))
+FREMD = (NB2_ID, "Hochschule", "Hochschule", "https://d.docs.live.net/abc/Dokumente/Hochschule/")
+BUECHER = hierarchie((NB_ID, "W.A.I.S", "W.A.I.S.", FIRMA_NB), FREMD)
+OHNE_WAIS = hierarchie(FREMD)
+
+
+def ziel(notizbuch_id: str = NB_ID, abschnitt_id: str = AB_ID) -> on.Ziel:
+    return on.Ziel(konto=KONTO.konto, notizbuch_url=ADRESSE, notizbuch_id=notizbuch_id, notizbuch="W.A.I.S.", abschnitt="W.A.I.S",
+                   abschnitt_id=abschnitt_id)
 
 
 # ---------- Erkennung ohne Start ----------
@@ -73,25 +85,56 @@ def test_erkennung_ohne_eintrag_ohne_datei_oder_ohne_windows():
     assert on.onenote_vorhanden(lesen=_registrierung(kaputt), datei_da=lambda p: True, plattform="win32") is False
 
 
-# ---------- Standard-Notizbuch und Abschnitt ----------
-def test_standard_ist_das_notizbuch_mit_den_schnellen_notizen():
-    schnell = "C:\\Users\\n\\OneNote\\Privat\\Schnelle Notizen.one"
-    assert on.notizbuch_waehlen(BUECHER, schnell) == (NB2_ID, "Privat")
-    schnell_web = "https://d.docs.live.net/abc/Dokumente/Arbeit/Schnelle Notizen.one"
-    assert on.notizbuch_waehlen(BUECHER, schnell_web) == (NB_ID, "Arbeit")
+# ---------- OneDrive der Firma und Notizbuch W.A.I.S. ----------
+FIRMA = {"UserEmail": "anna@firma.example", "ServiceEndpointUri": f"{KONTO.site}/_api"}
+SCHULE = {"UserEmail": "anna@hochschule.example",
+          "ServiceEndpointUri": "https://hochschule-my.sharepoint.com/personal/anna_hochschule_example/_api"}
 
 
-def test_ohne_schnelle_notizen_im_notizbuch_gilt_das_erste():
-    assert on.notizbuch_waehlen(BUECHER, "") == (NB_ID, "Arbeit")
-    # Präfix ohne Trenner zählt nicht: "Privat2" liegt nicht in "Privat"
-    assert on.notizbuch_waehlen(BUECHER, "C:\\Users\\n\\OneNote\\Privat2\\Schnelle Notizen.one") == (NB_ID, "Arbeit")
+def test_firmenkonto_ist_das_einzige_onedrive_for_business():
+    assert on.firmenkonto(konten=[FIRMA], domaenen="") == KONTO
+    assert on.notizbuch_adresse(KONTO) == ADRESSE
 
 
-def test_ohne_notizbuch_ein_klarer_fehler():
-    with pytest.raises(on.OneNoteFehler, match="kein Notizbuch"):
-        on.notizbuch_waehlen(hierarchie(), "")
+@pytest.mark.parametrize("konten, domaenen, text", [
+    ([], "", "kein OneDrive der Firma"),
+    ([FIRMA, SCHULE], "", "mehrere"),
+    ([SCHULE], "firma.example", "kein OneDrive der Firma"),
+    ([{**FIRMA, "ServiceEndpointUri": "https://boese.example/personal/x/_api"}], "", "kein OneDrive der Firma"),
+    ([{**FIRMA, "UserEmail": "ohne-domaene"}], "", "kein OneDrive der Firma"),
+])
+def test_kein_eindeutiges_firmenkonto_heisst_rueckfall(konten, domaenen, text):
+    with pytest.raises(on.OneNoteFehler, match=text) as fehler:
+        on.firmenkonto(konten=konten, domaenen=domaenen)
+    assert fehler.value.rueckfall is True
+
+
+def test_domaene_grenzt_mehrere_konten_ein(monkeypatch):
+    assert on.firmenkonto(konten=[FIRMA, SCHULE], domaenen="@Firma.example, andere.example") == KONTO
+    monkeypatch.setenv(on.DOMAENE_ENV, "firma.example")
+    assert on.firmenkonto(konten=[SCHULE, FIRMA]) == KONTO
+
+
+def test_notizbuch_nur_im_onedrive_der_firma():
+    assert on.notizbuch_finden(BUECHER, KONTO) == NB_ID
+    assert on.notizbuch_finden(OHNE_WAIS, KONTO) == ""  # fehlt: wird erst nach dem Klick angelegt
+    nur_name = hierarchie((NB_ID, "W.A.I.S.", "Anders", FIRMA_NB))
+    assert on.notizbuch_finden(nur_name, KONTO) == NB_ID
+    praefix = hierarchie((NB_ID, "W.A.I.S", "W.A.I.S.", "https://firma-my.sharepoint.com/personal/anna_firma_example2/x/"))
+    with pytest.raises(on.OneNoteFehler, match="nicht im OneDrive der Firma"):
+        on.notizbuch_finden(praefix, KONTO)
+
+
+def test_notizbuch_w_a_i_s_anderswo_oder_doppelt_heisst_rueckfall():
+    woanders = hierarchie((NB2_ID, "W.A.I.S.", "W.A.I.S.", "https://d.docs.live.net/abc/W.A.I.S./"))
+    with pytest.raises(on.OneNoteFehler, match="nicht im OneDrive der Firma") as fehler:
+        on.notizbuch_finden(woanders, KONTO)
+    assert fehler.value.rueckfall is True
+    doppelt = hierarchie((NB_ID, "W.A.I.S", "W.A.I.S.", FIRMA_NB), (NB2_ID, "W.A.I.S 2", "W.A.I.S.", f"{KONTO.site}/Documents/x/"))
+    with pytest.raises(on.OneNoteFehler, match="mehrere"):
+        on.notizbuch_finden(doppelt, KONTO)
     with pytest.raises(on.OneNoteFehler):
-        on.notizbuch_waehlen("kein xml", "")
+        on.notizbuch_finden("kein xml", KONTO)
 
 
 def test_abschnitt_nur_direkt_im_notizbuch_und_nicht_im_papierkorb():
@@ -193,19 +236,21 @@ def test_karte_zeigt_titel_und_den_ganzen_inhalt():
     assert on.karten_detail(code) == "Seite: SQL\nInhalt:\n> select 1\n>\n> from x"
 
 
-def test_ziel_der_karte_nennt_notizbuch_und_abschnitt():
-    assert on.karten_ziel(on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID)) == "OneNote, Notizbuch Arbeit, Abschnitt W.A.I.S."
-    neu = on.karten_ziel(on.Ziel(NB_ID, "N" * 300, "W.A.I.S.", ""))
-    assert neu.endswith("Abschnitt W.A.I.S. (wird angelegt)") and len(neu) <= 200
+def test_ziel_der_karte_nennt_notizbuch_abschnitt_und_konto():
+    assert on.karten_ziel(ziel()) == "OneNote, Notizbuch W.A.I.S., Abschnitt W.A.I.S, OneDrive der Firma (anna@firma.example)"
+    neu = on.karten_ziel(ziel("", ""))
+    assert "Notizbuch W.A.I.S. (wird neu angelegt), Abschnitt W.A.I.S (wird angelegt)" in neu
+    lang = on.karten_ziel(on.Ziel("k" * 300, ADRESSE, "", "N" * 300, "W.A.I.S", ""))
+    assert len(lang) <= 200
 
 
 # ---------- Ablauf mit einer Attrappe von OneNote ----------
 class App:
     """Attrappe der COM-Schnittstelle: merkt sich jeden Aufruf."""
 
-    def __init__(self, buecher=BUECHER, schnell="", vorhanden=(), fehler_bei=None):
+    def __init__(self, buecher=BUECHER, vorhanden=(), fehler_bei=None, nicht_synchron=0):
         self.aufrufe: list[tuple] = []
-        self.buecher, self.schnell, self.vorhanden, self.fehler_bei = buecher, schnell, list(vorhanden), fehler_bei
+        self.buecher, self.vorhanden, self.fehler_bei, self.nicht_synchron = buecher, list(vorhanden), fehler_bei, nicht_synchron
 
     def _merken(self, *aufruf):
         self.aufrufe.append(aufruf)
@@ -218,16 +263,23 @@ class App:
         self._merken("GetHierarchy", start, scope, xsSchema)
         return self.buecher if start == "" else abschnitte(start, *self.vorhanden)
 
-    def GetSpecialLocation(self, art):  # noqa: N802
-        self._merken("GetSpecialLocation", art)
-        return self.schnell
-
     def OpenHierarchy(self, pfad, relativ, cftIfNotExist):  # noqa: N802, N803
         self._merken("OpenHierarchy", pfad, relativ, cftIfNotExist)
-        return "{ab-neu}"
+        return "{nb-neu}" if cftIfNotExist == on.CFT_NOTIZBUCH else "{ab-neu}"
+
+    def UpdateHierarchy(self, xml, xsSchema):  # noqa: N802, N803
+        self._merken("UpdateHierarchy", xml, xsSchema)
+
+    def SyncHierarchy(self, objekt):  # noqa: N802
+        self._merken("SyncHierarchy", objekt)
 
     def CreateNewPage(self, abschnitt_id):  # noqa: N802
         self._merken("CreateNewPage", abschnitt_id)
+        if self.nicht_synchron:
+            self.nicht_synchron -= 1
+            fehler = OSError("noch nicht synchronisiert")
+            fehler.hresult = on.NICHT_SYNCHRON - (1 << 32)  # wie comtypes: vorzeichenbehaftet
+            raise fehler
         return SEITE_ID
 
     def UpdatePageContent(self, xml, dateExpectedLastModified, xsSchema):  # noqa: N802, N803
@@ -245,21 +297,30 @@ class App:
 SEITE = on.seite_pruefen({"art": "dokument", "titel": "Angebot", "text": f"# Kopf\n{GEHEIM}"})
 
 
+def anlegen(app, erwartet=None, **kw):
+    return on.seite_anlegen(SEITE, erwartet or ziel(), konto=KONTO, fabrik=lambda: app, **kw)
+
+
 def test_ziel_lesen_aendert_nichts():
-    app = App(vorhanden=[abschnitt("W.A.I.S.")])
-    ziel = on.ziel_pruefen(fabrik=lambda: app)
-    assert ziel == on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID)
-    assert {a[0] for a in app.aufrufe} == {"GetHierarchy", "GetSpecialLocation"}
-    assert all(a[-1] == on.XS_2013 for a in app.aufrufe if a[0] == "GetHierarchy")
+    app = App(vorhanden=[abschnitt("W.A.I.S")])
+    assert on.ziel_pruefen(konto=KONTO, fabrik=lambda: app) == ziel()
+    assert {a[0] for a in app.aufrufe} == {"GetHierarchy"}
+    assert all(a[-1] == on.XS_2013 for a in app.aufrufe)
+
+
+def test_fehlendes_notizbuch_wird_nur_angekuendigt():
+    app = App(buecher=OHNE_WAIS)
+    assert on.ziel_pruefen(konto=KONTO, fabrik=lambda: app) == ziel("", "")
+    assert [a[0] for a in app.aufrufe] == ["GetHierarchy"]  # nichts angelegt, keine Abschnitte gelesen
 
 
 def test_seite_im_vorhandenen_abschnitt():
-    app = App(vorhanden=[abschnitt("W.A.I.S.")])
-    ergebnis = on.seite_anlegen(SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID), fabrik=lambda: app)
-    assert ergebnis == {"seite_id": SEITE_ID, "abschnitt_id": AB_ID, "abschnitt_neu": False, "notizbuch": "Arbeit",
-                        "abschnitt": "W.A.I.S."}
+    app = App(vorhanden=[abschnitt("W.A.I.S")])
+    ergebnis = anlegen(app)
+    assert ergebnis == {"seite_id": SEITE_ID, "abschnitt_id": AB_ID, "abschnitt_neu": False, "notizbuch_neu": False,
+                        "notizbuch": "W.A.I.S.", "abschnitt": "W.A.I.S"}
     namen = [a[0] for a in app.aufrufe]
-    assert "OpenHierarchy" not in namen and "DeleteHierarchy" not in namen
+    assert not {"OpenHierarchy", "UpdateHierarchy", "DeleteHierarchy"} & set(namen)
     assert ("CreateNewPage", AB_ID) in app.aufrufe
     update = next(a for a in app.aufrufe if a[0] == "UpdatePageContent")
     assert update[2] == on.XS_2013 and ET.fromstring(update[1]).get("ID") == SEITE_ID and GEHEIM in update[1]
@@ -268,26 +329,55 @@ def test_seite_im_vorhandenen_abschnitt():
 
 def test_fehlender_abschnitt_wird_angelegt_und_nichts_gezeigt():
     app = App()
-    ergebnis = on.seite_anlegen(SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", ""), zeigen=False, fabrik=lambda: app)
+    ergebnis = anlegen(app, ziel(NB_ID, ""), zeigen=False)
     assert ergebnis["abschnitt_neu"] is True and ergebnis["abschnitt_id"] == "{ab-neu}"
-    assert ("OpenHierarchy", "W.A.I.S..one", NB_ID, on.CFT_ABSCHNITT) in app.aufrufe
+    assert ("OpenHierarchy", "W.A.I.S.one", NB_ID, on.CFT_ABSCHNITT) in app.aufrufe
+    assert ("SyncHierarchy", "{ab-neu}") in app.aufrufe
     assert ("CreateNewPage", "{ab-neu}") in app.aufrufe
     assert "NavigateTo" not in [a[0] for a in app.aufrufe]
 
 
-def test_anderes_standard_notizbuch_seit_der_anfrage_bricht_ab():
-    app = App(schnell="C:\\Users\\n\\OneNote\\Privat\\Schnelle Notizen.one")
-    with pytest.raises(on.OneNoteFehler, match="geändert"):
-        on.seite_anlegen(SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", ""), fabrik=lambda: app)
+def test_fehlendes_notizbuch_entsteht_erst_nach_dem_klick_im_onedrive_der_firma():
+    app = App(buecher=OHNE_WAIS)
+    ergebnis = anlegen(app, ziel("", ""), zeigen=False)
+    assert ergebnis["notizbuch_neu"] is True and ergebnis["abschnitt_neu"] is True
+    assert ("OpenHierarchy", ADRESSE, "", on.CFT_NOTIZBUCH) in app.aufrufe
+    nickname = next(a for a in app.aufrufe if a[0] == "UpdateHierarchy")
+    knoten = ET.fromstring(nickname[1]).find(f"{NS}Notebook")
+    assert (knoten.get("ID"), knoten.get("nickname")) == ("{nb-neu}", "W.A.I.S.")
+    assert ("OpenHierarchy", "W.A.I.S.one", "{nb-neu}", on.CFT_ABSCHNITT) in app.aufrufe
+
+
+def test_frischer_abschnitt_wartet_auf_den_abgleich():
+    app = App(nicht_synchron=2)
+    ergebnis = anlegen(app, ziel(NB_ID, ""), zeigen=False)
+    assert ergebnis["seite_id"] == SEITE_ID
+    assert [a[0] for a in app.aufrufe].count("CreateNewPage") == 3
+
+
+def test_anderes_notizbuch_oder_konto_seit_der_anfrage_bricht_ab():
+    app = App(buecher=hierarchie((NB2_ID, "W.A.I.S", "W.A.I.S.", FIRMA_NB)))
+    with pytest.raises(on.OneNoteFehler, match="Notizbuch W.A.I.S. hat sich"):
+        anlegen(app)
+    anders = on.Firmenkonto("max@firma.example", "https://firma-my.sharepoint.com/personal/max_firma_example")
+    with pytest.raises(on.OneNoteFehler, match="OneDrive der Firma hat sich"):
+        on.seite_anlegen(SEITE, ziel(), konto=anders, fabrik=lambda: app)
     assert not {"OpenHierarchy", "CreateNewPage", "UpdatePageContent"} & {a[0] for a in app.aufrufe}
 
 
 def test_fehler_beim_schreiben_raeumt_nur_die_eigene_neue_seite_weg():
-    app = App(vorhanden=[abschnitt("W.A.I.S.")], fehler_bei="UpdatePageContent")
+    app = App(vorhanden=[abschnitt("W.A.I.S")], fehler_bei="UpdatePageContent")
     with pytest.raises(on.OneNoteFehler, match="0x80042001"):
-        on.seite_anlegen(SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID), fabrik=lambda: app)
+        anlegen(app)
     loeschen = [a for a in app.aufrufe if a[0] == "DeleteHierarchy"]
     assert loeschen == [("DeleteHierarchy", SEITE_ID, True)]
+
+
+@pytest.mark.parametrize("abschnitt_name, notizbuch_name, ordner", [("W.A.I.S.", "W.A.I.S.", "W.A.I.S"),
+                                                                    ("W.A.I.S", "W.A.I.S.", "W.A.I.S."), ("a/b", "x", "y")])
+def test_namen_mit_punkt_am_ende_oder_trennern_gehen_nicht(abschnitt_name, notizbuch_name, ordner):
+    with pytest.raises(on.OneNoteFehler, match="Ungültiger Name"):
+        on.ziel_pruefen(abschnitt_name, notizbuch=notizbuch_name, ordner=ordner, konto=KONTO, fabrik=lambda: App())
 
 
 def test_zeitgrenze_und_nur_ein_zugriff_zur_zeit():
@@ -299,16 +389,20 @@ def test_zeitgrenze_und_nur_ein_zugriff_zur_zeit():
 
     start = time.monotonic()
     with pytest.raises(on.OneNoteFehler, match="nicht in der Zeit"):
-        on.ziel_pruefen(fabrik=haengt, timeout=0.2)
+        on.ziel_pruefen(konto=KONTO, fabrik=haengt, timeout=0.2)
     assert time.monotonic() - start < 2
     with pytest.raises(on.OneNoteFehler, match="beschäftigt"):
-        on.ziel_pruefen(fabrik=lambda: App(), timeout=0.2, warten=0.05)
+        on.ziel_pruefen(konto=KONTO, fabrik=lambda: App(), timeout=0.2, warten=0.05)
     los.set()
+    _warten_bis_frei()
+    assert on.ziel_pruefen(konto=KONTO, fabrik=lambda: App(), timeout=2).notizbuch_id == NB_ID
+
+
+def _warten_bis_frei() -> None:
     for _ in range(50):  # der hängende Faden gibt die Sperre frei, sobald er endet
         if not on._SPERRE.locked():
-            break
+            return
         time.sleep(0.05)
-    assert on.ziel_pruefen(fabrik=lambda: App(), timeout=2).notizbuch == "Arbeit"
 
 
 def test_start_von_onenote_scheitert_lesbar():
@@ -316,9 +410,8 @@ def test_start_von_onenote_scheitert_lesbar():
         raise OSError("Klasse nicht registriert")
 
     with pytest.raises(on.OneNoteFehler, match="OneNote"):
-        on.ziel_pruefen(fabrik=kaputt, timeout=2)
+        on.ziel_pruefen(konto=KONTO, fabrik=kaputt, timeout=2)
     assert not on._SPERRE.locked()
-
 
 # ---------- Ratenbremse ----------
 def test_bremse_zehn_je_stunde():
@@ -348,10 +441,10 @@ def test_unsichtbare_zeichen_fehlen_auf_karte_und_seite_gleich():
 def test_nach_der_zeitgrenze_entsteht_keine_seite_mehr():
     abbruch = threading.Event()
     abbruch.set()
-    app = App(vorhanden=[abschnitt("W.A.I.S.")])
+    app = App(buecher=OHNE_WAIS)
     with pytest.raises(on.OneNoteFehler, match="nachsehen"):
-        on._schreiben(app, SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID), False, abbruch)
-    assert not {"OpenHierarchy", "CreateNewPage"} & {a[0] for a in app.aufrufe}
+        on._schreiben(app, SEITE, ziel("", ""), False, abbruch, KONTO)
+    assert not {"OpenHierarchy", "CreateNewPage"} & {a[0] for a in app.aufrufe}  # auch kein Notizbuch
 
 
 def test_zeitgrenze_waehrend_des_anlegens_raeumt_die_eigene_seite_weg():
@@ -362,9 +455,9 @@ def test_zeitgrenze_waehrend_des_anlegens_raeumt_die_eigene_seite_weg():
             abbruch.set()  # so, als wäre die Zeitgrenze genau jetzt abgelaufen
             return super().CreateNewPage(abschnitt_id)
 
-    app = Langsam(vorhanden=[abschnitt("W.A.I.S.")])
+    app = Langsam(vorhanden=[abschnitt("W.A.I.S")])
     with pytest.raises(on.OneNoteFehler):
-        on._schreiben(app, SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID), False, abbruch)
+        on._schreiben(app, SEITE, ziel(), False, abbruch, KONTO)
     assert [a[0] for a in app.aufrufe][-2:] == ["CreateNewPage", "DeleteHierarchy"]
     assert "UpdatePageContent" not in [a[0] for a in app.aufrufe]
 
@@ -377,18 +470,15 @@ def test_schreib_zeitgrenze_warnt_vor_doppelter_seite():
         return App()
 
     with pytest.raises(on.OneNoteFehler, match="bevor du sie noch einmal anlegst"):
-        on.seite_anlegen(SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID), fabrik=haengt, timeout=0.2)
+        on.seite_anlegen(SEITE, ziel(), konto=KONTO, fabrik=haengt, timeout=0.2)
     los.set()
-    for _ in range(50):
-        if not on._SPERRE.locked():
-            break
-        time.sleep(0.05)
+    _warten_bis_frei()
 
 
 def test_anderer_abschnitt_gleichen_namens_bricht_ab():
-    app = App(vorhanden=[abschnitt("W.A.I.S.", "{anderer}")])
-    with pytest.raises(on.OneNoteFehler, match="Abschnitt W.A.I.S. hat sich"):
-        on.seite_anlegen(SEITE, on.Ziel(NB_ID, "Arbeit", "W.A.I.S.", AB_ID), fabrik=lambda: app)
+    app = App(vorhanden=[abschnitt("W.A.I.S", "{anderer}")])
+    with pytest.raises(on.OneNoteFehler, match="Abschnitt W.A.I.S hat sich"):
+        anlegen(app)
     assert "CreateNewPage" not in [a[0] for a in app.aufrufe]
 
 
@@ -397,21 +487,27 @@ def test_rueckfall_nur_wenn_onenote_nicht_taugt():
         raise OSError("nicht registriert")
 
     with pytest.raises(on.OneNoteFehler, match="startet nicht") as fehlt:
-        on.ziel_pruefen(fabrik=nicht_registriert, timeout=2)
+        on.ziel_pruefen(konto=KONTO, fabrik=nicht_registriert, timeout=2)
     assert fehlt.value.rueckfall is True
-    with pytest.raises(on.OneNoteFehler) as leer:
-        on.ziel_pruefen(fabrik=lambda: App(buecher=hierarchie()), timeout=2)
-    assert leer.value.rueckfall is True
     with pytest.raises(on.OneNoteFehler) as geschuetzt:
-        on.ziel_pruefen(fabrik=lambda: App(vorhanden=[abschnitt("W.A.I.S.", locked="true")]), timeout=2)
+        on.ziel_pruefen(konto=KONTO, fabrik=lambda: App(vorhanden=[abschnitt("W.A.I.S", locked="true")]), timeout=2)
     assert geschuetzt.value.rueckfall is False
     on._SPERRE.acquire()
     try:
         with pytest.raises(on.OneNoteFehler) as belegt:
-            on.ziel_pruefen(fabrik=lambda: App(), timeout=2, warten=0.05)
+            on.ziel_pruefen(konto=KONTO, fabrik=lambda: App(), timeout=2, warten=0.05)
         assert belegt.value.rueckfall is False
     finally:
         on._SPERRE.release()
+
+
+def test_ohne_firmenkonto_wird_onenote_gar_nicht_gefragt(monkeypatch):
+    monkeypatch.setattr(on, "_konten_lesen", lambda: [])
+    monkeypatch.delenv(on.DOMAENE_ENV, raising=False)
+    app = App()
+    with pytest.raises(on.OneNoteFehler, match="kein OneDrive der Firma") as fehler:
+        on.ziel_pruefen(fabrik=lambda: app)
+    assert fehler.value.rueckfall is True and app.aufrufe == []
 
 
 def test_fehler_aus_dem_faden_tragen_keine_com_rahmen():
@@ -427,32 +523,43 @@ def test_fehler_aus_dem_faden_tragen_keine_com_rahmen():
 @pytest.mark.skipif(sys.platform != "win32" or os.getenv("WAMO_OFFICE_ECHT") != "1",
                     reason="nur am Windows-PC mit OneNote und WAMO_OFFICE_ECHT=1")
 def test_echtes_onenote_legt_seite_im_eigenen_test_abschnitt_an_und_raeumt_auf():
+    """Nur im vorhandenen Notizbuch W.A.I.S. im OneDrive der Firma; der Test legt das Notizbuch nie an."""
     if not on.onenote_vorhanden():
         pytest.skip("OneNote für den Desktop ist nicht installiert")
-    name = f"Test {secrets.token_hex(3)} W.A.I.S."  # endet wie der echte Abschnitt mit dem Punkt
-    ziel = on.ziel_pruefen(abschnitt=name)
-    assert ziel.abschnitt_id == "", "Den Test-Abschnitt gibt es schon, der Test ändert nie Vorhandenes"
-    seite = on.seite_pruefen({"art": "dokument", "titel": "Prüfung W.A.I.S.", "text": f"# Kopf\n- eins\n{BOESE} **fett**"})
     try:
-        ergebnis = on.seite_anlegen(seite, ziel, zeigen=False)
-        assert ergebnis["abschnitt_neu"] is True
-        xml = on._im_faden(lambda app: app.GetPageContent(ergebnis["seite_id"], xsSchema=on.XS_2013), on.LESEN_TIMEOUT_SECS)
-        baum = ET.fromstring(xml)
-        assert baum.find(f"{NS}Title/{NS}OE/{NS}T").text.strip() == "Prüfung W.A.I.S."
-        alles = "".join(t.text or "" for t in baum.iter(NS + "T"))
-        assert "&lt;a href=" in alles and "&lt;b&gt;fett&lt;/b&gt;" in alles and "eins" in alles
-        assert baum.find(f".//{NS}Image") is None
-        namen = on._im_faden(lambda app: app.GetHierarchy(ziel.notizbuch_id, on.HS_ABSCHNITTE, xsSchema=on.XS_2013),
-                             on.LESEN_TIMEOUT_SECS)
-        assert on.abschnitt_suchen(namen, ziel.notizbuch_id, name) == ergebnis["abschnitt_id"]  # der Punkt am Ende bleibt
-        for inhalt, pruefen in ((TABELLE_ECHT, lambda b: len(b.findall(f".//{NS}Row")) == 3), (CODE_ECHT, _code_ok)):
-            weitere = on.seite_anlegen(on.seite_pruefen(inhalt), ziel, zeigen=False)
-            assert weitere["abschnitt_neu"] is False and weitere["abschnitt_id"] == ergebnis["abschnitt_id"]
-            xml = on._im_faden(lambda app, s=weitere["seite_id"]: app.GetPageContent(s, xsSchema=on.XS_2013), on.LESEN_TIMEOUT_SECS)
-            assert pruefen(ET.fromstring(xml)), xml[:2000]
-        print(f"OneNote: Seite in {ergebnis['notizbuch']!r}, Abschnitt {name!r} angelegt und gelesen")
+        konto = on.firmenkonto()
+    except on.OneNoteFehler as e:
+        pytest.skip(f"Kein eindeutiges OneDrive der Firma: {e}")
+    name = f"Test {secrets.token_hex(3)} W.A.I.S"  # wie der echte Abschnitt, ohne Punkt am Ende (SharePoint)
+    ziel_echt = on.ziel_pruefen(abschnitt=name, konto=konto)
+    if not ziel_echt.notizbuch_id:
+        pytest.skip("Das Notizbuch W.A.I.S. ist im OneDrive der Firma nicht offen; der Test legt es nie an")
+    assert ziel_echt.abschnitt_id == "", "Den Test-Abschnitt gibt es schon, der Test ändert nie Vorhandenes"
+    try:
+        _echte_seiten(ziel_echt, konto, name)
     finally:
-        _test_abschnitt_loeschen(ziel.notizbuch_id, name)
+        _test_abschnitt_loeschen(ziel_echt.notizbuch_id, name)
+
+
+def _echte_seiten(ziel_echt: on.Ziel, konto: on.Firmenkonto, name: str) -> None:
+    seite = on.seite_pruefen({"art": "dokument", "titel": "Prüfung W.A.I.S.", "text": f"# Kopf\n- eins\n{BOESE} **fett**"})
+    ergebnis = on.seite_anlegen(seite, ziel_echt, zeigen=False, konto=konto)
+    assert ergebnis["abschnitt_neu"] is True and ergebnis["notizbuch_neu"] is False
+    baum = ET.fromstring(_seite_lesen(ergebnis["seite_id"]))
+    assert baum.find(f"{NS}Title/{NS}OE/{NS}T").text.strip() == "Prüfung W.A.I.S."
+    alles = "".join(t.text or "" for t in baum.iter(NS + "T"))
+    assert "&lt;a href=" in alles and "&lt;b&gt;fett&lt;/b&gt;" in alles and "eins" in alles
+    assert baum.find(f".//{NS}Image") is None
+    for inhalt, pruefen in ((TABELLE_ECHT, lambda b: len(b.findall(f".//{NS}Row")) == 3), (CODE_ECHT, _code_ok)):
+        weitere = on.seite_anlegen(on.seite_pruefen(inhalt), ziel_echt, zeigen=False, konto=konto)
+        assert weitere["abschnitt_id"] == ergebnis["abschnitt_id"]
+        xml = _seite_lesen(weitere["seite_id"])
+        assert pruefen(ET.fromstring(xml)), xml[:2000]
+    print(f"OneNote: Seiten im Notizbuch W.A.I.S., Abschnitt {name!r} angelegt und gelesen")
+
+
+def _seite_lesen(seiten_id: str) -> str:
+    return on._im_faden(lambda app: app.GetPageContent(seiten_id, xsSchema=on.XS_2013), on.LESEN_TIMEOUT_SECS)
 
 
 TABELLE_ECHT = {"art": "tabelle", "titel": "Tabelle", "spalten": ["Name", "Wert"], "zeilen": [["<b>", "=1+1"], ["ä", ""]]}
@@ -468,7 +575,7 @@ def _code_ok(baum: ET.Element) -> bool:
 def _test_abschnitt_loeschen(notizbuch_id: str, name: str) -> None:
     """Löscht genau den Abschnitt, den dieser Test angelegt hat: Name mit Zufallsteil, vor dem Test gab es ihn nicht (oben geprüft).
     Läuft auch, wenn das Anlegen mittendrin scheiterte."""
-    assert re.fullmatch(r"Test [0-9a-f]{6} W\.A\.I\.S\.", name)
+    assert re.fullmatch(r"Test [0-9a-f]{6} W\.A\.I\.S", name)
 
     def loeschen(app):
         abschnitt_id = on.abschnitt_suchen(app.GetHierarchy(notizbuch_id, on.HS_ABSCHNITTE, xsSchema=on.XS_2013), notizbuch_id, name)

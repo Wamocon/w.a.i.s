@@ -19,8 +19,11 @@ import wamo_host as host
 SCHLUESSEL = "k" * 43
 GEHEIM = "Vertrauliche Zeile im Angebot"
 DOKUMENT = {"art": "dokument", "titel": "Angebot", "text": f"# Angebot\n- {GEHEIM}"}
-ZIEL = office_onenote.Ziel("{nb-1}", "Arbeit", "W.A.I.S.", "")
-ANGELEGT = {"seite_id": "{seite-1}", "abschnitt_id": "{ab-1}", "abschnitt_neu": True, "notizbuch": "Arbeit", "abschnitt": "W.A.I.S."}
+# Erfundenes Konto: Das Notizbuch W.A.I.S. fehlt noch und entsteht erst nach dem Klick
+ZIEL = office_onenote.Ziel(konto="anna@firma.example", notizbuch_url="https://firma-my.sharepoint.com/personal/anna/Documents/W.A.I.S",
+                           notizbuch_id="", notizbuch="W.A.I.S.", abschnitt="W.A.I.S", abschnitt_id="")
+ANGELEGT = {"seite_id": "{seite-1}", "abschnitt_id": "{ab-1}", "abschnitt_neu": True, "notizbuch_neu": True, "notizbuch": "W.A.I.S.",
+            "abschnitt": "W.A.I.S"}
 
 
 class _Basis(unittest.TestCase):
@@ -68,7 +71,8 @@ class Anfrage(_Basis):
         self.assertEqual(antwort["aktion"], "onenote")
         self.assertEqual(antwort["grund"], "Seite in OneNote anlegen")
         self.assertEqual(antwort["detail"], f"Seite: Angebot\nInhalt:\n> Angebot\n> • {GEHEIM}")
-        self.assertEqual(antwort["ziel"], "OneNote, Notizbuch Arbeit, Abschnitt W.A.I.S. (wird angelegt)")
+        self.assertEqual(antwort["ziel"], "OneNote, Notizbuch W.A.I.S. (wird neu angelegt), Abschnitt W.A.I.S (wird angelegt), "
+                                          "OneDrive der Firma (anna@firma.example)")
         self.assertEqual(antwort["gueltig_s"], host.FREIGABE_GUELTIG_SECS)
         self.assertEqual(antwort["anlass"], "Niko will es in OneNote")
         eintrag = host.PENDING[antwort["approval_id"]]
@@ -93,6 +97,13 @@ class Anfrage(_Basis):
         self.assertEqual((antwort["status"], antwort["rueckfall"]), ("rejected", "word"))
         self.assertIn("OneNote", antwort["summary"])
         self.ziel.assert_not_called()
+        self.assertEqual(host.PENDING, {})
+
+    def test_ohne_eindeutiges_firmenkonto_rueckfall_auf_word(self):
+        self.ziel.side_effect = office_onenote.OneNoteFehler(office_onenote.KEIN_FIRMENKONTO, rueckfall=True)
+        antwort = self.anfragen()
+        self.assertEqual((antwort["status"], antwort["rueckfall"]), ("rejected", "word"))
+        self.assertIn("kein OneDrive der Firma", antwort["summary"])
         self.assertEqual(host.PENDING, {})
 
     def test_onenote_nicht_bereit_rueckfall_auf_word(self):
@@ -152,7 +163,7 @@ class Ausfuehren(_Basis):
         ergebnis = host.entscheiden(antrag["approval_id"], True, SCHLUESSEL)
         self.assertEqual(ergebnis["status"], "success", ergebnis)
         self.assertIn("Neuer Titel", ergebnis["summary"])
-        self.assertIn("Abschnitt W.A.I.S.", ergebnis["summary"])
+        self.assertIn("Notizbuch W.A.I.S. (neu angelegt), Abschnitt W.A.I.S (neu angelegt)", ergebnis["summary"])
         seite, ziel = self.anlegen.call_args.args
         self.assertEqual((seite.titel, seite.inhalt.text, ziel), ("Neuer Titel", DOKUMENT["text"], ZIEL))
         self.assertEqual(self.anlegen.call_args.kwargs, {"zeigen": True})
