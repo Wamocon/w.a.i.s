@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Kern-Kanal der Entwicklungsaufträge einrichten und bedienen (Paket R10, Dispatcher Version 7, Plan docs/entwicklung-im-betrieb.md).
+# Kern-Kanal der Entwicklungsaufträge einrichten und bedienen (Paket R10, Dispatcher Version 8, Plan docs/entwicklung-im-betrieb.md,
+# Mitglieder und Trennung je Profil: docs/ausrollen-neue-nutzer.md, P5).
 # Der Kern des Sprachassistenten (wamo-core, Betriebsart Büro) ruft den Auftragsdispatcher über ssh mit einem eigenen Schlüssel auf,
 # der nur auf diesem Server entsteht und ihn nie verlässt. Dieses Skript legt Schlüssel, Regeln und Schalter an. Es startet, stoppt
 # und startet keinen Dienst neu: der Kern wechselt ausschließlich über wamo-core-slots.sh umschalten-kern.
@@ -10,7 +11,10 @@
 #       lokalen Hostschlüssel (Abgleich gegen --hostfingerabdruck, Pflicht außer mit --trocken), Zeile in authorized_keys.d/wamo-kern,
 #       kernkanal.conf mit KANAL=zu, Rauchtest installieren, Ja-Probe ping, bei Fehler Rücknahme der Zeile. --trocken schreibt nichts.
 #   wamo-job-kern-einrichten.sh kanal --arten A,B --repos O/N[,O/N] [--dienste D[,D]] [--max-turns N] [--max-budget-usd X]
-#                               [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N]
+#                               [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N] [--max-versuch-stunde N]
+#                               [--max-neu-stunde-profil N] [--max-neu-tag-profil N] [--max-versuch-stunde-profil N]
+#                               [--max-laufzeit-tag-s-profil N]
+#       Ein Aufruf ersetzt Arten, Repos und Dienste vollständig (was fehlt, ist danach nicht mehr erlaubt); die Grenzen ohne Option bleiben.
 #   wamo-job-kern-einrichten.sh kanal zu
 #       Regeln des Kern-Kanals öffnen oder schließen. Öffnen und Ändern nur ohne laufenden Kern-Auftrag, GitHub-Arten nur, wenn
 #       claude --help (als wamo) --max-turns und --max-budget-usd kennt. kanal zu geht immer.
@@ -20,7 +24,8 @@
 #       wamo-core-slots.sh umschalten-kern <release>. Scheitert das vor dem Umschalten, kommt das vorige Drop-in zurück. Wurde schon
 #       umgeschaltet, bleibt es und das Skript endet mit Exit 4. Gleicher Stand ist ein No-op. --mitglieder an (Standard aus, jeder
 #       Aufruf ohne die Option schreibt aus) lässt auch Mitglieder aus --profil Aufträge starten und verlangt SCHRANKEN_VERSION 2 oder
-#       höher im Zielrelease. --trocken prüft alles wie echt und zeigt das Drop-in, schreibt aber nichts und schaltet nicht um.
+#       höher im Zielrelease, Dispatcher 8 mit dem Modul des Kern-Kanals und MAX_BUDGET_USD höchstens 2.00 in kernkanal.conf.
+#       --trocken prüft alles wie echt und zeigt das Drop-in (user_id nur als Kurzkennung), schreibt aber nichts und schaltet nicht um.
 #   wamo-job-kern-einrichten.sh notaus-aufheben
 #       Sperrdatei entfernen. Der Kanal bleibt zu (der Notaus hat KANAL=zu gesetzt und das Schlüsselpaar beiseitegelegt): erst schluessel
 #       legt ein neues Paar an und setzt die Zeile neu, erst kanal öffnet. schluessel verweigert, solange die Sperrdatei besteht.
@@ -59,11 +64,18 @@ STD_MAX_LAUFZEIT_TAG_S=14400
 STD_MAX_FOLGEN=5
 STD_MIN_ABSTAND_S=60
 STD_MIN_PLATZ_MB=2048
-STD_MAX_VERSUCH_STUNDE=20
+STD_MAX_VERSUCH_STUNDE=60
+STD_MAX_NEU_STUNDE_PROFIL=3
+STD_MAX_NEU_TAG_PROFIL=8
+STD_MAX_VERSUCH_STUNDE_PROFIL=10
+STD_MAX_LAUFZEIT_TAG_S_PROFIL=7200
 STD_KOSTEN_AUFTRAG_USD=3
 STD_KOSTEN_TAG_USD=10
 STD_MITGLIEDER=aus
 MIN_SCHRANKEN_MITGLIEDER=2   # erst ab dieser SCHRANKEN_VERSION kennt der Kern WAMO_ENTWICKLUNG_MITGLIEDER und die Grenzen der Mitglieder
+MIN_DISPATCHER=8             # erst Dispatcher 8 kennt die Kennung des Profils und die Schlüssel MAX_*_PROFIL in kernkanal.conf
+MAX_BUDGET_MITGLIEDER_CENT=200   # Kosten je Lauf (MAX_BUDGET_USD) höchstens so hoch wie die Grenze je Auftrag der Mitglieder (2 USD)
+MAX_PROFILE=20               # wie MAX_PROFILE in voice-core/entwicklung_betrieb.py
 
 KERN_IP=192.168.178.136
 APP="$WURZEL/opt/wamo"
@@ -91,7 +103,8 @@ WAECHTER="$APP/waechter"
 NAME_RE='^v[0-9A-Za-z._-]{1,40}$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 KONFIG_SCHLUESSEL=(KANAL ABLAUF ARTEN REPOS DIENSTE MAX_TURNS MAX_BUDGET_USD MAX_START_STUNDE MAX_START_TAG MAX_LAUFZEIT_TAG_S MAX_FOLGEN
-  MIN_ABSTAND_S MIN_PLATZ_MB MAX_VERSUCH_STUNDE)
+  MIN_ABSTAND_S MIN_PLATZ_MB MAX_VERSUCH_STUNDE MAX_NEU_STUNDE_PROFIL MAX_NEU_TAG_PROFIL MAX_VERSUCH_STUNDE_PROFIL
+  MAX_LAUFZEIT_TAG_S_PROFIL)
 COREENV=/usr/local/sbin/wamo-core-env
 SLOTS=(bash "$HERE/wamo-core-slots.sh")
 PYTHON3=/usr/bin/python3
@@ -106,7 +119,9 @@ fehler() { echo "wamo-job-kern-einrichten: $*" >&2; exit 1; }
 aufruf() {
   echo "wamo-job-kern-einrichten: $*" >&2
   echo "Aufruf: schluessel [--trocken] [--ablauf JJJJMMTT] [--hostfingerabdruck SHA256:...] | kanal --arten A,B --repos O/N[,O/N]" \
-    "[--dienste D] [--max-turns N] [--max-budget-usd X] [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N] | kanal zu | schalter an|aus <release> [--profil <user_id>]" \
+    "[--dienste D] [--max-turns N] [--max-budget-usd X] [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N]" \
+    "[--max-versuch-stunde N] [--max-neu-stunde-profil N] [--max-neu-tag-profil N] [--max-versuch-stunde-profil N]" \
+    "[--max-laufzeit-tag-s-profil N] | kanal zu | schalter an|aus <release> [--profil <user_id>]" \
     "[--kosten-auftrag X] [--kosten-tag X] [--mitglieder an|aus] [--trocken] | notaus-aufheben | status" >&2
   exit 2
 }
@@ -276,12 +291,45 @@ pruefe_repos() {
 }
 
 pruefe_profil() {
-  # eine oder mehrere user_id (UUID, klein geschrieben), durch Komma getrennt, in einer Zeile
+  # eine oder mehrere user_id (UUID, klein geschrieben), durch Komma getrennt, in einer Zeile; höchstens MAX_PROFILE, jede Kurzkennung
+  # (die ersten 8 Hexzeichen) nur einmal: zwei Profile mit derselben Kennung teilten sich Projektordner und Grenzen (der Kern lehnt die
+  # Liste dann ebenso ab)
   local p
   local -a profile
+  local -A kennungen=()
   [[ "$1" =~ ^[0-9a-f-]{36}(,[0-9a-f-]{36})*$ ]] || aufruf "--profil: nur klein geschriebene user_id-Werte (UUID), durch Komma getrennt, in einer Zeile"
   IFS=, read -r -a profile <<< "$1"
-  for p in "${profile[@]}"; do [[ "$p" =~ $UUID_RE ]] || aufruf "--profil: keine gültige user_id (UUID, klein geschrieben)"; done
+  [ "${#profile[@]}" -le "$MAX_PROFILE" ] || aufruf "--profil: höchstens $MAX_PROFILE Profile"
+  for p in "${profile[@]}"; do
+    [[ "$p" =~ $UUID_RE ]] || aufruf "--profil: keine gültige user_id (UUID, klein geschrieben)"
+    [ -z "${kennungen[${p:0:8}]:-}" ] || aufruf "--profil: zwei Profile mit derselben Kurzkennung ${p:0:8} (oder ein Profil doppelt)"
+    kennungen[${p:0:8}]=1
+  done
+}
+
+dispatcher_version() {   # die Zahl aus der Zeile VERSION = "<n>" des installierten Dispatchers (leer, wenn sie fehlt)
+  sed -n 's/^VERSION = "\([1-9][0-9]*\)"[[:space:]]*\(#.*\)\{0,1\}$/\1/p' "$1" 2>/dev/null | head -n1
+}
+
+dispatcher_pruefen() {   # Dispatcher ab MIN_DISPATCHER und ein Modul, das die Grenzen je Profil kennt
+  local v
+  v="$(dispatcher_version "$APP/bin/wamo-job-dispatch")"
+  [ -n "$v" ] && [ "$v" -ge "$MIN_DISPATCHER" ] \
+    || vorbedingung "der Dispatcher ist älter als Version $MIN_DISPATCHER (gefunden: ${v:-keine}; sonst bekäme der Kern die Rechte des PC-Kanals oder verstünde die Regeln je Profil nicht): erst wamo-job-einrichten.sh"
+  [ -f "$WAECHTER/wamo_job_kernkanal.py" ] || vorbedingung "$WAECHTER/wamo_job_kernkanal.py fehlt (wamo-job-einrichten.sh)"
+  grep -q '"grenze_profil"' "$WAECHTER/wamo_job_kernkanal.py" 2>/dev/null \
+    || vorbedingung "das installierte Modul wamo_job_kernkanal.py kennt die Grenzen je Profil nicht (wamo-job-einrichten.sh)"
+}
+
+cent() {   # Betrag mit Punkt (0 bis 99.99) in Cent
+  local ganz="${1%%.*}" rest=""
+  [[ "$1" == *.* ]] && rest="${1#*.}"
+  rest="${rest}00"
+  echo $(( 10#$ganz * 100 + 10#${rest:0:2} ))
+}
+
+mitglieder_im_dropin() {   # an, wenn das vorhandene Drop-in WAMO_ENTWICKLUNG_MITGLIEDER=an setzt
+  [ -f "$DROPIN" ] && grep -qx 'Environment=WAMO_ENTWICKLUNG_MITGLIEDER=an' "$DROPIN" && echo an || echo aus
 }
 
 pruefe_dienste() {
@@ -322,7 +370,9 @@ konfig_standard() {
   K=([KANAL]="$STD_KANAL" [ABLAUF]="$(date -d "+$STD_ABLAUF_TAGE days" +%Y%m%d)" [ARTEN]="" [REPOS]="" [DIENSTE]=""
      [MAX_TURNS]="$STD_MAX_TURNS" [MAX_BUDGET_USD]="$STD_MAX_BUDGET_USD" [MAX_START_STUNDE]="$STD_MAX_START_STUNDE"
      [MAX_START_TAG]="$STD_MAX_START_TAG" [MAX_LAUFZEIT_TAG_S]="$STD_MAX_LAUFZEIT_TAG_S" [MAX_FOLGEN]="$STD_MAX_FOLGEN"
-     [MIN_ABSTAND_S]="$STD_MIN_ABSTAND_S" [MIN_PLATZ_MB]="$STD_MIN_PLATZ_MB" [MAX_VERSUCH_STUNDE]="$STD_MAX_VERSUCH_STUNDE")
+     [MIN_ABSTAND_S]="$STD_MIN_ABSTAND_S" [MIN_PLATZ_MB]="$STD_MIN_PLATZ_MB" [MAX_VERSUCH_STUNDE]="$STD_MAX_VERSUCH_STUNDE"
+     [MAX_NEU_STUNDE_PROFIL]="$STD_MAX_NEU_STUNDE_PROFIL" [MAX_NEU_TAG_PROFIL]="$STD_MAX_NEU_TAG_PROFIL"
+     [MAX_VERSUCH_STUNDE_PROFIL]="$STD_MAX_VERSUCH_STUNDE_PROFIL" [MAX_LAUFZEIT_TAG_S_PROFIL]="$STD_MAX_LAUFZEIT_TAG_S_PROFIL")
 }
 
 KONFIG_FEHLER=""
@@ -363,6 +413,7 @@ KOMMANDO="${1:-}"
 shift
 TROCKEN=0 ABLAUF="" HOSTFP="" ARTEN="" REPOS="" DIENSTE="" MAX_TURNS="" MAX_BUDGET="" PROFIL="" KOSTEN_AUFTRAG="" KOSTEN_TAG="" MITGLIEDER=""
 RELEASE="" SCHALTER="" ZU=0 GITHUB_ART=0 MAX_START_STUNDE="" MAX_START_TAG="" MAX_LAUFZEIT=""
+declare -A GRENZE=()
 optionswert() { [ "$#" -ge 2 ] && [ -n "${2:-}" ] && [[ "$2" != --* ]] || aufruf "$1 braucht einen Wert"; }
 case "$KOMMANDO" in
   schluessel)
@@ -394,6 +445,12 @@ case "$KOMMANDO" in
           --max-start-stunde) optionswert "$@"; MAX_START_STUNDE="$2"; pruefe_zahl --max-start-stunde "$2" 1 60; shift 2 ;;
           --max-start-tag) optionswert "$@"; MAX_START_TAG="$2"; pruefe_zahl --max-start-tag "$2" 1 200; shift 2 ;;
           --max-laufzeit-tag-s) optionswert "$@"; MAX_LAUFZEIT="$2"; pruefe_zahl --max-laufzeit-tag-s "$2" 60 86400; shift 2 ;;
+          --max-versuch-stunde) optionswert "$@"; GRENZE[MAX_VERSUCH_STUNDE]="$2"; pruefe_zahl "$1" "$2" 1 60; shift 2 ;;
+          # je Profil (gilt für jedes Profil, auch für Admins)
+          --max-neu-stunde-profil) optionswert "$@"; GRENZE[MAX_NEU_STUNDE_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 60; shift 2 ;;
+          --max-neu-tag-profil) optionswert "$@"; GRENZE[MAX_NEU_TAG_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 200; shift 2 ;;
+          --max-versuch-stunde-profil) optionswert "$@"; GRENZE[MAX_VERSUCH_STUNDE_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 60; shift 2 ;;
+          --max-laufzeit-tag-s-profil) optionswert "$@"; GRENZE[MAX_LAUFZEIT_TAG_S_PROFIL]="$2"; pruefe_zahl "$1" "$2" 60 86400; shift 2 ;;
           *) aufruf "unbekannte Option für kanal: $1" ;;
         esac
       done
@@ -443,7 +500,7 @@ fi
 
 # ---------------------------------------------------------------- schluessel
 cmd_schluessel() {
-  local ssh_version dispatcher zeile typ blob pub fp host_fp htyp hblob hosteintrag stand_zeile neu_ablauf
+  local ssh_version zeile typ blob pub fp host_fp htyp hblob hosteintrag stand_zeile neu_ablauf
   echo "== 0. Vorbedingungen (nur lesend)"
   ssh_version="$(ssh -V 2>&1 | head -n1 | sed -n 's/^OpenSSH_\([0-9]*\)\.\([0-9]*\).*/\1.\2/p')"
   [[ "$ssh_version" =~ ^[0-9]+\.[0-9]+$ ]] || vorbedingung "OpenSSH-Version nicht lesbar (ssh -V)"
@@ -451,10 +508,7 @@ cmd_schluessel() {
   echo "  OpenSSH $ssh_version"
   if [ -z "$WURZEL" ]; then [ -x /usr/bin/ssh ] || vorbedingung "/usr/bin/ssh fehlt (Paket openssh-client)"; else command -v ssh >/dev/null || vorbedingung "ssh fehlt"; fi
   fail2ban_pruefen
-  dispatcher="$APP/bin/wamo-job-dispatch"
-  grep -Eq '^VERSION = "([7-9]|[1-9][0-9]+)"$' "$dispatcher" 2>/dev/null \
-    || vorbedingung "der Dispatcher ist älter als Version 7 (sonst bekäme der Kern die Rechte des PC-Kanals): erst wamo-job-einrichten.sh"
-  [ -f "$WAECHTER/wamo_job_kernkanal.py" ] || vorbedingung "$WAECHTER/wamo_job_kernkanal.py fehlt (wamo-job-einrichten.sh)"
+  dispatcher_pruefen
   grep -Eq '^[[:space:]]*ExposeAuthInfo yes$' "$SSHD_DROPIN" 2>/dev/null && grep -q 'authorized_keys.d/%u-kern' "$SSHD_DROPIN" \
     || vorbedingung "der sshd-Block fehlt ExposeAuthInfo oder die zweite AuthorizedKeysFile (wamo-job-einrichten.sh, Bestätigung nicht vergessen)"
   [ -f "$HOSTKEY_PUB" ] || vorbedingung "die Datei des Hostschlüssels ${HOSTKEY_PUB#"$WURZEL"} fehlt"
@@ -600,6 +654,7 @@ cmd_kanal() {
   fi
   [ -f "$KERN_DATEI" ] || vorbedingung "${KERN_DATEI#"$WURZEL"} fehlt (erst schluessel)"
   [ ! -e "$NOTAUS" ] || vorbedingung "die Sperrdatei ${NOTAUS#"$WURZEL"} besteht (erst notaus-aufheben, dann schluessel)"
+  dispatcher_pruefen   # die Datei bekommt die Schlüssel MAX_*_PROFIL, die erst Dispatcher 8 kennt
   ruhe_pruefen
   konfig_lesen_hart
   [[ "${K[ABLAUF]}" =~ ^[0-9]{8}$ ]] && tage="$(tage_bis "${K[ABLAUF]}")" || vorbedingung "ABLAUF in kernkanal.conf ist ungültig (schluessel --ablauf)"
@@ -617,6 +672,11 @@ cmd_kanal() {
   [ -z "$MAX_START_STUNDE" ] || K[MAX_START_STUNDE]="$MAX_START_STUNDE"
   [ -z "$MAX_START_TAG" ] || K[MAX_START_TAG]="$MAX_START_TAG"
   [ -z "$MAX_LAUFZEIT" ] || K[MAX_LAUFZEIT_TAG_S]="$MAX_LAUFZEIT"
+  local g
+  for g in "${!GRENZE[@]}"; do K[$g]="${GRENZE[$g]}"; done
+  if [ "$(mitglieder_im_dropin)" = an ] && [ "$(cent "${K[MAX_BUDGET_USD]}")" -gt "$MAX_BUDGET_MITGLIEDER_CENT" ]; then
+    vorbedingung "MAX_BUDGET_USD ${K[MAX_BUDGET_USD]} liegt über 2.00, der Grenze je Auftrag der Mitglieder (erst schalter ... --mitglieder aus)"
+  fi
   K[KANAL]=offen
   konfig_schreiben
   echo "Kanal offen für: ${K[ARTEN]}${K[REPOS]:+ mit Repos ${K[REPOS]}}. Ablauf ${K[ABLAUF]} ($tage Tage)."
@@ -666,6 +726,10 @@ schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
     version="$(schranken_version "$ziel")"
     [ -n "$version" ] && [ "$version" -ge "$MIN_SCHRANKEN_MITGLIEDER" ] \
       || vorbedingung "das Release $RELEASE kennt die Schranken der Mitglieder nicht (SCHRANKEN_VERSION ${version:-?}, nötig ab $MIN_SCHRANKEN_MITGLIEDER): ein altes Release ließe --mitglieder an wirkungslos"
+    dispatcher_pruefen
+    konfig_lesen_hart
+    [ "$(cent "${K[MAX_BUDGET_USD]}")" -le "$MAX_BUDGET_MITGLIEDER_CENT" ] \
+      || vorbedingung "MAX_BUDGET_USD ${K[MAX_BUDGET_USD]} in kernkanal.conf liegt über 2.00, der Grenze je Auftrag der Mitglieder (kanal --max-budget-usd 2.00)"
   fi
   if "$COREENV" liste 2>/dev/null | grep -q '^WAMO_ENTWICKLUNG'; then
     vorbedingung "core.env enthält ein WAMO_ENTWICKLUNG*: es hätte vor dem Drop-in Vorrang (wamo-core-env loeschen)"
@@ -678,8 +742,13 @@ cmd_schalter() {
   local neu vorhanden=0 alt_inhalt
   [ "$TROCKEN" = 1 ] || AKTION=schalter   # trocken: keine Zeile in der Bedienspur
   schalter_vorabpruefung_wenn_an
+  if [ "$SCHALTER" = an ] && [ "$(mitglieder_im_dropin)" = an ] && [ "${MITGLIEDER:-$STD_MITGLIEDER}" != an ]; then
+    echo "Hinweis: Mitglieder sind danach aus (ohne --mitglieder an schreibt das Skript WAMO_ENTWICKLUNG_MITGLIEDER=aus)."
+  fi
   if [ "$TROCKEN" = 1 ]; then
-    if [ "$SCHALTER" = an ]; then echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde so lauten:"; drop_in_text | sed 's/^/  /'
+    if [ "$SCHALTER" = an ]; then
+      echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde so lauten (user_id nur als Kurzkennung):"
+      drop_in_text | sed -E 's/([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\1/g; s/^/  /'
     else echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde entfernt"; fi
     echo "[trocken] danach: systemctl daemon-reload, wamo-core-slots.sh umschalten-kern $RELEASE. Nichts geschrieben, nichts umgeschaltet."
     return 0
@@ -731,11 +800,11 @@ umgebungs_namen() {   # Namen WAMO_ENTWICKLUNG* aus /proc/<pid>/environ, dazu de
   done < "$datei"
 }
 
-schalter_wert() {   # an oder aus aus /proc/<pid>/environ (nur der Schalter)
-  local datei="$PROC/$1/environ" eintrag wert=aus
+schalter_wert() {   # an oder aus aus /proc/<pid>/environ (nur der Schalter, mit $2 ein anderer Schalter wie WAMO_ENTWICKLUNG_MITGLIEDER)
+  local datei="$PROC/$1/environ" eintrag wert=aus name="${2:-WAMO_ENTWICKLUNG_BUERO}"
   [ -r "$datei" ] || { echo "?"; return 0; }
   while IFS= read -r -d '' eintrag; do
-    [ "${eintrag%%=*}" = WAMO_ENTWICKLUNG_BUERO ] && wert="${eintrag#*=}"
+    [ "${eintrag%%=*}" = "$name" ] && wert="${eintrag#*=}"
   done < "$datei"
   echo "$wert"
 }
@@ -778,6 +847,10 @@ cmd_status() {
       ist="$(schalter_wert "$pid")"
       echo "Slot $s: aktiv, Release ${release:--}, $(umgebungs_namen "$pid")"
       if [ "$ist" != "$soll" ]; then abw+=("Slot $s hat WAMO_ENTWICKLUNG_BUERO=$ist, das Drop-in sagt $soll (umschalten-kern lädt es neu)"); fi
+      ist="$(schalter_wert "$pid" WAMO_ENTWICKLUNG_MITGLIEDER)"
+      if [ "$ist" != "${mitglieder_soll:-aus}" ]; then
+        abw+=("Slot $s hat WAMO_ENTWICKLUNG_MITGLIEDER=$ist, das Drop-in sagt ${mitglieder_soll:-aus} (umschalten-kern lädt es neu)")
+      fi
     else
       echo "Slot $s: ${zustand:-unbekannt}, Release ${release:--}"
     fi

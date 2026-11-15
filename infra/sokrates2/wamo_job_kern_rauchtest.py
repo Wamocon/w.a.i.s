@@ -231,7 +231,7 @@ def urteil(probe: Probe, returncode: int | None, stdout: str, stderr: str = "", 
     if probe.ja:
         try:
             antwort = json.loads(stdout.strip().splitlines()[-1])
-            ok = (returncode == 0 and antwort.get("ok") is True and antwort.get("kanal") == "kern" and int(str(antwort.get("version"))) >= 7)
+            ok = (returncode == 0 and antwort.get("ok") is True and antwort.get("kanal") == "kern" and int(str(antwort.get("version"))) >= 8)
         except (ValueError, IndexError, AttributeError, TypeError):
             ok = False
         return ok, f"Exit {returncode}"

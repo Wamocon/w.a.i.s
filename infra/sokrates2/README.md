@@ -1405,20 +1405,41 @@ im Dispatcher zusätzlich die GitHub-ID `SELF_REPO_IDS`, dazu die Fork-Prüfung)
 Plan: `docs/ausrollen-neue-nutzer.md` (4.6, P5, Entscheidungen N6 und N13). Dispatcher 8 trennt die Profile im Kern-Kanal: Der Projektname lautet
 `kern-<Kennung>-<Name>` (Kennung = `profil` der Kopfzeile, 8 Hexzeichen, die Kurzkennung der user_id), die Kennung steht in `auftrag.json` und in jeder
 Zeile von `kernkanal.jsonl`. Ein Projektordner, den ein Kern-Auftrag eines anderen Profils (oder einer ohne Kennung) angelegt hat, ist gesperrt (`projekt`),
-ebenso eine Fortsetzung aus einem anderen Profil. Zusätzlich zu den Grenzen aus `kernkanal.conf` gelten feste Grenzen je Profil (`grenze_profil`): höchstens 3 neue
-Aufträge je Stunde und 8 je Tag (Folgen desselben Auftrags zählen nicht), 10 Versuche je Stunde, 7200 Sekunden Laufzeit je Tag. `PARALLEL_MAX = 1` bleibt; ist der
-Platz belegt, sagt der Kern "Ein anderer Auftrag läuft gerade. Bitte versuche es in ein paar Minuten noch einmal." (einfache Form der Warteschlange).
+ebenso eine Fortsetzung aus einem anderen Profil. Die Kennung schützt gegen Fehler und Verwechslungen, nicht gegen einen kompromittierten Kern: Der Kern setzt
+`profil` selbst, der Dispatcher kann es nicht unabhängig prüfen. Ordner `kern-<Name>` aus Aufträgen vor Dispatcher 8 (ohne Kennung) werden nicht fortgesetzt;
+neue Aufträge bekommen neue Ordner, die alten bleiben liegen (Aufräumen ist ein Folgepaket).
 
-Mitglieder starten Aufträge nur mit `WAMO_ENTWICKLUNG_MITGLIEDER=an` im Drop-in und mit ihrer `user_id` in `WAMO_ENTWICKLUNG_PROFILE`, Laborprofile nie. Für sie gelten
-höchstens 2 USD je Auftrag und 10 USD je Tag (der kleinere Wert mit dem Drop-in), keine Repos bis Folgepaket 1, dieselben Arten wie im Kanal freigegeben.
+**Grenzen.** Gesamtgrenzen wie bisher aus `kernkanal.conf`, dazu Grenzen je Profil (`grenze_profil`), die für jedes Profil gelten, auch für Admins, als Schlüssel
+in `kernkanal.conf` mit Standard und Bereich: `MAX_NEU_STUNDE_PROFIL` (3, 1 bis 60) und `MAX_NEU_TAG_PROFIL` (8, 1 bis 200) zählen je Auftrag nur seinen
+ersten Start, `MAX_VERSUCH_STUNDE_PROFIL` (10, 1 bis 60) gilt nicht für Folgen eines eigenen Auftrags (die begrenzt `MAX_FOLGEN`), `MAX_LAUFZEIT_TAG_S_PROFIL`
+(7200, 60 bis 86400). Die Gesamtgrenze der Versuche (`MAX_VERSUCH_STUNDE`) liegt seit Dispatcher 8 fest bei höchstens 60 (Standard 60, nur nach unten): zwei
+Personen mit je ihrer Grenze sperren den Admin nicht mehr aus. Ein bestehendes `kernkanal.conf` behält seine Werte (auch `MAX_VERSUCH_STUNDE=20`), bis `kanal`
+sie ändert. `PARALLEL_MAX = 1` bleibt; meldet der Dispatcher einen anderen laufenden Auftrag, sagt der Kern "Ein anderer Auftrag läuft gerade. Bitte versuche es
+in ein paar Minuten noch einmal." (einfache Form der Warteschlange).
 
-Reihenfolge: (1) Kern-Release mit `SCHRANKEN_VERSION = 2` (der neue Kern schickt schon `kern-<Kennung>-<Name>`, Dispatcher 7 nimmt das für Aufträge ohne Repo
-an). (2) Bei Ruhe `wamo-job-einrichten.sh` (Dispatcher 8 und Modul), dann `wamo-job-kern-einrichten.sh schluessel --ablauf <JJJJMMTT> --hostfingerabdruck
-<SHA256:...>` (installiert den neuen Rauchtest mit der Probe "Start mit fremder Kennung", der Kanal bleibt, wie er ist), dann `wamo-job-kern-rauchtest --produktiv`.
-(3) Gesamtgrenzen für mehrere Personen anheben: `kanal --arten recherche --max-start-stunde 12 --max-start-tag 40 --max-laufzeit-tag-s 28800`. (4) `schalter an
-<release> --profil <niko>,<pilot> --kosten-auftrag 3 --kosten-tag 10 --mitglieder an --trocken`, dann ohne `--trocken` (verlangt `SCHRANKEN_VERSION` 2 im
-Zielrelease; ohne `--mitglieder` schreibt das Skript `aus`). Rückweg: sofort `wamo-job-kern-rueckweg.sh notaus`; für Mitglieder allein `schalter an <release>
---profil <niko> --mitglieder aus`.
+**Mitglieder.** Aufträge nur mit `WAMO_ENTWICKLUNG_MITGLIEDER=an` im Drop-in und mit ihrer `user_id` in `WAMO_ENTWICKLUNG_PROFILE` (jede Kurzkennung nur einmal,
+höchstens 20 Profile), Laborprofile nie. Für sie gelten höchstens 2 USD je Auftrag und 10 USD je Tag (der kleinere Wert mit dem Drop-in), keine Repos bis
+Folgepaket 1, keine Befehlskriterien, dieselben Arten wie im Kanal freigegeben. Die Tagesgrenze wird vor jedem Start gegen die Kosten bis dahin geprüft: ein
+letzter Auftrag kann sie um höchstens seine eigene Grenze überschreiten (bis zu einem Lauf mehr). `MAX_BUDGET_USD` (Kosten je Lauf) darf dann höchstens 2.00
+sein: `schalter ... --mitglieder an` und `kanal` mit höherem Budget brechen mit Exit 3 ab.
+
+**Versionspaar.** Kern `SCHRANKEN_VERSION = 2` gehört zu Dispatcher 8. Kern 2 mit Dispatcher 7 geht für Aufträge ohne Repo (Dispatcher 7 nimmt
+`kern-<Kennung>-<Name>` als gewöhnlichen Namen an, ohne Trennung und ohne Grenzen je Profil). Kern 1 mit Dispatcher 8 geht nicht: der alte Kern schickt
+`kern-<Name>`, jeder Start endet mit `projekt`. `schluessel`, `kanal` und `schalter ... --mitglieder an` verlangen Dispatcher 8 (die Datei bekommt die Schlüssel
+`MAX_*_PROFIL`, die Dispatcher 7 als Fehler läse), der Rauchtest ebenso.
+
+**Reihenfolge.** (1) Kern-Release mit `SCHRANKEN_VERSION = 2` über die Slots, Schalter unverändert. (2) Gleich danach bei Ruhe `wamo-job-einrichten.sh` (Dispatcher 8
+und Modul), dann `wamo-job-kern-einrichten.sh schluessel --trocken` und `schluessel --ablauf <JJJJMMTT> --hostfingerabdruck <SHA256:...>` (installiert den
+Rauchtest mit der Probe "Start mit fremder Kennung", schreibt die neuen Schlüssel mit Standardwerten, der Kanal bleibt, wie er ist), dann
+`wamo-job-kern-rauchtest --produktiv`. (3) Grenzen für mehrere Personen: `kanal --arten recherche --max-start-stunde 12 --max-start-tag 40 --max-laufzeit-tag-s 28800
+--max-versuch-stunde 60` (ein Aufruf ersetzt Arten, Repos und Dienste vollständig: was nicht genannt ist, ist danach nicht mehr erlaubt; Grenzen ohne Option
+bleiben). (4) `schalter an <release> --profil <niko>,<pilot> --kosten-auftrag 3 --kosten-tag 10 --mitglieder an --trocken`, dann ohne `--trocken` (verlangt
+`SCHRANKEN_VERSION` 2 im Zielrelease, Dispatcher 8 und `MAX_BUDGET_USD` bis 2.00; ohne `--mitglieder an` schreibt das Skript `aus` und sagt es).
+
+**Rückweg.** Sofort: `wamo-job-kern-rueckweg.sh notaus`. Nur die Mitglieder: `schalter an <release> --profil <niko> --mitglieder aus`. Ganz zurück in dieser
+Reihenfolge: zuerst `notaus` (oder `kanal zu`), dann den Kern zurück (`rueckweg-kern`), dann Dispatcher 7 aus dem vorigen Stand mit `wamo-job-einrichten.sh`,
+und erst danach `kernkanal.conf` ohne die Schlüssel `MAX_*_PROFIL` (Sicherung unter `/var/backups/wamo-job-kern/`), `notaus-aufheben`, `schluessel`, `kanal`.
+Bleibt Dispatcher 8 stehen, während der Kern zurück auf `SCHRANKEN_VERSION 1` geht, enden alle Starts mit `projekt` (fail closed).
 
 ## 19. Labor-Dienst (Test-Jira des Testlabors, Betrieb, vorbereitet am 12.11.2026, noch nicht ausgerollt)
 

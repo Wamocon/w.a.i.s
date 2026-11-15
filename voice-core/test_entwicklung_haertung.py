@@ -155,17 +155,17 @@ class KostenAusEreignisTests(unittest.TestCase):
 
     def test_auftragsgrenze_gilt_auch_bei_nan_als_erreicht(self):
         with tb.buero():
-            self.assertFalse(eb.auftragsgrenze_erreicht(2.99))
-            self.assertTrue(eb.auftragsgrenze_erreicht(3.0))
-            self.assertTrue(eb.auftragsgrenze_erreicht(float("nan")))  # nan >= grenze wäre immer False: fail closed
-            self.assertTrue(eb.auftragsgrenze_erreicht(float("inf")))
+            self.assertFalse(eb.auftragsgrenze_erreicht(2.99, None))
+            self.assertTrue(eb.auftragsgrenze_erreicht(3.0, None))
+            self.assertTrue(eb.auftragsgrenze_erreicht(float("nan"), None))  # nan >= grenze wäre immer False: fail closed
+            self.assertTrue(eb.auftragsgrenze_erreicht(float("inf"), None))
 
     def test_untergrenze_bei_fehlenden_kosten(self):
         with tb.buero():
-            self.assertEqual(eb.kosten_mit_untergrenze(0.4), 3.0)
-            self.assertEqual(eb.kosten_mit_untergrenze(4.0), 4.0)
+            self.assertEqual(eb.kosten_mit_untergrenze(0.4, None), 3.0)
+            self.assertEqual(eb.kosten_mit_untergrenze(4.0, None), 4.0)
         with tb.buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="kaputt"):
-            self.assertEqual(eb.kosten_mit_untergrenze(0.4), 0.4)  # ohne gültige Grenze gibt es nichts zu schätzen
+            self.assertEqual(eb.kosten_mit_untergrenze(0.4, None), 0.4)  # ohne gültige Grenze gibt es nichts zu schätzen
 
     def test_die_funktion_hat_keinen_toten_zweig_mehr(self):
         """Produktiv wird sie nur für einen gestarteten Lauf ohne gemeldete Kosten gerufen: der Parameter ohne_ergebnis entfällt."""

@@ -40,8 +40,10 @@ Regeln des Kern-Kanals, in dieser Reihenfolge (jeder Verstoß ist ein Code):
        angelegt hat, sind gesperrt (projekt).
 
 Trennung je Profil (Ausrollen P5): Die Kennung (8 Hexzeichen, die Kurzkennung der user_id, die der Kern als profil in der Kopfzeile
-schickt) steht im Projektnamen (kern-<Kennung>-<Name>) und in auftrag.json. Die Grenzen je Profil (MAX_*_PROFIL unten) gelten
-zusätzlich zu denen aus kernkanal.conf und sind fest; sie zählen nur Zählerzeilen mit derselben Kennung.
+schickt) steht im Projektnamen (kern-<Kennung>-<Name>) und in auftrag.json. Die Grenzen je Profil (Schlüssel MAX_*_PROFIL in
+kernkanal.conf, mit Standard und Bereich wie die übrigen) gelten zusätzlich zu den Gesamtgrenzen und für jedes Profil, auch für Admins;
+sie zählen nur Zählerzeilen mit derselben Kennung. Die Kennung schützt gegen Fehler und Verwechslungen, nicht gegen einen kompromittierten
+Kern: Der Kern setzt profil selbst, der Dispatcher kann es nicht unabhängig prüfen.
 
 Die Fenster der Zähler gleiten (Stunde = 3600 s, Tag = 86400 s). Die Zähler stehen in /srv/wamo/logs/kernkanal.jsonl,
 je Start und je Ende eine Zeile {"t", "job", "ereignis", "dauer_s" (nur bei ende), "profil" (Kennung, wenn bekannt)}.
@@ -81,13 +83,9 @@ SELF_REPO = SELF_REPOS[0]  # Alias für ältere Verweise, nie zum Vergleichen
 MAX_PROJEKT_ZEICHEN = 50
 MAX_REPOS = 10
 MAX_ABLAUF_TAGE = 400
-MAX_VERSUCH_STUNDE_FEST = 20  # Versuche je Stunde (jeder Start, der die erste Prüfung besteht, auch wenn er später an Sperren scheitert)
-# Grenzen je Profil (Kennung), fest und zusätzlich zu kernkanal.conf: neue Aufträge (Folgen desselben Auftrags zählen nicht), Versuche
-# und Laufzeit. So kann eine Person den einen Platz des Dispatchers nicht für alle anderen aufbrauchen.
-MAX_NEU_STUNDE_PROFIL = 3
-MAX_NEU_TAG_PROFIL = 8
-MAX_VERSUCH_STUNDE_PROFIL = 10
-MAX_LAUFZEIT_TAG_S_PROFIL = 7200
+# Versuche je Stunde für alle Profile zusammen (jeder Start, der die erste Prüfung besteht, auch wenn er später an Sperren scheitert).
+# 60 seit Dispatcher 8: mit mehreren Profilen dürfen zwei Personen mit je ihrer Grenze den Admin nicht aussperren. Nur nach unten einstellbar.
+MAX_VERSUCH_STUNDE_FEST = 60
 MAX_SCHLUESSELDATEI_BYTES = 256 * 1024
 MAX_AUTH_BYTES = 16 * 1024
 MAX_KONFIG_BYTES = 64 * 1024
@@ -114,7 +112,10 @@ NORMAL_RE = re.compile(r"[^a-z0-9-]")
 # Schlüssel der Konfiguration: (kleinster Wert, größter Wert) für Zahlen; Standard wie beim Anlegen durch das Skript
 ZAHLEN = {"MAX_TURNS": (1, 200), "MAX_START_STUNDE": (1, 60), "MAX_START_TAG": (1, 200), "MAX_LAUFZEIT_TAG_S": (60, 86400),
           "MAX_FOLGEN": (0, 20), "MIN_ABSTAND_S": (0, 3600), "MIN_PLATZ_MB": (100, 1000000),
-          "MAX_VERSUCH_STUNDE": (1, MAX_VERSUCH_STUNDE_FEST)}  # Versuche je Stunde: der Wert darf den festen nur senken
+          "MAX_VERSUCH_STUNDE": (1, MAX_VERSUCH_STUNDE_FEST),  # Versuche je Stunde: der Wert darf den festen nur senken
+          # je Profil (Dispatcher 8): neue Aufträge je Stunde und Tag (Folgen zählen nicht), Versuche je Stunde, Laufzeit je Tag
+          "MAX_NEU_STUNDE_PROFIL": (1, 60), "MAX_NEU_TAG_PROFIL": (1, 200), "MAX_VERSUCH_STUNDE_PROFIL": (1, MAX_VERSUCH_STUNDE_FEST),
+          "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400)}
 LISTEN = ("ARTEN", "REPOS", "DIENSTE")
 BEKANNTE_SCHLUESSEL = frozenset({"KANAL", "ABLAUF", "MAX_BUDGET_USD", *ZAHLEN, *LISTEN})
 
@@ -157,6 +158,10 @@ class Konfig:
     max_laufzeit_tag_s: int = 14400
     max_folgen: int = 5
     max_versuch_stunde: int = MAX_VERSUCH_STUNDE_FEST
+    max_neu_stunde_profil: int = 3
+    max_neu_tag_profil: int = 8
+    max_versuch_stunde_profil: int = 10
+    max_laufzeit_tag_s_profil: int = 7200
     min_abstand_s: int = 60
     min_platz_mb: int = 2048
 
@@ -184,10 +189,11 @@ class StartAnfrage:
     github: bool  # die Art hat eine GitHub-Stufe
     dienste: tuple[str, ...]  # Dienste der Art außer GitHub
     app_modus: bool  # die GitHub-App ist eingerichtet (kein Rückfall auf einen persönlichen Token)
-    fremd: bool = False  # der Auftrag besteht schon und gehört nicht dem Kern-Kanal (Regel 4)
-    projekt_fremd: bool = False  # der Projektordner besteht schon und stammt aus keinem Auftrag mit kanal=kern
-    projekt_kollision: bool = False  # ein Kern-Auftrag hat denselben Projektordner mit einem anderen Repo belegt
-    projekt_profil_fremd: bool = False  # ein Kern-Auftrag eines anderen Profils (oder ohne Profil) hat den Projektordner angelegt
+    # Die Lage des Auftrags und des Projektordners hat keine Vorgabe: wer eine Anfrage baut, muss sie ermitteln (nie still "frei")
+    fremd: bool  # der Auftrag besteht schon und gehört nicht dem Kern-Kanal (Regel 4)
+    projekt_fremd: bool  # der Projektordner besteht schon und stammt aus keinem Auftrag mit kanal=kern
+    projekt_kollision: bool  # ein Kern-Auftrag hat denselben Projektordner mit einem anderen Repo belegt
+    projekt_profil_fremd: bool  # ein Kern-Auftrag eines anderen Profils (oder ohne Profil) hat den Projektordner angelegt
 
 
 class KonfigFehler(Exception):
@@ -671,28 +677,32 @@ def freier_platz_mb(pfad) -> int | None:
         return None
 
 
-def pruefe_grenzen_profil(ereignisse: list[dict], job: str, jetzt: float, profil: str | None) -> str | None:
-    """Die festen Grenzen je Profil (grenze_profil): neue Aufträge je Stunde und Tag (eine Folge desselben Auftrags ist kein neuer),
-    Versuche je Stunde, Laufzeit je Tag. Gezählt werden nur Zeilen mit derselben Kennung. Ohne Kennung gibt es nichts zu zählen
-    (Regel 7 verlangt sie ohnehin)."""
-    if profil is None:
-        return None
-    eigene = [e for e in ereignisse if e.get("profil") == profil]
-    starts = [e for e in eigene if e["ereignis"] == "start"]
-    if not any(e["job"] == job for e in starts):  # ein neuer Auftrag dieses Profils, keine Folge
-        neu_stunde = {e["job"] for e in starts if e["t"] > jetzt - STUNDE_S}
-        neu_tag = {e["job"] for e in starts if e["t"] > jetzt - TAG_S}
-        if len(neu_stunde) >= MAX_NEU_STUNDE_PROFIL or len(neu_tag) >= MAX_NEU_TAG_PROFIL:
-            return "grenze_profil"
-    if sum(1 for e in eigene if e["ereignis"] == "versuch" and e["t"] > jetzt - STUNDE_S) >= MAX_VERSUCH_STUNDE_PROFIL:
+def pruefe_grenzen_profil(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, profil: str | None) -> str | None:
+    """Die Grenzen je Profil (grenze_profil) aus kernkanal.conf: neue Aufträge je Stunde und Tag (gezählt wird je Auftrag nur sein erster
+    Start, eine Folge ist kein neuer Auftrag), Versuche je Stunde (gilt nicht für die Folge eines eigenen Auftrags, die begrenzt MAX_FOLGEN),
+    Laufzeit je Tag. Gezählt werden nur Zeilen mit derselben Kennung. Ohne gültige Kennung: grenze_profil (fail closed)."""
+    if not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil):
         return "grenze_profil"
-    if sum(e.get("dauer_s", 0) for e in eigene if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S) >= MAX_LAUFZEIT_TAG_S_PROFIL:
+    eigene = [e for e in ereignisse if e.get("profil") == profil]
+    erste: dict[str, int] = {}  # Auftrag -> sein erster Start
+    for e in eigene:
+        if e["ereignis"] == "start":
+            erste[e["job"]] = min(e["t"], erste.get(e["job"], e["t"]))
+    folge = job in erste
+    if not folge:
+        neu_stunde = sum(1 for t in erste.values() if t > jetzt - STUNDE_S)
+        neu_tag = sum(1 for t in erste.values() if t > jetzt - TAG_S)
+        if neu_stunde >= konfig.max_neu_stunde_profil or neu_tag >= konfig.max_neu_tag_profil:
+            return "grenze_profil"
+        if sum(1 for e in eigene if e["ereignis"] == "versuch" and e["t"] > jetzt - STUNDE_S) >= konfig.max_versuch_stunde_profil:
+            return "grenze_profil"
+    if sum(e.get("dauer_s", 0) for e in eigene if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S) >= konfig.max_laufzeit_tag_s_profil:
         return "grenze_profil"
     return None
 
 
 def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, platz_mb: int | None,
-                   profil: str | None = None) -> str | None:
+                   profil: str | None) -> str | None:
     """Regel 9 in der Reihenfolge grenze_start, grenze_laufzeit, grenze_profil, grenze_folgen, abstand, platz. Der n-te Start im
     Fenster geht, der (n+1)-te nicht (n ist die Grenze). Fenster gleiten: Stunde 3600 s, Tag 86400 s. profil: die Kennung aus der
     Kopfzeile für die Grenzen je Profil."""
@@ -705,7 +715,7 @@ def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: floa
     laufzeit = sum(e.get("dauer_s", 0) for e in ereignisse if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S)
     if laufzeit >= konfig.max_laufzeit_tag_s:
         return "grenze_laufzeit"
-    grund = pruefe_grenzen_profil(ereignisse, job, jetzt, profil)
+    grund = pruefe_grenzen_profil(konfig, ereignisse, job, jetzt, profil)
     if grund is not None:
         return grund
     folge = any(e["job"] == job for e in starts)  # eine Folge desselben Auftrags (Abnahme-Runde): MAX_FOLGEN begrenzt sie, der Abstand nicht

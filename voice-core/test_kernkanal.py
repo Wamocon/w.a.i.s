@@ -506,7 +506,8 @@ def test_der_pc_kanal_darf_den_namensraum_kern_nicht_oeffnen():
 # ---------------------------------------------------------------- Start: Regeln 5 bis 7
 def anfrage(**ueber):
     werte = dict(job=JOB, projekt="kern-1a2b3c4d-marktstudie", art="recherche", repo=None, zugang="folgt", profil="1a2b3c4d",
-                 github=False, dienste=(), app_modus=True)
+                 github=False, dienste=(), app_modus=True, fremd=False, projekt_fremd=False, projekt_kollision=False,
+                 projekt_profil_fremd=False)
     werte.update(ueber)
     return K.StartAnfrage(**werte)
 
@@ -834,8 +835,9 @@ def test_versuche_zaehlen_nur_die_letzte_stunde_und_der_wert_darf_nur_nach_unten
     assert start(anfrage(), drei, [_versuch(100), _versuch(200), _versuch(300)]) == "grenze_start"
     assert lese(konfig_text(MAX_VERSUCH_STUNDE="20")).max_versuch_stunde == 20
     assert lese(konfig_text(MAX_VERSUCH_STUNDE="1")).max_versuch_stunde == 1
-    assert lese(konfig_text(MAX_VERSUCH_STUNDE=None)).max_versuch_stunde == 20  # fester Standard
-    for schlecht in ("21", "0", "-1", "zwanzig", "020", ""):
+    assert lese(konfig_text(MAX_VERSUCH_STUNDE="60")).max_versuch_stunde == 60
+    assert lese(konfig_text(MAX_VERSUCH_STUNDE=None)).max_versuch_stunde == 60  # fester Standard seit Dispatcher 8
+    for schlecht in ("61", "0", "-1", "zwanzig", "020", ""):
         with pytest.raises(K.KonfigFehler):
             lese(konfig_text(MAX_VERSUCH_STUNDE=schlecht))
 
@@ -1006,7 +1008,8 @@ def test_die_reihenfolge_gesamt_vor_profil_vor_folgen():
     assert start(anfrage(), zs, drei) == "grenze_start"  # gesamt zuerst
     zs2 = zustand(konfig_text(ARTEN="recherche", MIN_ABSTAND_S="0", MAX_FOLGEN="0", MAX_START_STUNDE="60", MAX_START_TAG="200"))
     assert start(anfrage(), zs2, drei) == "grenze_profil"
-    assert K.pruefe_grenzen_profil(drei, JOB, JETZT, None) is None  # ohne Kennung keine Grenze je Profil
+    for ohne in (None, "", "1A2B3C4D", "../x", 5):  # ohne gültige Kennung: gesperrt (fail closed)
+        assert K.pruefe_grenzen_profil(K.Konfig(), [], JOB, JETZT, ohne) == "grenze_profil", ohne
 
 
 def test_der_zaehler_traegt_die_kennung(tmp_path):
@@ -1023,3 +1026,51 @@ def test_der_zaehler_traegt_die_kennung(tmp_path):
     assert not (tmp_path / "n.jsonl").exists()
     pfad.write_text(f'{{"t": 1, "job": "{JOB}", "ereignis": "start", "profil": "../x"}}\n', encoding="utf-8")
     assert K.zaehler_lesen(pfad) == [{"t": 1, "job": JOB, "ereignis": "start"}]  # eine ungültige Kennung fällt weg, die Zeile zählt gesamt
+
+
+
+def test_grenze_profil_zaehlt_je_auftrag_nur_den_ersten_start():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20")
+    # drei alte Aufträge (erster Start vor mehr als einer Stunde) mit Folgen in dieser Stunde: keiner ist in dieser Stunde neu
+    alt_mit_folgen = [_p(_start(5000 + i, f"{i + 1:x}" * 16)) for i in range(3)] + [_p(_start(100 + i, f"{i + 1:x}" * 16)) for i in range(3)]
+    assert start(anfrage(), zs, alt_mit_folgen) is None
+    # am Tag zählen sie je einmal, nicht je Start
+    tag = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20", MAX_NEU_TAG_PROFIL="4")
+    assert start(anfrage(), tag, alt_mit_folgen) is None  # drei Aufträge, sechs Starts: der vierte Auftrag geht
+    assert start(anfrage(), tag, alt_mit_folgen + [_p(_start(6000, "d" * 16))]) == "grenze_profil"
+
+
+def test_eine_folge_des_eigenen_auftrags_scheitert_nicht_an_den_versuchen_je_profil():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20")
+    versuche = [_p(_versuch(100 + i, JOB)) for i in range(12)] + [_p(_start(50, JOB))]  # der Auftrag läuft schon (Abnahme-Runden)
+    assert start(anfrage(), zs, versuche) is None  # MAX_FOLGEN begrenzt die Folgen, nicht die Versuche je Profil
+    assert start(anfrage(job="e" * 16), zs, versuche) == "grenze_profil"  # ein neuer Auftrag desselben Profils schon
+    assert start(anfrage(), zs, versuche + [_p(_ende(10, 7200, JOB))]) == "grenze_profil"  # die Laufzeit gilt auch für Folgen
+
+
+def test_die_grenzen_je_profil_stehen_in_der_konfiguration():
+    std = lese(konfig_text())
+    assert (std.max_neu_stunde_profil, std.max_neu_tag_profil, std.max_versuch_stunde_profil, std.max_laufzeit_tag_s_profil) == (3, 8, 10, 7200)
+    k = lese(konfig_text(MAX_NEU_STUNDE_PROFIL="12", MAX_NEU_TAG_PROFIL="40", MAX_VERSUCH_STUNDE_PROFIL="60", MAX_LAUFZEIT_TAG_S_PROFIL="28800"))
+    assert (k.max_neu_stunde_profil, k.max_neu_tag_profil, k.max_versuch_stunde_profil, k.max_laufzeit_tag_s_profil) == (12, 40, 60, 28800)
+    for name, schlecht in (("MAX_NEU_STUNDE_PROFIL", "0"), ("MAX_NEU_STUNDE_PROFIL", "61"), ("MAX_NEU_TAG_PROFIL", "201"),
+                           ("MAX_VERSUCH_STUNDE_PROFIL", "61"), ("MAX_LAUFZEIT_TAG_S_PROFIL", "59"), ("MAX_LAUFZEIT_TAG_S_PROFIL", "86401")):
+        with pytest.raises(K.KonfigFehler):
+            lese(konfig_text(**{name: schlecht}))
+    eins = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_NEU_STUNDE_PROFIL="1")
+    assert start(anfrage(), eins, [_p(_start(100, "a" * 16))]) == "grenze_profil"
+    viel = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_LAUFZEIT_TAG_S_PROFIL="28800")
+    assert start(anfrage(), viel, [_p(_ende(5000, 7200))]) is None  # ein Admin mit mehr Laufzeit: der Wert ist einstellbar
+
+
+def test_zwei_profile_mit_ihren_versuchen_sperren_ein_drittes_nicht_aus():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_VERSUCH_STUNDE=None)  # Gesamtgrenze: der Standard 60
+    zwei = [_p(_versuch(100 + i), PROFIL_A) for i in range(10)] + [_p(_versuch(200 + i), PROFIL_B) for i in range(10)]
+    assert start(anfrage(profil="0a0b0c0d", projekt="kern-0a0b0c0d-marktstudie"), zs, zwei) is None
+    assert K.MAX_VERSUCH_STUNDE_FEST == 60 and K.Konfig().max_versuch_stunde == 60
+
+
+def test_eine_anfrage_ohne_lage_des_ordners_gibt_es_nicht():
+    with pytest.raises(TypeError):
+        K.StartAnfrage(job=JOB, projekt="kern-1a2b3c4d-x", art="recherche", repo=None, zugang="folgt", profil=PROFIL_A, github=False,
+                       dienste=(), app_modus=True)  # fremd, projekt_fremd, projekt_kollision und projekt_profil_fremd sind Pflicht

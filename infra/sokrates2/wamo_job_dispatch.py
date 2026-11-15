@@ -117,7 +117,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-VERSION = "8"  # 8: Trennung je Profil im Kern-Kanal (Projektname kern-<Kennung>-<Name>, Kennung in auftrag.json, Grenzen je Profil)
+# 8: Trennung je Profil im Kern-Kanal (Projektname kern-<Kennung>-<Name>, Kennung in auftrag.json, Grenzen je Profil). Die Zeile darunter
+# bleibt genau so (ohne Kommentar am Ende): wamo-job-kern-einrichten.sh liest die Zahl daraus.
+VERSION = "8"
 
 HEIM = Path("/srv/wamo")
 APP = Path("/opt/wamo")  # root-eigen; Programme in bin/, Wächter in waechter/ (in der Sandbox derselbe Pfad)

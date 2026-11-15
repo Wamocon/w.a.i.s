@@ -90,9 +90,9 @@ class BueroProblemTests(unittest.TestCase):
         for roh, wert in (("3", 3.0), ("0.5", 0.5), ("10.00", 10.0), (" 2.25 ", 2.25)):
             with self.subTest(roh=roh), buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=roh, WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="50"):
                 self.assertIsNone(eb.buero_problem())
-                self.assertEqual(eb.kosten_auftrag(), wert)
+                self.assertEqual(eb.kosten_auftrag(None), wert)
         with buero():
-            self.assertEqual(eb.kosten_tag(), 10.0)
+            self.assertEqual(eb.kosten_tag(None), 10.0)
 
     def test_ungueltiger_schalterwert_schaltet_ab(self):
         with buero(WAMO_ENTWICKLUNG_BUERO="vielleicht"):
@@ -675,8 +675,13 @@ class GrundSaetzeTests(unittest.TestCase):
     def test_ablehngrund_je_ereignis_und_code(self):
         g = eb.ablehn_grund
         self.assertEqual(g(2, {"kanal_gesperrt": {"grund": "kanal_zu"}}), eb.GRUND_SAETZE["kanal_zu"])
-        self.assertEqual(g(4, {"belegt": {}}), eb.SATZ_ANDERER_AUFTRAG)  # einfache Form der Warteschlange: später noch einmal
-        self.assertIn("in ein paar Minuten", g(4, {"belegt": {}}))
+        # einfache Form der Warteschlange: nur wenn der Dispatcher wirklich einen anderen Auftrag meldet, "später noch einmal"
+        self.assertEqual(g(4, {"belegt": {"grund": "Es läuft schon ein Auftrag"}}), eb.SATZ_ANDERER_AUFTRAG)
+        self.assertEqual(g(4, {"belegt": {"grund": "Es laufen schon 2 Aufträge"}}), eb.SATZ_ANDERER_AUFTRAG)
+        self.assertIn("in ein paar Minuten", eb.SATZ_ANDERER_AUFTRAG)
+        for ev in ({}, {"grund": "Dieser Auftrag läuft bereits"}, {"grund": "Im Projekt läuft schon ein anderer Auftrag"}, "x"):
+            with self.subTest(ev=ev):
+                self.assertEqual(g(4, {"belegt": ev}), eb.SATZ_BELEGT)
         self.assertIn("Claude-Zugang", g(5, {"keine_zugangsdaten": {}}))
         self.assertIn("Claude-Zugang", g(2, {"zugang_ungueltig": {}}))
         self.assertIn("Selbsttest", g(3, {"selbsttest_fehlgeschlagen": {}}))
@@ -1299,7 +1304,7 @@ class MitgliederKostenTests(unittest.TestCase):
         with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="3", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="25"):
             self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (2.0, 10.0))
             self.assertEqual((eb.kosten_auftrag(a), eb.kosten_tag(a)), (3.0, 25.0))
-            self.assertEqual((eb.kosten_auftrag(), eb.kosten_tag()), (3.0, 25.0))
+            self.assertEqual((eb.kosten_auftrag(None), eb.kosten_tag(None)), (3.0, 25.0))
             self.assertTrue(eb.auftragsgrenze_erreicht(2.0, m))
             self.assertFalse(eb.auftragsgrenze_erreicht(1.99, m))
             self.assertFalse(eb.auftragsgrenze_erreicht(2.5, a))
@@ -1310,6 +1315,13 @@ class MitgliederKostenTests(unittest.TestCase):
         with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="x"):
             self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (None, None))  # fehlt die Grenze, bleibt es aus
             self.assertTrue(eb.auftragsgrenze_erreicht(0.0, m))
+
+    def test_die_kostenfunktionen_haben_keine_stille_vorgabe(self):
+        import inspect
+
+        for funktion in (eb.kosten_auftrag, eb.kosten_tag, eb.kosten_mit_untergrenze, eb.auftragsgrenze_erreicht):
+            with self.subTest(funktion=funktion.__name__):
+                self.assertIs(inspect.signature(funktion).parameters["zulassung"].default, inspect.Parameter.empty)
 
     def test_mitglied_muss_ein_wahrheitswert_sein(self):
         for schlecht in ("ja", 1, None):
@@ -1329,6 +1341,17 @@ class MitgliederTagesgrenzeTests(unittest.IsolatedAsyncioTestCase):
                     aktion, satz = await eb.AuftragsBuch(memory, zulassung).beginnen("ab12cd34ef56ab12", "recherche", "kern-x", None, False)
                     self.assertEqual(satz, erwartet)
                     self.assertEqual(memory.veraltet_aufrufe[-1]["kosten_usd"], 2.0 if zulassung.mitglied else 3.0)
+
+
+class KennungsKollisionTests(unittest.TestCase):
+    def test_zwei_profile_mit_derselben_kurzkennung_heissen_keine_liste(self):
+        zwilling = NIKO[:8] + "-0000-4000-8000-000000000000"  # gleiche erste 8 Hexzeichen, andere user_id
+        with buero(WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{zwilling}"):
+            self.assertIsNone(eb.profile())
+            self.assertIn("WAMO_ENTWICKLUNG_PROFILE", eb.buero_problem())
+            self.assertIsNone(eb.zulassung_erteilen(NIKO, True))
+        with buero(WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{MITGLIED}"):
+            self.assertEqual(eb.profile(), (NIKO, MITGLIED))
 
 
 class MitgliederProjektTests(unittest.TestCase):
@@ -1375,6 +1398,18 @@ class MitgliedImDevAgentTests(BueroFlow):
         self.assertTrue(ergebnis["ok"], ergebnis)
         karte = next(m for m in self.task.messages() if m.get("type") == "auftrag")
         self.assertEqual(karte["projekt"], "kern-3c5e7a9b-marktstudie")
+
+    async def test_befehlskriterien_bleiben_fuer_mitglieder_aus(self):
+        with buero(WAMO_ABNAHME_BEFEHLE="ja", WAMO_ENTWICKLUNG_BEFEHLE_BUERO="an",
+                   WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{MITGLIED}", WAMO_ENTWICKLUNG_MITGLIEDER="an"):
+            self.assertFalse(self.agent_m._befehle_moeglich())
+            self.assertEqual(self.agent_m._befehle_hinweis(), dev_agent.BEFEHLE_AUS_HINWEIS)
+            self.assertNotEqual(self.agent._befehle_hinweis(), dev_agent.BEFEHLE_AUS_HINWEIS)  # der Admin bekommt den echten Grund
+
+    async def test_die_kopfzeile_traegt_die_kennung_der_zulassung(self):
+        with mock.patch.object(dev_agent, "persoenlicher_zugang", new=mock.AsyncMock(return_value={"typ": "api", "wert": "x"})):
+            kopf, _zeile = await self.agent_m._remote_zugang()
+        self.assertEqual(kopf["profil"], eb.BueroZulassung(MITGLIED, mitglied=True).kennung)
 
     async def test_ein_repo_wird_fuer_mitglieder_abgelehnt(self):
         for argumente in ({"repo": "acme/testrepo", "art": "recherche"}, {"repo": "acme/testrepo"}, {"repo": None, "art": "review"}):

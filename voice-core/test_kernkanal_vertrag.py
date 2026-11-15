@@ -332,10 +332,14 @@ def test_i3_auch_das_echte_grep_nimmt_die_datei_an():
 # ================================================================== I2: Standardwerte und Bereiche der kernkanal.conf
 I2_STANDARD = {"KANAL": "zu", "MAX_TURNS": "40", "MAX_BUDGET_USD": "2.00", "MAX_START_STUNDE": "4", "MAX_START_TAG": "8",
                "MAX_LAUFZEIT_TAG_S": "14400", "MAX_FOLGEN": "5", "MIN_ABSTAND_S": "60", "MIN_PLATZ_MB": "2048",
-               "MAX_VERSUCH_STUNDE": "20"}  # der letzte Schlüssel kam mit der Umsetzung (Versuche je Stunde, nur nach unten einstellbar)
+               "MAX_VERSUCH_STUNDE": "60",  # Versuche je Stunde, nur nach unten einstellbar (20 bis Dispatcher 7)
+               # Dispatcher 8: Grenzen je Profil
+               "MAX_NEU_STUNDE_PROFIL": "3", "MAX_NEU_TAG_PROFIL": "8", "MAX_VERSUCH_STUNDE_PROFIL": "10", "MAX_LAUFZEIT_TAG_S_PROFIL": "7200"}
 I2_ABLAUF_TAGE = 30
 I2_BEREICHE = {"MAX_TURNS": (1, 200), "MAX_START_STUNDE": (1, 60), "MAX_START_TAG": (1, 200), "MAX_LAUFZEIT_TAG_S": (60, 86400),
-               "MAX_FOLGEN": (0, 20), "MIN_ABSTAND_S": (0, 3600), "MIN_PLATZ_MB": (100, 1000000), "MAX_VERSUCH_STUNDE": (1, 20)}
+               "MAX_FOLGEN": (0, 20), "MIN_ABSTAND_S": (0, 3600), "MIN_PLATZ_MB": (100, 1000000), "MAX_VERSUCH_STUNDE": (1, 60),
+               "MAX_NEU_STUNDE_PROFIL": (1, 60), "MAX_NEU_TAG_PROFIL": (1, 200), "MAX_VERSUCH_STUNDE_PROFIL": (1, 60),
+               "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400)}
 I2_SCHLUESSEL = {"KANAL", "ABLAUF", "ARTEN", "REPOS", "DIENSTE", "MAX_BUDGET_USD", *I2_BEREICHE}
 
 
@@ -355,7 +359,7 @@ def test_i2_der_dispatcher_kennt_dieselben_schluessel_und_bereiche():
     assert schluessel
     assert set(schluessel.group(1).split()) == set(K.BEKANNTE_SCHLUESSEL) == I2_SCHLUESSEL
     assert dict(K.ZAHLEN) == I2_BEREICHE
-    assert K.MAX_ABLAUF_TAGE == 400 and K.MAX_REPOS == 10 and K.MAX_VERSUCH_STUNDE_FEST == 20
+    assert K.MAX_ABLAUF_TAGE == 400 and K.MAX_REPOS == 10 and K.MAX_VERSUCH_STUNDE_FEST == 60
 
 
 def test_i2_die_standardwerte_des_dispatchers_gleichen_denen_des_skripts():
@@ -387,7 +391,7 @@ def test_i2_die_angelegte_datei_wird_vom_dispatcher_angenommen():
 
 @pytest.mark.parametrize("schluessel, wert", [("MAX_TURNS", "0"), ("MAX_TURNS", "201"), ("MAX_BUDGET_USD", "0.00"),
                                               ("MAX_BUDGET_USD", "20.01"), ("MAX_BUDGET_USD", "2.005"), ("MAX_START_STUNDE", "61"),
-                                              ("MAX_VERSUCH_STUNDE", "21"), ("MAX_FOLGEN", "21"), ("MIN_PLATZ_MB", "99")])
+                                              ("MAX_VERSUCH_STUNDE", "61"), ("MAX_NEU_STUNDE_PROFIL", "61"), ("MAX_LAUFZEIT_TAG_S_PROFIL", "59"), ("MAX_FOLGEN", "21"), ("MIN_PLATZ_MB", "99")])
 def test_i2_werte_ausserhalb_des_bereichs_lehnt_der_dispatcher_ab(schluessel, wert):
     with pytest.raises(K.KonfigFehler):
         K.konfig_lesen("/t/kernkanal.conf", lesen=_attrappe(f"{schluessel}={wert}\n"))
@@ -449,7 +453,7 @@ def test_die_standardkosten_des_skripts_nimmt_der_kern_an(monkeypatch):
     std = _std_werte(SKRIPT)
     _buero(monkeypatch, WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=std["KOSTEN_AUFTRAG_USD"], WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=std["KOSTEN_TAG_USD"])
     assert eb.buero_problem() is None
-    assert eb.kosten_auftrag() == float(std["KOSTEN_AUFTRAG_USD"]) and eb.kosten_tag() == float(std["KOSTEN_TAG_USD"])
+    assert eb.kosten_auftrag(None) == float(std["KOSTEN_AUFTRAG_USD"]) and eb.kosten_tag(None) == float(std["KOSTEN_TAG_USD"])
 
 
 def test_das_dropin_setzt_genau_die_variablen_die_der_kern_liest():
@@ -725,8 +729,22 @@ def test_p5_die_kennung_ist_auf_allen_seiten_dieselbe_form():
     assert KENNUNG == "aaaaaaaa" and K.PROFIL_RE.fullmatch(KENNUNG) and D.PROFIL_RE.fullmatch(KENNUNG)
     assert K.PROFIL_RE.pattern == D.PROFIL_RE.pattern == eb.KENNUNG_RE.pattern == "[0-9a-f]{8}"
     assert eb.kennung_von(PROFIL) == KENNUNG  # Log und Audit
-    # die Kopfzeile des Kerns trägt dieselbe Kennung, die im Projektnamen steht
-    assert "profil = kennung.replace(\"-\", \"\")[:8]" in (VOICE_CORE / "dev_agent.py").read_text(encoding="utf-8")
+
+
+def test_p5_die_kopfzeile_des_kerns_traegt_die_kennung_des_projektnamens(monkeypatch):
+    """Verhalten statt Quelltext: _remote_zugang baut die Kopfzeile, deren profil der Dispatcher mit dem Projektnamen vergleicht."""
+    import asyncio
+    from unittest import mock
+
+    class Memory:
+        user_id = PROFIL.upper()
+
+    monkeypatch.delenv("WAMO_BETRIEB", raising=False)
+    monkeypatch.setattr(dev_agent, "persoenlicher_zugang", mock.AsyncMock(return_value={"typ": "api", "wert": "x"}))
+    kopf, _zeile = asyncio.run(dev_agent.DevAgent(memory=Memory(), auftraggeber="Test")._remote_zugang())
+    assert kopf == {"zugang": "folgt", "profil": KENNUNG}
+    name = eb.buero_projekt("recherche", None, "Marktstudie", eb.BueroZulassung(PROFIL))
+    assert K.projekt_pruefen(name, None, kopf["profil"]) is None and D.PROFIL_RE.fullmatch(kopf["profil"])
 
 
 def test_p5_beide_seiten_geben_mit_kennung_bei_jeder_eingabe_dasselbe():
@@ -774,8 +792,19 @@ def _an_aus_werte_gleich() -> bool:
     return eb._AN[0] == "an" and eb._AUS[0] == "aus" and 'an|aus) ;; *) aufruf "--mitglieder braucht an oder aus"' in SKRIPT
 
 
-def test_p5_die_grenzen_je_profil_sind_fest_und_liegen_unter_den_standards_der_konfiguration():
+def test_p5_die_grenzen_je_profil_liegen_unter_den_gesamtgrenzen_und_das_skript_kann_sie_setzen():
     std = _std_werte(SKRIPT)
-    assert K.MAX_NEU_STUNDE_PROFIL <= int(std["MAX_START_STUNDE"]) and K.MAX_NEU_TAG_PROFIL <= int(std["MAX_START_TAG"])
-    assert K.MAX_VERSUCH_STUNDE_PROFIL <= K.MAX_VERSUCH_STUNDE_FEST
-    assert K.MAX_LAUFZEIT_TAG_S_PROFIL <= int(std["MAX_LAUFZEIT_TAG_S"])
+    assert int(std["MAX_NEU_STUNDE_PROFIL"]) <= int(std["MAX_START_STUNDE"]) and int(std["MAX_NEU_TAG_PROFIL"]) <= int(std["MAX_START_TAG"])
+    assert int(std["MAX_VERSUCH_STUNDE_PROFIL"]) <= int(std["MAX_VERSUCH_STUNDE"]) <= K.MAX_VERSUCH_STUNDE_FEST
+    assert int(std["MAX_LAUFZEIT_TAG_S_PROFIL"]) <= int(std["MAX_LAUFZEIT_TAG_S"])
+    for option, schluessel in (("--max-neu-stunde-profil", "MAX_NEU_STUNDE_PROFIL"), ("--max-neu-tag-profil", "MAX_NEU_TAG_PROFIL"),
+                               ("--max-versuch-stunde-profil", "MAX_VERSUCH_STUNDE_PROFIL"),
+                               ("--max-laufzeit-tag-s-profil", "MAX_LAUFZEIT_TAG_S_PROFIL"), ("--max-versuch-stunde", "MAX_VERSUCH_STUNDE")):
+        klein, gross = K.ZAHLEN[schluessel]
+        assert re.search(rf'{option}\) optionswert "\$@"; GRENZE\[{schluessel}\]="\$2"; pruefe_zahl "\$1" "\$2" {klein} {gross};', SKRIPT), option
+
+
+def test_p5_skript_und_rauchtest_verlangen_dispatcher_8():
+    assert re.search(r"^MIN_DISPATCHER=8\b", SKRIPT, flags=re.M) and D.VERSION == "8"
+    assert ">= 8" in (INFRA / "wamo_job_kern_rauchtest.py").read_text(encoding="utf-8")
+    assert "grenze_profil" in K.KANAL_GRUENDE  # das Skript prüft das installierte Modul auf diesen Code

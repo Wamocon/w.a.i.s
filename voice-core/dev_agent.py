@@ -1,7 +1,8 @@
 """Entwicklungsaufträge per Sprache: WAMO gibt Aufträge an Claude Code (ohne Fenster).
 
-Nur für Profile mit der Rolle admin UND nur bei WAMO_ENTWICKLUNG=an (Standard: aus). Sonst bietet
-bot.py die Werkzeuge gar nicht an.
+Für Profile mit der Rolle admin, im Büro zusätzlich für freigeschaltete Mitglieder (WAMO_ENTWICKLUNG_MITGLIEDER=an und user_id in
+WAMO_ENTWICKLUNG_PROFILE, entwicklung_betrieb.py), nie für Laborprofile, und nur mit eingeschaltetem Schalter (Standard: aus). Sonst
+bietet bot.py die Werkzeuge gar nicht an.
 
 Betriebsart (WAMO_ENTWICKLUNG_ORT)
   sokrates2 (Standard): Claude Code läuft auf Sokrates-2 als Benutzer wamo in einer bubblewrap-Sandbox
@@ -690,6 +691,8 @@ class DevAgent:
         Kerns, auf Sokrates-2 in der engeren Sandbox des Dispatchers."""
         if not _befehle_an():
             return False
+        if isinstance(self._zulassung, BueroZulassung) and self._zulassung.mitglied:
+            return False  # Befehlskriterien für Mitglieder bleiben aus, bis Niko entscheidet (Ausrollen P5)
         if self._ausfuehrer is not None:
             return True
         return self._ort == "sokrates2" and self._ping.grund() is None
@@ -697,7 +700,7 @@ class DevAgent:
     def _befehle_hinweis(self) -> str:
         """Warum befehl: abgelehnt wird, in einem Satz: Schalter aus, oder (Sokrates-2) der Grund aus dem ping: Dispatcher ohne
         pruefen, Prüfsumme der Allowlist weicht ab, Dispatcher nicht erreichbar."""
-        if not _befehle_an():
+        if not _befehle_an() or (isinstance(self._zulassung, BueroZulassung) and self._zulassung.mitglied):
             return BEFEHLE_AUS_HINWEIS
         if self._ausfuehrer is None and self._ort == "sokrates2" and (grund := self._ping.grund()):
             return f"Befehlskriterien (befehl:) gehen hier nicht: {grund}"
@@ -1351,10 +1354,10 @@ class DevAgent:
         Eigener Zugang des Profils (Max-Token oder API-Schlüssel) hat Vorrang. Ohne ihn gilt der Zugang aus geheim.env nur,
         wenn das Profil dafür vorgesehen ist (serverzugang_erlaubt)."""
         user_id = getattr(self._memory, "user_id", None)
-        kennung = normalize_uuid(user_id) if user_id else None
-        if not kennung:
+        if not (normalize_uuid(user_id) if user_id else None):
             return None
-        profil = kennung.replace("-", "")[:8]  # nur zur Zuordnung im Audit und in der Buchführung des Dispatchers
+        # Kurzkennung wie BueroZulassung.kennung: Projektname, Audit, Buchführung und Grenzen je Profil im Dispatcher
+        profil = entwicklung_betrieb.kennung_von(user_id)
         eigener = await persoenlicher_zugang(user_id)
         if eigener is not None:
             return ({"zugang": "folgt", "profil": profil},

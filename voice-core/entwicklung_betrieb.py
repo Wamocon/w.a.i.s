@@ -95,6 +95,8 @@ def profile() -> tuple[str, ...] | None:
             return None
         if uid not in gefunden:
             gefunden.append(uid)
+    if len({uid.replace("-", "")[:8] for uid in gefunden}) != len(gefunden):
+        return None  # zwei Profile mit derselben Kurzkennung teilten sich Projektordner und Grenzen im Dispatcher (fail closed)
     return tuple(gefunden) if len(gefunden) <= MAX_PROFILE else None
 
 
@@ -110,16 +112,17 @@ def _ist_mitglied(zulassung: object) -> bool:
     return isinstance(zulassung, BueroZulassung) and zulassung.mitglied
 
 
-def kosten_auftrag(zulassung: object = None) -> float | None:
+def kosten_auftrag(zulassung: object) -> float | None:
     """Grenze je Auftrag in USD (alle Läufe zusammen) oder None, wenn sie fehlt oder ungültig ist. Mit der Zulassung eines Mitglieds
     höchstens MITGLIED_KOSTEN_AUFTRAG_MAX."""
     grenze = _kosten(ENV_KOSTEN_AUFTRAG)
     return min(grenze, MITGLIED_KOSTEN_AUFTRAG_MAX) if grenze is not None and _ist_mitglied(zulassung) else grenze
 
 
-def kosten_tag(zulassung: object = None) -> float | None:
+def kosten_tag(zulassung: object) -> float | None:
     """Grenze je Tag und Profil in USD (Europe/Berlin) oder None, wenn sie fehlt oder ungültig ist. Mit der Zulassung eines Mitglieds
-    höchstens MITGLIED_KOSTEN_TAG_MAX."""
+    höchstens MITGLIED_KOSTEN_TAG_MAX. Geprüft wird vor jedem Start gegen die Kosten bis dahin: ein letzter Auftrag kann die Grenze
+    um höchstens seine eigene Auftragsgrenze überschreiten (bis zu einem Lauf mehr)."""
     grenze = _kosten(ENV_KOSTEN_TAG)
     return min(grenze, MITGLIED_KOSTEN_TAG_MAX) if grenze is not None and _ist_mitglied(zulassung) else grenze
 
@@ -138,9 +141,9 @@ def buero_problem(ssh_pruefung: Callable[[], str | None] | None = None) -> str |
             return f"{ENV_ORT} ist ungültig (im Büro nur sokrates2)"
         if profile() is None:
             return f"{ENV_PROFILE} fehlt oder ist ungültig (eine oder mehrere user_id, durch Komma getrennt)"
-        if kosten_auftrag() is None:
+        if _kosten(ENV_KOSTEN_AUFTRAG) is None:
             return f"{ENV_KOSTEN_AUFTRAG} fehlt oder ist ungültig (positive Zahl mit Punkt)"
-        if kosten_tag() is None:
+        if _kosten(ENV_KOSTEN_TAG) is None:
             return f"{ENV_KOSTEN_TAG} fehlt oder ist ungültig (positive Zahl mit Punkt)"
         return ssh_pruefung() if ssh_pruefung is not None else None
     except Exception as e:  # noqa: BLE001 (ein Fehler hier schaltet nur die Entwicklung aus, nie den Kern)
@@ -303,7 +306,7 @@ def protokollieren(an: bool, grund: str | None, user_id: object, fehler: bool = 
 KERN_PRAEFIX = "kern-"
 PROJEKT_MAX = 50  # Gesamtlänge mit Präfix, wie PROJECT_NAME in dev_agent.py und check_project im Dispatcher
 SATZ_REPO_FEHLT = "Für diese Auftragsart brauche ich das Repo als owner/name, zum Beispiel acme/testrepo. Bitte nenne es."
-SATZ_MITGLIED_REPO = "Aufträge mit einem Repo gibt es für dein Profil noch nicht, nur Aufträge ohne Repo wie eine Recherche."
+SATZ_MITGLIED_REPO = "Für dieses Profil gibt es vorerst nur Recherchen ohne Repo."
 KENNUNG_RE = re.compile(r"[0-9a-f]{8}")
 
 
@@ -394,7 +397,7 @@ GRUND_SAETZE: dict[str, str] = {
     "grenze_folgen": "Die Obergrenze für Fortsetzungen ist erreicht.",
     "abstand": "Zwischen zwei Aufträgen muss etwas Zeit liegen, bitte gleich noch einmal versuchen.",
     "platz": "Auf dem Server ist zu wenig Platz frei.",
-    "grenze_profil": "Deine Obergrenze für Aufträge ist für den Moment erreicht, bitte versuche es später noch einmal.",
+    "grenze_profil": "Die Obergrenze für Aufträge dieses Profils ist erreicht, bitte später noch einmal versuchen.",
 }
 GRUND_UNBEKANNT = "Der Kanal hat den Auftrag abgewiesen."
 # Gründe, die nicht vom einzelnen Auftrag abhängen: Ein unveränderter zweiter Versuch scheitert genauso. Nach so einer Abweisung stellt
@@ -445,8 +448,11 @@ def ablehn_grund(returncode: int | None, ereignisse: dict, stderr: str = "") -> 
     if "kanal_gesperrt" in ereignisse:
         ev = ereignisse["kanal_gesperrt"]
         return grund_satz(ev.get("grund") if isinstance(ev, dict) else None)
-    if "belegt" in ereignisse:
-        return SATZ_ANDERER_AUFTRAG
+    if "belegt" in ereignisse:  # der Dispatcher nennt im Grund, was belegt ist (wamo_job_dispatch.cmd_start)
+        ev = ereignisse["belegt"]
+        grund = ev.get("grund") if isinstance(ev, dict) else None
+        anderer = isinstance(grund, str) and grund.startswith(("Es läuft schon ein Auftrag", "Es laufen schon"))
+        return SATZ_ANDERER_AUFTRAG if anderer else SATZ_BELEGT
     if "zugang_ungueltig" in ereignisse:
         return "Der Claude-Zugang wurde nicht angenommen, bitte in der Karte Modellzugang neu hinterlegen."
     if "keine_zugangsdaten" in ereignisse:
@@ -485,7 +491,7 @@ def kosten_aus_ereignis(wert: object) -> float | None:
     return kosten if math.isfinite(kosten) and 0.0 <= kosten <= KOSTEN_JE_ZEILE_MAX else None
 
 
-def kosten_mit_untergrenze(kosten_usd: float, zulassung: object = None) -> float:
+def kosten_mit_untergrenze(kosten_usd: float, zulassung: object) -> float:
     """Die Kosten, die ein Auftrag mindestens gekostet hat, wenn sein letzter Lauf gestartet ist, aber keine verwertbaren Kosten
     gemeldet hat (Abbruch, Auflegen, Zeitlimit, fehlender oder ungültiger Wert): mindestens die Auftragsgrenze (wie bei
     veraltete_schliessen, bei Mitgliedern deren Grenze). Ohne gültige Grenze gibt es nichts zu schätzen."""
@@ -601,7 +607,7 @@ class AuftragsBuch:
         return ok
 
 
-def auftragsgrenze_erreicht(kosten_bisher: float, zulassung: object = None) -> bool:
+def auftragsgrenze_erreicht(kosten_bisher: float, zulassung: object) -> bool:
     """Ist die Kostengrenze je Auftrag erreicht (alle Läufe zusammen, bei Mitgliedern deren Grenze)? Eine fehlende oder ungültige
     Grenze gilt als erreicht, ebenso ein Wert, der keine Zahl unter der Grenze ist (NaN: nan >= grenze wäre immer False)."""
     grenze = kosten_auftrag(zulassung)
