@@ -29,7 +29,7 @@ test("Admin sieht alle Abschnitte, Mitglied und unbekannte Rolle nicht den Verbr
   assert.ok(ids("admin").includes("verbrauch"));
   for (const rolle of ["mitglied", null] as const) {
     assert.ok(!ids(rolle).includes("verbrauch"), `Rolle ${rolle}`);
-    assert.deepEqual(ids(rolle), ["konto", "modellzugang", "sprache", "stimme", "darstellung", "geraete", "teilen", "info"]);
+    assert.deepEqual(ids(rolle), ["konto", "start", "modellzugang", "sprache", "stimme", "darstellung", "geraete", "teilen", "info"]);
   }
 });
 
@@ -239,6 +239,26 @@ test("Laborsicht: der Abschnitt hat eine eigene Kurzzeile, die Gliederung der an
 
 test("Texte der Laborsicht ohne Gedankenstrich, nur an der Laborsicht zu erkennen", () => {
   for (const a of abschnitteFuer({ rolle: null, labor: true })) assert.ok(!/[–—]|\s-\s/.test(`${a.titel} ${a.kurz}`), a.id);
+});
+
+test("Abschnitt Erste Schritte: direkt nach Konto, für jede Rolle, nie in der Laborsicht, mit eigenem Hash", () => {
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    const liste = ids(rolle);
+    assert.equal(liste.indexOf("start"), liste.indexOf("konto") + 1, `Rolle ${rolle}`);
+  }
+  const start = ABSCHNITTE.find((a) => a.id === "start");
+  assert.equal(start?.titel, "Erste Schritte");
+  assert.equal(start?.kurz, "Modellzugang einrichten und Installer laden");
+  assert.equal(start?.nurAdmin, undefined);
+  assert.equal(start?.laborSicht, undefined);
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    assert.ok(!abschnitteFuer({ rolle, labor: true }).some((a) => a.id === "start"), `Laborsicht ${rolle}`);
+  }
+  assert.deepEqual(parseHash("#einstellungen/start"), { offen: true, abschnitt: "start" });
+  // im Labor führt ein Hash auf "start" nie in den Abschnitt
+  assert.equal(wirksamerAbschnitt(parseHash("#einstellungen/start"), abschnitteFuer({ rolle: "mitglied", labor: true }), true), "sprache");
+  // ohne Abschnitt in der Adresse bleibt Konto der erste Abschnitt
+  assert.equal(wirksamerAbschnitt({ offen: true, abschnitt: null }, abschnitteFuer({ rolle: "mitglied" }), true), "konto");
 });
 
 test("Abschnitt Stimme: für jede Rolle da, in der Laborsicht nicht, mit eigenem Hash", () => {

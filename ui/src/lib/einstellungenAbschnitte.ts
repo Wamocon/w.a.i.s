@@ -14,6 +14,7 @@ import type { Modellzugang, Rolle } from "./nachrichten.ts";
 
 export const ABSCHNITT_IDS = [
   "konto",
+  "start",
   "modellzugang",
   "verbrauch",
   "sprache",
@@ -43,6 +44,8 @@ export type Abschnitt = {
 
 export const ABSCHNITTE: readonly Abschnitt[] = [
   { id: "konto", titel: "Konto und Profil", kurz: "E-Mail, Rolle und Abmelden" },
+  // Erste Schritte nach dem Ausrollen (docs/ausrollen-neue-nutzer.md 4.2): für jede Rolle, nie in der Laborsicht
+  { id: "start", titel: "Erste Schritte", kurz: "Modellzugang einrichten und Installer laden" },
   { id: "modellzugang", titel: "Modellzugang", kurz: "API-Schlüssel, Token und Modus" },
   { id: "verbrauch", titel: "Verbrauch", kurz: "Kontingent deines Claude-Abos", nurAdmin: true },
   { id: "sprache", titel: "Sprache und Ton", kurz: "Mikrofon, Hören und Stimme", laborSicht: true, laborKurz: "Mikrofon wählen" },
