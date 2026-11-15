@@ -136,7 +136,7 @@ schluessel() {
   wert=""
   [ -n "$WURZEL" ] || chown root:root "$neu"
   chmod 0400 "$neu"
-  sichern "$ETC/litellm.key"
+  # der alte Schlüssel wird bewusst nicht gesichert (keine Kopie unter /var/backups); in LiteLLM sperren, wenn er nicht mehr gilt
   mv -f "$neu" "$ETC/litellm.key"
   echo "Schlüssel abgelegt in $ETC/litellm.key (0400)."
   if [ -z "$WURZEL" ] && systemctl is-enabled --quiet "$DIENST" 2>/dev/null; then

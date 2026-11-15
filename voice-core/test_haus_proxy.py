@@ -57,7 +57,12 @@ class Attrappe:
         self.anfragen.append((kopf, koerper))
         if self.warten is not None:
             await self.warten.wait()
-        if self.art == "sse":
+        if self.art == "abbruch":  # Kopf und ein halbes Stück, dann weg (Antwort zu kurz)
+            w.write(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n40\r\nevent: mess")
+        elif self.art == "ohne_usage":
+            body = json.dumps({"type": "message", "content": [{"type": "text", "text": "x" * 400}]}).encode()
+            w.write(f"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {len(body)}\r\n\r\n".encode() + body)
+        elif self.art == "sse":
             w.write(f"HTTP/1.1 {self.status} OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n".encode())
             for i in range(0, len(SSE), 37):  # Stücke quer durch die Zeilen
                 teil = SSE[i:i + 37]
@@ -66,7 +71,8 @@ class Attrappe:
             w.write(b"0\r\n\r\n")
         else:
             body = json.dumps({"type": "message", "content": [{"type": "text", "text": "ok"}],
-                               "usage": {"input_tokens": 50, "output_tokens": 7}}).encode()
+                               "usage": {"input_tokens": 50, "output_tokens": 7},
+                               "intern": "api_base http://10.0.0.1:11434 und schluessel-hash"}).encode()
             w.write(f"HTTP/1.1 {self.status} OK\r\ncontent-type: application/json\r\ncontent-length: {len(body)}\r\n\r\n".encode() + body)
         await w.drain()
         w.close()
@@ -131,6 +137,8 @@ def entstueckeln(daten: bytes) -> bytes:
     aus = b""
     while True:
         zeile, _, daten = daten.partition(b"\r\n")
+        if not zeile:  # abgebrochene Antwort
+            return aus
         n = int(zeile, 16)
         if n == 0:
             return aus
@@ -247,12 +255,57 @@ class Durchreichen(unittest.TestCase):
                 self.assertEqual(welt.verbrauch.je_auftrag[JOB], 57)
         lauf(t())
 
-    def test_fehler_von_litellm_geht_durch(self):
+    def test_fehler_von_litellm_nur_als_eigener_fehler(self):
         async def t():
             async with Attrappe("json", status=500) as a, Welt(a) as welt:
-                status, _, _ = await welt.anfrage()
+                status, _, body = await welt.anfrage()
                 self.assertEqual(status, 500)
-                self.assertTrue(any("ziel_fehler" in z for z in welt.log))
+                self.assertNotIn(b"api_base", body)
+                self.assertIn("LiteLLM meldet Status 500", json.loads(body)["error"]["message"])
+                self.assertEqual(sum("ziel_fehler" in z for z in welt.log), 1)
+        lauf(t())
+
+    def test_felder_nur_aus_der_liste(self):
+        for feld in ("fallbacks", "api_base", "mock_response", "extra_headers", "litellm_metadata", "num_retries"):
+            with self.subTest(feld=feld):
+                async def t():
+                    async with Attrappe("json") as a, Welt(a) as welt:
+                        status, _, _ = await welt.anfrage(body={"model": MODELL, "max_tokens": 8, "messages": [], feld: "x"})
+                        self.assertEqual(status, 400)
+                        self.assertEqual(a.anfragen, [])
+                lauf(t())
+
+    def test_metadata_und_max_tokens_bereinigt(self):
+        async def t():
+            async with Attrappe("json") as a, Welt(a) as welt:
+                body = {"model": MODELL, "max_tokens": 64000, "messages": [], "metadata": {"user_id": "u1", "tags": ["cloud"]},
+                        "context_management": {"edits": []}, "output_config": {}, "thinking": {"type": "disabled"}}
+                status, _, _ = await welt.anfrage(body=body)
+                self.assertEqual(status, 200)
+                weiter = json.loads(a.anfragen[0][1])
+                self.assertEqual(weiter["metadata"], {"user_id": "u1"})
+                self.assertEqual(weiter["max_tokens"], X.MAX_AUSGABE_TOKEN)
+                laenge = next(z.split(":")[1] for z in a.anfragen[0][0].split("\r\n") if z.startswith("Content-Length"))
+                self.assertEqual(int(laenge), len(a.anfragen[0][1]))
+        lauf(t())
+
+    def test_abbruch_wird_geschaetzt_gebucht(self):
+        async def t():
+            async with Attrappe("abbruch") as a, Welt(a) as welt:
+                await welt.anfrage(body={"model": MODELL, "max_tokens": 5000, "stream": True,
+                                         "messages": [{"role": "user", "content": "x" * 3000}]})
+                self.assertEqual(len(a.anfragen), 1)
+                self.assertGreaterEqual(welt.verbrauch.je_auftrag.get(JOB, 0), 5000 + 1000)
+                self.assertTrue(any("abbruch" in z and "geschaetzt=ja" in z for z in welt.log))
+        lauf(t())
+
+    def test_ohne_usage_wird_geschaetzt(self):
+        async def t():
+            async with Attrappe("ohne_usage") as a, Welt(a) as welt:
+                status, _, _ = await welt.anfrage(body={"model": MODELL, "max_tokens": 8,
+                                                        "messages": [{"role": "user", "content": "y" * 900}]})
+                self.assertEqual(status, 200)
+                self.assertGreater(welt.verbrauch.je_auftrag.get(JOB, 0), 300)
         lauf(t())
 
     def test_litellm_nicht_erreichbar(self):
@@ -299,6 +352,35 @@ class Grenzen(unittest.TestCase):
                 tor.set()
                 self.assertEqual((await erste)[0], 200)
                 self.assertEqual(len(a.anfragen), 1)
+        lauf(t())
+
+    def test_budget_profil(self):
+        async def t():
+            async with Attrappe("sse") as a, Welt(a) as welt:
+                welt.proxy.profil_tag_token_max = 100
+                welt.verbrauch.je_profil_tag[("1a2b3c4d", X.Verbrauch.tag(time.time()))] = 100
+                status, _, body = await welt.anfrage()
+                self.assertEqual(status, 403)
+                self.assertIn("Profil", json.loads(body)["error"]["message"])
+                self.assertEqual(a.anfragen, [])
+        lauf(t())
+
+    def test_verbindungen_begrenzt(self):
+        async def t():
+            tor = asyncio.Event()
+            async with Attrappe("json", warten=tor) as a, Welt(a, parallel=2, warte_s=5) as welt:
+                laufend = [asyncio.ensure_future(welt.anfrage()) for _ in range(X.VERBINDUNGEN_JE_AUFTRAG)]
+                while len(a.anfragen) < 2:
+                    await asyncio.sleep(0.01)
+                await asyncio.sleep(0.1)
+                status, _, body = await welt.anfrage()
+                self.assertEqual(status, 429)
+                self.assertIn("dieses Auftrags", json.loads(body)["error"]["message"])
+                welt.proxy._verbindungen_max = welt.proxy._offen
+                status, _, body = await welt.anfrage(token=None)
+                self.assertEqual(status, 429)
+                tor.set()
+                self.assertEqual([(await f)[0] for f in laufend], [200] * X.VERBINDUNGEN_JE_AUFTRAG)
         lauf(t())
 
     def test_verbrauch_nach_neustart(self):
@@ -359,6 +441,13 @@ class Zaehlung(unittest.TestCase):
         z.ende()
         self.assertEqual((z.ein, z.aus), (1500, 42))
 
+    def test_keine_zahl_wirft_nicht(self):
+        z = X.Zaehler(True)
+        z.futter(b'data: {"type":"message_delta","usage":{"output_tokens":"viel"}}\n')
+        z.futter(b'data: {"type":"message_start","message":{"usage":{"input_tokens":-5}}}\n')
+        z.ende()
+        self.assertEqual((z.ein, z.aus), (0, 0))
+
     def test_json_kaputt_zaehlt_null(self):
         z = X.Zaehler(False)
         z.futter(b"{kaputt")
@@ -382,7 +471,8 @@ class SandboxAusnahme(unittest.TestCase):
         import re
         erlaubt = re.search(r"ERLAUBT_RE='\^\(([^)]*)\)\$'", self.runner).group(1).split("|")
         for name in ("ANTHROPIC_BASE_URL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                     "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"):
+                     "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+                     "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"):
             self.assertIn(name, erlaubt)
         for name in ("LITELLM_API_KEY", "ANTHROPIC_AUTH_TOKEN", "WAMO_HAUS"):
             self.assertNotIn(name, erlaubt)
@@ -398,33 +488,52 @@ class SandboxAusnahme(unittest.TestCase):
         # Die Ausnahme steht vor den Abweisungen von Loopback (intern4) und lokalen Adressen
         self.assertLess(self.nft.index("tcp dport 18090 accept"), self.nft.index("ip daddr @intern4 counter jump abweisen"))
 
-    def _sperrports(self, base_url: str | None) -> tuple[int, str]:
+    def _sperrports(self, base_url: str | None, **zusatz: str) -> tuple[int, str]:
         import re
-        haus = re.search(r"\nHAUS_PROXY_PORT=18090\n.*?\nfi\n", self.runner, re.S).group(0)
+        import subprocess
+        haus = re.search(r"\nHAUS_PROXY_PORT=18090\n.*?\n# Gesperrte Ports", self.runner, re.S).group(0)
         frei = re.search(r"\nFREI_PORTS=.*?\n\)\n", self.runner, re.S).group(0)
         skript = ('fehler() { echo "FEHLER $*"; exit 70; }\nNETZ_SPERRPORTS="4000 8000 8001 11434"\nNETZ_IMMER_ERLAUBT="53 80 443"\n'
-                  'HOST_PORTS="22\n53\n4000\n18090\n55443"\n' + haus + frei + 'echo "$SPERRPORTS"\n')
-        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_BASE_URL"}
+                  'HOST_PORTS="22\n53\n4000\n55443"\n' + haus + frei
+                  + 'echo "$SPERRPORTS ${ANTHROPIC_DEFAULT_HAIKU_MODEL:-ohne_modell}"\n')
+        weg = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_DEFAULT_HAIKU_MODEL")
+        env = {k: v for k, v in os.environ.items() if k not in weg}
         if base_url is not None:
             env["ANTHROPIC_BASE_URL"] = base_url
-        import subprocess
+        env.update(zusatz)
         r = subprocess.run([_bash(), "-c", skript], capture_output=True, text=True, encoding="utf-8", env=env, timeout=30)
         return r.returncode, r.stdout.strip()
 
     @unittest.skipUnless(_bash(), "bash fehlt")
     def test_landlock_nur_bei_haus_offen(self):
-        code, ports = self._sperrports(None)
+        # Ohne Haus steht 18090 immer in der Sperre, auch wenn der Proxy gerade nicht lauscht; Modellnamen fürs Haus fallen weg
+        code, ausgabe = self._sperrports(None, ANTHROPIC_DEFAULT_HAIKU_MODEL=MODELL)
         self.assertEqual(code, 0)
+        ports, modell = ausgabe.split(" ")
         self.assertIn("18090", ports.split(","))
-        code, ports = self._sperrports("http://127.0.0.1:18090")
-        self.assertEqual(code, 0)
+        self.assertEqual(modell, "ohne_modell")
+        code, ausgabe = self._sperrports("http://127.0.0.1:18090", ANTHROPIC_API_KEY=TOKEN, ANTHROPIC_DEFAULT_HAIKU_MODEL=MODELL)
+        self.assertEqual(code, 0, ausgabe)
+        ports, modell = ausgabe.split(" ")
         self.assertNotIn("18090", ports.split(","))
         self.assertIn("4000", ports.split(","))  # LiteLLM-Port bleibt immer zu
+        self.assertEqual(modell, MODELL)
         for falsch in ("http://192.168.178.75:4000", "https://api.anthropic.com", "http://127.0.0.1:18090/", "http://localhost:18090"):
             with self.subTest(url=falsch):
-                code, ausgabe = self._sperrports(falsch)
+                code, ausgabe = self._sperrports(falsch, ANTHROPIC_API_KEY=TOKEN)
                 self.assertEqual(code, 70)
                 self.assertIn("nur für den Proxy der Hausmodelle", ausgabe)
+
+    @unittest.skipUnless(_bash(), "bash fehlt")
+    def test_haus_nur_mit_auftragstoken(self):
+        url = "http://127.0.0.1:18090"
+        for zusatz in ({}, {"ANTHROPIC_API_KEY": "sk-ant-api03-" + "x" * 40}, {"ANTHROPIC_API_KEY": TOKEN + "0"},
+                       {"ANTHROPIC_API_KEY": TOKEN, "CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-" + "y" * 40},
+                       {"ANTHROPIC_API_KEY": TOKEN, "ANTHROPIC_CUSTOM_HEADERS": "anthropic-workspace-id: w"}):
+            with self.subTest(namen=sorted(zusatz)):
+                code, ausgabe = self._sperrports(url, **zusatz)
+                self.assertEqual(code, 70)
+                self.assertIn("Hausmodelle:", ausgabe)
 
 
 class DienstUndSkripte(unittest.TestCase):

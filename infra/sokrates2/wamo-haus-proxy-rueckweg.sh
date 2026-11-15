@@ -26,3 +26,4 @@ systemctl daemon-reload
 rm -rf /opt/wamo-haus-proxy /etc/wamo-haus-proxy /var/lib/wamo-haus-proxy /run/wamo-haus
 id -u wamo-haus-proxy >/dev/null 2>&1 && userdel wamo-haus-proxy
 echo "Entfernt. Buchung gesichert unter $ziel."
+echo "Pflicht danach: den virtuellen Schlüssel wamo-haus-proxy in LiteLLM sperren oder löschen (Admin-Oberfläche des Gateways)."

@@ -207,7 +207,7 @@ CLAUDE_ECHT=$(readlink -f "$HEIM/.local/bin/claude" || true)
 
 # Umgebung als Allowlist (Token kommen vom Dispatcher, nie über argv). Im Modus pruefen eine eigene, engere: kein einziger
 # Token, nichts von Claude, nichts von der Auftragsart; selbst wenn der Aufrufer eines mitschickte, käme es nicht hinein.
-ERLAUBT_RE='^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_BASE_URL|ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_SMALL_FAST_MODEL|CLAUDE_CODE_SUBAGENT_MODEL|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|GH_TOKEN|VERCEL_TOKEN|VERCEL_ORG_ID|SUPABASE_ACCESS_TOKEN|JIRA_URL|JIRA_EMAIL|JIRA_API_KEY|JIRA_API_TOKEN|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_[0-9]|GIT_CONFIG_VALUE_[0-9]|XDG_RUNTIME_DIR)$'
+ERLAUBT_RE='^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_BASE_URL|ANTHROPIC_DEFAULT_HAIKU_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_SMALL_FAST_MODEL|CLAUDE_CODE_SUBAGENT_MODEL|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC|DISABLE_TELEMETRY|DISABLE_ERROR_REPORTING|GH_TOKEN|VERCEL_TOKEN|VERCEL_ORG_ID|SUPABASE_ACCESS_TOKEN|JIRA_URL|JIRA_EMAIL|JIRA_API_KEY|JIRA_API_TOKEN|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_[0-9]|GIT_CONFIG_VALUE_[0-9]|XDG_RUNTIME_DIR)$'
 ERLAUBT_PRUEFEN_RE='^(GIT_CONFIG_COUNT|GIT_CONFIG_KEY_[0-9]|GIT_CONFIG_VALUE_[0-9]|XDG_RUNTIME_DIR)$'
 [ "$MODUS" != pruefen ] || ERLAUBT_RE=$ERLAUBT_PRUEFEN_RE
 while IFS= read -r name; do
@@ -218,13 +218,21 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 # Hausmodelle (Paket P6a, docs/ausrollen-neue-nutzer.md 4.7): Ein Lauf mit Zugangsart haus spricht über den Proxy wamo-haus-proxy auf
 # Loopback mit LiteLLM. ANTHROPIC_BASE_URL darf nur genau dessen Adresse sein (jede andere bricht ab, die Sandbox spricht sonst nur mit
-# Anthropic), und nur dann bleibt sein Port in der Landlock-Sperre offen; der Ausgangsfilter (wamo-egress.nft) lässt ihn immer zu.
+# Anthropic), und nur dann ist sein Port in der Landlock-Sperre offen (sonst steht er immer darin, auch wenn der Proxy gerade nicht
+# lauscht); der Ausgangsfilter (wamo-egress.nft) lässt ihn immer zu, ohne Auftragstoken antwortet der Proxy nur mit 401.
 HAUS_PROXY_PORT=18090
 HAUS_PROXY_URL="http://127.0.0.1:$HAUS_PROXY_PORT"
 HAUS=aus
 if [ -n "${ANTHROPIC_BASE_URL-}" ]; then
   [ "$ANTHROPIC_BASE_URL" = "$HAUS_PROXY_URL" ] || fehler "ANTHROPIC_BASE_URL ist nur für den Proxy der Hausmodelle erlaubt"
   HAUS=an
+fi
+# Zweite Sicherung neben dem Dispatcher: mit dem Proxy nur das Auftragstoken, nie ein Claude-Zugang; ohne Proxy keine Modellnamen fürs Haus
+if [ "$HAUS" = an ]; then
+  [[ ${ANTHROPIC_API_KEY-} =~ ^wh1-[0-9a-f]{16,32}-[0-9a-f]{64}$ ]] || fehler "Hausmodelle: Auftragstoken fehlt oder hat eine falsche Form"
+  [ -z "${CLAUDE_CODE_OAUTH_TOKEN-}" ] && [ -z "${ANTHROPIC_CUSTOM_HEADERS-}" ] || fehler "Hausmodelle: kein Claude-Zugang neben dem Proxy"
+else
+  unset ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_SUBAGENT_MODEL
 fi
 
 # Gesperrte Ports: alles, worauf der Host gerade lauscht, plus feste Zusatzports, ohne die immer erlaubten.
@@ -235,7 +243,7 @@ HOST_PORTS=$(awk '{print $4}' <<<"$SS_AUSGABE" | sed -nE 's/.*:([0-9]+)$/\1/p' |
 FREI_PORTS="$NETZ_IMMER_ERLAUBT"
 [ "$HAUS" != an ] || FREI_PORTS="$FREI_PORTS $HAUS_PROXY_PORT"
 SPERRPORTS=$(
-  { printf '%s\n' $HOST_PORTS; printf '%s\n' $NETZ_SPERRPORTS; } \
+  { printf '%s\n' $HOST_PORTS; printf '%s\n' $NETZ_SPERRPORTS; echo "$HAUS_PROXY_PORT"; } \
     | sort -un | grep -vxF -f <(printf '%s\n' $FREI_PORTS) | paste -sd, -
 )
 

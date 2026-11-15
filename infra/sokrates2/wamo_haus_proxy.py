@@ -10,11 +10,17 @@ Was durchgeht (alles andere wird abgewiesen, ohne eine Verbindung nach draußen 
   * Ein Auftragstoken in x-api-key oder Authorization: Bearer, Form wh1-<job>-<64 Hexzeichen>. Der Dispatcher legt je Lauf
     <auftraege>/<job>.json an ({"v": 1, "job", "hash" = SHA-256 des Tokens, "profil", "bis", "max_token"}) und löscht sie am Laufende.
     Geprüft werden Form, Datei (kein Link, klein, gültiges JSON), Hash (zeitkonstant), Frist bis.
-  * Ein Körper mit Content-Length (kein Transfer-Encoding) bis KOERPER_MAX, als JSON-Objekt, Feld model aus der festen Liste MODELLE.
+  * Ein Körper mit Content-Length (kein Transfer-Encoding) bis KOERPER_MAX, als JSON-Objekt nur mit Feldern aus FELDER_ERLAUBT (keine
+    Steuerfelder von LiteLLM wie fallbacks, api_base oder mock_response), model aus der festen Liste MODELLE; metadata behält nur user_id,
+    max_tokens wird auf MAX_AUSGABE_TOKEN gekürzt. Der Körper geht neu geschrieben weiter.
   * Höchstens PARALLEL_MAX Anfragen gleichzeitig (damit die Gespräche auf LiteLLM nicht leiden); wer länger als WARTE_S wartet, bekommt 429.
-  * Token-Budget je Auftrag (max_token aus der Datei des Dispatchers) und je Tag für alle Aufträge (TAG_TOKEN_MAX); erschöpft heißt 403.
+    Der Körper wird erst gelesen, wenn ein Platz frei ist. Offene Verbindungen höchstens VERBINDUNGEN_MAX, je Auftrag VERBINDUNGEN_JE_AUFTRAG.
+  * Token-Budget je Auftrag (max_token aus der Datei des Dispatchers), je Profil und Tag (PROFIL_TAG_TOKEN_MAX) und je Tag für alle
+    Aufträge (TAG_TOKEN_MAX); erschöpft heißt 403.
 Weitergereicht werden nur die Kopfzeilen anthropic-version, anthropic-beta und accept; die Antwort (auch Streaming, SSE) geht gestückelt
-zurück. Gezählt werden input_tokens (mit Cache-Anteilen) und output_tokens aus der Antwort, gebucht in verbrauch.jsonl (Zustandsordner).
+zurück. Eine Antwort von LiteLLM ab Status 400 geht nie wörtlich zurück, nur als eigener Fehler mit demselben Status. Gezählt werden
+input_tokens (mit Cache-Anteilen) und output_tokens aus der Antwort, gebucht in verbrauch.jsonl (Zustandsordner). Gebucht wird alles, was an
+LiteLLM ging: bei Abbruch, Zeitgrenze oder fehlendem usage mindestens eine Schätzung (Körper durch 3, dazu max_tokens bzw. Antwort durch 4).
 Im Protokoll (stderr, Journal): Ergebnis, Auftrag, Weg, Modell, Status, Token, Dauer. Nie ein Inhalt, nie ein Token, nie der Schlüssel.
 
 Aufruf (durch wamo-haus-proxy.service):
@@ -64,6 +70,14 @@ GESAMT_ZEIT_S = 1800.0
 ANTWORT_MAX = 64 * 1024 * 1024
 JSON_ZAEHL_MAX = 4 * 1024 * 1024  # eine Antwort ohne Streaming wird bis zu dieser Größe für die Zählung gelesen
 TAG_TOKEN_MAX = 30_000_000
+PROFIL_TAG_TOKEN_MAX = 10_000_000
+VERBINDUNGEN_MAX = 16  # offene Verbindungen insgesamt (der Körper wird erst nach dem Platz gelesen, aber Köpfe kosten auch Speicher)
+VERBINDUNGEN_JE_AUFTRAG = 4
+MAX_AUSGABE_TOKEN = 32768  # max_tokens wird darauf gekürzt (Kontext von qwen3.6:35b im Ollama des Gateways: 32768)
+# Oberste Felder einer Anfrage: genau die, die Claude Code schickt (gemessen mit 2.1.303), plus die üblichen der Messages-API. Felder, mit
+# denen LiteLLM selbst gesteuert wird (fallbacks, api_base, extra_headers, mock_response, metadata.tags, litellm_*), kommen nie durch.
+FELDER_ERLAUBT = frozenset({"model", "messages", "system", "max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences",
+                            "tools", "tool_choice", "thinking", "metadata", "context_management", "output_config"})
 VERBRAUCH_LESEN_MAX = 16 * 1024 * 1024
 CHUNK = 65536
 GRUENDE = {400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed",
@@ -108,6 +122,7 @@ class Verbrauch:
     pfad: Path | None
     je_auftrag: dict[str, int] = field(default_factory=dict)
     je_tag: dict[str, int] = field(default_factory=dict)
+    je_profil_tag: dict[tuple[str, str], int] = field(default_factory=dict)
 
     @staticmethod
     def tag(zeit: float) -> str:
@@ -128,13 +143,16 @@ class Verbrauch:
             except (ValueError, KeyError, TypeError):
                 continue  # auch die erste, angeschnittene Zeile
             if isinstance(job, str) and isinstance(tag, str) and n > 0:
-                self.je_auftrag[job] = self.je_auftrag.get(job, 0) + n
-                self.je_tag[tag] = self.je_tag.get(tag, 0) + n
+                self._addieren(job, tag, e.get("profil"), n)
+
+    def _addieren(self, job: str, tag: str, profil: object, n: int) -> None:
+        self.je_auftrag[job] = self.je_auftrag.get(job, 0) + n
+        self.je_tag[tag] = self.je_tag.get(tag, 0) + n
+        if isinstance(profil, str):
+            self.je_profil_tag[(profil, tag)] = self.je_profil_tag.get((profil, tag), 0) + n
 
     def buchen(self, eintrag: dict) -> None:
-        n = int(eintrag["ein"]) + int(eintrag["aus"])
-        self.je_auftrag[eintrag["job"]] = self.je_auftrag.get(eintrag["job"], 0) + n
-        self.je_tag[eintrag["tag"]] = self.je_tag.get(eintrag["tag"], 0) + n
+        self._addieren(eintrag["job"], eintrag["tag"], eintrag.get("profil"), int(eintrag["ein"]) + int(eintrag["aus"]))
         if self.pfad is not None:
             with open(self.pfad, "a", encoding="utf-8") as f:
                 f.write(json.dumps(eintrag, ensure_ascii=True, separators=(",", ":")) + "\n")
@@ -145,14 +163,18 @@ class Zaehler:
     usage der JSON-Antwort. Hält nur angefangene Zeilen bzw. höchstens JSON_ZAEHL_MAX Bytes."""
 
     def __init__(self, sse: bool):
-        self.sse, self.ein, self.aus, self._rest, self._json = sse, 0, 0, b"", bytearray()
+        self.sse, self.ein, self.aus, self.bytes, self._rest, self._json = sse, 0, 0, 0, b"", bytearray()
 
     @staticmethod
-    def _eingabe(u: dict) -> int:
-        return sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-                   if isinstance(u.get(k) or 0, int))
+    def _zahl(wert: object) -> int:
+        return wert if type(wert) is int and 0 <= wert <= 10**9 else 0
+
+    @classmethod
+    def _eingabe(cls, u: dict) -> int:
+        return sum(cls._zahl(u.get(k)) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
 
     def futter(self, daten: bytes) -> None:
+        self.bytes += len(daten)
         if not self.sse:
             if len(self._json) + len(daten) <= JSON_ZAEHL_MAX:
                 self._json += daten
@@ -172,10 +194,10 @@ class Zaehler:
             return
         if e.get("type") == "message_start" and isinstance(e.get("message"), dict) and isinstance(e["message"].get("usage"), dict):
             self.ein = max(self.ein, self._eingabe(e["message"]["usage"]))
-            self.aus = max(self.aus, int(e["message"]["usage"].get("output_tokens") or 0))
+            self.aus = max(self.aus, self._zahl(e["message"]["usage"].get("output_tokens")))
         elif e.get("type") == "message_delta" and isinstance(e.get("usage"), dict):
             u = e["usage"]
-            self.aus = max(self.aus, int(u.get("output_tokens") or 0))
+            self.aus = max(self.aus, self._zahl(u.get("output_tokens")))
             self.ein = max(self.ein, self._eingabe(u))
 
     def ende(self) -> None:
@@ -188,7 +210,7 @@ class Zaehler:
         except (ValueError, AttributeError):
             return
         if isinstance(u, dict):
-            self.ein, self.aus = self._eingabe(u), int(u.get("output_tokens") or 0)
+            self.ein, self.aus = self._eingabe(u), self._zahl(u.get("output_tokens"))
 
 
 def _fehler_json(status: int, text: str) -> bytes:
@@ -199,14 +221,18 @@ def _fehler_json(status: int, text: str) -> bytes:
 class Proxy:
     def __init__(self, ziel: Ziel, schluessel: str, modelle: frozenset[str], auftraege: Path, verbrauch: Verbrauch,
                  parallel_max: int = PARALLEL_MAX, tag_token_max: int = TAG_TOKEN_MAX, warte_s: float = WARTE_S,
-                 protokoll: Callable[[str], None] | None = None, uhr: Callable[[], float] = time.time):
+                 protokoll: Callable[[str], None] | None = None, uhr: Callable[[], float] = time.time,
+                 profil_tag_token_max: int = PROFIL_TAG_TOKEN_MAX, verbindungen_max: int = VERBINDUNGEN_MAX):
         if not schluessel or not WERT_RE.fullmatch(schluessel):
             raise ValueError("Schlüssel für LiteLLM fehlt oder hat unerlaubte Zeichen")
         if not modelle or any(not MODELL_RE.fullmatch(m) for m in modelle):
             raise ValueError("Modellliste leer oder ungültig")
         self.ziel, self._schluessel, self.modelle, self.auftraege, self.verbrauch = ziel, schluessel, modelle, auftraege, verbrauch
-        self.tag_token_max, self.warte_s = tag_token_max, warte_s
+        self.tag_token_max, self.profil_tag_token_max, self.warte_s = tag_token_max, profil_tag_token_max, warte_s
         self._frei = asyncio.Semaphore(parallel_max)
+        self._verbindungen_max = verbindungen_max
+        self._offen = 0
+        self._offen_je_auftrag: dict[str, int] = {}
         self._protokoll = protokoll or (lambda z: print(z, file=sys.stderr, flush=True))
         self._uhr = uhr
 
@@ -249,9 +275,12 @@ class Proxy:
         return Auftrag(job, d["profil"], d["bis"], d["max_token"])
 
     def budget_pruefen(self, a: Auftrag) -> None:
+        tag = Verbrauch.tag(self._uhr())
         if self.verbrauch.je_auftrag.get(a.job, 0) >= a.max_token:
             raise Abweisung(403, "budget_auftrag", "Token-Budget dieses Auftrags ist erschöpft")
-        if self.verbrauch.je_tag.get(Verbrauch.tag(self._uhr()), 0) >= self.tag_token_max:
+        if self.verbrauch.je_profil_tag.get((a.profil, tag), 0) >= self.profil_tag_token_max:
+            raise Abweisung(403, "budget_profil", "Token-Budget des Tages für dieses Profil ist erschöpft")
+        if self.verbrauch.je_tag.get(tag, 0) >= self.tag_token_max:
             raise Abweisung(403, "budget_tag", "Token-Budget des Tages für Hausmodelle ist erschöpft")
 
     # ------------------------------------------------------------ Anfrage lesen
@@ -306,61 +335,119 @@ class Proxy:
                 raise Abweisung(400, "kopf_ungueltig", f"Kopfzeile {name} ungültig")
         return ziel, auftrag, int(laenge)
 
-    def _modell_pruefen(self, koerper: bytes) -> str:
+    def _koerper_pruefen(self, koerper: bytes) -> tuple[str, bytes, int]:
+        """Prüft den Körper und baut ihn neu: nur Felder aus FELDER_ERLAUBT (sonst 400), Modell aus der Liste, metadata nur mit
+        user_id, max_tokens auf MAX_AUSGABE_TOKEN gekürzt. Liefert (Modell, neuer Körper, max_tokens für die Schätzung)."""
         try:
             d = json.loads(koerper)
         except (ValueError, UnicodeDecodeError, RecursionError):
             raise Abweisung(400, "json", "Körper ist kein JSON") from None
         if not isinstance(d, dict):
             raise Abweisung(400, "json", "Körper ist kein JSON-Objekt")
+        fremd = set(d) - FELDER_ERLAUBT
+        if fremd:
+            raise Abweisung(400, "feld", "Feld nicht erlaubt: " + ", ".join(sorted(f[:40] for f in fremd)[:5]))
         modell = d.get("model")
         if not isinstance(modell, str) or modell not in self.modelle:
             raise Abweisung(400, "modell", f"Modell nicht erlaubt (erlaubt: {', '.join(sorted(self.modelle))})")
-        return modell
+        if "metadata" in d:
+            meta = d["metadata"]
+            if not isinstance(meta, dict):
+                raise Abweisung(400, "feld", "metadata muss ein Objekt sein")
+            d["metadata"] = {"user_id": meta["user_id"]} if isinstance(meta.get("user_id"), str) else {}
+        max_tokens = d.get("max_tokens", 0)
+        if "max_tokens" in d:
+            if type(max_tokens) is not int or max_tokens < 1:
+                raise Abweisung(400, "feld", "max_tokens ungültig")
+            max_tokens = d["max_tokens"] = min(max_tokens, MAX_AUSGABE_TOKEN)
+        return modell, json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), max_tokens
 
     # ------------------------------------------------------------ Bedienen
     async def bediene(self, r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        """Eine Anfrage je Verbindung. Gebucht wird alles, was an LiteLLM ging, auch wenn der Client mittendrin abbricht oder die Antwort
+        scheitert: was gezählt wurde, mindestens aber eine Schätzung (Körper durch 3 plus max_tokens bei Abbruch)."""
         beginn = time.monotonic()
         felder: dict = {}
+        if self._offen >= self._verbindungen_max:
+            self._log("zu_viele_verbindungen")
+            await self._antwort(w, 429, "zu viele offene Verbindungen", {"Retry-After": "5"})
+            return await self._schliesse(w)
+        self._offen += 1
+        job = None
+        lauf: dict = {}
         try:
             methode, ziel, kopf = await self._kopf_lesen(r)
             ziel, auftrag, laenge = self._anfrage_pruefen(methode, ziel, kopf)
-            felder.update(job=auftrag.job, weg=ziel.partition("?")[0])
+            job = auftrag.job
+            felder.update(job=job, weg=ziel.partition("?")[0])
+            self._offen_je_auftrag[job] = self._offen_je_auftrag.get(job, 0) + 1
+            if self._offen_je_auftrag[job] > VERBINDUNGEN_JE_AUFTRAG:
+                raise Abweisung(429, "zu_viele_auftrag", "zu viele Anfragen dieses Auftrags gleichzeitig", {"Retry-After": "5"})
             self.budget_pruefen(auftrag)
-            try:
-                koerper = await asyncio.wait_for(r.readexactly(laenge), KOERPER_ZEIT_S)
-            except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError):
-                raise Abweisung(400, "koerper", "Körper unvollständig") from None
-            felder["modell"] = self._modell_pruefen(koerper)
-            try:
+            try:  # erst den Platz, dann den Körper: wartende Anfragen halten keinen Körper im Speicher
                 await asyncio.wait_for(self._frei.acquire(), self.warte_s)
             except asyncio.TimeoutError:
                 raise Abweisung(429, "zu_viele", "Hausmodelle gerade ausgelastet", {"Retry-After": "10"}) from None
             try:
-                status, ein, aus = await self._weiterreichen(ziel, kopf, koerper, w)
+                try:
+                    koerper = await asyncio.wait_for(r.readexactly(laenge), KOERPER_ZEIT_S)
+                except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError):
+                    raise Abweisung(400, "koerper", "Körper unvollständig") from None
+                felder["modell"], koerper, lauf["max_tokens"] = self._koerper_pruefen(koerper)
+                lauf["koerper"] = len(koerper)
+                try:
+                    await self._weiterreichen(ziel, kopf, koerper, w, lauf)
+                finally:
+                    if lauf.get("gesendet"):
+                        self._buchen(auftrag, felder, lauf, beginn)
             finally:
                 self._frei.release()
-            self._buchen(auftrag, felder, status, ein, aus, beginn)
         except Abweisung as a:
-            self._log(a.ergebnis, status=a.status, ms=int((time.monotonic() - beginn) * 1000), **felder)
+            if not (a.ergebnis == "ziel_fehler" and lauf.get("gesendet")):  # gebucht und protokolliert ist das schon
+                self._log(a.ergebnis, status=a.status, ms=int((time.monotonic() - beginn) * 1000), **felder)
             await self._antwort(w, a.status, a.text, a.kopf)
         except Exception as e:  # noqa: BLE001  nie ein Absturz des Proxys durch eine Anfrage, nie ein Inhalt im Protokoll
             self._log("fehler", art=type(e).__name__, **felder)
         finally:
+            self._offen -= 1
+            if job is not None:
+                self._offen_je_auftrag[job] -= 1
+                if self._offen_je_auftrag[job] <= 0:
+                    del self._offen_je_auftrag[job]
             await self._schliesse(w)
 
-    def _buchen(self, auftrag: Auftrag, felder: dict, status: int, ein: int, aus: int, beginn: float) -> None:
+    @staticmethod
+    def _menge(lauf: dict) -> tuple[int, int, bool]:
+        """Token für die Buchung: gezählt, und wenn das nicht reicht, geschätzt (Rückgabe ein, aus, geschätzt)."""
+        z = lauf.get("zaehler")
+        ein, aus = (z.ein, z.aus) if z is not None else (0, 0)
+        status = lauf.get("status") or 0
+        if not lauf.get("vollstaendig"):  # Abbruch, Zeitgrenze, Fehler: LiteLLM rechnet womöglich weiter
+            return max(ein, lauf.get("koerper", 0) // 3), max(aus, lauf.get("max_tokens") or 0), True
+        if 200 <= status < 300 and ein + aus == 0:  # vollständig, aber ohne usage in der Antwort
+            return lauf.get("koerper", 0) // 3, (z.bytes if z is not None else 0) // 4, True
+        return ein, aus, False
+
+    def _buchen(self, auftrag: Auftrag, felder: dict, lauf: dict, beginn: float) -> None:
         ms = int((time.monotonic() - beginn) * 1000)
         jetzt = self._uhr()
+        ein, aus, geschaetzt = self._menge(lauf)
+        status = lauf.get("status") or 0
         try:
             self.verbrauch.buchen({"zeit": int(jetzt), "tag": Verbrauch.tag(jetzt), "job": auftrag.job, "profil": auftrag.profil,
                                    "weg": felder.get("weg"), "modell": felder.get("modell"), "status": status, "ein": ein, "aus": aus,
-                                   "ms": ms})
+                                   "geschaetzt": geschaetzt, "ms": ms})
         except OSError as e:
             self._log("buchung_fehlt", art=type(e).__name__, job=auftrag.job)
-        self._log("ok" if 200 <= status < 300 else "ziel_fehler", status=status, ein=ein, aus=aus, ms=ms, **felder)
+        if not lauf.get("vollstaendig"):
+            ergebnis = "abbruch"
+        else:
+            ergebnis = "ok" if 200 <= status < 300 else "ziel_fehler"
+        self._log(ergebnis, status=status, ein=ein, aus=aus, geschaetzt="ja" if geschaetzt else "", ms=ms, **felder)
 
-    async def _weiterreichen(self, ziel: str, kopf: dict[str, str], koerper: bytes, w: asyncio.StreamWriter) -> tuple[int, int, int]:
+    async def _weiterreichen(self, ziel: str, kopf: dict[str, str], koerper: bytes, w: asyncio.StreamWriter, lauf: dict) -> None:
+        """Reicht die Anfrage an LiteLLM und die Antwort zurück. lauf hält fest: gesendet, status, zaehler, vollstaendig. Eine Antwort ab
+        Status 400 geht nie wörtlich zurück (sie kann Interna von LiteLLM nennen), sondern als eigener Fehler mit demselben Status."""
         try:
             ur, uw = await asyncio.wait_for(asyncio.open_connection(self.ziel.host, self.ziel.port), VERBINDEN_ZEIT_S)
         except (OSError, asyncio.TimeoutError):
@@ -371,6 +458,7 @@ class Proxy:
                       f"Content-Length: {len(koerper)}", "Connection: close"]
             zeilen += [f"{n}: {kopf[n]}" for n in WEITERGEREICHT if n in kopf]
             uw.write(("\r\n".join(zeilen) + "\r\n\r\n").encode("ascii") + koerper)
+            lauf["gesendet"] = True
             await uw.drain()
             try:
                 roh = await asyncio.wait_for(ur.readuntil(b"\r\n\r\n"), ANTWORT_KOPF_ZEIT_S)
@@ -379,20 +467,23 @@ class Proxy:
             except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
                 raise Abweisung(502, "ziel_antwort", "Antwort von LiteLLM ungültig") from None
             status, akopf = self._antwortkopf(roh)
+            lauf["status"] = status
+            if status >= 400:
+                lauf["vollstaendig"] = True
+                weiter = {"Retry-After": akopf["retry-after"]} if re.fullmatch(r"[0-9]{1,5}", akopf.get("retry-after", "")) else None
+                raise Abweisung(status, "ziel_fehler", f"LiteLLM meldet Status {status}", weiter)
             art = akopf.get("content-type", "application/json")
             sse = art.startswith("text/event-stream")
-            aus_kopf = [f"HTTP/1.1 {status} {GRUENDE.get(status, 'OK' if status < 300 else 'Error')}",
+            aus_kopf = [f"HTTP/1.1 {status} {GRUENDE.get(status, 'OK')}",
                         f"Content-Type: {art if WERT_RE.fullmatch(art) else 'application/octet-stream'}",
                         "Transfer-Encoding: chunked", "Connection: close", "Cache-Control: no-store"]
-            if "retry-after" in akopf and re.fullmatch(r"[0-9]{1,5}", akopf["retry-after"]):
-                aus_kopf.append(f"Retry-After: {akopf['retry-after']}")
             w.write(("\r\n".join(aus_kopf) + "\r\n\r\n").encode("ascii"))
-            zaehler = Zaehler(sse)
+            lauf["zaehler"] = zaehler = Zaehler(sse)
             await self._koerper_kopieren(ur, akopf, w, zaehler)
             w.write(b"0\r\n\r\n")
             await w.drain()
             zaehler.ende()
-            return status, zaehler.ein, zaehler.aus
+            lauf["vollstaendig"] = True
         finally:
             await self._schliesse(uw)
 

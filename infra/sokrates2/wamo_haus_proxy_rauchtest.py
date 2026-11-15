@@ -10,7 +10,8 @@ Proben:
             Abweisungen (Weg, Token, Modell, Budget) gehen nie an die Attrappe. Kein Netz, kein Schlüssel.
   dienst    wamo-haus-proxy läuft, lauscht nur auf 127.0.0.1:18090, weist ohne Token (401), falschen Weg (404) und GET (405) ab.
   rechte    litellm.key root:root 0400 und für wamo unlesbar; /run/wamo-haus 2750 wamo:wamo-haus-proxy.
-  echt      Tokendatei für einen Probe-Auftrag, eine Anfrage mit max_tokens 8 an qwen3.6-35b, 200 und message_stop, Datei wieder weg.
+  echt      Tokendatei für einen Probe-Auftrag, eine Anfrage mit max_tokens 8 an qwen3.6-35b, 200 und message_stop, gezählte Token (nicht
+            geschätzt) in verbrauch.jsonl, Datei wieder weg.
 Ausgabe: je Probe eine Zeile OK oder FEHLER, nie ein Inhalt, nie ein Schlüssel. Exit 0 nur, wenn alle Proben bestehen.
 """
 
@@ -35,6 +36,7 @@ PORT = 18090
 MODELL = "qwen3.6-35b"
 ORDNER = Path("/run/wamo-haus")
 SCHLUESSEL_DATEI = Path("/etc/wamo-haus-proxy/litellm.key")
+VERBRAUCH = Path("/var/lib/wamo-haus-proxy/verbrauch.jsonl")
 SSE = (b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n"
        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n\n"
        b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
@@ -153,7 +155,20 @@ def probe_echt() -> str | None:
         status, body = asyncio.run(_anfrage(PORT, token))
         if status != 200 or b"message_stop" not in body:
             return f"echte Anfrage: Status {status}"
-        print(f"  echt: 200 in {time.time() - beginn:.1f} s")
+        dauer = time.time() - beginn
+        time.sleep(0.5)
+        buchung = None
+        with open(VERBRAUCH, encoding="utf-8") as f:
+            for zeile in f.readlines()[-50:]:
+                try:
+                    e = json.loads(zeile)
+                except ValueError:
+                    continue
+                if e.get("job") == job:
+                    buchung = e
+        if buchung is None or buchung.get("geschaetzt") or not (buchung.get("ein", 0) > 0 and buchung.get("aus", 0) > 0):
+            return "echte Anfrage: Token nicht gezählt (usage fehlt in der Antwort von LiteLLM)"
+        print(f"  echt: 200 in {dauer:.1f} s, gezählt {buchung['ein']} ein, {buchung['aus']} aus")
     finally:
         try:
             os.unlink(datei)
