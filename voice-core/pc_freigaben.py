@@ -43,7 +43,7 @@ MAX_OFFEN = 5  # wie MAX_PENDING im Host
 MAX_ERGEBNIS_ZEICHEN = 800  # so viel vom Ergebnis des PCs bekommt das Sprachmodell
 SCHLIESSEN_TIMEOUT_SECS = 3.0
 AKTION_TEXT = {"powershell": "den PowerShell-Befehl", "senden": "das Senden", "webseite": "das Öffnen der Webseite",
-               "klicken": "den Klick", "github": "das Anlegen des GitHub-Repositorys"}
+               "klicken": "den Klick", "github": "das Anlegen des GitHub-Repositorys", "mail": "die Mail"}
 
 
 @dataclass
@@ -95,6 +95,9 @@ class PcFreigaben:
         self._offen: dict[str, _Offen] = {}
         self._entschieden: deque[str] = deque(maxlen=50)  # zweiter Klick: nur protokollieren, nicht ansagen
         self._hintergrund: set[asyncio.Future] = set()
+        # nach_ergebnis(anfrage, ergebnis): sieht das Ergebnis des Hosts nach einem Ja (Mail: Zurückholen und Endstand,
+        # outlook_werkzeuge.py); bot.py setzt es, Fehler darin halten die Freigabe nie auf
+        self.nach_ergebnis: Callable[[dict, dict], Awaitable[None]] | None = None
 
     # ---------- 1. Anfrage vom Host ----------
     def anfrage(self, a: dict) -> dict | None:
@@ -115,7 +118,7 @@ class PcFreigaben:
         a = offen.anfrage
         rest = max(1, int(offen.gueltig - (self._uhr() - offen.erstellt)))  # Restfrist, nicht die volle
         item = {"id": a["id"], "grund": a["grund"], "detail": a["detail"], "von": self._von, "gueltig_s": rest}
-        for feld in ("ziel", "anlass"):  # anlass: Begründung des Modells, getrennt von dem, was ausgeführt wird
+        for feld in ("ziel", "anlass", "warnung"):  # anlass: Begründung des Modells; warnung: Fremdinhalt im Zug (Mail)
             if a.get(feld):
                 item[feld] = a[feld]
         return freigabe_karte(item, self._pc_name() or "PC")
@@ -129,8 +132,12 @@ class PcFreigaben:
 
     def _protokollieren(self, a: dict) -> asyncio.Future:
         params = {"approval_id": a["id"], "aktion": a["aktion"], "ziel": a.get("ziel", ""), "detail": a["detail"]}
+        risiko = "critical"
+        if a["aktion"] == "mail":  # nie Betreff, Text oder Adressen in actions: nur Zahlen, Domänen, Weg (activity._mail_protokoll)
+            params = {"approval_id": a["id"], "aktion": "mail", "ziel": a.get("ziel", ""), "mail": a.get("protokoll", {})}
+            risiko = "change" if a.get("protokoll", {}).get("weg") == "entwurf" else "critical"
         return self._hinten(self._memory.log_action(tool=a["werkzeug"], params=params, reason=a["grund"],
-                                                    risk="critical"))
+                                                    risk=risiko))
 
     def _abgelaufen(self, offen: _Offen) -> bool:
         return self._uhr() - offen.erstellt > offen.gueltig
@@ -195,6 +202,11 @@ class PcFreigaben:
         else:
             await self._aktivitaet(offen, "fertig" if status == "success" else "fehler")
             await self._markierung(offen, ergebnis)
+            if self.nach_ergebnis is not None:
+                try:
+                    await self.nach_ergebnis(offen.anfrage, ergebnis)
+                except Exception as e:  # noqa: BLE001 (eine Anzeige darf die Freigabe nie aufhalten)
+                    logger.warning("PC-Freigabe: Nachbereitung fehlgeschlagen ({})", type(e).__name__)
         self._fremdinhalt()
         await self._melden(self._ergebnis_text(offen.anfrage, ergebnis))
         return ergebnis

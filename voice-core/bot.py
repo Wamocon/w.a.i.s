@@ -49,6 +49,11 @@ Nachrichten von der Oberfläche:
                                           eigenes Canvas-Element als Datei am PC speichern, gespeicherte Datei öffnen
                                           (office_werkzeuge.py; nur admin mit WAMO_OFFICE=dateien, nie im Labor). Antwort an die
                                           Oberfläche: {"type": "datei", "ok", ...}; betrieb trägt dann "office" (Formate)
+  {"type": "mail_vorbereiten", "data": {"canvas_id"?, "an", "cc", "betreff", "text", "anhang"?}} und
+  {"type": "mail_zurueckholen", "data": {"id"}}
+                                          Mail über Outlook am PC zur Freigabe vorbereiten, geplanten Versand zurückholen
+                                          (outlook_werkzeuge.py; nur admin mit WAMO_OFFICE=outlook, nie im Labor). Antworten:
+                                          {"type": "mail_antwort", "ok", ...} und {"type": "mail_versand", ...}; betrieb trägt "mail"
   {"type": "freigabe", "data": {...}}     sonst Freigabe für Entwicklungsaufträge (nur admin)
 Live-Untertitel: Pipecat sendet bot-output (mit Wortfortschritt aus den Soniox-Zeitstempeln) und
 user-transcription von selbst; RTVIObserverParams bleiben dafür auf dem Standard (eingeschaltet).
@@ -174,6 +179,7 @@ import bild_fern
 from bildstrom import NICHT_ERLAUBT as BILD_NICHT_ERLAUBT, Bildstrom
 import labor_werkzeuge
 import office_werkzeuge
+import outlook_werkzeuge
 from pc_freigaben import PcFreigaben
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
 from screen import PC_OFF, foto as screen_foto, register_screen_tools
@@ -366,7 +372,7 @@ def betrieb_message(
     pc: str, pc_latenz_ms: int | None = None, pc_steuerung: bool = False, entwicklung: bool = False,
     llm: str | None = None, pc_name: str | None = None, pc_belegt: bool = False, sprache: dict[str, str] | None = None,
     modell_modus: str | None = None, modell_quelle: str | None = None, modell_hinweis: str | None = None,
-    entwicklung_grund: str | None = None, office: list[str] | None = None,
+    entwicklung_grund: str | None = None, office: list[str] | None = None, mail: bool = False,
 ) -> dict:
     """pc: verbindet | verbunden | gesperrt | getrennt | aus (gesperrt: Bildschirm am PC gesperrt, pc_anzeige).
     pc_steuerung: ob die PC-Werkzeuge in dieser Sitzung eingeschaltet sind (Standard aus).
@@ -380,7 +386,8 @@ def betrieb_message(
     Modell nehmen konnte (zu langsam, nicht erreichbar), für die Anzeige in der Statusleiste.
     entwicklung_grund: warum Entwicklungsaufträge im Büro aus sind (höchstens 120 Zeichen); der Aufrufer reicht ihn nur für
     Admins durch (entwicklung_betrieb.anzeige_grund), nie für Mitglieder.
-    office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld."""
+    office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld.
+    mail: ob Mails über Outlook am PC jetzt gehen (outlook_werkzeuge.OutlookMail.anzeige); nur dann trägt betrieb "mail": true."""
     sprache = sprache or {}
     message = {
         "type": "betrieb",
@@ -408,6 +415,8 @@ def betrieb_message(
         message["entwicklung_grund"] = " ".join(entwicklung_grund.split())[:entwicklung_betrieb.ANZEIGE_ZEICHEN]
     if office:
         message["office"] = [f for f in office if f in office_werkzeuge.FORMATE]
+    if mail is True:
+        message["mail"] = True
     return message
 
 
@@ -760,6 +769,16 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     if office is not None:
         office.register(llm)
 
+    # Mail über Outlook am PC (outlook_werkzeuge.py): nur admin mit PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=outlook. Auch dieses
+    # Werkzeug läuft durch das Stimmabdruck-Gate; die Karte legt PcFreigaben an (unten verdrahtet), den Anhang exportiert office.
+    mail = (outlook_werkzeuge.OutlookMail(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
+                                          melden=lambda t: melde_llm(t), fremd=lambda: turn.tainted,
+                                          exportieren=office.exportieren if office is not None else None,
+                                          formate=(lambda: office.formate) if office is not None else (lambda: ()))
+            if (pc_client is not None and is_admin and not labor_sitzung and outlook_werkzeuge.fuer_sitzung(identity)) else None)
+    if mail is not None:
+        mail.register(llm)
+
     # WAMO Boss (boss.py): Aufgaben an Spezialisten verteilen; Karte unter Vorgänge, Ergebnis als Daten (turn.taint).
     # Die Art "bild" gibt es nur mit PC-Steuerung und Rolle admin, wie bildschirm_ansehen.
     async def bildschirm_foto():
@@ -967,7 +986,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                    modell_modus=modus_wirksam(zugang), modell_quelle=zugang.quelle,
                                    modell_hinweis=llm_wahl.grund,
                                    entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund),
-                                   office=office.anzeige() if office is not None else None))
+                                   office=office.anzeige() if office is not None else None,
+                                   mail=mail.anzeige() if mail is not None else False))
 
     async def stimme_sagen(text: str) -> None:
         """WAMO spricht einen Satz der Stimmprüfung (Anleitung beim Einlernen, Fehler), ohne das Modell zu fragen."""
@@ -1046,6 +1066,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     ) if pc_client else None
     if freigaben is not None and is_admin:  # Mitglieder können nichts freigeben: keine Karte, die ins Leere läuft
         aktivitaet.on_freigabe = freigaben.anfrage
+        if mail is not None:  # Mail: Karte über dieselbe Freigabe (Job pc, Aktion mail), danach Zurückholen und Endstand
+            mail.karte_anlegen = freigaben.anfrage
+            freigaben.nach_ergebnis = mail.nach_freigabe
 
     # Testlabor (labor_werkzeuge.py): nur Laborprofile, nach der Annahme oben (labor_sitzung.py). Werkzeuge (ticket_*, mail_senden) und Freigabekarte.
     # Fällt der Dienst zwischen Annahme und diesem Schritt aus (oder endet der Durchlauf dort), gibt es keine Sitzung: die Person bekommt dieselbe
@@ -1136,7 +1159,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             if stimme is not None:  # Handler im Schema registriert Pipecat selbst: auch sie fragen vorher das Gate der Stimmprüfung
                 pc_schemas = schemas_absichern(pc_schemas, stimme.gate)
             office_schemas = await office.schemas() if office is not None else []  # nur Formate, die der Host meldet
-            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas]))
+            mail_schemas = await mail.schemas() if mail is not None else []  # nur, wenn der Host Mails vorbereiten kann
+            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas,
+                                                          *mail_schemas]))
             state["pc_tools"] = True
             started = time.monotonic()
             with contextlib.suppress(Exception):  # Latenz, Rechnername und Sperre sind nur Anzeigen
@@ -1272,6 +1297,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 logger.warning("Office-Nachricht ohne Office-Dateien in dieser Sitzung abgewiesen")
                 return
             await office.client_nachricht(msg.type, data)
+        elif msg.type in outlook_werkzeuge.NACHRICHTEN:
+            # Mail über Outlook vorbereiten und Versand zurückholen (outlook_werkzeuge.py): nur in Sitzungen mit Mail über Outlook
+            if mail is None:
+                logger.warning("Mail-Nachricht ohne Mail über Outlook in dieser Sitzung abgewiesen")
+                return
+            await mail.client_nachricht(msg.type, data)
         elif msg.type == "stimmabdruck" and stimme is not None:
             # Einlernen, abbrechen, löschen (stimme_sitzung.py): nur per Klick in der angemeldeten Oberfläche, nie per Sprache, nie im Labor
             await stimme.nachricht(data)
@@ -1459,6 +1490,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         if buerogeraete is not None:  # offene Karten der Bürogeräte ablehnen (keine offene Zeile in actions zurücklassen)
             with contextlib.suppress(Exception, asyncio.TimeoutError):
                 await asyncio.wait_for(buerogeraete.schliessen(), CLEANUP_DB_TIMEOUT_SECS)
+        if mail is not None:
+            await mail.schliessen()  # nur das Nachfragen endet, ein freigegebener Versand läuft am PC weiter
         if freigaben is not None:
             # offene PC-Freigaben ablehnen: keine Eingabesperre am PC und keine offene Zeile in actions zurücklassen
             with contextlib.suppress(Exception):

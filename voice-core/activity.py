@@ -36,6 +36,8 @@ DETAIL_KEYS = {
 
 
 def _detail(name: str, args: dict) -> str:
+    if name == "outlook_senden" and isinstance(args, dict):  # nur die Zahl, nie Adressen, Betreff oder Text
+        return f"{sum(len(args[k]) for k in ('an', 'cc') if isinstance(args.get(k), list))} Empfänger"
     key = DETAIL_KEYS.get(name)
     if key and isinstance(args, dict) and args.get(key):
         return str(args[key])[:80]
@@ -45,13 +47,16 @@ def _detail(name: str, args: dict) -> str:
 
 
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
-FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github")
-# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken)
+FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail")
+# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken; outlook_senden legt
+# seine Karte selbst über diese Funktion an, outlook_werkzeuge.py)
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
-                                "github_repo_anlegen"})
-FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche (ui/src/lib/nachrichten.ts)
+                                "github_repo_anlegen", "outlook_senden"})
+FREIGABE_DETAIL_ZEICHEN = 2000
+FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
+_DOMAENE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}")
 
 
 def _karten_text(wert: object, grenze: int, zeilen: bool = False) -> str | None:
@@ -87,7 +92,8 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
     roh = data.get("detail") if isinstance(data.get("detail"), str) else ""
     if aktion == "senden":
         roh = roh.replace("\r\n", "\n").replace("\n", "⏎\n").rstrip("\n")  # jedes Enter sendet: sichtbar machen
-    detail = _karten_text(roh, FREIGABE_DETAIL_ZEICHEN, zeilen=True)
+    grenze = FREIGABE_DETAIL_ZEICHEN_MAIL if aktion == "mail" else FREIGABE_DETAIL_ZEICHEN
+    detail = _karten_text(roh, grenze, zeilen=True)
     grund = _karten_text(data.get("grund"), FREIGABE_KURZ_ZEICHEN)
     ziel = _karten_text(data.get("ziel"), FREIGABE_KURZ_ZEICHEN)
     anlass = _karten_text(data.get("anlass"), FREIGABE_KURZ_ZEICHEN)  # vom Modell, nur als Hinweis
@@ -95,12 +101,31 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
         logger.warning("Freigabe {} ohne Karte: Inhalt fehlt oder ist zu lang", aid)
         return None
     gueltig = data.get("gueltig_s")
-    return {
+    anfrage = {
         "id": aid, "werkzeug": str(name)[:60], "aktion": aktion, "grund": grund or "PC-Aktion freigeben",
         "detail": detail, "ziel": ziel, "anlass": anlass, "aktivitaet_id": str(aktivitaet_id)[:100],
         "gueltig_s": gueltig if isinstance(gueltig, int) and not isinstance(gueltig, bool) and 0 < gueltig <= 3600
         else 300,
     }
+    if aktion == "mail":
+        anfrage["protokoll"] = _mail_protokoll(data.get("protokoll"))
+    return anfrage
+
+
+def _mail_protokoll(roh: object) -> dict:
+    """Was der Kern zu einer Mail in actions schreibt: nur Zahlen, Domänen und Weg, nie Adressen, Betreff oder Text."""
+    p = roh if isinstance(roh, dict) else {}
+    sauber: dict = {k: p[k] for k in ("an", "cc", "anhaenge") if isinstance(p.get(k), int) and not isinstance(p.get(k), bool)
+                    and 0 <= p[k] <= 10}
+    if isinstance(p.get("extern"), bool):
+        sauber["extern"] = p["extern"]
+    if isinstance(p.get("domaenen"), list):
+        sauber["domaenen"] = [d for d in p["domaenen"][:10] if isinstance(d, str) and len(d) <= 100 and _DOMAENE.fullmatch(d)]
+    if p.get("weg") in ("senden", "entwurf"):
+        sauber["weg"] = p["weg"]
+    if p.get("programm") in ("klassisch", "neu"):
+        sauber["programm"] = p["programm"]
+    return sauber
 
 
 def freigabe_karte(item: dict, projekt: str) -> dict:
