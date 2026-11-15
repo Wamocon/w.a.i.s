@@ -3,6 +3,7 @@ Zugang (Claude-Code-Token, Übergang, keine) und dass der Token nur für genau d
 
 from __future__ import annotations
 
+import inspect
 import os
 import unittest
 from unittest import mock
@@ -134,14 +135,19 @@ class BueroEntwicklungTests(unittest.IsolatedAsyncioTestCase):
         dev, _log = await self.build(rolle="mitglied", WAMO_BETRIEB="", WAMO_ENTWICKLUNG="an", WAMO_ENTWICKLUNG_MITGLIEDER="an")
         self.assertFalse(dev.called)
 
-    async def test_laborprofil_nie_auch_mit_beiden_schaltern(self):
-        from labor_sitzung import LaborSitzung
-
-        with mock.patch.object(LaborSitzung, "starten", mock.AsyncMock(side_effect=RuntimeError("Laborsitzung im Test nicht nötig"))):
-            with self.assertRaises(RuntimeError):  # die Laborsitzung startet vorher: Entwicklung wird gar nicht erst gefragt
-                with mock.patch.dict(os.environ, {**BUERO_ENV, "WAMO_ENTWICKLUNG_MITGLIEDER": "an"}):
-                    await bot.build_session(smoke.FakeTransport(), Identity(USER, "Gast", "mitglied", "du", labor_art="platz"))
-        self.assertIsNone(bot.entwicklung_betrieb.zulassung_fuer(Identity(USER, "Gast", "mitglied", "du", labor_art="platz")))
+    def test_laborprofil_nie_auch_mit_beiden_schaltern(self):
+        # Die Laborsitzung selbst prüft test_labor_sitzung.py (dort setzt bot.py Entwicklung zuletzt fest auf aus); hier die Entscheidung,
+        # die bot.py für jedes Profil fragt: weder Zulassung noch Satz für Mitglieder, auch mit beiden Schaltern und der user_id in der Liste
+        eb = bot.entwicklung_betrieb
+        with mock.patch.dict(os.environ, {**BUERO_ENV, "WAMO_ENTWICKLUNG_MITGLIEDER": "an"}):
+            for art in ("platz", "schaufenster"):
+                labor = Identity(USER, "Gast", "mitglied", "du", labor_art=art)
+                self.assertEqual(eb.rollen(labor), (False, False, True))
+                self.assertIsNone(eb.zulassung_fuer(labor))
+                self.assertEqual(eb.grund_fuer(labor), eb.GRUND_LABOR)
+                self.assertIsNone(eb.anzeige_grund(False, eb.grund_fuer(labor), mitglied=eb.rollen(labor)[1]))
+        quelle = inspect.getsource(bot.build_session)
+        self.assertIn('entwicklung, fernzugriff, ent_grund = False, False, "Entwicklungsaufträge gibt es im Labor nicht"', quelle)
 
     async def test_prompt_eines_mitglieds_ohne_repo(self):
         with mock.patch.object(bot, "build_system_prompt", wraps=bot.build_system_prompt) as prompt:
@@ -150,7 +156,7 @@ class BueroEntwicklungTests(unittest.IsolatedAsyncioTestCase):
         kwargs = prompt.call_args.kwargs
         self.assertEqual((kwargs["ohne_repo"], kwargs["repo_pflicht"]), (True, False))
         text = bot.build_system_prompt("Erika", "du", entwicklung=True, ohne_repo=True)
-        self.assertIn("Aufträge mit einem GitHub-Repo gibt es für Erika noch nicht", text)
+        self.assertIn("Für Erika gibt es im Büro nur Recherchen (art recherche) ohne Repo", text)
         self.assertNotIn("braucht jeder Auftrag außer der Recherche das GitHub-Repo", text)
 
     async def test_uebergang_zaehlt_im_buero_wie_keine(self):

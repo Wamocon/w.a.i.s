@@ -407,8 +407,8 @@ def betrieb_message(
     modell_modus: wirksamer Modus dieser Sitzung (automatisch | nur_haus, boss.modus_wirksam), modell_quelle: warum
     (festgelegt: Admin, wahl: Person, keiner: kein eigener Schlüssel), modell_hinweis: warum der Boss nicht das beste
     Modell nehmen konnte (zu langsam, nicht erreichbar), für die Anzeige in der Statusleiste.
-    entwicklung_grund: warum Entwicklungsaufträge im Büro aus sind (höchstens 120 Zeichen); der Aufrufer reicht ihn nur für
-    Admins durch (entwicklung_betrieb.anzeige_grund), nie für Mitglieder.
+    entwicklung_grund: warum Entwicklungsaufträge im Büro aus sind (höchstens 120 Zeichen); der Aufrufer reicht ihn für Admins
+    ganz durch, für Mitglieder nur die Sätze für Mitglieder (entwicklung_betrieb.anzeige_grund), für alle anderen nie.
     office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld.
     mail: ob Mails über Outlook am PC jetzt gehen (outlook_werkzeuge.OutlookMail.anzeige); nur dann trägt betrieb "mail": true.
     onenote: ob der Knopf "Als OneNote-Seite" gehen kann (onenote_werkzeuge.OneNoteSeiten.anzeige); False: kein Feld.

@@ -397,9 +397,9 @@ DEV_ABNAHME_BEFEHLE_PROMPT = """- Befehlskriterien sind zugeschaltet: Hat das Pr
 # Büro (Kern auf Sokrates-2): Aufträge mit GitHub-Stufe brauchen das Repo, das Projekt leitet der Kern daraus ab
 # (entwicklung_betrieb.buero_projekt). Nur die Recherche kommt ohne Repo aus. Steht nur bei Entwicklungsaufträgen im Büro im Prompt.
 # Mitglieder im Büro (Paket P5, Entscheidung N6): keine Repos bis Folgepaket 1; der Kern lehnt einen Auftrag mit Repo ab.
-DEV_OHNE_REPO_PROMPT = """- Aufträge mit einem GitHub-Repo gibt es für {name} noch nicht, nur Aufträge ohne Repo, etwa eine Recherche. Fragt
-  {name} nach einem Auftrag an einem Repo, sag das in einem Satz und biete einen Auftrag ohne Repo an. Ein anderer Auftrag kann gerade
-  laufen; dann startet der neue nicht, und {name} versucht es in ein paar Minuten noch einmal.
+DEV_OHNE_REPO_PROMPT = """- Für {name} gibt es im Büro nur Recherchen (art recherche) ohne Repo; Aufträge an einem GitHub-Repo kommen erst
+  später. Fragt {name} nach einer anderen Art oder einem Repo, sag das in einem Satz und biete eine Recherche an. Ein anderer Auftrag
+  kann gerade laufen; dann startet der neue nicht, und {name} versucht es in ein paar Minuten noch einmal.
 """
 
 DEV_REPO_PFLICHT_PROMPT = """- Im Büro braucht jeder Auftrag außer der Recherche das GitHub-Repo als owner/name im Feld repo. Hat {name}
