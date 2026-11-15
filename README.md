@@ -128,7 +128,7 @@ Offen:
 - Browser-Betrieb (21.10.2026, Variante A): Die Oberfläche läuft als Container `wamo-ui` auf Sokrates-2 hinter
   `wamo-caddy` unter `https://192.168.178.136:55445` (Zertifikat der WAMO-CA, nur Büro-LAN und Loopback). Jedes
   Gerät im Büro öffnet WAMO im Browser, nach dem einmaligen Import der WAMO-CA; der Browser dort kennt nur die
-  Betriebsart Büro, PC-Steuerung gibt es nur in der Desktop-App. Test mit Chromium: Seite in 0,23 s geladen, Anmeldung mit
+  Betriebsart Büro; die PC-Steuerung bedient von dort den eigenen Laptop (seit 15.11.2026). Test mit Chromium: Seite in 0,23 s geladen, Anmeldung mit
   zweitem Faktor, Verbindung nach 0,9 s, Begrüßung nach 4,0 s, Frage erkannt und beantwortet, keine CSP-Verstöße.
   Einzelheiten und die Umstellung auf Variante B (eigene Domain, öffentliches Zertifikat):
   `infra/sokrates2/README.md`, Abschnitt 12.
@@ -291,7 +291,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\wamo-tunnel-einricht
 Die Oberfläche gibt es zusätzlich als Dienst auf Sokrates-2 (`https://192.168.178.136:55445`). Gebaut wird sie mit
 `NEXT_PUBLIC_WAMO_NUR_BUERO=ja` (Build-Argument, `infra/sokrates2/wamo-ui/Dockerfile`); ein solcher Build kennt keinen
 lokalen Kern, nennt ihn auch nicht in der CSP und bietet im Browser nur die Betriebsart Büro an. Die Umschaltung
-Büro/Unterwegs entfällt dort, bei der PC-Steuerung steht „nur in der Desktop-App verfügbar“. Erkannt wird die Desktop-App an
+Büro/Unterwegs entfällt dort. Die PC-Steuerung gibt es dort wie in der App; sie steuert den Laptop aus dem Geräteregister,
+und der Schalter sagt das, dazu, was nur die Desktop-App kann (Autostart, Lichtrahmen). Erkannt wird die Desktop-App an
 `window.wamoDesktop` (`ui/src/lib/geraet.ts`), nie an der Adresse. Die Anmeldung gilt im Browser 24 Stunden
 (`NEXT_PUBLIC_WAMO_ANMELDUNG_MAX_STUNDEN_BROWSER`). Adresse und Zertifikat stehen nur in `/home/wamocon/wamo-ui/wamo-ui.conf`
 auf dem Server, nicht im Code.
@@ -408,7 +409,7 @@ Mikrofonfrage des Browsers noch offen, wird weiter gewartet.
 
 Die Oberfläche ist als App installierbar (`ui/src/app/manifest.ts`, Symbole aus `scripts/wamo_icons_erzeugen.py`, Abstände
 für Notch und Home-Balken über `env(safe-area-inset-*)` in `globals.css`). Das Manifest enthält nur Namen, Farben und Symbole.
-Einrichtung am iPhone (nur Betriebsart Büro, also im Büro-LAN oder über WireGuard; die PC-Steuerung bleibt der Desktop-App vorbehalten):
+Einrichtung am iPhone (nur Betriebsart Büro, also im Büro-LAN oder über WireGuard; die PC-Steuerung bedient von dort den eigenen Laptop, ohne Autostart und ohne Lichtrahmen):
 
 1. `infra/sokrates2/wamo-ca.crt` aufs iPhone bringen (AirDrop oder Mail an sich selbst) und öffnen: „Profil geladen“.
 2. Einstellungen, Allgemein, VPN und Geräteverwaltung: das Profil „WAMO CA“ installieren.
@@ -436,7 +437,7 @@ Eingaben in Textfeldern in Ruhe.
 | Verbrauch (`verbrauch`) | Kontingent des Max-Abos aus der Servernachricht `kontingent`: Sitzungslimit, Wochenlimit, Fable limit | Admin |
 | Sprache und Ton (`sprache`) | Mikrofonwahl, Spracherkennung und Sprachausgabe laut Betriebsmeldung | alle |
 | Darstellung (`darstellung`) | Normal, Fokus, Zentrale, Nacht | alle |
-| Geräte und PC (`geraete`) | Verbindungen, Geräteverwaltung (Freigeben, Sperren, Widerrufen), PC-Steuerung samt Autostart (nur Admin, nur Desktop-App), Betriebsart, Stand der Geräteeinrichtung | alle, Geräteverwaltung und PC-Steuerung nur Admin |
+| Geräte und PC (`geraete`) | Verbindungen, Geräteverwaltung (Freigeben, Sperren, Widerrufen), PC-Steuerung (nur Admin, auch im Browser; Autostart nur in der Desktop-App), Betriebsart, Stand der Geräteeinrichtung | alle, Geräteverwaltung und PC-Steuerung nur Admin |
 | Teilen (`teilen`) | Geteilte Arbeit: mit mir, von mir, Dateien | alle |
 | Info (`info`) | Version, Kern, Hinweise an Admins | alle, Hinweise nur Admin |
 

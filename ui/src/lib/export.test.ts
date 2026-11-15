@@ -48,6 +48,14 @@ test("Nachricht datei: Erfolg mit Kennung, Name, Ordner und Pfad", () => {
   assert.equal(hinweisText(m as never), "2026-11-14 Angebot.docx liegt in Dokumente\\WAIS und ist geöffnet.");
 });
 
+test("Hinweis aus dem Browser: die Datei liegt auf dem Laptop, nicht auf dem Gerät des Browsers", () => {
+  const ok = { ok: true, kennung: "0123456789abcdef", name: "Angebot.docx", ordner: "Dokumente\\WAIS", geoeffnet: false } as const;
+  assert.equal(hinweisText(ok, true), "Angebot.docx liegt auf deinem Laptop in Dokumente\\WAIS.");
+  assert.equal(hinweisText({ ...ok, geoeffnet: true }, true), "Angebot.docx liegt auf deinem Laptop in Dokumente\\WAIS und ist dort geöffnet.");
+  assert.equal(hinweisText(ok, false), "Angebot.docx liegt in Dokumente\\WAIS.");
+  assert.equal(hinweisText({ ok: false, grund: "Die PC-Steuerung ist aus." }, true), "Nicht gespeichert: Die PC-Steuerung ist aus.");
+});
+
 test("Nachricht datei: Fehler mit Grund, kaputte Nachrichten werden verworfen", () => {
   assert.deepEqual(parseServerMessage({ type: "datei", ok: false, grund: "Die PC-Steuerung ist aus." }), {
     type: "datei", ok: false, grund: "Die PC-Steuerung ist aus.",
