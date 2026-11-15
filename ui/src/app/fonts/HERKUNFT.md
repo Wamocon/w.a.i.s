@@ -1,8 +1,9 @@
 # Schriften der Oberfläche
 
 Die Oberfläche liefert ihre Schriften selbst aus (`next/font/local` in `layout.tsx`), damit der Bau und der Betrieb nichts bei Google holen.
-Drei Familien, je eine Aufgabe: Unbounded für Marke, Überschriften und große Zahlen (`--font-display`), JetBrains Mono für Beschriftungen,
-Zähler und Code (`--font-hud`), Atkinson Hyperlegible für Fließtext (`--font-body`). Alle Dateien sind die Teilmenge latin (enthält ä, ö, ü, ß).
+Vier Familien, je eine Aufgabe: Cormorant Garamond nur für den Namen W.A.I.S. und seine Langform (`--font-marke`, Klasse `.marke`),
+Unbounded für Überschriften und große Zahlen (`--font-display`), JetBrains Mono für Beschriftungen, Zähler und Code (`--font-hud`),
+Atkinson Hyperlegible für Fließtext (`--font-body`). Alle Dateien sind die Teilmenge latin (enthält ä, ö, ü, ß und den Apostroph ’).
 
 | Datei | Schnitt | SHA-256 |
 | --- | --- | --- |
@@ -15,6 +16,7 @@ Zähler und Code (`--font-hud`), Atkinson Hyperlegible für Fließtext (`--font-
 | `jetbrains-mono-latin-700-normal.woff2` | JetBrains Mono Bold | `d0d4e818808f2a0ba39b2b09d1989366f63494e295f003c7ef436697378507e8` |
 | `atkinson-hyperlegible-latin-400-normal.woff2` | Atkinson Hyperlegible Regular | `d64ba838ef5472bba248620ec4fd8b5aa7cf0db2908e0bb230600caf279ba7bc` |
 | `atkinson-hyperlegible-latin-700-normal.woff2` | Atkinson Hyperlegible Bold | `140e2bd25a7315c8a062508391426b0d8c3297400c947b8d847be28f73a199f0` |
+| `cormorant-garamond-latin-600-normal.woff2` | Cormorant Garamond SemiBold | `ae062b6d5ae308e7edf61b28b07b9984bbb6e961b1f34d9b2c2f4389c33f21ea` |
 
 Quellen (Dateien jeweils unter `files/` des Pakets), Lizenz jeweils SIL Open Font License 1.1:
 
@@ -23,5 +25,6 @@ Quellen (Dateien jeweils unter `files/` des Pakets), Lizenz jeweils SIL Open Fon
 | Unbounded | `@fontsource/unbounded` 5.3.0 | `LICENSE-Unbounded-OFL.txt` |
 | JetBrains Mono | `@fontsource/jetbrains-mono` 5.3.0 | `LICENSE-JetBrainsMono-OFL.txt` |
 | Atkinson Hyperlegible | `@fontsource/atkinson-hyperlegible` 5.3.0 | `LICENSE-AtkinsonHyperlegible-OFL.txt` |
+| Cormorant Garamond | `@fontsource/cormorant-garamond` 5.3.0 | `LICENSE-CormorantGaramond-OFL.txt` |
 
 Aktualisieren: neue Fassung des Pakets holen, die Dateien ersetzen und die Prüfsummen hier und im Test (`ui/src/lib/schrift.test.ts`) nachziehen.

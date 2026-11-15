@@ -47,6 +47,9 @@ describe("Kopfzeile eines normalen Kontos", () => {
     const { onVerlauf } = zeige(NORMAL);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("W.A.I.S.");
     expect(screen.getByRole("heading", { level: 1 }).hasAttribute("title")).toBe(false);
+    // Name in der Markenschrift (components/Wortmarke.tsx), die vier Punkte in WMC-Rot
+    expect(screen.getByRole("heading", { level: 1 }).querySelector(".marke")?.textContent).toBe("W.A.I.S.");
+    expect(screen.getByRole("heading", { level: 1 }).querySelectorAll(".marke-punkt")).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: "Verlauf" }));
     expect(onVerlauf).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Verlauf öffnen", hidden: true })).toBeTruthy(); // im Menü (Popover)
@@ -71,6 +74,9 @@ describe("Kopfzeile eines Laborkontos", () => {
   it("nennt den Platz in der Überschrift", () => {
     zeige(PLATZ);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("W.A.I.S. Testlabor, Platz 3");
+    // nur der Name in der Markenschrift mit roten Punkten, "Testlabor, Platz 3" behält die Schrift der Kopfzeile
+    expect(screen.getByRole("heading", { level: 1 }).querySelector(".marke")?.textContent).toBe("W.A.I.S.");
+    expect(screen.getByRole("heading", { level: 1 }).querySelectorAll(".marke-punkt")).toHaveLength(4);
   });
 
   it("nennt beim Schaufenster nur das Testlabor", () => {
