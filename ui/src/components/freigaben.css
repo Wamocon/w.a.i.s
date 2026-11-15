@@ -27,6 +27,16 @@
 .approval-detail { font: 12px/1.5 var(--hud); }
 .approval-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* Ergebnis einer Jira-Story (components/JiraStory.tsx): Schlüssel mit Verweis oder ein Satz, warum nicht; bleibt bis zum Schließen */
+.jira-ergebnis {
+  display: grid; gap: 6px; justify-items: start; padding: 12px 16px;
+  border: 1px solid var(--kante); border-radius: 10px; background: var(--panel);
+}
+.jira-ergebnis[data-ok="nein"] { border-color: color-mix(in srgb, var(--core) 45%, var(--kante)); }
+.jira-ergebnis .eyebrow { margin: 0; letter-spacing: 0.12em; }
+.jira-ergebnis-text { margin: 0; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+.jira-ergebnis a { color: var(--ink); font-weight: 700; text-decoration-color: var(--core); text-underline-offset: 3px; }
+
 /* Entwicklungsauftrag: Projekt, Art und vollständiger Auftragstext */
 .auftrag-meta { margin: 0 0 10px; display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 14px; }
 .auftrag-meta > div { display: contents; }

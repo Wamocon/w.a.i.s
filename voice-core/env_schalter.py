@@ -44,6 +44,13 @@ Fehlerbehebungen aus der Sitzung vom 31.10.2026 (Standard an, sie ändern kein S
   WAMO_WERKZEUG_DOPPELT        dieselbe Öffnen-Aktion im selben Zug nicht wiederholen, weitere Seite mit Hinweis (werkzeug_wache.py)
   WAMO_MARKER_FALLBACK         fehlt der Satzende-Marker, den Text sofort freigeben statt am Antwortende (marker_wache.py)
   WAMO_LERNEN_HAUS_SECS        Zahl: so lange darf ein Hausmodell für "lernen" brauchen, bevor Claude übernimmt (Standard 15, 0 = aus)
+Jira-Stories aus dem Canvas (jira_client.py, jira_werkzeuge.py, seit 14.11.2026; nur vom Server über wamo-core-env, nie aus der .env des PCs):
+  WAMO_JIRA                    Werkzeug jira_story_anlegen und Knopf am Canvas für Admins im Büro (Standard aus; ein Tippfehler bleibt aus)
+  WAMO_JIRA_URL                Jira Cloud, nur https://<name>.atlassian.net (Standard https://wamocon.atlassian.net)
+  WAMO_JIRA_EMAIL              Mailadresse des technischen Jira-Benutzers nur für W.A.I.S.
+  WAMO_JIRA_TOKEN              dessen API-Token (Geheimnis, nur per stdin an wamo-core-env, nie in Logs)
+  WAMO_JIRA_PROJEKTE           Erlaubnisliste der Projektschlüssel, durch Komma getrennt (Standard WMCNL)
+  WAMO_JIRA_STANDARD_PROJEKT   Projekt ohne Angabe (Standard WMCNL, muss in der Liste stehen)
 Zahlen und Werte ohne Schalterform (Stimme, Tempo, Pausen): SONIOX_VOICE, SONIOX_SPEED (0,7 bis 1,3) und
 SONIOX_REDUCE_SILENCE (an/aus); leer lässt die Standardeinstellung von Soniox (soniox_tts.stimme_einstellung)."""
 

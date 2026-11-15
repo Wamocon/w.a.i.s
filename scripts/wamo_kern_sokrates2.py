@@ -81,6 +81,9 @@ AUS_ENV = (
     # Drop-in wamo-entwicklung-buero.conf, und der Kern-Kanal des Dispatchers sperrt den Befehl pruefen ohnehin), Schwelle zum
     # Kürzen langer Werkzeugausgaben (ausgaben_kuerzen.py, Standard 3000, 0 = aus)
     "WAMO_PERSONA_ABNAHME", "WAMO_ABNAHME_BEFEHLE", "WAMO_AUSGABE_SCHWELLE",
+    # Jira-Stories (voice-core/jira_client.py): Nicht dabei sind alle WAMO_JIRA* (Schalter, Adresse, Mailadresse, Token, Projekte). Das
+    # Token des technischen Jira-Benutzers darf Vorgänge anlegen; es geht nur per stdin an wamo-core-env auf dem Server, nie aus einer .env
+    # des PCs (Anleitung docs/jira-benutzer-einrichten.md, Test test_env_schalter.JiraEinstellungenTest).
 )
 AUS_ENV_PRAEFIX = ("WAMO_LLM_",)
 
