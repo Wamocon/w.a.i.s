@@ -174,6 +174,7 @@ import bild_fern
 from bildstrom import NICHT_ERLAUBT as BILD_NICHT_ERLAUBT, Bildstrom
 import labor_werkzeuge
 import office_werkzeuge
+import onenote_werkzeuge
 from pc_freigaben import PcFreigaben
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
 from screen import PC_OFF, foto as screen_foto, register_screen_tools
@@ -759,6 +760,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
               if (pc_client is not None and is_admin and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
     if office is not None:
         office.register(llm)
+    # OneNote-Seite aus dem Canvas (onenote_werkzeuge.py): dieselben Bedingungen, aber WAMO_OFFICE=onenote. Die Seite entsteht erst nach dem
+    # Klick auf die Freigabekarte (activity.py, pc_freigaben.py); fehlt OneNote am PC, wird es eine Word-Datei in Dokumente\WAIS.
+    onenote = (onenote_werkzeuge.OneNoteSeiten(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d))
+               if (pc_client is not None and is_admin and not labor_sitzung and onenote_werkzeuge.fuer_sitzung(identity)) else None)
+    if onenote is not None:
+        onenote.register(llm)
 
     # WAMO Boss (boss.py): Aufgaben an Spezialisten verteilen; Karte unter Vorgänge, Ergebnis als Daten (turn.taint).
     # Die Art "bild" gibt es nur mit PC-Steuerung und Rolle admin, wie bildschirm_ansehen.
@@ -1136,7 +1143,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             if stimme is not None:  # Handler im Schema registriert Pipecat selbst: auch sie fragen vorher das Gate der Stimmprüfung
                 pc_schemas = schemas_absichern(pc_schemas, stimme.gate)
             office_schemas = await office.schemas() if office is not None else []  # nur Formate, die der Host meldet
-            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas]))
+            onenote_schemas = await onenote.schemas() if onenote is not None else []  # nur, wenn der Host OneNote oder Word kann
+            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas,
+                                                          *onenote_schemas]))
             state["pc_tools"] = True
             started = time.monotonic()
             with contextlib.suppress(Exception):  # Latenz, Rechnername und Sperre sind nur Anzeigen
