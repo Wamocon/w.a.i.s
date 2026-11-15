@@ -212,6 +212,25 @@ def test_text_mit_links_bleibt_text():
     assert 'TargetMode="External"' not in _zip_text(_bauen(roh, "powerpoint"))
 
 
+def _png_bloecke(daten: bytes) -> list[str]:
+    import struct
+
+    assert daten[:8] == b"\x89PNG\r\n\x1a\n"
+    bloecke, i = [], 8
+    while i < len(daten):
+        (laenge,) = struct.unpack(">I", daten[i:i + 4])
+        bloecke.append(daten[i + 4:i + 8].decode("ascii"))
+        i += 12 + laenge
+    return bloecke
+
+
+def test_logo_ohne_metadaten_und_ohne_c2pa():
+    """Das Logo kommt in jede Datei: nur Bilddaten, kein C2PA-Block (caBX) und keine Text- oder Zeitblöcke."""
+    bloecke = _png_bloecke(od.LOGO.read_bytes())
+    assert "caBX" not in bloecke
+    assert set(bloecke) <= {"IHDR", "PLTE", "tRNS", "IDAT", "IEND"}, bloecke
+
+
 # ---------- Prüfung der Eingabe ----------
 @pytest.mark.parametrize("roh", [
     None, [], "text", {"art": "bild", "titel": "x", "text": "y"}, {"art": "dokument", "titel": "x"},
