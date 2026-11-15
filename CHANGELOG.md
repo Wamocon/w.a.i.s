@@ -62,10 +62,24 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   Betriebsart Büro steht das am Schalter, dazu, was nur die Desktop-App kann (Autostart, Lichtrahmen am Zielfenster). Den Haken für den
   Autostart gibt es dort nicht. In einer Sitzung ohne PC-Host ist der Schalter mit klarem Satz gesperrt (statt stiller Ablehnung im
   Kern), bei getrenntem oder gesperrtem PC nennt ein Satz den Zustand. Der Hinweis nach dem Speichern aus dem Canvas sagt im Browser „auf
-  deinem Laptop“ und „Am Laptop öffnen“. Live-Bild, Freigabekarten, Export und OneNote laufen über den Kern und bleiben unverändert. Nur
+  deinem Laptop“ und „Am Laptop öffnen“. Live-Bild, Freigabekarten, Export, OneNote und Mail über Outlook laufen über den Kern und bleiben. Nur
   Oberfläche (`ui/src/lib/pcSchalter.ts`, `usePcSchalter.ts`, `geraet.ts`, `export.ts`, `useWamo.ts`,
   `ui/src/components/einstellungen/Geraete.tsx`, `ui/src/components/DateiHinweis.tsx`); der Kern entscheidet weiter (Rolle admin,
   Register, PC-Sperre je Sitzung, Freigabekarten, Gate der Stimmprüfung). Ablauf, Quelle und Anzeige am Laptop (KP-3A, KP-3C) sind offen.
+- Mail über Outlook am PC aus dem Canvas (Paket 2 aus `docs/office-und-versand.md`, Zweig `feat/outlook`): Auf Zuruf (Werkzeug
+  `outlook_senden`) oder per Klick („Als E-Mail“ im Kopf des Canvas mit An, Cc, Betreff, Text und dem Canvas als Anhang) legt W.A.I.S.
+  eine Freigabekarte mit genau dem Inhalt an, der rausgeht (lange Karte bis 8000 Zeichen, intern oder EXTERN je Empfänger, Warnung bei
+  Fremdinhalt im Zug). Welches Outlook gerade läuft, entscheidet der Weg: Läuft das klassische Outlook allein, sendet W.A.I.S. nach dem
+  Klick per COM mit der Outlook-Signatur und hält die Mail 30 Sekunden unter Entwürfe zurück („Zurückholen“ in der Oberfläche);
+  läuft das neue Outlook (`olk.exe`), öffnet W.A.I.S. einen fertigen Entwurf mit Anhang (.eml mit `X-Unsent` über den App-Alias
+  `olk.exe`, am PC geprüft) und die Person sendet selbst. Im Zweifel nie senden. Endet die Sitzung in der Frist, holt W.A.I.S. die Mail
+  zurück; nach einem Ruhezustand, bei offener Mail in Outlook oder bei einem Fehler beim Senden geht sie nicht raus, und ein unklarer
+  Ausgang heißt unklar. Nur Admins, nie im Labor (das Werkzeug heißt
+  bewusst nicht wie `mail_senden` im Labor), nur mit `WAMO_OFFICE=outlook`, PC-Steuerung und Stimmabdruck-Gate. Host:
+  `outlook_mail_anfragen`, `outlook_zurueckholen`, `outlook_versand_status` (`host/office_outlook.py`, `host/office_outlook_com.py`),
+  Anhänge nur aus dem Register mit gleicher Prüfsumme, höchstens 10 Empfänger und 10 Mails je Stunde, `office.aus` wirkt auch hier.
+  Kern: `voice-core/outlook_werkzeuge.py`, Freigabeart `mail` in `activity.py` und `pc_freigaben.py` (Protokoll ohne Betreff und Text).
+
 - User Story in Jira aus dem Canvas (Zweig `feat/jira-story`, Paket P3 aus dem Plan Office und Versand): Werkzeug `jira_story_anlegen` und Knopf
   "Als User Story in Jira" am eigenen Canvas-Dokument, nur für Admins im Büro, nie im Labor, Werkzeug unter dem Gate der Stimmprüfung. Angelegt wird
   nur nach dem Klick auf "Freigeben" auf der Karte im Kern (Job `jira`, `voice-core/jira_freigaben.py`: Hash über alle Werte, genau einmal, 300

@@ -14,6 +14,7 @@ import type {
   Vorgang,
 } from "@/lib/nachrichten";
 import { hinweisText, type DateiMeldung } from "./export.ts"; // relativ aus demselben Grund
+import { versandText, type MailVersand } from "./mail.ts"; // relativ aus demselben Grund
 import { fristLoeschen } from "./auftragFrist.ts"; // relativ aus demselben Grund
 import { AUFGABE_LEER, naechsteAufgabe, type Aufgabe } from "./aufgabenanzeige.ts"; // relativ aus demselben Grund
 import { auftraegeNachQuittung } from "./auftragStart.ts"; // relativ aus demselben Grund
@@ -62,6 +63,8 @@ export type Approval = {
   ziel?: string;
   /** Begründung des Modells, getrennt von dem, was ausgeführt wird */
   anlass?: string;
+  /** Warnung des Kerns (Mail mit Fremdinhalt im Zug) */
+  warnung?: string;
   ablauf?: number;
 };
 
@@ -181,6 +184,10 @@ export type WamoState = {
   datei: Extract<DateiMeldung, { ok: true }> | null;
   /** zählt die Antworten auf "Speichern" (Erfolg oder Fehler): ein gesperrter Knopf im Canvas wird damit wieder frei */
   dateiAntworten: number;
+  /** letzte Antwort auf "Zur Freigabe vorbereiten" (Mail über Outlook); n zählt, damit das Formular jede Antwort sieht */
+  mailAntwort: { n: number; ok: boolean; grund?: string };
+  /** Stand des letzten Versands (wartet mit Frist und Zurückholen, Endstand oder offener Entwurf), bis die Person ihn schließt */
+  mailVersand: MailVersand | null;
 };
 
 export const HISTORY = 240; // ~12 s bei 20 Hz
@@ -227,6 +234,8 @@ export const initialState: WamoState = {
   jira: JIRA_LEER,
   datei: null,
   dateiAntworten: 0,
+  mailAntwort: { n: 0, ok: true },
+  mailVersand: null,
 };
 
 export const wamo = createStore<WamoState>(initialState);
@@ -404,6 +413,11 @@ export function zeigeToast(text: string) {
 /** Den Hinweis zur zuletzt gespeicherten Datei schließen (die Datei bleibt am PC). */
 export function schliesseDateiHinweis() {
   wamo.set((s) => (s.datei ? { ...s, datei: null } : s));
+}
+
+/** Den Hinweis zum Versand schließen (am PC ändert das nichts; eine wartende Mail geht nach der Frist raus). */
+export function schliesseMailVersand() {
+  wamo.set((s) => (s.mailVersand ? { ...s, mailVersand: null } : s));
 }
 
 // ---------- Freigaben mit Frist (PC-Aktionen): abgelaufene Karten verschwinden selbst ----------
@@ -592,6 +606,7 @@ export function applyServerMessage(msg: ServerMessage) {
         modellHinweis: msg.modellHinweis,
         entwicklungGrund: msg.entwicklungGrund,
         office: msg.office,
+        mail: msg.mail,
         onenote: msg.onenote,
       };
       const vorher = wamo.get().betrieb;
@@ -629,6 +644,26 @@ export function applyServerMessage(msg: ServerMessage) {
         geoeffnet: msg.geoeffnet,
       };
       wamo.set((s) => ({ ...s, datei, dateiAntworten: s.dateiAntworten + 1, ansage: hinweisText(datei) }));
+      return;
+    }
+    case "mail_antwort":
+      // Antwort auf "Zur Freigabe vorbereiten" (components/MailFormular.tsx): ok heißt, die Karte liegt bereit
+      wamo.set((s) => ({
+        ...s,
+        mailAntwort: { n: s.mailAntwort.n + 1, ok: msg.ok, grund: msg.grund },
+        ansage: msg.ok ? "Die Mail liegt zur Freigabe bereit" : `Mail nicht vorbereitet: ${msg.grund ?? ""}`,
+      }));
+      return;
+    case "mail_versand": {
+      // Stand nach dem Klick (components/MailVersand.tsx): die Frist rechnet die Oberfläche ab Eingang, nie länger als der Kern sagt
+      const mailVersand: MailVersand = {
+        id: msg.id,
+        zustand: msg.zustand,
+        text: msg.text,
+        restS: msg.restS,
+        bis: msg.zustand === "wartet" && msg.restS ? Date.now() + msg.restS * 1000 : undefined,
+      };
+      wamo.set((s) => ({ ...s, mailVersand, ansage: versandText(mailVersand, msg.restS ?? 0) }));
       return;
     }
     case "onenote":

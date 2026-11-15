@@ -1,11 +1,13 @@
 "use client";
 
 import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { CanvasMail } from "@/components/MailFormular";
 import { JiraStoryKnopf } from "@/components/JiraStory";
 import { TeilenKnopf } from "@/components/Teilen";
 import { canvasIndex, canvasWunsch } from "@/lib/canvasWahl";
 import { exportFormate, knopfText, ONENOTE_KNOPF, onenoteMoeglich, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
 import { KOPIERT_MS, kopierChipText, type KopierStatus } from "@/lib/kopieren";
+import type { MailAktionen } from "@/lib/mail";
 import { istUuid } from "@/lib/teilenHilfe";
 import { useSelect } from "@/lib/store";
 import { useThema } from "@/lib/useThema";
@@ -44,11 +46,19 @@ const BEISPIELE = [
  * Ergebnisfläche: abonniert nur den eigenen Store-Ausschnitt (canvas) und rendert deshalb nicht
  * neu, wenn sich Untertitel oder Zeitleiste ändern. Leer zeigt sie eine ruhige Beispielliste.
  */
-export const CanvasBereich = memo(function CanvasBereich({ jiraStory, office }: { jiraStory?: (canvasId: string) => boolean; office?: OfficeAktionen }) {
+export const CanvasBereich = memo(function CanvasBereich({
+  jiraStory,
+  office,
+  mail,
+}: {
+  jiraStory?: (canvasId: string) => boolean;
+  office?: OfficeAktionen;
+  mail?: MailAktionen;
+}) {
   const items = useSelect(wamo, (s) => s.canvas);
   // PC-Werkzeuge gibt es vorerst nur für admin; Mitgliedern den Hinweis darauf ersparen
   const mitglied = useSelect(wamo, (s) => s.profil?.rolle === "mitglied");
-  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} />;
+  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} mail={mail} />;
   return (
     <div className="canvas-empty">
       <p className="eyebrow">Canvas</p>
@@ -66,7 +76,17 @@ export const CanvasBereich = memo(function CanvasBereich({ jiraStory, office }: 
   );
 });
 
-function Canvas({ items, jiraStory, office }: { items: CanvasItem[]; jiraStory?: (canvasId: string) => boolean; office?: OfficeAktionen }) {
+function Canvas({
+  items,
+  jiraStory,
+  office,
+  mail,
+}: {
+  items: CanvasItem[];
+  jiraStory?: (canvasId: string) => boolean;
+  office?: OfficeAktionen;
+  mail?: MailAktionen;
+}) {
   const [picked, setPicked] = useState<number | null>(null);
   // "Ergebnis ansehen" in der Tafel Vorgänge (lib/canvasWahl.ts): ein neuer Wunsch wählt das Element mit dieser Kennung, noch im
   // selben Render (kein Zwischenbild mit dem alten Element). Ein Wunsch, der schon galt, bevor dieses Canvas entstand, zählt nicht.
@@ -110,6 +130,7 @@ function Canvas({ items, jiraStory, office }: { items: CanvasItem[]; jiraStory?:
           <CanvasTeilen item={item} />
           <JiraStoryKnopf item={item} anfragen={jiraStory} />
           {office && <CanvasSpeichern key={item.id ?? item.title} item={item} office={office} />}
+          {mail && <CanvasMail key={`mail-${item.id ?? item.title}`} item={item} mail={mail} />}
         </header>
         <CanvasBody item={item} />
       </article>

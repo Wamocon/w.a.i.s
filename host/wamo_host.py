@@ -12,7 +12,9 @@ untrusted: auch Text aus Websuche, Mails oder Dateien kann im Modell als Anweisu
   change    sofort, protokolliert (webseite_oeffnen, programm_oeffnen, dark_mode, git_klonen; nur für den Kern:
             office_datei_erstellen und office_datei_oeffnen, Dateien nur in Dokumente\\WAIS, Schalter office.aus)
   critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung durch einen Admin in der UI (auch github_repo_anlegen und,
-            nur für den Kern, onenote_seite_anfragen)
+            nur für den Kern, outlook_mail_anfragen: Senden über das klassische Outlook ist critical, ein Entwurf im neuen Outlook
+            ist change, kommt aber ebenso erst nach der Karte; Schalter office.aus; nur für den Kern auch
+            onenote_seite_anfragen)
   blocked   nie
 Freigaben kann das Modell NICHT selbst erteilen. Solange eine Anfrage offen ist oder eine freigegebene Aktion läuft,
 ruhen alle Eingaben (status=wartet), und die eigene Oberfläche (Freigabekarte) bedient WAMO nie: Das Modell kann die
@@ -54,6 +56,8 @@ import office_ablage
 import office_com
 import office_dateien
 import office_onenote
+import office_outlook
+import office_outlook_com
 import uia_control
 import windows_control as wc
 
@@ -221,11 +225,12 @@ _rate_zeiten: dict[str, list[float]] = {}
 _RATE_LOCK = threading.Lock()
 
 
-def _rate_ok(tool: str, je_minute: int) -> bool:
-    """Gleitende Minute je Werkzeug: höchstens je_minute Aufrufe (Schutz vor einer Flut, auch bei ruhigem Tunnel)."""
+def _rate_ok(tool: str, je_minute: int, fenster: float = 60.0) -> bool:
+    """Gleitende Minute (oder fenster Sekunden) je Werkzeug: höchstens je_minute Aufrufe (Schutz vor einer Flut, auch bei ruhigem
+    Tunnel)."""
     jetzt = time.monotonic()
     with _RATE_LOCK:
-        zeiten = [t for t in _rate_zeiten.get(tool, []) if jetzt - t < 60.0]
+        zeiten = [t for t in _rate_zeiten.get(tool, []) if jetzt - t < fenster]
         if len(zeiten) >= je_minute:
             _rate_zeiten[tool] = zeiten
             return False
@@ -1012,18 +1017,20 @@ def _text_audit(text: str) -> dict:
 
 
 def _anfrage(tool: str, art: str, daten: dict, aktion: str, grund: str, detail: str, ziel: str, summary: str,
-             audit: dict, anlass: str = "") -> dict:
+             audit: dict, anlass: str = "", *, detail_max: int = FREIGABE_DETAIL_MAX, risiko: str = "critical",
+             zu_lang: str = "Das ist zu lang, um es sicher zur Freigabe zu zeigen. Bitte kürzer.") -> dict:
     """Freigabe-Anfrage anlegen und beantworten. Zu lange Inhalte (die Karte könnte sie nicht ganz zeigen) und eine
-    volle Warteschlange ergeben status=rejected."""
-    if len(detail) + detail.count("\n") > FREIGABE_DETAIL_MAX:
+    volle Warteschlange ergeben status=rejected. detail_max: lange Karte für Mails; risiko: Klasse im Audit (ein Entwurf ist
+    change, kommt aber ebenso nur über die Karte)."""
+    if len(detail) + detail.count("\n") > detail_max:
         _audit({"tool": tool, "risk": "rejected", "grund": "zu lang für eine Freigabe", **audit})
-        return {"status": "rejected", "summary": "Das ist zu lang, um es sicher zur Freigabe zu zeigen. Bitte kürzer."}
+        return {"status": "rejected", "summary": zu_lang}
     try:
         approval_id = _neue_freigabe(art, **daten)
     except FreigabeNichtMoeglich as e:
         _audit({"tool": tool, "risk": "rejected", "grund": "Warteschlange voll", **audit})
         return {"status": "rejected", "summary": str(e)}
-    _audit({"tool": tool, "risk": "critical", "approval_id": approval_id, "art": art, **audit})
+    _audit({"tool": tool, "risk": risiko, "approval_id": approval_id, "art": art, **audit})
     frist = FREIGABE_EINGABE_SECS if art in EINGABE_ARTEN else FREIGABE_GUELTIG_SECS
     return _freigabe_antwort(approval_id, aktion, grund, detail, ziel, summary, frist, anlass)
 
@@ -2125,9 +2132,11 @@ def office_faehigkeiten() -> dict:
     if aus := _office_aus("office_faehigkeiten"):
         return {**aus, "formate": []}
     faehig = office_com.faehigkeiten()
+    mail = office_outlook.verfuegbar()  # welches Outlook gerade läuft, prüft erst die Mail-Anfrage (hier nie COM: schnell bleiben)
     onenote = office_onenote.onenote_vorhanden()
-    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"], "onenote": onenote})
-    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE, "onenote": onenote}
+    _audit({"tool": "office_faehigkeiten", "risk": "read", "formate": faehig["formate"], "mail": mail, "onenote": onenote})
+    return {"status": "success", "formate": faehig["formate"], "ordner": office_ablage.ORDNER_ANZEIGE, "mail": mail,
+            "onenote": onenote}
 
 
 @mcp.tool()
@@ -2244,6 +2253,189 @@ def office_datei_oeffnen(kennung: str) -> dict:
     return {"status": "success", "summary": f"{pfad.name} ist geöffnet."}
 
 
+# ---------- Mail über Outlook (office_outlook.py) ----------
+# Nur für den Kern, nie in LLM_TOOLS: Das Modell ruft outlook_senden im Kern, der Kern ruft outlook_mail_anfragen. Der Host erkennt
+# selbst, welches Outlook läuft (office_outlook.py, COM in office_outlook_com.py), prüft Empfänger, Betreff, Text und Anhänge (nur
+# Dateien aus dem Register, Prüfsumme wie beim Speichern), baut die Karte mit genau dem Inhalt, der rausgeht (lange Karte bis
+# FREIGABE_DETAIL_MAX_MAIL), und hält die Anfrage. Nach dem Klick prüft er Schalter, Anhänge und Outlook erneut: Klassisch speichert
+# er die Mail unter Entwürfe und sendet sie nach MAIL_VERZOEGERUNG_SECS (outlook_zurueckholen hält sie bis dahin an), sonst öffnet er
+# nur den Entwurf. Hat Outlook seit der Karte gewechselt, wird nie gesendet.
+MAIL_PRO_STUNDE = 10
+MAIL_VERZOEGERUNG_SECS = office_outlook.VERZOEGERUNG_SECS
+FREIGABE_DETAIL_MAX_MAIL = office_outlook.KARTE_MAX
+MAIL_KARTE = ("Die Mail liegt als Karte in der Oberfläche. Erst nach dem Klick eines Admins sendet W.A.I.S. sie (klassisches Outlook, "
+              "30 Sekunden zurückholbar) oder öffnet den fertigen Entwurf (neues Outlook).")
+MAIL_ZU_LANG = "Zu lang für die Karte: als Anhang schicken oder kürzen."
+_VERSAND: office_outlook_com.Versandliste | None = None
+
+
+def _versand() -> office_outlook_com.Versandliste:
+    global _VERSAND
+    if _VERSAND is None:
+        _VERSAND = office_outlook_com.Versandliste(senden=_mail_versenden, gesperrt=lambda: OFFICE_AUS.exists())
+    return _VERSAND
+
+
+def _mail_versenden(v: office_outlook_com.Versand) -> None:
+    """Nach der Frist (im Faden der Versandliste): den gespeicherten Entwurf senden, wenn er noch derselbe ist."""
+    try:
+        office_outlook_com.klassisch_senden(v.ort, v.pruef, konto=v.ort.get("konto", ""))
+    except Exception as e:
+        _audit({"tool": "outlook_versand", "versand_id": v.id, "risk": "critical", "result": "error", "error": str(e)[:200]})
+        raise
+    _audit({"tool": "outlook_versand", "versand_id": v.id, "risk": "critical", "result": "gesendet"})
+
+
+def _mail_anhaenge(kennungen: object) -> tuple[office_outlook.Anhang, ...]:
+    """Anhänge nur aus dem Register (Ordner WAIS), höchstens ANHAENGE_MAX, Inhalt wie beim Speichern (Größe und SHA-256)."""
+    if kennungen is None:
+        return ()
+    if not isinstance(kennungen, list) or len(kennungen) > office_outlook.ANHAENGE_MAX or len(set(map(str, kennungen))) != len(kennungen):
+        raise office_outlook.MailFehler(f"Höchstens {office_outlook.ANHAENGE_MAX} verschiedene Anhänge.")
+    ablage = _office_ablage()
+    register = {e["kennung"]: e for e in ablage.eintraege()}
+    anhaenge = []
+    for kennung in kennungen:
+        try:
+            pfad = ablage.pfad(kennung)
+        except office_ablage.AblageFehler as e:
+            raise office_outlook.MailFehler(str(e)) from e
+        eintrag = register.get(kennung)
+        if eintrag is None:  # die Datei liegt noch da, ihr Eintrag ist inzwischen weg
+            raise office_outlook.MailFehler("Diese Datei kennt W.A.I.S. nicht mehr (nur selbst erzeugte Dateien).")
+        anhaenge.append(office_outlook.Anhang(kennung=kennung, name=pfad.name, pfad=pfad, groesse=int(eintrag.get("groesse", -1)),
+                                              sha256=str(eintrag.get("sha256", ""))))
+    office_outlook.anhaenge_lesen(anhaenge)  # Größe und Prüfsumme jetzt schon: eine veränderte Datei kommt nicht auf die Karte
+    return tuple(anhaenge)
+
+
+@mcp.tool()
+async def outlook_mail_anfragen(an: list[str], betreff: str, text: str = "", cc: list[str] | None = None,
+                                anhaenge: list[str] | None = None, anlass: str = "") -> dict:
+    """Nur für den Kern: bereitet eine Mail über Outlook vor und legt die Freigabekarte an (ausgeführt erst nach dem Klick). an und cc:
+    Mailadressen oder (klassisches Outlook) Namen aus dem Adressbuch, zusammen höchstens 10, kein Bcc; anhaenge: Kennungen aus dem
+    Register (nur Dateien, die W.A.I.S. selbst in Dokumente\\WAIS gespeichert hat)."""
+    tool = "outlook_mail_anfragen"
+    if aus := _office_aus(tool):
+        return aus
+    if not _rate_ok(tool, MAIL_PRO_STUNDE, 3600.0):
+        _audit({"tool": tool, "risk": "rejected", "grund": "Rate-Grenze"})
+        return {"status": "rejected", "summary": f"Höchstens {MAIL_PRO_STUNDE} Mails je Stunde. Bitte später noch einmal."}
+    # Im Thread: Erkennung und Auflösen im Adressbuch (COM) dauern einige Sekunden; die Probe des Kerns läuft weiter
+    return await asyncio.to_thread(_mail_anfragen, an, cc, betreff, text, anhaenge, anlass)
+
+
+def _mail_anfragen(an: object, cc: object, betreff_roh: object, text_roh: object, anhaenge_roh: object, anlass: object) -> dict:
+    tool = "outlook_mail_anfragen"
+    try:
+        paare = office_outlook.eingaben(an, cc)
+        betreff = office_outlook.betreff(betreff_roh)
+        text = office_outlook.text(text_roh)
+        anhaenge = _mail_anhaenge(anhaenge_roh)
+        weg = office_outlook.erkennen()
+        if weg.weg == "keiner":
+            raise office_outlook.MailFehler(weg.grund)
+        if weg.programm == "klassisch":
+            konto, empf, signatur = office_outlook_com.com_lauf(lambda app: office_outlook_com.klassisch_vorbereiten(app, paare))
+        else:
+            konto, signatur = None, None
+            empf = office_outlook.empfaenger_adressen(paare, office_outlook.interne_domaenen())
+    except office_outlook.MailFehler as e:
+        _audit({"tool": tool, "risk": "rejected", "error": str(e)[:200]})
+        return {"status": "rejected", "summary": str(e)}
+    except (KeyError, office_ablage.AblageFehler) as e:  # Register nicht lesbar oder im Umbau: keine Karte
+        _audit({"tool": tool, "risk": "rejected", "error": type(e).__name__})
+        return {"status": "rejected", "summary": "Der Anhang ist im Register von W.A.I.S. gerade nicht zu finden. Es ist nichts passiert."}
+    mail = office_outlook.Mail(tuple(empf), betreff, text, anhaenge)
+    senden, extern = weg.weg == "senden", any(e.extern for e in empf)
+    if senden:
+        grund = "Mail an EXTERNE Empfänger senden" if extern else "Mail über Outlook senden"
+    else:
+        grund = "Mail-Entwurf an EXTERNE Empfänger öffnen" if extern else "Mail-Entwurf in Outlook öffnen"
+    ziel = (f"Outlook (klassisch), Konto {konto['smtp']}" if konto else
+            "Neues Outlook, dein Standardkonto" if weg.programm == "neu" else "Outlook (klassisch)")
+    protokoll = {"an": len(mail.an), "cc": len(mail.cc), "domaenen": sorted({e.smtp.rsplit("@", 1)[1].lower() for e in empf}),
+                 "extern": extern, "anhaenge": len(anhaenge), "weg": weg.weg, "programm": weg.programm}
+    # Audit am PC: Adressen und Anhangsnamen ja, Betreff und Text nur als Länge und Prüfsumme
+    audit = {**protokoll, "adressen": [e.smtp for e in empf], "anhang_namen": [a.name[:120] for a in anhaenge],
+             "betreff": _text_audit(betreff), "text": _text_audit(text)}
+    detail = office_outlook.kartentext(mail, weg, konto, signatur)
+    if office_outlook.utf16_laenge(detail) > FREIGABE_DETAIL_MAX_MAIL:  # die Oberfläche zählt UTF-16-Einheiten und kürzte sonst
+        _audit({"tool": tool, "risk": "rejected", "grund": "zu lang für eine Freigabe", **audit})
+        return {"status": "rejected", "summary": MAIL_ZU_LANG}
+    antwort = _anfrage(tool, "mail", {"mail": mail, "weg": weg.weg, "programm": weg.programm, "konto": konto["smtp"] if konto else ""},
+                       "mail", grund, detail, ziel, MAIL_KARTE, audit,
+                       uia_control.sicherer_text(anlass, 200) if isinstance(anlass, str) and anlass else "",
+                       detail_max=FREIGABE_DETAIL_MAX_MAIL, risiko="critical" if senden else "change", zu_lang=MAIL_ZU_LANG)
+    if antwort.get("status") == "needs_approval":
+        antwort["protokoll"] = protokoll
+    return antwort
+
+
+def _mail_ausfuehren(eintrag: dict) -> dict:
+    """Freigegebene Mail: Schalter, Anhänge und Outlook direkt davor neu prüfen. Gesendet wird nur, wenn die Karte Senden zeigte und
+    jetzt noch das klassische Outlook allein läuft; sonst nur ein Entwurf."""
+    if OFFICE_AUS.exists():
+        _audit({"tool": "outlook_mail", "risk": "blocked", "grund": "office.aus"})
+        return {"status": "blocked", "summary": OFFICE_AUS_TEXT}
+    mail, war_senden = eintrag["mail"], eintrag["weg"] == "senden"
+    try:
+        daten = office_outlook.anhaenge_lesen(mail.anhaenge)
+        weg = office_outlook.erkennen()
+        if war_senden and weg.weg == "senden":
+            return _mail_planen(mail, eintrag["konto"], daten)
+        if weg.programm == "neu":
+            ergebnis = office_outlook.neu_entwurf(mail, daten)
+        elif weg.programm == "klassisch":
+            konto = eintrag["konto"] if eintrag["programm"] == "klassisch" else ""
+            with office_outlook.anhang_dateien(daten) as pfade:
+                ergebnis = office_outlook_com.com_lauf(lambda app: office_outlook_com.klassisch_entwurf(app, mail, konto, pfade))
+        else:
+            return {"status": "error", "summary": f"{weg.grund} Es ist nichts passiert."}
+    except office_outlook.MailFehler as e:
+        _audit({"tool": "outlook_mail", "risk": "change", "result": "error", "error": str(e)[:200]})
+        return {"status": "error", "summary": str(e)}
+    if war_senden and ergebnis.get("status") == "success":
+        ergebnis = {**ergebnis, "summary": "Outlook hat seit der Anfrage gewechselt, deshalb sendet W.A.I.S. nicht. " + ergebnis["summary"]}
+    _audit({"tool": "outlook_mail", "risk": "change", "weg": ergebnis.get("weg"), "anhang": ergebnis.get("anhang"),
+            "fenster": ergebnis.get("fenster"), "result": ergebnis.get("status")})
+    return ergebnis
+
+
+def _mail_planen(mail: office_outlook.Mail, konto: str, daten: list) -> dict:
+    """Klassisch: die Mail mit Signatur unter Entwürfe speichern und nach der Frist senden (zurückholbar bis dahin)."""
+    with office_outlook.anhang_dateien(daten) as pfade:
+        ort, pruef = office_outlook_com.com_lauf(
+            lambda app: office_outlook_com.speichern(office_outlook_com.mail_bauen(app, mail, konto, pfade)))
+    ort["konto"] = konto  # das Konto der Karte: vor dem Senden noch einmal verglichen
+    v = _versand().planen(ort, pruef, MAIL_VERZOEGERUNG_SECS)
+    _audit({"tool": "outlook_mail", "risk": "critical", "versand_id": v.id, "verzoegerung_s": MAIL_VERZOEGERUNG_SECS})
+    return {"status": "success", "weg": "senden",
+            "summary": f"Die Mail geht in {MAIL_VERZOEGERUNG_SECS} Sekunden raus. Bis dahin kannst du sie in W.A.I.S. zurückholen.",
+            "versand": {"id": v.id, "frist_s": MAIL_VERZOEGERUNG_SECS}}
+
+
+@mcp.tool()
+def outlook_zurueckholen(versand_id: str, schluessel: str = "") -> dict:
+    """Nur für den Voice-Core nach einem Klick auf "Zurückholen": hält eine geplante Mail an, sie bleibt unter Entwürfe. Ohne den
+    Freigabe-Schlüssel dieses Hosts passiert nichts."""
+    vid = versand_id if isinstance(versand_id, str) else ""
+    if not _schluessel_ok(schluessel):
+        _audit({"tool": "outlook_zurueckholen", "versand_id": vid[:20], "risk": "blocked", "grund": "ohne gültigen Schlüssel"})
+        return {"status": "blocked", "summary": "Zurückholen kommt nur aus der Oberfläche."}
+    r = _versand().zurueckholen(vid)
+    _audit({"tool": "outlook_zurueckholen", "versand_id": vid[:20], "risk": "change", "zustand": r["zustand"]})
+    status = "success" if r["zustand"] == "zurueckgeholt" else ("error" if r["zustand"] == "fehler" else "rejected")
+    return {"status": status, **r}
+
+
+@mcp.tool()
+def outlook_versand_status(versand_id: str) -> dict:
+    """Nur für den Kern: Stand einer geplanten Mail (wartet, sendet, gesendet, zurueckgeholt, fehler) (read)."""
+    s = _versand().status(versand_id)
+    if s is None:
+        return {"status": "rejected", "zustand": "unbekannt", "summary": "Diesen Versand kennt W.A.I.S. nicht (mehr)."}
+    return {"status": "success", **s}
 # ---------- OneNote-Seite aus dem Canvas (office_onenote.py) ----------
 # Nur für den Kern, nie in LLM_TOOLS: Das Sprachmodell ruft onenote_seite im Kern, der Kern liest das eigene Canvas-Element und schickt
 # hierher nur dessen feste Struktur. Der Host prüft selbst (Inhalt, Titel, Länge, Zeichen), liest nur das Standard-Notizbuch und legt eine
@@ -2359,6 +2551,10 @@ def _inhalt_audit(eintrag: dict) -> dict:
     if art == "github_anlegen":  # Repository und Sichtbarkeit, die Beschreibung nur als Prüfsumme
         return {"repo": f"{eintrag['org']}/{eintrag['name']}", "privat": eintrag["privat"],
                 **({"beschreibung": _text_audit(eintrag["beschreibung"])} if eintrag["beschreibung"] else {})}
+    if art == "mail":  # Weg, Adressen und Anhangsnamen; Betreff und Text nur als Länge und Prüfsumme
+        m = eintrag["mail"]
+        return {"weg": eintrag["weg"], "programm": eintrag["programm"], "adressen": [e.smtp for e in m.empfaenger],
+                "anhang_namen": [a.name[:120] for a in m.anhaenge], "betreff": _text_audit(m.betreff), "text": _text_audit(m.text)}
     return {}
 
 
@@ -2488,6 +2684,8 @@ def _ausfuehren(eintrag: dict) -> dict:
                 **_markierung(eintrag.get("hwnd"))}
     if art == "github_anlegen":
         return _github_anlegen_ausfuehren(eintrag)
+    if art == "mail":
+        return _mail_ausfuehren(eintrag)
     if art == "onenote":
         return _onenote_ausfuehren(eintrag)
     if art == "webseite":
@@ -2504,6 +2702,7 @@ def _ausfuehren(eintrag: dict) -> dict:
 
 
 if __name__ == "__main__":
+    office_outlook.beim_start_aufraeumen()  # Entwurfsdateien des vorigen Laufs (Text und Anhang) nicht liegen lassen
     if "--stdio" in sys.argv:
         mcp.run(transport="stdio")
     elif "--http" in sys.argv:

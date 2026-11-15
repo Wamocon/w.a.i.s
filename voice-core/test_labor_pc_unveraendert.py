@@ -21,7 +21,8 @@ import pytest
 from auth_gate import Identity
 
 HIER = pathlib.Path(__file__).parent
-HASH_PC_FREIGABEN = "1f3146778ea20ea0367773f55c9284ba570e7066cb08badee096e6e724f5a044"
+# 15.11.2026: pc_freigaben.py kennt die Freigabeart mail (Protokoll ohne Inhalte, Warnung, nach_ergebnis; outlook_werkzeuge.py)
+HASH_PC_FREIGABEN = "5b0597401b6c3d5d101baede20ae8112088c8cc82dd7e635477073772a68ee3f"
 HASH_PC_HOST = "b05e608cf90697588505b436872b10212fc7df16f9e9db3e962ba6cb480b5460"
 HASH_DARF_PC_FREIGEBEN = "28a646d4f986c04ec1ca31a75ce5baeb4dd8ce9d938e381583f749384c5d005f"
 

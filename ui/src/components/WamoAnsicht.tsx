@@ -5,6 +5,7 @@ import { ActivityTimeline } from "@/components/ActivityFeed";
 import { BildschirmAnsicht } from "@/components/BildschirmAnsicht";
 import { CanvasBereich } from "@/components/Canvas";
 import { DateiHinweis } from "@/components/DateiHinweis";
+import { MailVersandHinweis } from "@/components/MailVersand";
 import { Einstellungen } from "@/components/einstellungen/Einstellungen";
 import { EINSTELLUNGEN_KNOPF_ID } from "@/components/einstellungen/EinstellungenLink";
 import { Auftraege, Freigaben } from "@/components/Freigaben";
@@ -169,6 +170,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
           <UebernehmenHinweis onUebernehmen={uebernehmen} />
           <GemerktHinweis onVergessen={vergesseEintrag} />
           {!ansicht.labor && <DateiHinweis onOeffnen={aktionen.office?.oeffnen} />}
+          {!ansicht.labor && <MailVersandHinweis onZurueckholen={aktionen.mail?.zurueckholen} />}
           {ansicht.adminHinweise && <AdminHinweise />}
           {ansicht.geraeteEinrichtung && <GeraetEinrichtung />}
         </>
@@ -189,7 +191,11 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
         <>
           {aktionen.liveBild && <BildschirmAnsicht aktionen={aktionen.liveBild} />}
           {/* Speichern als Datei nie für Laborkonten (der Kern schickt dort ohnehin keine Formate) */}
-          <CanvasBereich jiraStory={aktionen.jiraStory} office={ansicht.labor ? undefined : aktionen.office} />
+          <CanvasBereich
+            jiraStory={aktionen.jiraStory}
+            office={ansicht.labor ? undefined : aktionen.office}
+            mail={ansicht.labor ? undefined : aktionen.mail}
+          />
         </>
       }
       hinweise={

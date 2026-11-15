@@ -30,6 +30,7 @@ import {
   type LeerlaufLage,
 } from "@/lib/stillStart";
 import { istOfficeFormat, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
+import { formularFehler, type MailAktionen } from "@/lib/mail";
 import { parseServerMessage, type Auftrag, type Markierung, type ModellModus } from "@/lib/nachrichten";
 import type { SchluesselArt } from "@/lib/schluesselhilfe";
 import { abdruckGestartet, abdruckLaeuft, kannEinlernen, kannLoeschen, STIMME_LEER } from "@/lib/stimme";
@@ -175,6 +176,8 @@ export type WamoAktionen = {
   jiraStory?: (canvasId: string) => boolean;
   /** Canvas als Datei am PC speichern und die gespeicherte Datei öffnen (lib/export.ts). Optional, damit die Vorschau ohne Kern auskommt. */
   office?: OfficeAktionen;
+  /** Mail über Outlook vorbereiten und einen Versand zurückholen (lib/mail.ts). Optional, damit die Vorschau ohne Kern auskommt. */
+  mail?: MailAktionen;
 };
 
 /** Die drei Aktionen am Stimmabdruck; der Kern prüft sie und antwortet mit stimmabdruck-Nachrichten. true, wenn gesendet. */
@@ -219,6 +222,11 @@ type ClientMessage =
   | { type: "jira_story"; data: { canvas_id: string } }
   | { type: "canvas_export"; data: { canvas_id: string; format: OfficeFormat } }
   | { type: "datei_oeffnen"; data: { kennung: string } }
+  | {
+      type: "mail_vorbereiten";
+      data: { canvas_id: string | null; an: string[]; cc: string[]; betreff: string; text: string; anhang: OfficeFormat | null };
+    }
+  | { type: "mail_zurueckholen"; data: { id: string } }
   | { type: "onenote_seite"; data: { canvas_id: string } };
 
 function senden(client: PipecatClient, msg: ClientMessage) {
@@ -1645,6 +1653,39 @@ export function useWamo(): WamoAktionen {
     };
   }, []);
 
+  // Mail über Outlook (lib/mail.ts): nur senden; Karte, Versand und Zurückholen entscheiden Kern und Host, die Antworten kommen als
+  // Nachrichten mail_antwort und mail_versand. Eine Freigabe ersetzt das nie: gesendet wird erst nach dem Klick auf der Karte.
+  const mail = useMemo<MailAktionen>(() => {
+    const schicken = (msg: ClientMessage, fehlerText: string) => {
+      const client = clientRef.current;
+      if (!client || !istOnline(wamo.get())) {
+        zeigeToast(`${fehlerText}: keine Verbindung.`);
+        return false;
+      }
+      try {
+        senden(client, msg);
+      } catch {
+        zeigeToast(`${fehlerText}: die Nachricht ging nicht hinaus.`);
+        return false;
+      }
+      return true;
+    };
+    return {
+      vorbereiten: (d) =>
+        formularFehler(d) === null &&
+        (d.anhang === null || istOfficeFormat(d.anhang)) &&
+        schicken(
+          {
+            type: "mail_vorbereiten",
+            data: { canvas_id: d.canvasId, an: d.an, cc: d.cc, betreff: d.betreff, text: d.text, anhang: d.anhang },
+          },
+          "Mail nicht vorbereitet",
+        ),
+      zurueckholen: (id) =>
+        /^[0-9a-f]{16}$/.test(id) && schicken({ type: "mail_zurueckholen", data: { id } }, "Nicht zurückgeholt"),
+    };
+  }, []);
+
   const schliesseFehler = useCallback(() => setFehler(null), []);
 
   // Mikrofone für die Auswahl in der Mikrofon-Warnung (Bezeichnungen gibt es erst nach der Freigabe)
@@ -1716,6 +1757,7 @@ export function useWamo(): WamoAktionen {
       eingabeMelden,
       jiraStory,
       office,
+      mail,
     }),
     [
       connect,
@@ -1737,6 +1779,7 @@ export function useWamo(): WamoAktionen {
       eingabeMelden,
       jiraStory,
       office,
+      mail,
     ],
   );
 }
