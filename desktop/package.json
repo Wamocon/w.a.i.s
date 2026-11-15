@@ -10,7 +10,7 @@
     "start": "electron .",
     "test": "node --test",
     "dist": "node ../scripts/wamo-dist-vorbereiten.cjs && electron-builder --win nsis --x64 --publish never",
-    "dist:signiert": "node ../scripts/wamo-dist-vorbereiten.cjs && electron-builder --win nsis --x64 --publish never --config.win.forceCodeSigning=true",
+    "dist:signiert": "node ../scripts/wamo-dist-vorbereiten.cjs && electron-builder --win nsis --x64 --publish never --config.win.forceCodeSigning=true && node ../scripts/wamo-dist-codesign.cjs dist --pflicht",
     "dist:pruefen": "node ../scripts/wamo-dist-pruefen.cjs dist/win-unpacked",
     "dist:codesign": "node ../scripts/wamo-dist-codesign.cjs dist"
   },

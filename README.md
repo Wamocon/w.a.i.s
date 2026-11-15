@@ -497,7 +497,7 @@ sind nur mit aufgezeichneten Streams getestet (`voice-core/testdaten/vorgang_str
 
 ### Neue Mitglieder (Admin-Übersicht, Paket P7)
 
-Admins sehen in den Einstellungen unter „Neue Mitglieder“ je Profil (ohne Laborprofile), wie weit die Einrichtung ist: angemeldet,
+Admins sehen in den Einstellungen unter „Neue Mitglieder“ je Profil der letzten 90 Tage (ohne Laborprofile, Daten nur als Datum, nie als Uhrzeit), wie weit die Einrichtung ist: angemeldet,
 zweiter Faktor, Passwort gewechselt (sobald Paket P1a das Schema `wamo_auth` eingerichtet hat, vorher „noch nicht prüfbar“), Laptop
 eingerichtet, Stimmabdruck, dazu der Modellzugang als Art (eigener Token, eigener Schlüssel, Hausmodelle) und ein Satz zum nächsten
 Schritt. Die Daten kommen allein aus der Funktion `<schema>.neue_mitglieder(p_admin)` (Migration `0022_neue_mitglieder`, SECURITY

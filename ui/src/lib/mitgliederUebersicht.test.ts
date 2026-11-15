@@ -9,8 +9,8 @@ const roh = (teil: Record<string, unknown> = {}) => ({
   anzeigename: "Person A",
   rolle: "mitglied",
   aktiv: true,
-  angelegt: "2026-11-15T09:00:00+00:00",
-  letzte_anmeldung: "2026-11-16T08:00:00+00:00",
+  angelegt: "2026-11-15",
+  letzte_anmeldung: "2026-11-16",
   faktor_bestaetigt: true,
   passwort_stand: null,
   geraet_stand: "aktiv",
@@ -28,7 +28,7 @@ test("pruefeMitglied: nur bekannte Werte, Unbekanntes wird null, ohne Kennung ke
   assert.equal(m.passwort, null);
   assert.equal(pruefeMitglied(roh({ user_id: "x" })), null);
   assert.equal(pruefeMitglied([]), null);
-  assert.equal(mitglied({ anzeigename: "A‮B​C\u0000" }).name, "ABC");
+  assert.equal(mitglied({ anzeigename: "A\u202eB\u200bC\x00\u2028D" }).name, "ABCD");
   assert.equal(mitglied({ aktiv: "true" }).aktiv, false);
 });
 
@@ -61,7 +61,10 @@ test("zusammenfassung und Datum", () => {
   assert.equal(zusammenfassung([]), "Keine Profile.");
   assert.equal(zusammenfassung([mitglied(), mitglied({ faktor_bestaetigt: false })]), "1 von 2 Profilen fertig eingerichtet.");
   assert.equal(datumKurz(null), "nie");
-  assert.match(datumKurz("2026-11-15T12:00:00+00:00"), /^15\.11\.2026$/);
+  assert.equal(datumKurz("2026-11-15"), "15.11.2026");
+  assert.equal(datumKurz("2026-11-15T12:00:00+00:00"), "nie"); // nur das Datum, nie eine Uhrzeit
+  assert.equal(mitglied({ letzte_anmeldung: "2026-11-16T08:00:00Z" }).letzteAnmeldung, null);
+  assert.equal(mitglied({ passwort_stand: "irgendwas" }).passwort, null);
 });
 
 test("Texte ohne Gedankenstriche", () => {

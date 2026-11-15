@@ -22,6 +22,8 @@
 --   modellzugang     hinterlegte Art: token_und_schluessel, token, schluessel oder haus (nie ein Wert; die Wahl modell_modus
 --                    der Person zählt hier nicht).
 --   stimmabdruck     eingelernter Abdruck des Profilinhabers vorhanden.
+-- Datensparsam: nur Profile der letzten 90 Tage (die Einrichtungsphase), Anlage und letzte Anmeldung nur als Datum (deutsche
+-- Zeit), keine Uhrzeit; so entsteht keine laufende Anmeldekontrolle älterer Konten.
 -- Keine neue Tabelle, keine Schreibrechte, ausführbar nur für wamo_core. Ändern sich später die Spalten, braucht die nächste
 -- Migration drop function davor (create or replace kann den Rückgabetyp nicht ändern) und setzt die Rechte neu.
 set local lock_timeout = '5s';
@@ -34,7 +36,7 @@ do $$ begin
 end $$;
 
 create or replace function __SCHEMA__.neue_mitglieder(p_admin uuid)
-returns table (user_id uuid, anzeigename text, rolle text, aktiv boolean, angelegt timestamptz, letzte_anmeldung timestamptz,
+returns table (user_id uuid, anzeigename text, rolle text, aktiv boolean, angelegt date, letzte_anmeldung date,
                faktor_bestaetigt boolean, passwort_stand text, geraet_stand text, modellzugang text, stimmabdruck boolean)
 language plpgsql stable security definer set search_path = '' as $$
 declare
@@ -56,7 +58,8 @@ begin
     raise exception 'neue_mitglieder: nur für einen aktiven Admin' using errcode = '42501';
   end if;
   for user_id, anzeigename, rolle, aktiv, angelegt, letzte_anmeldung, faktor_bestaetigt, geraet_stand, modellzugang, stimmabdruck in
-    select p.user_id, p.display_name, p.rolle::text, p.aktiv, p.created_at, u.last_sign_in_at,
+    select p.user_id, p.display_name, p.rolle::text, p.aktiv, (p.created_at at time zone 'Europe/Berlin')::date,
+           (u.last_sign_in_at at time zone 'Europe/Berlin')::date,
            exists (select 1 from auth.mfa_factors f
                     where f.user_id = p.user_id and f.factor_type::text = 'totp' and f.status::text = 'verified'),
            coalesce((select d.status::text from __SCHEMA__.devices d
@@ -74,6 +77,7 @@ begin
       join auth.users u on u.id = p.user_id
       left join __SCHEMA__.model_access m on m.user_id = p.user_id
      where p.labor_art is null
+       and p.created_at > now() - interval '90 days'
      order by p.created_at desc, p.user_id
      limit 200
   loop

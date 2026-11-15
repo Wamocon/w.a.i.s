@@ -28,17 +28,19 @@ export type Schritt = { id: SchrittId; titel: string; erledigt: boolean | null }
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const GERAETE: readonly GeraetStand[] = ["aktiv", "beantragt", "gesperrt", "widerrufen", "keins"];
 const ZUGAENGE: readonly Modellzugang[] = ["token_und_schluessel", "token", "schluessel", "haus"];
-const PASSWORT_ERLEDIGT = ["erledigt", "keine"];
+const PASSWORT_STAENDE = ["keine", "offen", "abgelaufen", "erledigt"] as const;
+const PASSWORT_ERLEDIGT: readonly string[] = ["erledigt", "keine"];
 const NAME_MAX = 60;
 
 const istObjekt = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const aus = <T extends string>(v: unknown, erlaubt: readonly T[]): T | null =>
   typeof v === "string" && (erlaubt as readonly string[]).includes(v) ? (v as T) : null;
-const zeit = (v: unknown): string | null => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? v : null);
+const DATUM_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const zeit = (v: unknown): string | null => (typeof v === "string" && DATUM_RE.test(v) ? v : null);
 
 function name(v: unknown): string {
   if (typeof v !== "string") return "";
-  return v.slice(0, 4 * NAME_MAX).replace(/[\p{Cc}\p{Cf}]/gu, "").slice(0, NAME_MAX);
+  return v.slice(0, 4 * NAME_MAX).replace(/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu, "").slice(0, NAME_MAX);
 }
 
 /** Eine Zeile des Kerns lesen; ohne gültige Kennung null. */
@@ -52,7 +54,7 @@ export function pruefeMitglied(v: unknown): Mitglied | null {
     angelegt: zeit(v.angelegt),
     letzteAnmeldung: zeit(v.letzte_anmeldung),
     faktor: v.faktor_bestaetigt === true,
-    passwort: typeof v.passwort_stand === "string" && /^[a-z_]{1,24}$/.test(v.passwort_stand) ? v.passwort_stand : null,
+    passwort: aus(v.passwort_stand, PASSWORT_STAENDE),
     geraet: aus(v.geraet_stand, GERAETE),
     modellzugang: aus(v.modellzugang, ZUGAENGE),
     stimmabdruck: v.stimmabdruck === true,
@@ -106,7 +108,6 @@ export function zusammenfassung(liste: readonly Mitglied[]): string {
 
 /** Datum kurz auf Deutsch (TT.MM.JJJJ), ohne Datum "nie". */
 export function datumKurz(iso: string | null): string {
-  if (!iso) return "nie";
-  const d = new Date(iso);
-  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+  const t = iso ? DATUM_RE.exec(iso) : null;
+  return t ? `${t[3]}.${t[2]}.${t[1]}` : "nie";
 }

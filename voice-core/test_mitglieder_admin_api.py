@@ -7,7 +7,7 @@ Internes nach außen geben.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import asyncpg
 import pytest
@@ -29,7 +29,7 @@ def zeile(**teil) -> dict:
         "anzeigename": "Person A",
         "rolle": "mitglied",
         "aktiv": True,
-        "angelegt": datetime(2026, 11, 15, 9, 0, tzinfo=timezone.utc),
+        "angelegt": date(2026, 11, 15),
         "letzte_anmeldung": None,
         "faktor_bestaetigt": False,
         "passwort_stand": None,
@@ -95,15 +95,18 @@ URL = "/wamo/api/admin/neue-mitglieder"
 
 def test_admin_sieht_die_liste_mit_genau_den_erlaubten_feldern(client, db):
     db.liste = [zeile(), zeile(user_id=ADMIN, anzeigename="Admin", rolle="admin", faktor_bestaetigt=True,
-                               letzte_anmeldung=datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc),
+                               letzte_anmeldung=date(2026, 11, 16),
                                passwort_stand="erledigt", geraet_stand="aktiv", modellzugang="token", stimmabdruck=True)]
     r = client.get(URL)
     assert r.status_code == 200
     assert r.headers["cache-control"] == "no-store"
     mitglieder = r.json()["mitglieder"]
     assert [set(m) for m in mitglieder] == [FELDER, FELDER]
-    assert mitglieder[0]["angelegt"] == "2026-11-15T09:00:00+00:00"
-    assert mitglieder[1]["letzte_anmeldung"] == "2026-11-16T08:00:00+00:00"
+    assert mitglieder[0]["angelegt"] == "2026-11-15"
+    assert mitglieder[1]["letzte_anmeldung"] == "2026-11-16"
+    # auch ein Zeitstempel wird auf das Datum gekürzt, nie eine Uhrzeit
+    db.liste = [zeile(letzte_anmeldung=datetime(2026, 11, 16, 8, 0, tzinfo=timezone.utc))]
+    assert client.get(URL).json()["mitglieder"][0]["letzte_anmeldung"] == "2026-11-16"
     assert mitglieder[1]["passwort_stand"] == "erledigt"
     sql, args = db.sql[0]
     assert "wamo_test.neue_mitglieder($1::uuid)" in sql
@@ -112,13 +115,13 @@ def test_admin_sieht_die_liste_mit_genau_den_erlaubten_feldern(client, db):
 
 def test_unbekannte_werte_und_zusatzfelder_fallen_weg(client, db):
     db.liste = [zeile(geraet_stand="quatsch", modellzugang="sk-ant-api03-geheim", passwort_stand="x" * 80, email="a@b.c",
-                      claude_schluessel=b"geheim", anzeigename="Name‮ mit Steuerzeichen\x00")]
+                      claude_schluessel=b"geheim", anzeigename="Name\u202e mit Steuerzeichen\x00\u2028\u00ad")]
     m = client.get(URL).json()["mitglieder"][0]
     assert set(m) == FELDER
     assert m["geraet_stand"] is None
     assert m["modellzugang"] is None
     assert m["passwort_stand"] is None
-    assert "‮" not in m["anzeigename"] and "\x00" not in m["anzeigename"]
+    assert m["anzeigename"] == "Name mit Steuerzeichen"
     assert "geheim" not in str(m)
 
 

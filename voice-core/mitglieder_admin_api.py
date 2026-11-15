@@ -16,10 +16,10 @@ Datenbank nicht sehen kann:
 
 from __future__ import annotations
 
-import re
 import time
+import unicodedata
 from collections import deque
-from datetime import datetime
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -32,7 +32,7 @@ router = APIRouter()
 
 LISTE_GRENZE = (30, 60.0)  # Abrufe je Fenster in Sekunden, je Admin
 NAME_MAX = 60
-STEUER_RE = re.compile("[\x00-\x1f\x7f-\x9f​-‏‪-‮⁠-⁩﻿]")
+STEUER_KATEGORIEN = ("Cc", "Cf", "Cs", "Zl", "Zp")  # Steuer-, Format-, Surrogat- und Zeilentrenner, wie die Oberfläche
 ROLLEN = ("admin", "mitglied")
 GERAET_STAENDE = ("aktiv", "beantragt", "gesperrt", "widerrufen", "keins")
 MODELLZUGAENGE = ("token_und_schluessel", "token", "schluessel", "haus")
@@ -65,8 +65,13 @@ def _db():
     return db
 
 
-def _zeit(wert: object) -> str | None:
-    return wert.isoformat() if isinstance(wert, datetime) else None
+def _datum(wert: object) -> str | None:
+    """Nur das Datum (JJJJ-MM-TT), nie eine Uhrzeit."""
+    return wert.isoformat()[:10] if isinstance(wert, date) else None
+
+
+def _ohne_steuerzeichen(text: str) -> str:
+    return "".join(c for c in text[: 4 * NAME_MAX] if unicodedata.category(c) not in STEUER_KATEGORIEN)
 
 
 def _aus(wert: object, erlaubt: tuple[str, ...]) -> str | None:
@@ -86,11 +91,11 @@ def zeile_pruefen(r: Any) -> dict | None:
     passwort = r["passwort_stand"]
     return {
         "user_id": user_id,
-        "anzeigename": STEUER_RE.sub("", name)[:NAME_MAX],
+        "anzeigename": _ohne_steuerzeichen(name)[:NAME_MAX],
         "rolle": _aus(r["rolle"], ROLLEN),
         "aktiv": _ja(r["aktiv"]),
-        "angelegt": _zeit(r["angelegt"]),
-        "letzte_anmeldung": _zeit(r["letzte_anmeldung"]),
+        "angelegt": _datum(r["angelegt"]),
+        "letzte_anmeldung": _datum(r["letzte_anmeldung"]),
         "faktor_bestaetigt": _ja(r["faktor_bestaetigt"]),
         "passwort_stand": _aus(passwort, PASSWORT_STAENDE),
         "geraet_stand": _aus(r["geraet_stand"], GERAET_STAENDE),
@@ -110,8 +115,11 @@ async def liste(request: Request, response: Response) -> dict:
     try:
         zeilen = await db.fetch(f"select * from {db.t('neue_mitglieder')}($1::uuid)", ich.user_id)
     except (*DB_ERRORS, DatabaseUnavailable) as e:
-        if getattr(e, "sqlstate", None) == "42501":
+        sqlstate = getattr(e, "sqlstate", None)
+        logger.warning("Neue Mitglieder: Liste fehlgeschlagen ({}, {})", type(e).__name__, sqlstate)
+        if sqlstate == "42501":
             raise HTTPException(403, "Dir fehlt die Berechtigung für diese Übersicht") from e
-        logger.warning("Neue Mitglieder: Liste fehlgeschlagen ({})", type(e).__name__)
         raise HTTPException(503, "Die Übersicht ist gerade nicht verfügbar") from e
-    return {"mitglieder": [m for m in (zeile_pruefen(r) for r in zeilen) if m is not None]}
+    mitglieder = [m for m in (zeile_pruefen(r) for r in zeilen) if m is not None]
+    logger.info("Neue Mitglieder: Abruf (Admin {}, {} Zeilen)", ich.user_id[:8], len(mitglieder))
+    return {"mitglieder": mitglieder}

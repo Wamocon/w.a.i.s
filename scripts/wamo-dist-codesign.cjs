@@ -6,7 +6,8 @@
 // "npm run dist" signiert dann von selbst und baut ohne Zertifikat wie bisher unsigniert. "npm run dist:signiert" verlangt die
 // Signatur (forceCodeSigning) und bricht ohne Zertifikat ab. Dieses Skript prüft danach, was wirklich signiert ist.
 //
-// Aufruf:  node scripts/wamo-dist-codesign.cjs <Ordner dist> [--pflicht] [--herausgeber "WAMOCON GmbH"]
+// Aufruf:  node scripts/wamo-dist-codesign.cjs <Ordner dist> [--pflicht] [--herausgeber "WAMOCON GmbH"] [--fingerabdruck <SHA1>]
+//   --fingerabdruck: nur genau dieses Zertifikat zählt (Thumbprint), nicht jedes gültige mit passendem Namen
 //   ohne --pflicht: Bericht, Exit 0 auch ohne Signatur (Hinweis: Ausgabe nur an die sieben Pilotkollegen)
 //   mit --pflicht:  Exit 1, wenn eine Datei nicht gültig signiert ist oder der Herausgeber nicht passt
 // Nur Windows (Get-AuthenticodeSignature). Keine Netzanfrage außer der Prüfung der Zertifikatskette durch Windows.
@@ -27,24 +28,24 @@ function zuPruefen(distOrdner, version) {
 function leseSignatur(datei) {
   const skript =
     "$s = Get-AuthenticodeSignature -LiteralPath $env:WAIS_CODESIGN_DATEI; " +
-    "[pscustomobject]@{ status = [string]$s.Status; herausgeber = [string]$s.SignerCertificate.Subject } | ConvertTo-Json -Compress";
+    "[pscustomobject]@{ status = [string]$s.Status; herausgeber = [string]$s.SignerCertificate.Subject; " +
+    "fingerabdruck = [string]$s.SignerCertificate.Thumbprint } | ConvertTo-Json -Compress";
   const powershell = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  const aus = execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", skript], {
-    encoding: "utf8",
-    env: { ...process.env, WAIS_CODESIGN_DATEI: datei },
-  });
+  // Nur die nötige Umgebung: nie CSC_LINK, CSC_KEY_PASSWORD oder andere Zugangswerte an den Kindprozess
+  const env = { SystemRoot: process.env.SystemRoot, PATH: process.env.PATH, TEMP: process.env.TEMP, WAIS_CODESIGN_DATEI: datei };
+  const aus = execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", skript], { encoding: "utf8", env, timeout: 60_000 });
   const j = JSON.parse(aus);
-  return { datei, status: String(j.status ?? ""), herausgeber: String(j.herausgeber ?? "") };
+  return { datei, status: String(j.status ?? ""), herausgeber: String(j.herausgeber ?? ""), fingerabdruck: String(j.fingerabdruck ?? "") };
 }
 
 /** Bewertet die Ergebnisse; reine Funktion (testbar). Liefert { ok, zeilen }. */
-function bewerte(ergebnisse, { pflicht = false, herausgeber = STANDARD_HERAUSGEBER } = {}) {
+function bewerte(ergebnisse, { pflicht = false, herausgeber = STANDARD_HERAUSGEBER, fingerabdruck = "" } = {}) {
   const zeilen = [];
-  let alleGut = ergebnisse.length > 0;
+  let alleGut = ergebnisse.length > 0 && typeof herausgeber === "string" && herausgeber.trim() !== "";
   for (const e of ergebnisse) {
     const name = path.basename(e.datei);
-    const gueltig = e.status === "Valid";
-    const passt = gueltig && new RegExp(`(^|,\\s*)(O|CN)=("?)${herausgeber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\3(,|$)`).test(e.herausgeber);
+    const gueltig = e.status === "Valid" && (!fingerabdruck || String(e.fingerabdruck).toUpperCase() === fingerabdruck.toUpperCase());
+    const passt = gueltig && herausgeber.trim() !== "" && new RegExp(`(^|,\\s*)(O|CN)=("?)${herausgeber.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\3(,|$)`).test(e.herausgeber);
     if (!gueltig) zeilen.push(`${name}: nicht signiert oder ungültig (${e.status || "unbekannt"})`);
     else if (!passt) zeilen.push(`${name}: signiert, aber nicht von ${herausgeber}`);
     else zeilen.push(`${name}: gültig signiert von ${herausgeber}`);
@@ -58,10 +59,12 @@ function hauptprogramm(args) {
   const ordner = path.resolve(args.find((a) => !a.startsWith("--")) ?? "dist");
   const i = args.indexOf("--herausgeber");
   const herausgeber = i >= 0 ? args[i + 1] : STANDARD_HERAUSGEBER;
+  const f = args.indexOf("--fingerabdruck");
+  const fingerabdruck = f >= 0 ? args[f + 1] : "";
   const version = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "desktop", "package.json"), "utf8")).version;
   const dateien = zuPruefen(ordner, version);
   for (const d of dateien) if (!fs.existsSync(d)) throw new Error(`${d} fehlt. Erst bauen (npm run dist).`);
-  const ergebnis = bewerte(dateien.map(leseSignatur), { pflicht: args.includes("--pflicht"), herausgeber });
+  const ergebnis = bewerte(dateien.map(leseSignatur), { pflicht: args.includes("--pflicht"), herausgeber, fingerabdruck });
   for (const z of ergebnis.zeilen) console.log(z);
   return ergebnis.ok ? 0 : 1;
 }

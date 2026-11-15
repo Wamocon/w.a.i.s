@@ -15,6 +15,7 @@ test("ohne Zertifikat baut dist wie bisher, dist:signiert verlangt die Signatur"
   assert.doesNotMatch(paket.scripts.dist, /forceCodeSigning/);
   assert.match(paket.scripts["dist:signiert"], /--config\.win\.forceCodeSigning=true/);
   assert.match(paket.scripts["dist:signiert"], /wamo-dist-vorbereiten\.cjs/);
+  assert.match(paket.scripts["dist:signiert"], /&& node \.\.\/scripts\/wamo-dist-codesign\.cjs dist --pflicht$/);
   assert.match(paket.scripts["dist:codesign"], /wamo-dist-codesign\.cjs dist/);
   assert.equal(paket.build.win.forceCodeSigning, undefined);
 });
@@ -52,4 +53,11 @@ test("bewerte: fremder oder nur ähnlicher Herausgeber zählt nicht", () => {
   const abgelaufen = [{ datei: "a.exe", status: "HashMismatch", herausgeber: "CN=WAMOCON GmbH" }];
   assert.equal(bewerte(abgelaufen, { pflicht: true }).ok, false);
   assert.equal(bewerte([], { pflicht: true }).ok, false);
+  assert.equal(bewerte([gut("a.exe")], { pflicht: true, herausgeber: "" }).ok, false);
+});
+
+test("bewerte: mit Fingerabdruck zählt nur genau dieses Zertifikat", () => {
+  const mit = { ...gut("a.exe"), fingerabdruck: "AB12" };
+  assert.equal(bewerte([mit], { pflicht: true, fingerabdruck: "ab12" }).ok, true);
+  assert.equal(bewerte([mit], { pflicht: true, fingerabdruck: "CD34" }).ok, false);
 });

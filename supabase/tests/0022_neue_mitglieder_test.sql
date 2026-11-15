@@ -108,11 +108,20 @@ begin
   perform wamo_testhilfe.gleich(r.modellzugang, 'haus', 'nur Hausmodelle');
   perform wamo_testhilfe.gleich(r.stimmabdruck, false, 'ohne Abdruck');
   perform wamo_testhilfe.gleich(r.aktiv, false, 'gesperrtes Profil erscheint als gesperrt');
-  perform wamo_testhilfe.gleich(r.letzte_anmeldung, null::timestamptz, 'nie angemeldet');
+  perform wamo_testhilfe.gleich(r.letzte_anmeldung, null::date, 'nie angemeldet');
   select * into r from __SCHEMA__.neue_mitglieder('00000000-0000-4000-8000-0000000022a1')
    where user_id = '00000000-0000-4000-8000-0000000022b3';
   perform wamo_testhilfe.gleich(r.modellzugang, 'schluessel', 'nur Schlüssel');
   perform wamo_testhilfe.gleich(r.faktor_bestaetigt, false, 'unbestätigter Faktor zählt nicht');
+end $$;
+
+-- 2b. Ältere Profile (vor mehr als 90 Tagen angelegt) erscheinen nicht
+reset role;
+update __SCHEMA__.profiles set created_at = now() - interval '100 days' where user_id = '00000000-0000-4000-8000-0000000022b2';
+set role wamo_core;
+do $$ begin
+  perform wamo_testhilfe.gleich((select count(*) from __SCHEMA__.neue_mitglieder('00000000-0000-4000-8000-0000000022a1')
+                                  where user_id = '00000000-0000-4000-8000-0000000022b2'), 0::bigint, 'altes Profil fehlt');
 end $$;
 
 -- 3. Nur ein aktiver Admin ruft auf
