@@ -6,6 +6,8 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.2.0] - 2026-11-15
+
 ### Geändert
 
 - Desktop-App ohne Stimmen-Rand (Zweig `feat/ohne-schleier`): Den Saum an allen Monitorkanten gibt es nicht mehr, in keinem
@@ -747,5 +749,6 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/wamo/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/Wamocon/wamo/releases/tag/v0.1.0
+[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Wamocon/w.a.i.s/releases/tag/v0.1.0
