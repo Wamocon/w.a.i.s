@@ -121,6 +121,8 @@ class OutlookMail:
         self.verfuegbar = False
         self.status_nach_secs: float | None = None  # None: Frist plus 2 Sekunden (Tests setzen 0)
         self.status_abstand_secs = 3.0
+        self._laeuft = False  # je Sitzung höchstens eine Vorbereitung (Doppelklick, doppelter Werkzeugaufruf)
+        self._karten: set[str] = set()  # Freigaben, deren Karte diese Sitzung schon gezeigt hat
         self._eigene: set[str] = set()  # Versände dieser Sitzung (nur sie lassen sich zurückholen)
         self._erledigt: set[str] = set()  # Endstand schon gemeldet
         self._aufgaben: set[asyncio.Task] = set()
@@ -148,7 +150,9 @@ class OutlookMail:
         return [schema(self._anhang_formate())]
 
     def register(self, llm) -> None:
-        llm.register_function(WERKZEUG, self._werkzeug, timeout_secs=ANFRAGE_TIMEOUT_SECS + EXPORT_TIMEOUT_SECS)
+        # Kein Abbruch bei einem Einwurf: Sonst hielte der PC eine Anfrage ohne Karte, und dort ruhten die Eingaben bis zum Ablauf
+        llm.register_function(WERKZEUG, self._werkzeug, cancel_on_interruption=False,
+                              timeout_secs=ANFRAGE_TIMEOUT_SECS + EXPORT_TIMEOUT_SECS)
 
     def anzeige(self) -> bool:
         """Für die Oberfläche (Feld mail in betrieb): Knopf "Als E-Mail" nur, solange es geht."""
@@ -165,7 +169,20 @@ class OutlookMail:
 
     async def vorbereiten(self, *, an: object, cc: object, betreff: object, text: object, anhang: object = None,
                           canvas_id: str | None = None, canvas_titel: str | None = None, quelle: str, aktivitaet_id: str = "") -> dict:
-        """Gemeinsamer Weg für Sprache und Klick: Anhang exportieren, Host fragen, Karte anlegen. Liefert die Antwort für das Modell."""
+        """Gemeinsamer Weg für Sprache und Klick: Anhang exportieren, Host fragen, Karte anlegen. Liefert die Antwort für das Modell.
+        Läuft schon eine Vorbereitung dieser Sitzung, kommt eine Ablehnung (keine zweite Datei, keine zweite Karte)."""
+        if self._laeuft:
+            return {"status": "rejected", "summary": "Eine Mail wird gerade schon vorbereitet. Bitte einen Moment warten."}
+        self._laeuft = True  # ohne await dazwischen gesetzt: kein zweiter Aufruf kommt vorbei
+        logger.info("Mail über Outlook: Vorbereitung ({})", quelle)  # nur woher, nie Empfänger, Betreff oder Text
+        try:
+            return await self._vorbereiten(an=an, cc=cc, betreff=betreff, text=text, anhang=anhang, canvas_id=canvas_id,
+                                           canvas_titel=canvas_titel, aktivitaet_id=aktivitaet_id)
+        finally:
+            self._laeuft = False
+
+    async def _vorbereiten(self, *, an: object, cc: object, betreff: object, text: object, anhang: object, canvas_id: str | None,
+                           canvas_titel: str | None, aktivitaet_id: str) -> dict:
         if not self._darf():
             return {"status": "rejected", "summary": PC_AUS}
         client = self._client()
@@ -202,9 +219,12 @@ class OutlookMail:
         if self._fremd():
             anfrage["warnung"] = WARNUNG
         karte = self.karte_anlegen(anfrage)
+        if karte is None and anfrage["id"] in self._karten:  # dieselbe Mail noch einmal: der Host gibt dieselbe Anfrage zurück
+            return {"status": "wartet_auf_klick", "summary": "Diese Mail liegt schon als Karte zur Freigabe bereit."}
         if karte is None:  # zu viele offene Karten: am PC nichts offen lassen
             await pc_freigabe_entscheiden(client, anfrage["id"], False)
             return {"status": "error", "summary": "Es warten schon zu viele Freigaben. Erst entscheiden, dann neu anfragen."}
+        self._karten.add(anfrage["id"])
         await self._melden(karte)
         return {"status": "wartet_auf_klick",
                 "summary": "Die Mail liegt als Karte zur Freigabe bereit. Erst nach dem Klick in der Oberfläche passiert etwas."}

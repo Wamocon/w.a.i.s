@@ -172,6 +172,8 @@ async def test_registrierung_durch_das_stimmabdruck_gate(host):
     handler, kwargs = llm.handler["outlook_senden"]
     assert getattr(handler, stimme_gate.MARKE) is gate
     assert kwargs["timeout_secs"] >= 60
+    # ein Einwurf bricht nicht ab: sonst hielte der PC eine Anfrage ohne Karte, und Eingaben ruhten bis zu 5 Minuten
+    assert kwargs["cancel_on_interruption"] is False
 
 
 async def test_schema_nur_mit_faehigkeit_des_hosts(host, monkeypatch):
@@ -239,6 +241,37 @@ async def test_ablehnung_des_hosts_und_pc_aus(host, monkeypatch):
     aus = mail(darf=False)
     r = await aus.vorbereiten(an=["a@firma.example"], cc=None, betreff="B", text="T", quelle="sprache")
     assert r["status"] == "rejected" and "PC-Steuerung" in r["summary"]
+
+
+async def test_gleiche_anfrage_zweimal_laesst_die_karte_stehen(host):
+    m = mail()
+    karten = []
+    m.karte_anlegen = lambda a: None if any(k["id"] == a["id"] for k in karten) else (karten.append(a) or {"items": [a]})
+    erste = await m.vorbereiten(an=["a@firma.example"], cc=None, betreff="B", text="T", quelle="sprache")
+    zweite = await m.vorbereiten(an=["a@firma.example"], cc=None, betreff="B", text="T", quelle="sprache")
+    assert erste["status"] == zweite["status"] == "wartet_auf_klick" and "schon" in zweite["summary"]
+    assert "freigabe_entscheiden" not in host.namen()  # die offene Anfrage am PC bleibt gültig
+
+
+async def test_nur_eine_vorbereitung_zur_zeit(host):
+    m = mail()
+    halt = asyncio.Event()
+
+    async def langsam(client, name, arguments):
+        await halt.wait()
+        return json.dumps(NEEDS)
+
+    m_call = om.call_host_tool
+    om.call_host_tool = langsam
+    try:
+        erste = asyncio.ensure_future(m.vorbereiten(an=["a@firma.example"], cc=None, betreff="B", text="T", quelle="klick"))
+        await asyncio.sleep(0)
+        zweite = await m.vorbereiten(an=["a@firma.example"], cc=None, betreff="B", text="T", quelle="klick")
+        assert zweite["status"] == "rejected" and "gerade" in zweite["summary"]
+        halt.set()
+        assert (await erste)["status"] == "wartet_auf_klick"
+    finally:
+        om.call_host_tool = m_call
 
 
 async def test_volle_kartenliste_lehnt_beim_host_ab(host):
@@ -360,6 +393,32 @@ async def test_zurueckholen_nur_fuer_eigene_versaende(host):
         await m.client_nachricht("mail_zurueckholen", daten)
     assert "outlook_zurueckholen" not in host.namen()
     assert m.gesendet[-1]["type"] == "mail_versand" and m.gesendet[-1]["zustand"] == "unbekannt"
+
+
+# ---------- Vertrag mit Host und Oberfläche (beide Seiten halten ihre Grenzen selbst) ----------
+WURZEL = Path(__file__).resolve().parent.parent
+
+
+def _konstante(datei: str, name: str) -> str:
+    import re
+
+    ende = "".join(map(chr, (59, 10, 35)))  # Semikolon, Zeilenende, Raute: dort endet der Wert
+    treffer = re.search(rf"^(?:export const )?{name}\s*=\s*([^{ende}]+)", (WURZEL / datei).read_text(encoding="utf-8"), re.M)
+    assert treffer, (datei, name)
+    return treffer.group(1).strip()
+
+
+def test_grenzen_gleich_in_kern_host_und_oberflaeche():
+    assert int(_konstante("host/office_outlook.py", "EMPFAENGER_MAX").split()[0]) == om.EMPFAENGER_MAX
+    assert int(_konstante("host/office_outlook.py", "BETREFF_MAX")) == om.BETREFF_MAX
+    assert int(_konstante("host/office_outlook.py", "TEXT_MAX")) == om.TEXT_MAX
+    assert int(_konstante("host/office_outlook.py", "KARTE_MAX").split()[0]) == activity.FREIGABE_DETAIL_ZEICHEN_MAIL
+    assert int(_konstante("ui/src/lib/nachrichten.ts", "FREIGABE_DETAIL_MAX")) == activity.FREIGABE_DETAIL_ZEICHEN_MAIL
+    assert int(_konstante("ui/src/lib/nachrichten.ts", "FREIGABE_DETAIL_KURZ")) == activity.FREIGABE_DETAIL_ZEICHEN
+    assert int(_konstante("ui/src/lib/mail.ts", "MAIL_EMPFAENGER_MAX")) == om.EMPFAENGER_MAX
+    assert int(_konstante("ui/src/lib/mail.ts", "MAIL_BETREFF_MAX")) == om.BETREFF_MAX
+    assert int(_konstante("ui/src/lib/mail.ts", "MAIL_TEXT_MAX")) == om.TEXT_MAX
+    assert _konstante("host/office_outlook_com.py", "VERSAND_ID_RE") == f're.compile(r"{om.VERSAND_RE.pattern}")'
 
 
 # ---------- Verdrahtung in bot.py (statisch, die Sitzung braucht Netz und Modelle) ----------
