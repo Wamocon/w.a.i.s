@@ -1,4 +1,5 @@
-"""OneNote-Seite aus dem Canvas (Paket 4 von docs/office-und-versand.md, Teil OneNote): Werkzeug onenote_seite.
+"""OneNote-Seite aus dem Canvas (Paket 4 von docs/office-und-versand.md, Teil OneNote): Werkzeug onenote_seite und der Klick
+"Als OneNote-Seite" im Canvas (Client-Nachricht onenote_seite).
 
 Wer: nur admin, nie in einer Laborsitzung (fuer_sitzung, dazu prüft der Konstruktor selbst), nur mit WAMO_OFFICE (Teil "onenote",
 Standard leer = aus), nur bei eingeschalteter PC-Steuerung mit gehaltener Sperre (darf) und nur, wenn der Host das Werkzeug kennt
@@ -6,13 +7,18 @@ Standard leer = aus), nur bei eingeschalteter PC-Steuerung mit gehaltener Sperre
 eingehängt hat; es steht nicht in OFFENE_WERKZEUGE.
 
 Was: Der Kern liest das eigene Canvas-Element (canvas_quelle.py) und schickt dem Host nur dessen feste Struktur
-(onenote_seite_anfragen, nie in LLM_TOOLS). Der Host prüft selbst, liest das Standard-Notizbuch und legt eine Freigabe-Anfrage an
-(needs_approval, Aktion onenote). Daraus macht activity.py die Karte (Job pc, Titel und ganzer Inhalt); angelegt wird erst nach dem
-Klick eines Admins (pc_freigaben.py, freigabe_entscheiden im Host), genau einmal.
+(onenote_seite_anfragen, nie in LLM_TOOLS). Der Host prüft selbst, bestimmt das OneDrive der Firma und das Notizbuch W.A.I.S. darin
+und legt eine Freigabe-Anfrage an (needs_approval, Aktion onenote). Per Sprache macht activity.py daraus die Karte, per Klick dieses
+Modul über karte (pc_freigaben.PcFreigaben.anfrage); beide Wege zeigen Konto, Notizbuch, Abschnitt, Titel und den ganzen Inhalt.
+Angelegt wird erst nach dem Klick eines Admins auf die Karte (pc_freigaben.py, freigabe_entscheiden im Host), genau einmal; fehlt das
+Notizbuch, legt der Host es erst dann an.
 
-Rückfall: Fehlt OneNote für den Desktop oder ist es nicht bereit (Fähigkeiten oder rueckfall "word" vom Host), speichert der Kern die
-Seite als Word-Datei in Dokumente\\WAIS (office_werkzeuge.OfficeDateien.exportieren, ohne Karte: nichts verlässt den PC) und sagt, dass
-sie sich über "An OneNote senden" in OneNote einfügen lässt.
+Rückfall: Fehlt OneNote für den Desktop, gibt es kein eindeutiges OneDrive der Firma oder ist OneNote nicht bereit (Fähigkeiten oder
+rueckfall "word" vom Host), speichert der Kern die Seite als Word-Datei in Dokumente\\WAIS (office_werkzeuge.OfficeDateien.exportieren,
+ohne Karte wie in Paket 1) und sagt, dass sie sich über "An OneNote senden" in OneNote einfügen lässt.
+
+Oberfläche: betrieb trägt "onenote": true, solange der Knopf gehen kann (anzeige). Nach einem Klick meldet der Kern
+{"type": "onenote", "ok", "text"}: Karte liegt bereit, Rückfall als Word-Datei oder der Grund, warum nicht.
 """
 
 from __future__ import annotations
@@ -26,15 +32,16 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 import labor
-from activity import APPROVAL_ID_RE
-from canvas_quelle import CanvasNichtErreichbar, canvas_lesen
+from activity import APPROVAL_ID_RE, freigabe_anfrage
+from canvas_quelle import CanvasNichtErreichbar, canvas_lesen, kennung_gueltig
 from office_werkzeuge import (CANVAS_NICHT_ERREICHBAR, ERSTELLEN_TIMEOUT_SECS, FAEHIGKEITEN_TIMEOUT_SECS, KEIN_CANVAS, PC_AUS,
                               OfficeDateien, office_teile)
-from pc_host import call_host_tool
+from pc_host import call_host_tool, pc_freigabe_entscheiden
 from persona import clean_inline
 
 TEIL = "onenote"
 WERKZEUG = "onenote_seite"
+NACHRICHT = "onenote_seite"  # Klick "Als OneNote-Seite" im Canvas, {"canvas_id"}
 AKTION = "onenote"
 ANFRAGEN_TIMEOUT_SECS = 50.0  # Host: Notizbücher lesen bis 30 s, Tunnel 45 s (pc_tunnel.LANGE_WERKZEUGE)
 WERKZEUG_TIMEOUT_SECS = ANFRAGEN_TIMEOUT_SECS + ERSTELLEN_TIMEOUT_SECS + 5  # Anfrage, danach höchstens der Rückfall als Word-Datei
@@ -45,6 +52,8 @@ ONENOTE_FEHLT = "OneNote für den Desktop ist an diesem PC nicht installiert."
 LAEUFT_SCHON = "Eine OneNote-Seite wird gerade schon vorbereitet. Bitte einen Moment warten."
 RUECKFALL = ("{grund} Stattdessen liegt die Seite als Word-Datei {name} im Ordner {ordner}. Über „An OneNote senden“ lässt sie "
              "sich in OneNote einfügen.")
+KARTE_BEREIT = "Die OneNote-Seite liegt zur Freigabe bereit. Erst nach deinem Klick auf der Karte wird sie angelegt."
+KEINE_KARTE = "Die Freigabekarte ließ sich nicht anzeigen. Am PC ist nichts passiert."
 
 
 def fuer_sitzung(identity) -> bool:
@@ -56,10 +65,11 @@ def schema() -> FunctionSchema:
     return FunctionSchema(
         name=WERKZEUG,
         description=(
-            "Legt ein Canvas-Element als neue Seite in OneNote an (Standard-Notizbuch, Abschnitt W.A.I.S.). Ohne canvas gilt das "
-            "zuletzt gezeigte Element. Die Seite entsteht erst, wenn ein Admin die Freigabekarte in der Oberfläche bestätigt: Sag "
-            "danach nur, dass die Karte bereitliegt, nie, dass die Seite schon angelegt ist. Fehlt OneNote am PC, speichert das "
-            "Werkzeug stattdessen eine Word-Datei im Ordner WAIS; sag dann, dass sie sich über „An OneNote senden“ einfügen lässt."
+            "Legt ein Canvas-Element als neue Seite in OneNote an, im Notizbuch W.A.I.S. im OneDrive der Firma (nie in einem anderen "
+            "Notizbuch). Ohne canvas gilt das zuletzt gezeigte Element. Die Seite entsteht erst, wenn ein Admin die Freigabekarte in "
+            "der Oberfläche bestätigt: Sag danach nur, dass die Karte bereitliegt, nie, dass die Seite schon angelegt ist. Geht "
+            "OneNote am PC nicht, speichert das Werkzeug stattdessen eine Word-Datei im Ordner WAIS; sag dann den Grund und dass sie "
+            "sich über „An OneNote senden“ einfügen lässt."
         ),
         properties={
             "canvas": {"type": "string", "description": "Titel des Canvas-Elements, leer = das zuletzt gezeigte"},
@@ -70,11 +80,14 @@ def schema() -> FunctionSchema:
 
 
 class OneNoteSeiten:
+    """karte(anfrage) registriert eine Freigabe-Anfrage für diese Sitzung und liefert die Karte für die Oberfläche oder None
+    (pc_freigaben.PcFreigaben.anfrage); ohne karte gibt es den Klickweg nicht."""
+
     def __init__(self, identity, memory, *, client: Callable[[], object], darf: Callable[[], bool],
-                 senden: Callable[[dict], Awaitable[None]] | None):
+                 senden: Callable[[dict], Awaitable[None]] | None, karte: Callable[[dict], dict | None] | None = None):
         if not getattr(identity, "is_admin", False) or labor.ist_labor(identity):
             raise ValueError("OneNote-Seiten gibt es nur für Admins und nie im Labor")
-        self.memory, self._client, self._darf = memory, client, darf
+        self.memory, self._client, self._darf, self._senden, self._karte_fuer = memory, client, darf, senden, karte
         self._dateien = OfficeDateien(identity, memory, client=client, darf=darf, senden=senden)  # nur für den Rückfall
         self.onenote = self.word = False
         self._laeuft = False  # je Sitzung höchstens eine Anfrage zur Zeit
@@ -101,6 +114,10 @@ class OneNoteSeiten:
         # bis zum Ablauf der Anfrage (wie canvas_exportieren)
         llm.register_function(WERKZEUG, self._werkzeug, cancel_on_interruption=False, timeout_secs=WERKZEUG_TIMEOUT_SECS)
 
+    def anzeige(self) -> bool:
+        """Knopf "Als OneNote-Seite" (Feld onenote in betrieb): nur mit OneNote am PC, Klickweg für Karten und PC-Steuerung an."""
+        return self.onenote and self._karte_fuer is not None and self._darf()
+
     # ---------- Werkzeug ----------
     async def _werkzeug(self, params) -> None:
         a = params.arguments if isinstance(params.arguments, dict) else {}
@@ -108,25 +125,25 @@ class OneNoteSeiten:
         titel = a.get("titel") if isinstance(a.get("titel"), str) else ""
         await params.result_callback(await self.anlegen(canvas=canvas, titel=titel))
 
-    async def anlegen(self, *, canvas: str | None, titel: str) -> dict:
+    async def anlegen(self, *, canvas: str | None = None, titel: str = "", canvas_id: str | None = None) -> dict:
         """Freigabe-Anfrage im Host (needs_approval wird zur Karte), Rückfall als Word-Datei oder eine Ablehnung. Läuft schon eine
         Anfrage dieser Sitzung, kommt eine Ablehnung."""
         if self._laeuft:
             return {"status": "rejected", "summary": LAEUFT_SCHON}
         self._laeuft = True  # ohne await dazwischen gesetzt: kein zweiter Aufruf kommt vorbei
         try:
-            return await self._anlegen(canvas, titel)
+            return await self._anlegen(canvas, titel, canvas_id)
         finally:
             self._laeuft = False
 
-    async def _anlegen(self, canvas: str | None, titel: str) -> dict:
+    async def _anlegen(self, canvas: str | None, titel: str, canvas_id: str | None) -> dict:
         if not self._darf():
             return {"status": "rejected", "summary": PC_AUS}
         client = self._client()
         if client is None:
             return {"status": "error", "summary": "Kein Zugriff auf den PC."}
         try:
-            gefunden = await canvas_lesen(self.memory, titel=canvas)
+            gefunden = await canvas_lesen(self.memory, canvas_id=canvas_id, titel=canvas)
         except CanvasNichtErreichbar:
             return {"status": "error", "summary": CANVAS_NICHT_ERREICHBAR}
         if gefunden is None:
@@ -163,6 +180,45 @@ class OneNoteSeiten:
         return {"status": "success", "onenote": False, "gespeichert": True, "datei": datei["name"], "ordner": datei["ordner"],
                 "geoeffnet": ergebnis["geoeffnet"], "summary": RUECKFALL.format(grund=grund, name=datei["name"],
                                                                                ordner=datei["ordner"] or "WAIS")}
+
+    # ---------- Klick "Als OneNote-Seite" ----------
+    async def client_nachricht(self, daten: object) -> None:
+        """Klick im Canvas: dieselbe Anfrage wie per Sprache, die Karte entsteht hier statt in activity.py."""
+        kennung = kennung_gueltig(daten.get("canvas_id")) if isinstance(daten, dict) else None
+        if kennung is None:
+            await self._melden(False, "Ungültige Anfrage.")
+            return
+        ergebnis = await self.anlegen(canvas_id=kennung)
+        if ergebnis.get("status") == "needs_approval":
+            await self._karte_zeigen(ergebnis)
+        elif ergebnis.get("status") == "success":
+            await self._melden(True, ergebnis.get("summary", ""))
+        else:
+            await self._melden(False, ergebnis.get("summary") or "Nicht angelegt.")
+
+    async def _karte_zeigen(self, ergebnis: dict) -> None:
+        anfrage = freigabe_anfrage(WERKZEUG, {}, ergebnis, "")
+        karte = self._karte_fuer(anfrage) if anfrage is not None and self._karte_fuer is not None else None
+        if karte is None:  # keine Karte, die jemand bestätigen könnte: die Anfrage am PC sofort ablehnen, sonst ruhen dort die Eingaben
+            logger.warning("OneNote: Karte für den Klick nicht anzeigbar, Anfrage am PC abgelehnt")
+            client = self._client()
+            if client is not None and isinstance(ergebnis.get("approval_id"), str):
+                await pc_freigabe_entscheiden(client, ergebnis["approval_id"], False)
+            await self._melden(False, KEINE_KARTE)
+            return
+        await self._ui(karte)
+        await self._melden(True, KARTE_BEREIT)
+
+    # ---------- Ausgaben ----------
+    async def _melden(self, ok: bool, text: str) -> None:
+        await self._ui({"type": "onenote", "ok": ok, "text": clean_inline(text, 400)})
+
+    async def _ui(self, nachricht: dict) -> None:
+        if self._senden is not None:
+            try:
+                await self._senden(nachricht)
+            except Exception as e:  # noqa: BLE001 (Oberfläche weg: das Gespräch läuft weiter)
+                logger.debug("OneNote: Meldung an die Oberfläche fehlgeschlagen ({})", type(e).__name__)
 
     @staticmethod
     async def _host(client, name: str, argumente: dict, frist: float) -> dict:

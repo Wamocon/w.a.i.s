@@ -580,6 +580,7 @@ export function applyServerMessage(msg: ServerMessage) {
         modellHinweis: msg.modellHinweis,
         entwicklungGrund: msg.entwicklungGrund,
         office: msg.office,
+        onenote: msg.onenote,
       };
       const vorher = wamo.get().betrieb;
       wamo.set((s) => ({
@@ -618,6 +619,11 @@ export function applyServerMessage(msg: ServerMessage) {
       wamo.set((s) => ({ ...s, datei, dateiAntworten: s.dateiAntworten + 1, ansage: hinweisText(datei) }));
       return;
     }
+    case "onenote":
+      // Antwort auf "Als OneNote-Seite": gibt die Knöpfe wieder frei (wie eine Datei-Antwort), der Text kommt als kurzer Hinweis
+      wamo.set((s) => ({ ...s, dateiAntworten: s.dateiAntworten + 1, ansage: msg.text }));
+      zeigeToast(msg.text);
+      return;
     case "auftrag": {
       const a: Auftrag = {
         job: msg.job,

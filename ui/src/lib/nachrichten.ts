@@ -41,6 +41,8 @@ export type Betrieb = {
   entwicklungGrund?: string;
   /** Dateiformate, in denen das Canvas jetzt am PC gespeichert werden kann (nur Admins mit PC-Steuerung, voice-core/office_werkzeuge.py) */
   office?: OfficeFormat[];
+  /** ob der Knopf "Als OneNote-Seite" gehen kann (nur Admins mit PC-Steuerung und OneNote am PC, voice-core/onenote_werkzeuge.py) */
+  onenote?: boolean;
 };
 
 /** Modellwahl je Profil: Automatisch (der Boss wählt) oder Nur Hausmodelle */
@@ -263,6 +265,8 @@ export type ServerMessage =
   | ({ type: "gemerkt" } & Gemerkt)
   /** Canvas als Datei gespeichert (Kennung aus dem Register am PC, Name, Ordner, Pfad) oder nicht (Grund); nie ein Dateiinhalt */
   | ({ type: "datei" } & DateiMeldung)
+  /** Antwort auf "Als OneNote-Seite": Karte liegt bereit, Rückfall als Word-Datei (ok) oder der Grund, warum nicht */
+  | { type: "onenote"; ok: boolean; text: string }
   // Ohne stand: den Zustand der Startkarte setzt allein die Oberfläche (lib/auftragStart.ts), der Kern kann ihn nicht vorgeben
   | ({ type: "auftrag" } & Omit<Auftrag, "stand">)
   /** Antwort des Kerns auf den Klick "Starten": ok, oder nicht ok mit einem Satz als Grund (voice-core/dev_agent.py) */
@@ -644,8 +648,12 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         modellHinweis: optStr(m.modell_hinweis, 200),
         entwicklungGrund: zeile(m.entwicklung_grund, 120),
         office: officeFormate(m.office),
+        onenote: m.onenote === true ? true : undefined,
       };
     }
+    case "onenote":
+      if (typeof m.ok !== "boolean") return null;
+      return { type: "onenote", ok: m.ok, text: zeile(m.text, 400) ?? (m.ok ? "Erledigt." : "Nicht angelegt.") };
     case "datei": {
       if (m.ok === false) return { type: "datei", ok: false, grund: zeile(m.grund, 300) ?? "Nicht gespeichert." };
       const name = zeile(m.name, 200);

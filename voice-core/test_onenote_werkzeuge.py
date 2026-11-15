@@ -52,15 +52,26 @@ def host(monkeypatch):
     return h
 
 
-def seiten(memory=None, darf=True):
+def seiten(memory=None, darf=True, karte=None):
     gesendet: list[dict] = []
 
     async def senden(d):
         gesendet.append(d)
 
-    s = onw.OneNoteSeiten(ADMIN, memory or Memory([DOK, DOK]), client=lambda: object(), darf=lambda: darf, senden=senden)
+    s = onw.OneNoteSeiten(ADMIN, memory or Memory([DOK, DOK]), client=lambda: object(), darf=lambda: darf, senden=senden, karte=karte)
     s.gesendet = gesendet
     return s
+
+
+def karten_sammler():
+    """Wie PcFreigaben.anfrage: registriert die Anfrage und liefert die Karte für die Oberfläche."""
+    gesammelt: list[dict] = []
+
+    def anfrage(a: dict) -> dict:
+        gesammelt.append(a)
+        return {"type": "freigaben", "job": "pc", "projekt": "PC", "items": [a]}
+
+    return anfrage, gesammelt
 
 
 # ---------- Wer darf ----------
@@ -260,3 +271,98 @@ def test_bot_baut_onenote_nur_fuer_admin_ohne_labor_und_haengt_das_schema_an():
     assert "onenote.register(llm)" in BOT and "await onenote.schemas()" in BOT
     assert BOT.index("werkzeuge_absichern(llm, stimme.gate)") < BOT.index("onenote.register(llm)")
     assert "*onenote_schemas" in BOT
+
+
+# ---------- Klick im Canvas: "Als OneNote-Seite" ----------
+async def test_klick_macht_die_karte_und_meldet_kurz(host):
+    anfrage, gesammelt = karten_sammler()
+    s = seiten(karte=anfrage)
+    await s.schemas()
+    await s.client_nachricht({"canvas_id": CID})
+    name, args = host.aufrufe[-1]
+    assert name == "onenote_seite_anfragen" and args["canvas_id"] == CID and args["titel"] == ""
+    assert gesammelt[0]["aktion"] == "onenote" and gesammelt[0]["id"] == AID and gesammelt[0]["werkzeug"] == onw.WERKZEUG
+    assert s.gesendet[0]["type"] == "freigaben" and s.gesendet[0]["items"][0]["detail"] == KARTE["detail"]
+    assert s.gesendet[-1] == {"type": "onenote", "ok": True, "text": onw.KARTE_BEREIT}
+
+
+async def test_klick_ohne_karte_lehnt_die_anfrage_am_host_ab(host, monkeypatch):
+    abgelehnt: list[tuple] = []
+
+    async def entscheiden(client, aid, ja):
+        abgelehnt.append((aid, ja))
+        return {"status": "rejected"}
+
+    monkeypatch.setattr(onw, "pc_freigabe_entscheiden", entscheiden)
+    s = seiten(karte=lambda a: None)  # zum Beispiel schon fünf Karten offen
+    await s.schemas()
+    await s.client_nachricht({"canvas_id": CID})
+    assert abgelehnt == [(AID, False)]  # sonst ruhen am PC die Eingaben bis zum Ablauf einer Karte, die niemand sieht
+    assert s.gesendet == [{"type": "onenote", "ok": False, "text": onw.KEINE_KARTE}]
+
+
+@pytest.mark.parametrize("daten", [{}, {"canvas_id": "x"}, {"canvas_id": CID + "0"}, "kaputt"])
+async def test_klick_ungueltig_fragt_den_host_nicht(host, daten):
+    s = seiten(karte=karten_sammler()[0])
+    await s.schemas()
+    await s.client_nachricht(daten)
+    assert [n for n, _ in host.aufrufe] == ["office_faehigkeiten"]
+    assert s.gesendet == [{"type": "onenote", "ok": False, "text": "Ungültige Anfrage."}]
+
+
+async def test_klick_mit_rueckfall_meldet_die_word_datei(host):
+    host.anfrage = {"status": "rejected", "rueckfall": "word", "summary": "An diesem PC ist kein OneDrive der Firma angemeldet."}
+    s = seiten(karte=karten_sammler()[0])
+    await s.schemas()
+    await s.client_nachricht({"canvas_id": CID})
+    assert s.gesendet[0]["type"] == "datei" and s.gesendet[0]["ok"] is True
+    assert s.gesendet[-1]["type"] == "onenote" and s.gesendet[-1]["ok"] is True
+    assert "kein OneDrive der Firma" in s.gesendet[-1]["text"] and "An OneNote senden" in s.gesendet[-1]["text"]
+
+
+async def test_klick_ablehnung_wird_gemeldet(host):
+    host.anfrage = {"status": "rejected", "summary": "Das ist zu lang für die Freigabekarte."}
+    s = seiten(karte=karten_sammler()[0])
+    await s.schemas()
+    await s.client_nachricht({"canvas_id": CID})
+    assert s.gesendet == [{"type": "onenote", "ok": False, "text": "Das ist zu lang für die Freigabekarte."}]
+
+
+async def test_anzeige_nur_mit_onenote_karte_und_pc_steuerung(host):
+    karte = karten_sammler()[0]
+    s = seiten(karte=karte)
+    assert s.anzeige() is False  # vor den Fähigkeiten
+    await s.schemas()
+    assert s.anzeige() is True
+    assert (await _mit(seiten(darf=False, karte=karte))).anzeige() is False
+    assert (await _mit(seiten())).anzeige() is False  # ohne Karten kein Klickweg
+    host.faehig = {"status": "success", "formate": ["word"], "onenote": False}
+    assert (await _mit(seiten(karte=karte))).anzeige() is False  # ohne OneNote kein Knopf, per Sprache bleibt der Rückfall
+
+
+async def _mit(s):
+    await s.schemas()
+    return s
+
+
+def test_bot_leitet_den_klick_weiter_und_meldet_den_knopf(bot):
+    assert "msg.type == onenote_werkzeuge.NACHRICHT" in BOT
+    assert BOT.index("msg.type == onenote_werkzeuge.NACHRICHT") < BOT.index("elif dev:\n            await dev.on_client_message")
+    zeile = next(z for z in BOT.splitlines() if "OneNoteSeiten(" in z)
+    block = BOT[BOT.index(zeile): BOT.index(zeile) + 600]
+    assert "karte=" in block and "freigaben.anfrage" in block
+    assert "onenote=onenote is not None and onenote.anzeige()" in BOT
+    assert bot.betrieb_message("verbunden", onenote=True)["onenote"] is True
+    assert "onenote" not in bot.betrieb_message("verbunden")
+
+
+@pytest.fixture(scope="module")
+def bot():
+    import os
+    from unittest import mock
+
+    umgebung = {"SONIOX_API_KEY": "dummy-soniox", "ANTHROPIC_API_KEY": "dummy-anthropic", "WAMO_DATABASE_URL": "",
+                "WAMO_DB_SCHEMA": "wamo_test", "WAMO_PC_HOST": "off"}
+    with mock.patch.dict(os.environ, umgebung):
+        import bot as modul
+    return modul

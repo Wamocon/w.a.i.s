@@ -26,7 +26,12 @@ export type OfficeAktionen = {
   speichern: (canvasId: string, format: OfficeFormat) => boolean;
   /** eine gespeicherte Datei öffnen (Nachricht datei_oeffnen, nur Dateien aus dem Register des Hosts) */
   oeffnen: (kennung: string) => boolean;
+  /** eigenes Canvas-Element als OneNote-Seite, erst nach der Freigabekarte (Nachricht onenote_seite, voice-core/onenote_werkzeuge.py) */
+  onenote?: (canvasId: string) => boolean;
 };
+
+/** Text des Knopfs für OneNote; die Seite entsteht erst nach dem Klick auf die Freigabekarte. */
+export const ONENOTE_KNOPF = "Als OneNote-Seite";
 
 /** Ergebnis des Speicherns (Servernachricht "datei"). */
 export type DateiMeldung =
@@ -40,13 +45,18 @@ export const istOfficeFormat = (v: unknown): v is OfficeFormat =>
  * Formate für ein Element: nur eigene, gespeicherte Elemente (Kennung aus der Datenbank, nicht geteilt, kein Auftragsergebnis), nur
  * Formate aus betrieb.office, Excel und CSV nur für Tabellen.
  */
-export function exportFormate(
-  item: Pick<CanvasItem, "kind"> & Partial<Pick<CanvasItem, "id" | "geteilt" | "teilbar">>,
-  verfuegbar: readonly string[] | undefined,
-): OfficeFormat[] {
-  if (!verfuegbar?.length || item.geteilt || item.teilbar || !(typeof item.id === "string" && UUID.test(item.id))) return [];
+type ExportItem = Pick<CanvasItem, "kind"> & Partial<Pick<CanvasItem, "id" | "geteilt" | "teilbar">>;
+
+/** Eigenes, gespeichertes Element: Kennung aus der Datenbank, nicht geteilt, kein Auftragsergebnis. */
+const eigenesElement = (item: ExportItem) => !item.geteilt && !item.teilbar && typeof item.id === "string" && UUID.test(item.id);
+
+export function exportFormate(item: ExportItem, verfuegbar: readonly string[] | undefined): OfficeFormat[] {
+  if (!verfuegbar?.length || !eigenesElement(item)) return [];
   return OFFICE_FORMATE.filter((f) => verfuegbar.includes(f) && (item.kind === "tabelle" || !NUR_TABELLE.includes(f)));
 }
+
+/** "Als OneNote-Seite" für jede Art, aber nur für eigene, gespeicherte Elemente und nur, wenn der Kern betrieb.onenote meldet. */
+export const onenoteMoeglich = (item: ExportItem, an: boolean | undefined): boolean => an === true && eigenesElement(item);
 
 export const knopfText = (f: OfficeFormat) => `Als ${FORMAT_NAME[f]} speichern`;
 
