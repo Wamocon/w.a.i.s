@@ -363,7 +363,7 @@ def test_adf_kennt_keine_erwaehnungen_links_oder_makros():
             assert "attrs" not in m
         assert set(k) <= {"type", "version", "content", "text", "marks", "attrs"}
     texte = "".join(k.get("text", "") for k in alle)
-    assert "https://boese.example" in texte  # bleibt reiner Text, nie ein Verweis
+    assert texte.count("boese.example") == 1  # bleibt reiner Text, nie ein Verweis
 
 
 def test_adf_leer_ergibt_kein_dokument():
