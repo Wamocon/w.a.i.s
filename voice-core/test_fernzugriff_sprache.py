@@ -167,7 +167,8 @@ class VerdrahtungTests(unittest.TestCase):
 
     def test_beide_stellen_bekommen_denselben_schalter(self):
         self.assertRegex(self.bot, r"build_system_prompt\([^)]*fernzugriff=fernzugriff")
-        self.assertRegex(self.bot, r"register_tools\(llm, memory, identity, turn, zugang=zugang, fernzugriff=fernzugriff\)")
+        # weitere Angaben nach dem Schalter (canvas=canvas_sitzung) ändern nichts daran, dass beide Stellen denselben Schalter bekommen
+        self.assertRegex(self.bot, r"register_tools\(llm, memory, identity, turn, zugang=zugang, fernzugriff=fernzugriff[,)]")
 
     def test_aktiv_liest_den_schalter_ohne_standard(self):
         import os
