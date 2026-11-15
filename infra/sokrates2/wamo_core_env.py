@@ -92,6 +92,11 @@ ERLAUBT = set(PFLICHT) | {
     # /start und Offer je Profil und Minute
     "WAMO_LABOR_TEXT_ABSTAND_SECS", "WAMO_LABOR_TEXT_MAX_ZEICHEN", "WAMO_LABOR_SUCHEN_MAX", "WAMO_LABOR_ANFRAGEN_MAX",
     "WAMO_LABOR_KLICK_ABSTAND_SECS", "WAMO_LABOR_KLICK_MAX",
+    # Jira-Stories aus dem Canvas (voice-core/jira_client.py, jira_werkzeuge.py): kommen nur vom Server, nie aus der .env des PCs (nicht in
+    # AUS_ENV). WAMO_JIRA (an oder aus, Standard aus), Adresse (nur https://<name>.atlassian.net), Mailadresse und API-Token des technischen
+    # Jira-Benutzers nur für W.A.I.S. (Rechte Browse Projects und Create Issues; das Token ist ein Geheimnis und wird wie alle Werte nie
+    # angezeigt), Erlaubnisliste der Projekte und Standardprojekt. Anleitung docs/jira-benutzer-einrichten.md.
+    "WAMO_JIRA", "WAMO_JIRA_URL", "WAMO_JIRA_EMAIL", "WAMO_JIRA_TOKEN", "WAMO_JIRA_PROJEKTE", "WAMO_JIRA_STANDARD_PROJEKT",
     # Office-Dateien aus dem Canvas (voice-core/office_werkzeuge.py): Liste der Teile, bisher "dateien" (Paket 1) und "onenote"
     # (Paket 4, voice-core/onenote_werkzeuge.py). Leer oder unbekannt heißt aus. Gilt nur für Admins, nie im Labor; am PC sperrt
     # zusätzlich die Datei office.aus.

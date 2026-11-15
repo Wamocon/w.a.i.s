@@ -108,7 +108,12 @@ test("Bau-Konfiguration: Kennung, pro Benutzer ohne Admin, Fuses, Host ohne Test
   const host = b.extraResources.find((e) => e.to === "host");
   assert.ok(host.filter.includes("!**/test_*.py") && host.filter.includes("!.venv/**") && host.filter.includes("uv.lock"));
   const skripte = b.extraResources.find((e) => e.to === "scripts");
-  assert.deepEqual([...skripte.filter].sort(), ["wamo-tunnel-einrichten.ps1", "wamo-tunnel-entfernen.ps1", "wamo-tunnel.ps1"]);
+  assert.deepEqual([...skripte.filter].sort(), [
+    "wamo-symbol-reparieren.ps1",
+    "wamo-tunnel-einrichten.ps1",
+    "wamo-tunnel-entfernen.ps1",
+    "wamo-tunnel.ps1",
+  ]);
   assert.ok(b.files.includes("!**/*.test.js") && b.files.includes("!testdaten/**"));
 });
 
@@ -184,7 +189,7 @@ test("Versionen: electron und electron-builder sind exakt gepinnt", () => {
 });
 
 test("Der Paketname des Skripts und die Gerätedatei zeigen auf vorhandene Skripte im Repository", () => {
-  for (const s of ["wamo-tunnel.ps1", "wamo-tunnel-einrichten.ps1", "wamo-tunnel-entfernen.ps1"]) {
+  for (const s of ["wamo-tunnel.ps1", "wamo-tunnel-einrichten.ps1", "wamo-tunnel-entfernen.ps1", "wamo-symbol-reparieren.ps1"]) {
     assert.ok(fs.existsSync(path.join(__dirname, "..", "scripts", s)), s);
   }
 });
@@ -196,11 +201,49 @@ test("Der Installer gibt ALLE ANWENDUNGSPAKETE Lesezugriff auf den Installations
   assert.doesNotMatch(nsh, /\/grant[^\n]*(F|M|W)\)/, "nur Lesen und Ausführen");
 });
 
-test("Der Installer meldet der Shell neue Symbole (SHCNE_ASSOCCHANGED), sonst zeigt Windows ein leeres Datei-Symbol", () => {
+// Symbol nach einem Update: Beim Update behält electron-builder die Verknüpfung im Startmenü (--keep-shortcuts) und tauscht nur
+// die EXE. In der Nachstellung vom 14.11.2026 las Windows den Eintrag der Kennung im App-Zwischenspeicher der Shell
+// (%LOCALAPPDATA%\Microsoft\Windows\Caches) dann nicht neu, nur bei einer umbenannten Verknüpfung. Deshalb schreibt der Installer
+// die Verknüpfung neu (WinShell::SetLnkAUMI), meldet Verknüpfung und EXE als geändert und danach neue Symbole, jeweils mit
+// SHCNF_FLUSH (wartet, bis die Shell die Meldung hat). customInstall läuft vor dem Start der App (runAfterFinish).
+test("Der Installer erneuert nach dem Update Verknüpfung und Symbole, bevor er die App startet", () => {
   const nsh = fs.readFileSync(path.join(__dirname, "build", "installer.nsh"), "utf8");
   const install = nsh.match(/!macro customInstall\r?\n([\s\S]*?)!macroend/);
   assert.ok(install, "customInstall fehlt");
-  assert.match(install[1], /System::Call 'shell32::SHChangeNotify\(i 0x08000000, i 0x0000, p 0, p 0\)'/);
-  // electron-builder meldet es nur beim Anlegen einer Desktop-Verknüpfung, und die gibt es hier nicht
+  const teil = install[1];
+  const schritte = [
+    /\$\{If\} \$\{FileExists\} "\$newStartMenuLink"/,
+    /WinShell::SetLnkAUMI "\$newStartMenuLink" "\$\{APP_ID\}"/,
+    /System::Call 'shell32::SHChangeNotify\(i 0x00002000, i 0x1005, w "\$newStartMenuLink", p 0\)'/,
+    /\$\{EndIf\}/,
+    /System::Call 'shell32::SHChangeNotify\(i 0x00002000, i 0x1005, w "\$appExe", p 0\)'/,
+    /System::Call 'shell32::SHChangeNotify\(i 0x08000000, i 0x1000, p 0, p 0\)'/,
+    // gemessen: Die Shell schreibt den neu gelesenen Eintrag rund 2,2 s nach der neuen Verknüpfung, die App soll danach starten
+    /Sleep 3000/,
+  ];
+  let ab = teil.search(/icacls\.exe/);
+  assert.ok(ab >= 0, "icacls zuerst");
+  for (const s of schritte) {
+    const i = teil.slice(ab).search(s);
+    assert.ok(i >= 0, `fehlt oder falsche Reihenfolge: ${s}`);
+    ab += i + 1;
+  }
+  // Keine fremden Systemdateien, kein Eingriff in den Explorer: das bleibt dem Reparaturwerkzeug mit Rückfrage vorbehalten
+  assert.doesNotMatch(nsh, /Caches|iconcache|explorer\.exe|taskkill|Stop-Process|ie4uinit/i);
+  // electron-builder meldet neue Symbole nur beim Anlegen einer Desktop-Verknüpfung, und die gibt es hier nicht
   assert.equal(paket.build.nsis.createDesktopShortcut, false);
+  assert.equal(paket.build.nsis.createStartMenuShortcut, true);
+  assert.equal(paket.build.nsis.runAfterFinish, true);
+});
+
+test("electron-builder ruft customInstall nach dem Anlegen der Verknüpfung und vor dem Start der App auf", () => {
+  const vorlage = path.join(__dirname, "node_modules", "app-builder-lib", "templates", "nsis", "installSection.nsh");
+  const text = fs.readFileSync(vorlage, "utf8");
+  const verknuepfung = text.indexOf("!insertmacro addStartMenuLink");
+  const zusatz = text.indexOf("!insertmacro customInstall");
+  const start = text.indexOf("!insertmacro doStartApp", zusatz);
+  assert.ok(verknuepfung >= 0 && zusatz > verknuepfung && start > zusatz, "Reihenfolge in installSection.nsh geändert");
+  // $newStartMenuLink und $appExe setzt die Vorlage vorher (setLinkVars, StrCpy $appExe)
+  assert.ok(text.indexOf("!insertmacro setLinkVars") < zusatz);
+  assert.ok(text.indexOf('StrCpy $appExe "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"') < zusatz);
 });

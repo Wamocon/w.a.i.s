@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { JiraStoryKnopf } from "@/components/JiraStory";
 import { TeilenKnopf } from "@/components/Teilen";
 import { canvasIndex, canvasWunsch } from "@/lib/canvasWahl";
 import { exportFormate, knopfText, ONENOTE_KNOPF, onenoteMoeglich, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
@@ -43,11 +44,11 @@ const BEISPIELE = [
  * Ergebnisfläche: abonniert nur den eigenen Store-Ausschnitt (canvas) und rendert deshalb nicht
  * neu, wenn sich Untertitel oder Zeitleiste ändern. Leer zeigt sie eine ruhige Beispielliste.
  */
-export const CanvasBereich = memo(function CanvasBereich({ office }: { office?: OfficeAktionen }) {
+export const CanvasBereich = memo(function CanvasBereich({ jiraStory, office }: { jiraStory?: (canvasId: string) => boolean; office?: OfficeAktionen }) {
   const items = useSelect(wamo, (s) => s.canvas);
   // PC-Werkzeuge gibt es vorerst nur für admin; Mitgliedern den Hinweis darauf ersparen
   const mitglied = useSelect(wamo, (s) => s.profil?.rolle === "mitglied");
-  if (items.length) return <Canvas items={items} office={office} />;
+  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} />;
   return (
     <div className="canvas-empty">
       <p className="eyebrow">Canvas</p>
@@ -65,7 +66,7 @@ export const CanvasBereich = memo(function CanvasBereich({ office }: { office?: 
   );
 });
 
-function Canvas({ items, office }: { items: CanvasItem[]; office?: OfficeAktionen }) {
+function Canvas({ items, jiraStory, office }: { items: CanvasItem[]; jiraStory?: (canvasId: string) => boolean; office?: OfficeAktionen }) {
   const [picked, setPicked] = useState<number | null>(null);
   // "Ergebnis ansehen" in der Tafel Vorgänge (lib/canvasWahl.ts): ein neuer Wunsch wählt das Element mit dieser Kennung, noch im
   // selben Render (kein Zwischenbild mit dem alten Element). Ein Wunsch, der schon galt, bevor dieses Canvas entstand, zählt nicht.
@@ -107,6 +108,7 @@ function Canvas({ items, office }: { items: CanvasItem[]; office?: OfficeAktione
             </p>
           )}
           <CanvasTeilen item={item} />
+          <JiraStoryKnopf item={item} anfragen={jiraStory} />
           {office && <CanvasSpeichern key={item.id ?? item.title} item={item} office={office} />}
         </header>
         <CanvasBody item={item} />

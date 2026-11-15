@@ -19,12 +19,21 @@ const SUMMEN: Record<string, string> = {
   "jetbrains-mono-latin-700-normal.woff2": "d0d4e818808f2a0ba39b2b09d1989366f63494e295f003c7ef436697378507e8",
   "atkinson-hyperlegible-latin-400-normal.woff2": "d64ba838ef5472bba248620ec4fd8b5aa7cf0db2908e0bb230600caf279ba7bc",
   "atkinson-hyperlegible-latin-700-normal.woff2": "140e2bd25a7315c8a062508391426b0d8c3297400c947b8d847be28f73a199f0",
+  "cormorant-garamond-latin-600-normal.woff2": "ae062b6d5ae308e7edf61b28b07b9984bbb6e961b1f34d9b2c2f4389c33f21ea",
 };
 // Je Schriftfamilie: Lizenzdatei, npm-Paket der Herkunft und die CSS-Variable aus layout.tsx
 const FAMILIEN = [
   { lizenz: "LICENSE-Unbounded-OFL.txt", paket: "@fontsource/unbounded", variable: "--font-display" },
   { lizenz: "LICENSE-JetBrainsMono-OFL.txt", paket: "@fontsource/jetbrains-mono", variable: "--font-hud" },
   { lizenz: "LICENSE-AtkinsonHyperlegible-OFL.txt", paket: "@fontsource/atkinson-hyperlegible", variable: "--font-body" },
+  { lizenz: "LICENSE-CormorantGaramond-OFL.txt", paket: "@fontsource/cormorant-garamond", variable: "--font-marke" },
+] as const;
+// Stellen, an denen der Name in der Markenschrift steht (Komponente Wortmarke)
+const NAMENSSTELLEN = [
+  "components/Kopfzeile.tsx",
+  "components/LoginGate.tsx",
+  "components/kommando/Kernbereich.tsx",
+  "components/kommando/ZentraleStatus.tsx",
 ] as const;
 
 function quelldateien(ordner: string): string[] {
@@ -58,7 +67,7 @@ test("Lizenz und Herkunft liegen bei den Dateien und nennen dieselben Prüfsumme
   }
 });
 
-test("layout.tsx nutzt next/font/local mit genau diesen Dateien und setzt die drei Schriftvariablen", () => {
+test("layout.tsx nutzt next/font/local mit genau diesen Dateien und setzt die vier Schriftvariablen", () => {
   const layout = readFileSync(join(SRC, "app", "layout.tsx"), "utf8");
   assert.match(layout, /from "next\/font\/local"/);
   assert.doesNotMatch(layout, /next\/font\/google/);
@@ -66,8 +75,48 @@ test("layout.tsx nutzt next/font/local mit genau diesen Dateien und setzt die dr
   const css = readFileSync(join(SRC, "app", "globals.css"), "utf8");
   for (const f of FAMILIEN) {
     assert.ok(layout.includes(`variable: "${f.variable}"`), f.variable);
-    assert.ok(css.includes(`var(${f.variable}`), `globals.css nutzt ${f.variable}`);   // Marke und Zahlen, HUD-Beschriftungen, Fließtext
+    assert.ok(css.includes(`var(${f.variable}`), `globals.css nutzt ${f.variable}`);   // Überschriften und Zahlen, HUD, Fließtext, Wortmarke
   }
+});
+
+/** Rumpf des Aufrufs localFont({ ... }) in layout.tsx, der die Variable setzt */
+function schriftAufruf(layout: string, variable: string): string {
+  const rumpf = layout.split("localFont({").slice(1).find((b) => b.includes(`variable: "${variable}"`));
+  assert.ok(rumpf, `localFont mit ${variable}`);
+  return rumpf.slice(0, rumpf.indexOf("});"));
+}
+
+test("die Wortmarke hat ihre eigene Schrift: Cormorant Garamond 600, bis zum Laden ein angepasster Serifen-Ersatz", () => {
+  const layout = readFileSync(join(SRC, "app", "layout.tsx"), "utf8");
+  const marke = schriftAufruf(layout, "--font-marke");
+  assert.ok(marke.includes('{ path: "./fonts/cormorant-garamond-latin-600-normal.woff2", weight: "600", style: "normal" }'));
+  assert.match(marke, /adjustFontFallback: "Times New Roman"/);   // Serife mit gleicher Höhe und Breite, bis die Datei da ist
+  assert.match(layout, /\$\{marke\.variable\}/);
+
+  const css = readFileSync(join(SRC, "app", "globals.css"), "utf8");
+  assert.match(css, /--marke: var\(--font-marke\), Georgia, "Times New Roman", serif;/);
+  const regel = /\n\.marke \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(regel, /font-family: var\(--marke\);/);
+  assert.match(regel, /font-weight: 600;/);
+  assert.match(regel, /letter-spacing: 0\.06em;/);
+  assert.match(regel, /margin-inline-end: -0\.06em;/);   // gleicht die Sperrung nach dem letzten Zeichen aus: mittig heißt mittig
+  assert.match(/\n\.marke-punkt \{([^}]*)\}/.exec(css)?.[1] ?? "", /color: var\(--core\);/);
+  assert.deepEqual(css.match(/--core: [^;]+;/g), ["--core: #f40e0e;"]);   // Punkte in WMC-Rot, im Hellmodus genauso
+});
+
+test("nur Name und Langform stehen in der Markenschrift, jede Namensstelle nutzt die Wortmarke", () => {
+  const mitVariable = new Set([join(SRC, "app", "layout.tsx"), join(SRC, "app", "globals.css")]);
+  const mitKlasse = new Set([join(SRC, "components", "Wortmarke.tsx"), join(SRC, "components", "LoginGate.tsx")]);
+  for (const datei of quelldateien(SRC)) {
+    const text = readFileSync(datei, "utf8");
+    if (!mitVariable.has(datei)) assert.doesNotMatch(text, /--font-marke|var\(--marke\)/, datei);
+    if (!mitKlasse.has(datei)) assert.doesNotMatch(text, /className="marke"/, datei);
+  }
+  for (const stelle of NAMENSSTELLEN) {
+    assert.match(readFileSync(join(SRC, stelle), "utf8"), /<Wortmarke\b/, stelle);
+  }
+  // Anmeldung: die Langform steht direkt unter dem Namen in derselben Schrift
+  assert.match(readFileSync(join(SRC, "components", "LoginGate.tsx"), "utf8"), /<span className="marke">\{LANGFORM\}<\/span>/);
 });
 
 test("im Quelltext der Oberfläche verweist nichts auf Google-Schriften", () => {

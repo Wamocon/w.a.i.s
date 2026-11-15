@@ -9,6 +9,7 @@ import { Einstellungen } from "@/components/einstellungen/Einstellungen";
 import { EINSTELLUNGEN_KNOPF_ID } from "@/components/einstellungen/EinstellungenLink";
 import { Auftraege, Freigaben } from "@/components/Freigaben";
 import { GemerktHinweis } from "@/components/GemerktHinweis";
+import { JiraErgebnisHinweis } from "@/components/JiraStory";
 import { Bedienung } from "@/components/kommando/Bedienung";
 import { BueroKarte } from "@/components/kommando/BueroKarte";
 import { useBueroStandHalten } from "@/components/kommando/useBueroStand";
@@ -188,7 +189,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
         <>
           {aktionen.liveBild && <BildschirmAnsicht aktionen={aktionen.liveBild} />}
           {/* Speichern als Datei nie für Laborkonten (der Kern schickt dort ohnehin keine Formate) */}
-          <CanvasBereich office={ansicht.labor ? undefined : aktionen.office} />
+          <CanvasBereich jiraStory={aktionen.jiraStory} office={ansicht.labor ? undefined : aktionen.office} />
         </>
       }
       hinweise={
@@ -200,6 +201,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
       auftraege={
         <>
           <Freigaben onDecide={aktionen.decide} />
+          <JiraErgebnisHinweis />
           <Auftraege onDecide={aktionen.entscheideAuftrag} />
           <AuftraegeLeer />
         </>

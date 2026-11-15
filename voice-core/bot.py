@@ -175,6 +175,7 @@ from pc_host import (
 )
 import bild_fern
 from bildstrom import NICHT_ERLAUBT as BILD_NICHT_ERLAUBT, Bildstrom
+import jira_werkzeuge
 import labor_werkzeuge
 import office_werkzeuge
 import onenote_werkzeuge
@@ -880,6 +881,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     doppel = DoppelWache(turn_nr=lambda: turn.turn_nr) if werkzeug_doppelt_an() else None
 
     buerogeraete: Buerogeraete | None = None  # wird weiter unten im Büro gesetzt; hier gebunden, damit freigabe_offen nie ins Leere greift
+    jira_story: jira_werkzeuge.JiraStory | None = None  # ebenso (Jira-Stories, weiter unten)
 
     def freigabe_offen() -> bool:
         """Wartet eine Freigabe (PC-Freigabe-Karte oder Entwicklungsauftrag)? Dann greift der Ja-Wächter nie."""
@@ -890,6 +892,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             if labor_werkz is not None and labor_werkz.freigaben.offen:  # Labor-Karte (labor_freigaben.py)
                 return True
             if buerogeraete is not None and buerogeraete._offen:  # Karte der Bürogeräte (geraete_werkzeuge.py)
+                return True
+            if jira_story is not None and jira_story.offen:  # Karte einer Jira-Story (jira_freigaben.py)
                 return True
             return dev is not None and any(j.pending for j in dev._jobs.values())
         except AttributeError:
@@ -1097,8 +1101,16 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             context.set_tools(ToolsSchema(standard_tools=standard_tools))
             logger.info("Bürogeräte: {} Werkzeuge in der Sitzung", len(geraete_schemas))
 
+    # Jira-Stories aus dem Canvas (jira_werkzeuge.py): nur Admin im Büro mit WAMO_JIRA=an, nie im Labor. Angelegt wird nur nach der Karte im Kern
+    # (job "jira"); das Werkzeug läuft wie alle durch das Gate der Stimmprüfung, der Knopf am Canvas ist ein Klick (jira_story).
+    jira_story = jira_werkzeuge.sitzung_bauen(identity, memory, im_buero=im_buero, ist_fremd=lambda: turn.tainted) if not labor_sitzung else None
+    if jira_story is not None:
+        jira_story.anbinden(senden=send, melden=melde_llm)
+        standard_tools += jira_story.schemas() if stimme is None else schemas_absichern(jira_story.schemas(), stimme.gate)
+        context.set_tools(ToolsSchema(standard_tools=standard_tools))
+
     # Die Grenze der Laborsitzung: Namen im Kontext und am LLM müssen der Erlaubnisliste entsprechen, sonst entsteht keine Sitzung. Sie gilt für das
-    # Endergebnis und steht deshalb hinter dem letzten Block, der Werkzeuge einhängt (labor_werkzeuge, Bürogeräte). Heute hält zusätzlich die
+    # Endergebnis und steht deshalb hinter dem letzten Block, der Werkzeuge einhängt (labor_werkzeuge, Bürogeräte, Jira). Heute hält zusätzlich die
     # Bedingung "not labor_sitzung" den Bürogeräte-Block aus der Laborsitzung heraus; hängt später jemand dort oder davor etwas ein, scheitert
     # die Sitzung hier (test_bot_geraete.py prüft die Reihenfolge, test_labor_sitzung.py das Verhalten).
     if labor_sitzung:
@@ -1229,6 +1241,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         await send(profil_message(identity))
         await send_betrieb()
         vorgaenge.erneut_senden()  # die Oberfläche (wieder) verbunden: alle bekannten Vorgänge noch einmal, ohne zu warten
+        if jira_story is not None:
+            await jira_story.client_bereit()  # Knopf "Als User Story in Jira" am Canvas, mit den freigegebenen Projekten
         if stimme is not None:
             await stimme.client_bereit()  # Stand der Stimmprüfung und Text der Einwilligung
         else:
@@ -1284,6 +1298,18 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             # Labor-Freigaben (labor_freigaben.py) gibt es nur in einer Laborsitzung, dort gehen sie oben über labor_sitzung.client_nachricht an
             # labor_werkz.entscheiden. Hier, in jeder anderen Sitzung, auch bei einem Admin, ist der Klick ohne Wirkung.
             logger.warning("Labor-Freigabe ohne Laborsitzung abgewiesen")
+        elif msg.type == "freigabe" and data.get("job") == jira_werkzeuge.JOB:
+            # Karte einer Jira-Story (jira_freigaben.py): nur in der Sitzung, die sie angelegt hat
+            if jira_story is None:
+                logger.warning("Jira-Freigabe ohne Jira-Stories in dieser Sitzung abgewiesen")
+                return
+            await jira_story.entscheiden(data)
+        elif msg.type == jira_werkzeuge.NACHRICHT_KLICK:
+            # Knopf "Als User Story in Jira" am Canvas: liest Jira im Hintergrund und legt nur die Karte an, nie die Story
+            if jira_story is None:
+                logger.warning("Jira-Story ohne Jira-Stories in dieser Sitzung abgewiesen")
+                return
+            jira_story.klick_starten(data)
         elif msg.type == onenote_werkzeuge.NACHRICHT:
             # Klick "Als OneNote-Seite" (onenote_werkzeuge.py): Freigabekarte, erst danach die Seite; nur in Sitzungen mit OneNote
             if onenote is None:
@@ -1483,6 +1509,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         if buerogeraete is not None:  # offene Karten der Bürogeräte ablehnen (keine offene Zeile in actions zurücklassen)
             with contextlib.suppress(Exception, asyncio.TimeoutError):
                 await asyncio.wait_for(buerogeraete.schliessen(), CLEANUP_DB_TIMEOUT_SECS)
+        if jira_story is not None:  # offene Jira-Karten ablehnen, den Client schließen
+            with contextlib.suppress(Exception, asyncio.TimeoutError):
+                await asyncio.wait_for(jira_story.schliessen(), CLEANUP_DB_TIMEOUT_SECS)
         if freigaben is not None:
             # offene PC-Freigaben ablehnen: keine Eingabesperre am PC und keine offene Zeile in actions zurücklassen
             with contextlib.suppress(Exception):
