@@ -2279,7 +2279,7 @@ def _versand() -> office_outlook_com.Versandliste:
 def _mail_versenden(v: office_outlook_com.Versand) -> None:
     """Nach der Frist (im Faden der Versandliste): den gespeicherten Entwurf senden, wenn er noch derselbe ist."""
     try:
-        office_outlook_com.klassisch_senden(v.ort, v.pruef)
+        office_outlook_com.klassisch_senden(v.ort, v.pruef, konto=v.ort.get("konto", ""))
     except Exception as e:
         _audit({"tool": "outlook_versand", "versand_id": v.id, "risk": "critical", "result": "error", "error": str(e)[:200]})
         raise
@@ -2300,7 +2300,9 @@ def _mail_anhaenge(kennungen: object) -> tuple[office_outlook.Anhang, ...]:
             pfad = ablage.pfad(kennung)
         except office_ablage.AblageFehler as e:
             raise office_outlook.MailFehler(str(e)) from e
-        eintrag = register[kennung]
+        eintrag = register.get(kennung)
+        if eintrag is None:  # die Datei liegt noch da, ihr Eintrag ist inzwischen weg
+            raise office_outlook.MailFehler("Diese Datei kennt W.A.I.S. nicht mehr (nur selbst erzeugte Dateien).")
         anhaenge.append(office_outlook.Anhang(kennung=kennung, name=pfad.name, pfad=pfad, groesse=int(eintrag.get("groesse", -1)),
                                               sha256=str(eintrag.get("sha256", ""))))
     office_outlook.anhaenge_lesen(anhaenge)  # Größe und Prüfsumme jetzt schon: eine veränderte Datei kommt nicht auf die Karte
@@ -2341,6 +2343,9 @@ def _mail_anfragen(an: object, cc: object, betreff_roh: object, text_roh: object
     except office_outlook.MailFehler as e:
         _audit({"tool": tool, "risk": "rejected", "error": str(e)[:200]})
         return {"status": "rejected", "summary": str(e)}
+    except (KeyError, office_ablage.AblageFehler) as e:  # Register nicht lesbar oder im Umbau: keine Karte
+        _audit({"tool": tool, "risk": "rejected", "error": type(e).__name__})
+        return {"status": "rejected", "summary": "Der Anhang ist im Register von W.A.I.S. gerade nicht zu finden. Es ist nichts passiert."}
     mail = office_outlook.Mail(tuple(empf), betreff, text, anhaenge)
     senden, extern = weg.weg == "senden", any(e.extern for e in empf)
     if senden:
@@ -2354,8 +2359,12 @@ def _mail_anfragen(an: object, cc: object, betreff_roh: object, text_roh: object
     # Audit am PC: Adressen und Anhangsnamen ja, Betreff und Text nur als Länge und Prüfsumme
     audit = {**protokoll, "adressen": [e.smtp for e in empf], "anhang_namen": [a.name[:120] for a in anhaenge],
              "betreff": _text_audit(betreff), "text": _text_audit(text)}
+    detail = office_outlook.kartentext(mail, weg, konto, signatur)
+    if office_outlook.utf16_laenge(detail) > FREIGABE_DETAIL_MAX_MAIL:  # die Oberfläche zählt UTF-16-Einheiten und kürzte sonst
+        _audit({"tool": tool, "risk": "rejected", "grund": "zu lang für eine Freigabe", **audit})
+        return {"status": "rejected", "summary": MAIL_ZU_LANG}
     antwort = _anfrage(tool, "mail", {"mail": mail, "weg": weg.weg, "programm": weg.programm, "konto": konto["smtp"] if konto else ""},
-                       "mail", grund, office_outlook.kartentext(mail, weg, konto, signatur), ziel, MAIL_KARTE, audit,
+                       "mail", grund, detail, ziel, MAIL_KARTE, audit,
                        uia_control.sicherer_text(anlass, 200) if isinstance(anlass, str) and anlass else "",
                        detail_max=FREIGABE_DETAIL_MAX_MAIL, risiko="critical" if senden else "change", zu_lang=MAIL_ZU_LANG)
     if antwort.get("status") == "needs_approval":
@@ -2398,6 +2407,7 @@ def _mail_planen(mail: office_outlook.Mail, konto: str, daten: list) -> dict:
     with office_outlook.anhang_dateien(daten) as pfade:
         ort, pruef = office_outlook_com.com_lauf(
             lambda app: office_outlook_com.speichern(office_outlook_com.mail_bauen(app, mail, konto, pfade)))
+    ort["konto"] = konto  # das Konto der Karte: vor dem Senden noch einmal verglichen
     v = _versand().planen(ort, pruef, MAIL_VERZOEGERUNG_SECS)
     _audit({"tool": "outlook_mail", "risk": "critical", "versand_id": v.id, "verzoegerung_s": MAIL_VERZOEGERUNG_SECS})
     return {"status": "success", "weg": "senden",
@@ -2692,6 +2702,7 @@ def _ausfuehren(eintrag: dict) -> dict:
 
 
 if __name__ == "__main__":
+    office_outlook.beim_start_aufraeumen()  # Entwurfsdateien des vorigen Laufs (Text und Anhang) nicht liegen lassen
     if "--stdio" in sys.argv:
         mcp.run(transport="stdio")
     elif "--http" in sys.argv:
