@@ -32,7 +32,7 @@ DETAIL_KEYS = {
     "canvas_zeigen": "titel", "auf_bildschirm_klicken": "ziel", "bildschirm_ansehen": "frage",
     "merken": "art", "entwicklung_vorbereiten": "projekt", "maus_scrollen": "richtung",
     "aufgabe_verteilen": "art", "element_klicken": "beschreibung", "elemente_auflisten": "fenster", "browser_lesen": "fenster",
-    "git_klonen": "repo", "github_repo_anlegen": "name",
+    "git_klonen": "repo", "github_repo_anlegen": "name", "canvas_exportieren": "format",
 }
 
 

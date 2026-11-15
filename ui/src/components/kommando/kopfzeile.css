@@ -23,16 +23,19 @@
 .topbar .logo-plate { margin-left: 4px; padding: 3px 6px; }
 .topbar .logo-plate img { height: 30px; }
 
+/* Wortmarke (components/Wortmarke.tsx): Schrift, Schnitt und Sperrung des Namens kommen aus .marke (globals.css), hier nur die Größe */
 .wordmark-sm {
   margin: 0; flex: none; display: inline-flex; align-items: center; gap: 10px;
-  font: 700 19px/1 var(--display); letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink);
+  font: 700 23px/1 var(--display); text-transform: uppercase; color: var(--ink);
 }
 .wordmark-sm::before {
   content: ""; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--core);
   box-shadow: 0 0 12px var(--core), 0 0 3px var(--core-hot);
 }
-/* Laborkonten (lib/laborPlatz.ts): "WAMO Testlabor, Platz N" ist länger als die Wortmarke, also kleiner gesetzt; zuerst kürzt sie sich */
+/* Laborkonten (lib/laborPlatz.ts): "W.A.I.S. Testlabor, Platz N" ist länger als die Wortmarke, also kleiner gesetzt; zuerst kürzt sie
+   sich. Der Zusatz bleibt in Unbounded, der Name ein Fünftel größer (kleinere Versalien der Markenschrift, globals.css .marke) */
 .wordmark-sm[data-labor] { flex: 0 1 auto; min-width: 0; font-size: 12px; letter-spacing: 0.12em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wordmark-sm[data-labor] .marke { font-size: 1.2em; }
 
 /* ---------- Profil ---------- */
 .profile { flex: none; display: flex; min-width: 0; }
@@ -192,7 +195,7 @@
 /* unter 1024 px: Kopfzeile in Kurzform, die Einzelheiten stehen im Menü */
 @media (max-width: 1023px) {
   .topbar { gap: 8px; padding-right: max(var(--sa-r), 8px); padding-left: max(var(--sa-l), 12px); }
-  .wordmark-sm { font-size: 19px; }
+  .wordmark-sm { font-size: 23px; }
   .wordmark-sm[data-labor] { font-size: 12px; }
   .profile-chip { padding: 0 4px; }
   .profile-first { display: none; }

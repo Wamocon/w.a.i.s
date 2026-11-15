@@ -97,6 +97,9 @@ ERLAUBT = set(PFLICHT) | {
     # Jira-Benutzers nur für W.A.I.S. (Rechte Browse Projects und Create Issues; das Token ist ein Geheimnis und wird wie alle Werte nie
     # angezeigt), Erlaubnisliste der Projekte und Standardprojekt. Anleitung docs/jira-benutzer-einrichten.md.
     "WAMO_JIRA", "WAMO_JIRA_URL", "WAMO_JIRA_EMAIL", "WAMO_JIRA_TOKEN", "WAMO_JIRA_PROJEKTE", "WAMO_JIRA_STANDARD_PROJEKT",
+    # Office-Dateien aus dem Canvas (voice-core/office_werkzeuge.py): Liste der Teile, in Paket 1 nur "dateien". Leer oder
+    # unbekannt heißt aus. Gilt nur für Admins, nie im Labor; am PC sperrt zusätzlich die Datei office.aus.
+    "WAMO_OFFICE",
 }
 ERLAUBT_PRAEFIX = ("WAMO_LLM_",)  # Anbieter-Fabrik (Phase P4)
 SCHLUESSEL_RE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")

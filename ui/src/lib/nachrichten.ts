@@ -1,6 +1,7 @@
 import type { CanvasItem } from "@/components/Canvas";
 import type { AuftragStand } from "./auftragStart.ts"; // relativ, nur der Typ (beide Dateien laden unter node:test)
 import { JIRA_PROJEKTE_MAX, linkOk, projektOk, schluesselOk, type JiraErgebnis, type JiraStatus } from "./jiraStory.ts";
+import { istOfficeFormat, OFFICE_FORMATE, type DateiMeldung, type OfficeFormat } from "./export.ts";
 
 /**
  * RTVI-Servernachrichten des Voice-Core (kommen über onServerMessage in useWamo.ts an).
@@ -39,6 +40,8 @@ export type Betrieb = {
   modellHinweis?: string;
   /** warum Entwicklungsaufträge im Büro aus sind; der Kern schickt das Feld nur Admins, die Anzeige prüft die Rolle trotzdem */
   entwicklungGrund?: string;
+  /** Dateiformate, in denen das Canvas jetzt am PC gespeichert werden kann (nur Admins mit PC-Steuerung, voice-core/office_werkzeuge.py) */
+  office?: OfficeFormat[];
 };
 
 /** Modellwahl je Profil: Automatisch (der Boss wählt) oder Nur Hausmodelle */
@@ -259,6 +262,8 @@ export type ServerMessage =
   | ({ type: "profil" } & Profil)
   | ({ type: "betrieb" } & Betrieb)
   | ({ type: "gemerkt" } & Gemerkt)
+  /** Canvas als Datei gespeichert (Kennung aus dem Register am PC, Name, Ordner, Pfad) oder nicht (Grund); nie ein Dateiinhalt */
+  | ({ type: "datei" } & DateiMeldung)
   // Ohne stand: den Zustand der Startkarte setzt allein die Oberfläche (lib/auftragStart.ts), der Kern kann ihn nicht vorgeben
   | ({ type: "auftrag" } & Omit<Auftrag, "stand">)
   /** Antwort des Kerns auf den Klick "Starten": ok, oder nicht ok mit einem Satz als Grund (voice-core/dev_agent.py) */
@@ -346,6 +351,16 @@ function markierung(m: Roh): Markierung | null {
     ergebnis.punkt = { x: m.punkt.x, y: m.punkt.y };
   }
   return ergebnis;
+}
+
+/** Kennung einer Datei im Register am PC (host/office_ablage.py). */
+const DATEI_KENNUNG = /^[0-9a-f]{16}$/;
+
+/** Formate aus betrieb.office: nur bekannte, in fester Reihenfolge; leer oder kaputt heißt keine. */
+function officeFormate(v: unknown): OfficeFormat[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const formate = OFFICE_FORMATE.filter((f) => v.includes(f));
+  return formate.length ? formate : undefined;
 }
 
 /** Grenzen gegen übergroße Canvas-Inhalte (Speicher, Darstellung). */
@@ -632,6 +647,22 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         modellQuelle: oneOf(m.modell_quelle, MODELL_QUELLEN) ? m.modell_quelle : undefined,
         modellHinweis: optStr(m.modell_hinweis, 200),
         entwicklungGrund: zeile(m.entwicklung_grund, 120),
+        office: officeFormate(m.office),
+      };
+    }
+    case "datei": {
+      if (m.ok === false) return { type: "datei", ok: false, grund: zeile(m.grund, 300) ?? "Nicht gespeichert." };
+      const name = zeile(m.name, 200);
+      if (m.ok !== true || !isStr(m.kennung) || !DATEI_KENNUNG.test(m.kennung) || !name) return null;
+      return {
+        type: "datei",
+        ok: true,
+        kennung: m.kennung,
+        name,
+        format: istOfficeFormat(m.format) ? m.format : undefined,
+        ordner: zeile(m.ordner, 80),
+        pfad: zeile(m.pfad, 400),
+        geoeffnet: m.geoeffnet === true,
       };
     }
     case "gemerkt":

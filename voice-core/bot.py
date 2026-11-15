@@ -45,6 +45,10 @@ Nachrichten von der Oberfläche:
                                           Freigabe einer schreibenden Labor-Aktion (labor_freigaben.py; nur Laborprofile)
   {"type": "bildstrom", "data": {"aktion", ...}}
                                           Live-Bild des eigenen Laptops (bildstrom.py; nur admin mit gebundenem Gerät)
+  {"type": "canvas_export", "data": {"canvas_id", "format"}} und {"type": "datei_oeffnen", "data": {"kennung"}}
+                                          eigenes Canvas-Element als Datei am PC speichern, gespeicherte Datei öffnen
+                                          (office_werkzeuge.py; nur admin mit WAMO_OFFICE=dateien, nie im Labor). Antwort an die
+                                          Oberfläche: {"type": "datei", "ok", ...}; betrieb trägt dann "office" (Formate)
   {"type": "freigabe", "data": {...}}     sonst Freigabe für Entwicklungsaufträge (nur admin)
 Live-Untertitel: Pipecat sendet bot-output (mit Wortfortschritt aus den Soniox-Zeitstempeln) und
 user-transcription von selbst; RTVIObserverParams bleiben dafür auf dem Standard (eingeschaltet).
@@ -170,6 +174,7 @@ import bild_fern
 from bildstrom import NICHT_ERLAUBT as BILD_NICHT_ERLAUBT, Bildstrom
 import jira_werkzeuge
 import labor_werkzeuge
+import office_werkzeuge
 from pc_freigaben import PcFreigaben
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
 from screen import PC_OFF, foto as screen_foto, register_screen_tools
@@ -362,7 +367,7 @@ def betrieb_message(
     pc: str, pc_latenz_ms: int | None = None, pc_steuerung: bool = False, entwicklung: bool = False,
     llm: str | None = None, pc_name: str | None = None, pc_belegt: bool = False, sprache: dict[str, str] | None = None,
     modell_modus: str | None = None, modell_quelle: str | None = None, modell_hinweis: str | None = None,
-    entwicklung_grund: str | None = None,
+    entwicklung_grund: str | None = None, office: list[str] | None = None,
 ) -> dict:
     """pc: verbindet | verbunden | gesperrt | getrennt | aus (gesperrt: Bildschirm am PC gesperrt, pc_anzeige).
     pc_steuerung: ob die PC-Werkzeuge in dieser Sitzung eingeschaltet sind (Standard aus).
@@ -375,7 +380,8 @@ def betrieb_message(
     (festgelegt: Admin, wahl: Person, keiner: kein eigener Schlüssel), modell_hinweis: warum der Boss nicht das beste
     Modell nehmen konnte (zu langsam, nicht erreichbar), für die Anzeige in der Statusleiste.
     entwicklung_grund: warum Entwicklungsaufträge im Büro aus sind (höchstens 120 Zeichen); der Aufrufer reicht ihn nur für
-    Admins durch (entwicklung_betrieb.anzeige_grund), nie für Mitglieder."""
+    Admins durch (entwicklung_betrieb.anzeige_grund), nie für Mitglieder.
+    office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld."""
     sprache = sprache or {}
     message = {
         "type": "betrieb",
@@ -401,6 +407,8 @@ def betrieb_message(
         message["modell_hinweis"] = modell_hinweis[:200]
     if entwicklung_grund:
         message["entwicklung_grund"] = " ".join(entwicklung_grund.split())[:entwicklung_betrieb.ANZEIGE_ZEICHEN]
+    if office:
+        message["office"] = [f for f in office if f in office_werkzeuge.FORMATE]
     return message
 
 
@@ -745,6 +753,14 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     screen_schemas = (register_screen_tools(llm, lambda: pc_client, pc_allowed, turn.taint, zugang=zugang)
                       if pc_client and is_admin else [])
 
+    # Office-Dateien aus dem Canvas (office_werkzeuge.py): nur admin mit PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=dateien.
+    # Das Werkzeug läuft durch das Stimmabdruck-Gate (registriert nach werkzeuge_absichern); sein Schema kommt erst dazu, wenn der Host
+    # meldet, welche Formate gehen (attach_pc_tools). Speichern und Öffnen nur mit PC-Steuerung und gehaltener Sperre (pc_allowed).
+    office = (office_werkzeuge.OfficeDateien(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d))
+              if (pc_client is not None and is_admin and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
+    if office is not None:
+        office.register(llm)
+
     # WAMO Boss (boss.py): Aufgaben an Spezialisten verteilen; Karte unter Vorgänge, Ergebnis als Daten (turn.taint).
     # Die Art "bild" gibt es nur mit PC-Steuerung und Rolle admin, wie bildschirm_ansehen.
     async def bildschirm_foto():
@@ -954,7 +970,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                    pc_belegt=state["pc_belegt"], sprache=sprache.anzeige(SONIOX_VOICE),
                                    modell_modus=modus_wirksam(zugang), modell_quelle=zugang.quelle,
                                    modell_hinweis=llm_wahl.grund,
-                                   entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund)))
+                                   entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund),
+                                   office=office.anzeige() if office is not None else None))
 
     async def stimme_sagen(text: str) -> None:
         """WAMO spricht einen Satz der Stimmprüfung (Anleitung beim Einlernen, Fehler), ohne das Modell zu fragen."""
@@ -1130,7 +1147,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             pc_schemas = gate_pc_tools(list(pc.standard_tools), pc_allowed, turn.taint, doppel)
             if stimme is not None:  # Handler im Schema registriert Pipecat selbst: auch sie fragen vorher das Gate der Stimmprüfung
                 pc_schemas = schemas_absichern(pc_schemas, stimme.gate)
-            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas]))
+            office_schemas = await office.schemas() if office is not None else []  # nur Formate, die der Host meldet
+            context.set_tools(ToolsSchema(standard_tools=[*standard_tools, *pc_schemas, *screen_schemas, *office_schemas]))
             state["pc_tools"] = True
             started = time.monotonic()
             with contextlib.suppress(Exception):  # Latenz, Rechnername und Sperre sind nur Anzeigen
@@ -1274,6 +1292,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 logger.warning("Jira-Story ohne Jira-Stories in dieser Sitzung abgewiesen")
                 return
             jira_story.klick_starten(data)
+        elif msg.type in office_werkzeuge.NACHRICHTEN:
+            # Canvas als Datei speichern und gespeicherte Datei öffnen (office_werkzeuge.py): nur in Sitzungen mit Office-Dateien
+            if office is None:
+                logger.warning("Office-Nachricht ohne Office-Dateien in dieser Sitzung abgewiesen")
+                return
+            await office.client_nachricht(msg.type, data)
         elif msg.type == "stimmabdruck" and stimme is not None:
             # Einlernen, abbrechen, löschen (stimme_sitzung.py): nur per Klick in der angemeldeten Oberfläche, nie per Sprache, nie im Labor
             await stimme.nachricht(data)

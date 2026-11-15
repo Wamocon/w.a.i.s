@@ -34,6 +34,11 @@
 }
 .canvas-item-head { margin-bottom: 16px; display: grid; gap: 4px; }
 .canvas-item-head h2 { margin: 0; font: 700 20px/1.25 var(--display); letter-spacing: 0.01em; }
+/* Als Datei am PC speichern (Canvas.tsx, CanvasSpeichern): eine Zeile kleiner Knöpfe, die bei schmaler Fläche umbricht */
+.canvas-export { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.canvas-export button[aria-busy="true"] { cursor: progress; }
+/* Hinweis nach dem Speichern (DateiHinweis.tsx): der volle Pfad darf umbrechen */
+.datei-hinweis .datei-pfad { overflow-wrap: anywhere; }
 
 .canvas-table-wrap { overflow-x: auto; }
 .canvas-table { border-collapse: collapse; width: 100%; font-size: 14.5px; }

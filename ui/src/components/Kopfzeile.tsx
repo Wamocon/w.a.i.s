@@ -8,10 +8,11 @@ import { ProfilChip } from "@/components/ProfilChip";
 import { StatusDetails } from "@/components/Statusleiste";
 import { ThemaSchalter } from "@/components/ThemaSchalter";
 import { WmcLogo } from "@/components/WmcLogo";
+import { Wortmarke } from "@/components/Wortmarke";
 import { laborAnsicht } from "@/lib/laborPlatz";
 
 /**
- * Kopfzeile und Statusleiste in einem (48 px): links die Wortmarke WAMO und der Profil-Chip,
+ * Kopfzeile und Statusleiste in einem (48 px): links die Wortmarke W.A.I.S. (components/Wortmarke.tsx) und der Profil-Chip,
  * daneben Verbindung, Betriebsart, Modelle, PC-Host und Mikrofon, rechts das WMC-Logo wie in der
  * WMC-Vorlage. Die Module stehen nach Rangfolge in einer Zeile, was nicht passt, fällt als ganzes Modul weg (kommando/kopfzeile.css);
  * unter 1600 px zeigt das Menü (Knopf mit drei Strichen) alle Module. Unter 1024 px bleiben nur Punkte und Kurzformen.
@@ -63,7 +64,7 @@ export const Kopfzeile = memo(function Kopfzeile({
   return (
     <header className="topbar" ref={kopf}>
       <h1 className="wordmark-sm" data-labor={ansicht.kopfTitel ? "" : undefined} title={ansicht.kopfTitel ?? undefined}>
-        {ansicht.kopfTitel ?? "W.A.I.S."}
+        <Wortmarke text={ansicht.kopfTitel ?? undefined} />
       </h1>
       <ProfilChip email={email} onAbmelden={ansicht.abmeldenFragen ? abmeldenAnfragen : onAbmelden} />
       <StatusDetails kompakt stimme={ansicht.stimme} />

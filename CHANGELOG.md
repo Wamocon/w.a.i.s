@@ -62,6 +62,18 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   anlegen. Ergebnis mit Schlüssel und geprüftem Verweis in der Oberfläche. Schalter `WAMO_JIRA` (Standard aus) und `WAMO_JIRA_URL`,
   `WAMO_JIRA_EMAIL`, `WAMO_JIRA_TOKEN`, `WAMO_JIRA_PROJEKTE`, `WAMO_JIRA_STANDARD_PROJEKT` nur über `wamo-core-env`; eigener technischer
   Jira-Benutzer nur für W.A.I.S. (`docs/jira-benutzer-einrichten.md`). Keine Migration.
+- Canvas als Datei am PC (Paket 1 aus `docs/office-und-versand.md`, Zweig `feat/office-export`): Ein Canvas-Element wird auf Zuruf
+  (Werkzeug `canvas_exportieren`) oder per Klick („Als Word speichern“ usw. im Kopf des Canvas) zur Word-, Excel-, PowerPoint-, PDF-, CSV-
+  oder Markdown-Datei in `Dokumente\WAIS` (bekannter Ordner, folgt OneDrive) und öffnet sich danach; ein Hinweis nennt Datei und Pfad und
+  hat „Öffnen“. Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=dateien` (Standard leer, also aus) und eingeschalteter PC-Steuerung; das
+  Werkzeug läuft durch das Stimmabdruck-Gate. Speichern braucht keine Freigabekarte (kein Versand); ist `Dokumente` auf OneDrive
+  umgeleitet, synchronisiert OneDrive die Datei, das sagt auch die Werkzeugbeschreibung. Der Kern liest nur eigene
+  Elemente aus `canvas_items` (`voice-core/canvas_quelle.py`) und schickt dem Host nur die feste Struktur; der Host prüft selbst, baut die
+  Datei mit `python-docx`, `openpyxl` und `python-pptx` im WMC-Design, PDF über eine eigene, unsichtbare Word-Instanz
+  (`host/office_dateien.py`, `host/office_com.py`), legt sie nie überschreibend ab und führt ein Register ohne Inhalte
+  (`host/office_ablage.py`, `%LOCALAPPDATA%\WAMO\ablage.json`). Excel-Zellen sind immer Text, CSV-Zellen mit `=`, `+`, `-`, `@` bekommen
+  ein Hochkomma. Die Datei `%LOCALAPPDATA%\WAMO\office.aus` sperrt alles sofort. Die Host-Werkzeuge stehen nie in `LLM_TOOLS`.
+
 - Prüfungen auf GitHub (README Abschnitt „Prüfungen auf GitHub“): Workflow `Prüfungen` (`.github/workflows/ci.yml`) bei jedem Push, jedem
   Pull Request und manuell mit Wahl des Teils, mit Jobs für Oberfläche (ESLint, `tsc`, `node --test`, vitest, `next build`), Kern (pytest in
   vier Teilen), Python (`compileall`, ruff mit Grundregeln), Labor-Dienst, Gerätedienst, Skripte, Desktop und Host (Windows), Infra

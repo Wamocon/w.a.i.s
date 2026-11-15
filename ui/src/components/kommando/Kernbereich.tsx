@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { LABEL } from "@/components/ActivityFeed";
 import { LiveCaption } from "@/components/LiveCaption";
+import { Wortmarke } from "@/components/Wortmarke";
 import { useSelect } from "@/lib/store";
 import {
   istOnline,
@@ -61,7 +62,9 @@ function Namensschild({
 }) {
   return (
     <p className="kz-schild" data-presence={presence} data-zustand={kennung}>
-      <span className="kz-schild-name">W.A.I.S.</span>
+      <span className="kz-schild-name">
+        <Wortmarke />
+      </span>
       <span className="kz-schild-status">{text}</span>
     </p>
   );
