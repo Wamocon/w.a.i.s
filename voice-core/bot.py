@@ -800,7 +800,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                           melden=lambda t: melde_llm(t), fremd=lambda: turn.tainted,
                                           exportieren=office.exportieren if office is not None else None,
                                           formate=(lambda: office.formate) if office is not None else (lambda: ()))
-            if (pc_client is not None and is_admin and not labor_sitzung and outlook_werkzeuge.fuer_sitzung(identity)) else None)
+            if (pc_teile and is_admin and not labor_sitzung and outlook_werkzeuge.fuer_sitzung(identity)) else None)
     if mail is not None:
         mail.register(llm)
 
