@@ -90,4 +90,32 @@ describe("Canvas, Als Teams-Nachricht", () => {
     render(<CanvasBereich teams={teams} />);
     expect(screen.queryByRole("button", { name: "Als Teams-Nachricht" })).toBeNull();
   });
+
+  it("überarbeitet W.A.I.S. das Element, übernimmt das offene Formular den neuen Text und behält die Empfänger", () => {
+    const NEU = "22222222-2222-4222-8222-222222222222";
+    const teams = teamsAktionen();
+    zustand(DOKUMENT);
+    render(<CanvasBereich teams={teams} />);
+    fireEvent.click(screen.getByRole("button", { name: "Als Teams-Nachricht" }));
+    fireEvent.change(screen.getByLabelText("An"), { target: { value: "max@firma.example" } });
+    act(() =>
+      applyServerMessage({ type: "canvas", item: { id: NEU, kind: "dokument", title: "Stand Angebot", text: "Neu: verschickt." }, ersetzt: ID }),
+    );
+    expect((screen.getByLabelText("An") as HTMLInputElement).value).toBe("max@firma.example");
+    expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe("Neu: verschickt.");
+    fireEvent.click(screen.getByRole("button", { name: "Zur Freigabe vorbereiten" }));
+    expect(teams.vorbereiten.mock.calls[0][0].text).toBe("Neu: verschickt.");
+  });
+
+  it("behält bei einer Überarbeitung einen Text, den die Person selbst geändert hat", () => {
+    const NEU = "22222222-2222-4222-8222-222222222222";
+    zustand(DOKUMENT);
+    render(<CanvasBereich teams={teamsAktionen()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Als Teams-Nachricht" }));
+    fireEvent.change(screen.getByLabelText("Text"), { target: { value: "Eigener Text" } });
+    act(() =>
+      applyServerMessage({ type: "canvas", item: { id: NEU, kind: "dokument", title: "Stand Angebot", text: "Neu" }, ersetzt: ID }),
+    );
+    expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe("Eigener Text");
+  });
 });

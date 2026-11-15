@@ -96,9 +96,10 @@ describe("Canvas, Als E-Mail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Als E-Mail" }));
     fireEvent.change(screen.getByLabelText("An"), { target: { value: "max@firma.example" } });
     act(() =>
-      applyServerMessage({ type: "canvas", item: { id: NEU, kind: "dokument", title: DOKUMENT.title, text: "# Angebot, überarbeitet" }, ersetzt: ID }),
+      applyServerMessage({ type: "canvas", item: { id: NEU, kind: "dokument", title: "Angebot Kunde X, neu", text: "# Angebot, überarbeitet" }, ersetzt: ID }),
     );
     expect((screen.getByLabelText("An") as HTMLInputElement).value).toBe("max@firma.example");
+    expect((screen.getByLabelText("Betreff") as HTMLInputElement).value).toBe("Angebot Kunde X, neu"); // unverändert: folgt dem Titel
     fireEvent.click(screen.getByRole("button", { name: "Zur Freigabe vorbereiten" }));
     expect(mail.vorbereiten.mock.calls[0][0].canvasId).toBe(NEU);
   });

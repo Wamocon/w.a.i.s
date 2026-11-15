@@ -30,6 +30,15 @@ export function CanvasTeams({ item, teams }: { item: CanvasItem; teams: TeamsAkt
   const [fehler, setFehler] = useState<string | null>(null);
   const [wartet, setWartet] = useState<number | null>(null);
 
+  // Überarbeitet W.A.I.S. das Element (lib/canvasWahl.ts, das Formular bleibt stehen), gilt der neue Text als Vorschlag, solange die
+  // Person ihn nicht selbst geändert hat
+  const vorschlag = klartext(item);
+  const [basis, setBasis] = useState(vorschlag);
+  if (vorschlag !== basis) {
+    setBasis(vorschlag);
+    if (text === basis) setText(vorschlag);
+  }
+
   if (wartet !== null && antwort.n !== wartet) {
     // Antwort da: bei Erfolg liegt die Karte bereit (Formular zu), sonst bleibt es mit dem Grund offen
     setWartet(null);
