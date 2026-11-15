@@ -6,7 +6,9 @@
 # Dienste, Pakete des Kernels ohne Socket wie IPv6-Nachbarerkennung) bleibt unberührt.
 #
 #   erlaubt   bestehende Verbindungen (z. B. die eingehende SSH-Sitzung), DNS an 127.0.0.53,
-#             127.0.0.1:20000-20999 (Entwicklungsserver eines Auftrags), Internet nur auf TCP 80 und 443
+#             127.0.0.1:20000-20999 (Entwicklungsserver eines Auftrags), 127.0.0.1:18090 (Proxy der Hausmodelle
+#             wamo-haus-proxy, verlangt ein Auftragstoken; Landlock in wamo-job.sh öffnet den Port nur bei Zugangsart haus),
+#             Internet nur auf TCP 80 und 443
 #   abgewiesen IPv6, private und besondere Netze (intern4), eigene, Broadcast-, Multicast- und Anycast-Adressen,
 #             jedes andere Protokoll und jeder andere Port; mit begrenztem Log und "admin prohibited"
 
@@ -30,6 +32,7 @@ table inet wamo_egress {
 		ct state established,related accept
 		ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept
 		ip daddr 127.0.0.1 tcp dport 20000-20999 accept
+		ip daddr 127.0.0.1 tcp dport 18090 accept
 		meta nfproto ipv6 counter jump abweisen
 		ip daddr @intern4 counter jump abweisen
 		fib daddr type { local, broadcast, multicast, anycast } counter jump abweisen
