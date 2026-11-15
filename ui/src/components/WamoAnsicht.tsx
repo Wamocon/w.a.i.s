@@ -195,6 +195,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
             jiraStory={aktionen.jiraStory}
             office={ansicht.labor ? undefined : aktionen.office}
             mail={ansicht.labor ? undefined : aktionen.mail}
+            teams={ansicht.labor ? undefined : aktionen.teams}
           />
         </>
       }

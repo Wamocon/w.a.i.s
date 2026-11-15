@@ -43,7 +43,8 @@ MAX_OFFEN = 5  # wie MAX_PENDING im Host
 MAX_ERGEBNIS_ZEICHEN = 800  # so viel vom Ergebnis des PCs bekommt das Sprachmodell
 SCHLIESSEN_TIMEOUT_SECS = 3.0
 AKTION_TEXT = {"powershell": "den PowerShell-Befehl", "senden": "das Senden", "webseite": "das Öffnen der Webseite",
-               "klicken": "den Klick", "github": "das Anlegen des GitHub-Repositorys", "mail": "die Mail"}
+               "klicken": "den Klick", "github": "das Anlegen des GitHub-Repositorys", "mail": "die Mail",
+               "teams": "das Öffnen des Teams-Chats"}
 
 
 @dataclass
@@ -133,8 +134,8 @@ class PcFreigaben:
     def _protokollieren(self, a: dict) -> asyncio.Future:
         params = {"approval_id": a["id"], "aktion": a["aktion"], "ziel": a.get("ziel", ""), "detail": a["detail"]}
         risiko = "critical"
-        if a["aktion"] == "mail":  # nie Betreff, Text oder Adressen in actions: nur Zahlen, Domänen, Weg (activity._mail_protokoll)
-            params = {"approval_id": a["id"], "aktion": "mail", "ziel": a.get("ziel", ""), "mail": a.get("protokoll", {})}
+        if a["aktion"] in ("mail", "teams"):  # nie Betreff, Text oder Adressen in actions: nur Zahlen, Domänen (activity.py)
+            params = {"approval_id": a["id"], "aktion": a["aktion"], "ziel": a.get("ziel", ""), a["aktion"]: a.get("protokoll", {})}
             risiko = "change" if a.get("protokoll", {}).get("weg") == "entwurf" else "critical"
         return self._hinten(self._memory.log_action(tool=a["werkzeug"], params=params, reason=a["grund"],
                                                     risk=risiko))

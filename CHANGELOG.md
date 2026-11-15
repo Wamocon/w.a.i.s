@@ -54,6 +54,16 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ### Hinzugefügt
 
+- Teams-Nachricht am PC aus dem Gespräch oder dem Canvas (Paket 4 aus `docs/office-und-versand.md`, Teil Teams, Zweig `feat/teams`):
+  Auf Zuruf (Werkzeug `teams_nachricht`) oder per Klick („Als Teams-Nachricht“ im Kopf des Canvas, Text als Klartext vorgeschlagen
+  und änderbar) legt W.A.I.S. eine Freigabekarte mit Empfängern und Text an. Erst nach dem Klick öffnet der Host den Chat per Deep Link
+  (`msteams://`, sonst Browser) mit dem Text im Eingabefeld; senden muss die Person selbst mit Enter, W.A.I.S. sendet in Teams nie.
+  Empfänger nur als aufgelöste interne Adressen (Namen nur über das Adressbuch des klassischen Outlooks, mehrdeutig heißt Rückfrage),
+  höchstens 10, Gruppenname nur bei mehreren, Text höchstens 1000 Zeichen und Link höchstens 2000 Zeichen (zu lang heißt Hinweis, nie
+  gekürzt). Nur Admins, nie im Labor, nur mit `WAMO_OFFICE=teams`, PC-Steuerung und Stimmabdruck-Gate. Host: `teams_chat_anfragen`
+  (critical, Freigabeart `teams`, `host/office_teams.py`, Audit nur mit Anzahl und Prüfsummen, 20 je Stunde, `office.aus`). Kern:
+  `voice-core/teams_werkzeuge.py`, Aktion `teams` in `activity.py` und `pc_freigaben.py` (Protokoll ohne Adressen und Text).
+
 - PC-Steuerung auch im Browser (Wunsch 3 aus `docs/komfort-paket.md`, Teil KP-3B ohne Kern, Zweig `feat/pc-browser`): Der Schalter
   „PC-Steuerung“ erscheint für Admins im Browser wie in der Desktop-App, auch im Build für Sokrates-2 (`NEXT_PUBLIC_WAMO_NUR_BUERO=ja`).
   Mit Sitzung ist er bedienbar, ohne Sitzung startet „an“ still eine Sitzung nach denselben Regeln wie der Start beim Tippen
@@ -68,6 +78,7 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
   Oberfläche (`ui/src/lib/pcSchalter.ts`, `usePcSchalter.ts`, `geraet.ts`, `export.ts`, `mail.ts`, `useWamo.ts`,
   `ui/src/components/einstellungen/Geraete.tsx`, `ui/src/components/DateiHinweis.tsx`, `ui/src/components/MailVersand.tsx`); der Kern entscheidet weiter (Rolle admin,
   Register, PC-Sperre je Sitzung, Freigabekarten, Gate der Stimmprüfung). Ablauf, Quelle und Anzeige am Laptop (KP-3A, KP-3C) sind offen.
+
 - Mail über Outlook am PC aus dem Canvas (Paket 2 aus `docs/office-und-versand.md`, Zweig `feat/outlook`): Auf Zuruf (Werkzeug
   `outlook_senden`) oder per Klick („Als E-Mail“ im Kopf des Canvas mit An, Cc, Betreff, Text und dem Canvas als Anhang) legt W.A.I.S.
   eine Freigabekarte mit genau dem Inhalt an, der rausgeht (lange Karte bis 8000 Zeichen, intern oder EXTERN je Empfänger, Warnung bei
