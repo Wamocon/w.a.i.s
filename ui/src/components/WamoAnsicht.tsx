@@ -197,6 +197,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
             office={ansicht.labor ? undefined : aktionen.office}
             mail={ansicht.labor ? undefined : aktionen.mail}
             aktiv={ansicht.labor ? undefined : aktionen.canvasAktiv}
+            teams={ansicht.labor ? undefined : aktionen.teams}
           />
         </>
       }

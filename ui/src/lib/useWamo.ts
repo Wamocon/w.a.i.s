@@ -31,6 +31,7 @@ import {
 } from "@/lib/stillStart";
 import { istOfficeFormat, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
 import { formularFehler, type MailAktionen } from "@/lib/mail";
+import { teamsFehler, type TeamsAktionen } from "@/lib/teams";
 import { parseServerMessage, type Auftrag, type Markierung, type ModellModus } from "@/lib/nachrichten";
 import type { SchluesselArt } from "@/lib/schluesselhilfe";
 import { abdruckGestartet, abdruckLaeuft, kannEinlernen, kannLoeschen, STIMME_LEER } from "@/lib/stimme";
@@ -182,6 +183,8 @@ export type WamoAktionen = {
    *  diesen Reiter. Nur die Kennung geht hinaus (null: ein Element ohne Kennung), der Kern überarbeitet nur Elemente seiner Sitzung;
    *  true, wenn gesendet. Nie im Labor. */
   canvasAktiv?: (canvasId: string | null) => boolean;
+  /** Teams-Nachricht zur Freigabe vorbereiten (lib/teams.ts). Optional, damit die Vorschau ohne Kern auskommt. */
+  teams?: TeamsAktionen;
 };
 
 /** Die drei Aktionen am Stimmabdruck; der Kern prüft sie und antwortet mit stimmabdruck-Nachrichten. true, wenn gesendet. */
@@ -232,7 +235,8 @@ type ClientMessage =
     }
   | { type: "mail_zurueckholen"; data: { id: string } }
   | { type: "onenote_seite"; data: { canvas_id: string } }
-  | { type: "canvas_aktiv"; data: { canvas_id: string | null } };
+  | { type: "canvas_aktiv"; data: { canvas_id: string | null } }
+  | { type: "teams_vorbereiten"; data: { an: string[]; gruppenname: string; text: string } };
 
 function senden(client: PipecatClient, msg: ClientMessage) {
   client.sendClientMessage(msg.type, msg.data);
@@ -1703,6 +1707,29 @@ export function useWamo(): WamoAktionen {
     };
   }, []);
 
+  // Teams-Nachricht (lib/teams.ts): nur senden; die Karte bauen Kern und Host, die Antwort kommt als teams_antwort. Gesendet wird in
+  // Teams nie von W.A.I.S.: nach dem Klick auf der Karte steht der Text im Eingabefeld, Enter drückt die Person.
+  const teams = useMemo<TeamsAktionen>(
+    () => ({
+      vorbereiten: (d) => {
+        const client = clientRef.current;
+        if (teamsFehler(d) !== null) return false;
+        if (!client || !istOnline(wamo.get())) {
+          zeigeToast("Teams-Nachricht nicht vorbereitet: keine Verbindung.");
+          return false;
+        }
+        try {
+          senden(client, { type: "teams_vorbereiten", data: { an: d.an, gruppenname: d.gruppenname, text: d.text } });
+        } catch {
+          zeigeToast("Teams-Nachricht nicht vorbereitet: die Nachricht ging nicht hinaus.");
+          return false;
+        }
+        return true;
+      },
+    }),
+    [],
+  );
+
   const schliesseFehler = useCallback(() => setFehler(null), []);
 
   // Mikrofone für die Auswahl in der Mikrofon-Warnung (Bezeichnungen gibt es erst nach der Freigabe)
@@ -1776,6 +1803,7 @@ export function useWamo(): WamoAktionen {
       office,
       mail,
       canvasAktiv,
+      teams,
     }),
     [
       connect,
@@ -1799,6 +1827,7 @@ export function useWamo(): WamoAktionen {
       office,
       mail,
       canvasAktiv,
+      teams,
     ],
   );
 }
