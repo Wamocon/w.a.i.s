@@ -1,6 +1,9 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { EinrichtungsAblauf } from "@/components/einrichtung/EinrichtungsAblauf";
+import { InstallerDownload } from "@/components/einrichtung/InstallerDownload";
+import { EINRICHTUNG_SCHRITTE } from "@/components/einrichtung/schritte";
 import {
   STUFE_TEXT,
   erneutWartezeit,
@@ -13,12 +16,13 @@ import {
   type UpdateAngebot,
   type UpdateInstallation,
 } from "@/lib/einrichtung";
+import { SCHRITT_TITEL } from "@/lib/einrichtungSchritte";
 import { kernJson } from "@/lib/kernApi";
 import { accessToken } from "@/lib/supabase";
 import { Block } from "./Block";
 
 /**
- * Abschnitt "Erste Schritte" (Kennung start): die Prüfliste der Einrichtung aus Kern und Desktop-App (lib/einrichtung.ts, Planpapier
+ * Abschnitt "Erste Schritte" (Kennung start), Teil Prüfliste: die Prüfliste der Einrichtung aus Kern und Desktop-App (lib/einrichtung.ts, Planpapier
  * docs/ausrollen-neue-nutzer.md 4.3). Je Zeile ein Zeichen (Haken, Ausrufezeichen, i) und der Zustand als Wort für Screenreader, dazu
  * der Satz; die Farbe trägt nie allein. Ein Update der App gibt es nur als Knopf, wenn die App das Manifest des Servers bestätigt hat.
  * Das Token holt erst der Klick und gibt es nur an die App weiter (lib/einrichtung.ts, updateInstallieren); es steht nie im Zustand.
@@ -190,7 +194,7 @@ function zusammenfassungText(punkte: Punkte, laeuft: boolean): string {
   return laeuft ? "Prüfe ..." : "Die Prüfung ist fehlgeschlagen. Bitte erneut prüfen.";
 }
 
-export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
+const Pruefliste = memo(function Pruefliste() {
   const { punkte, laeuft, gesperrt, zeit, installiert, erneut, installieren } = usePruefliste();
   const offen = punkte !== null && punkte.some((p) => p.stufe === "rot");
   return (
@@ -219,5 +223,28 @@ export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
         <p className="ez-klein">{standZeile(laeuft, gesperrt, zeit)}</p>
       </div>
     </Block>
+  );
+});
+
+const MODELL_SCHRITTE = EINRICHTUNG_SCHRITTE.filter((s) => s.id !== "installer");
+
+/**
+ * Abschnitt "Erste Schritte" (Kennung start, docs/ausrollen-neue-nutzer.md 4.2, 4.3, 4.7): zuerst der Modellzugang in Schritten
+ * (Claude-Code-Token, API-Schlüssel, Zusammenfassung), dann der Installer zum Herunterladen, zuletzt die Prüfliste mit den Updates
+ * der App. Bis das Gerüst der Erstanmeldung die Schritte selbst führt, sind sie hier erreichbar.
+ */
+export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
+  const id = useId();
+  return (
+    <>
+      <EinrichtungsAblauf schritte={MODELL_SCHRITTE} />
+      <section className="ea" aria-labelledby={id}>
+        <h4 id={id} className="ea-titel">
+          {SCHRITT_TITEL.installer}
+        </h4>
+        <InstallerDownload />
+      </section>
+      <Pruefliste />
+    </>
   );
 });

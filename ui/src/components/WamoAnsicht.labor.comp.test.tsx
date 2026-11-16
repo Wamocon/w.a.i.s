@@ -232,7 +232,7 @@ describe("Hauptansicht eines Laborkontos: Einstellungen nur mit Mikrofon", () =>
   });
 
   it("ein Link auf einen gesperrten Abschnitt zeigt ihn nicht, auch Konto mit Abmelden nicht", async () => {
-    for (const abschnitt of ["modellzugang", "konto", "geraete", "info", "fernzugriff", "verbrauch"]) {
+    for (const abschnitt of ["modellzugang", "konto", "start", "geraete", "info", "fernzugriff", "verbrauch"]) {
       const { unmount } = zeige(PLATZ, { hash: `#einstellungen/${abschnitt}` });
       await ruhe();
       const seite = document.querySelector<HTMLElement>(".ez");
@@ -242,6 +242,7 @@ describe("Hauptansicht eines Laborkontos: Einstellungen nur mit Mikrofon", () =>
       unmount();
     }
     expect(pfade()).not.toContain("/modellzugang");
+    expect(pfade()).not.toContain("/installer");
   });
 });
 

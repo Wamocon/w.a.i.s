@@ -47,8 +47,10 @@ export type Abschnitt = {
 
 export const ABSCHNITTE: readonly Abschnitt[] = [
   { id: "konto", titel: "Konto und Profil", kurz: "E-Mail, Rolle und Abmelden" },
-  // Prüfliste der Einrichtung und Updates der App (lib/einrichtung.ts); Kennung "start", weil es "einrichtung" schon als Block in "Geräte und PC" gibt
-  { id: "start", titel: "Erste Schritte", kurz: "Prüfliste und Updates" },
+  // Erste Schritte nach dem Ausrollen (docs/ausrollen-neue-nutzer.md 4.2, 4.3, 4.7): Modellzugang, Installer, Prüfliste und Updates der App
+  // (lib/einrichtungSchritte.ts, lib/installer.ts, lib/einrichtung.ts); Kennung "start", weil es "einrichtung" schon als Block in
+  // "Geräte und PC" gibt. Für jede Rolle, nie in der Laborsicht.
+  { id: "start", titel: "Erste Schritte", kurz: "Modellzugang, Installer, Prüfliste und Updates" },
   { id: "modellzugang", titel: "Modellzugang", kurz: "API-Schlüssel, Token und Modus" },
   { id: "verbrauch", titel: "Verbrauch", kurz: "Kontingent deines Claude-Abos", nurAdmin: true, auchMitToken: true },
   { id: "sprache", titel: "Sprache und Ton", kurz: "Mikrofon, Hören und Stimme", laborSicht: true, laborKurz: "Mikrofon wählen" },

@@ -31,6 +31,9 @@ export class KernFehler extends Error {
 
 const ZEITLIMIT_MS = 20_000;
 const ZEITLIMIT_DATEI_MS = 150_000;
+/** Zeitgrenze für große Dateien (Installer, etwa 117 MB) einschließlich Lesen: 30 Minuten reichen auch bei etwa 0,6 Mbit/s */
+const ZEITLIMIT_STROM_MS = 1_800_000;
+const ABGEBROCHEN = "Abgebrochen";
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const ABGELAUFEN = "Die Anmeldung ist abgelaufen. Bitte neu anmelden.";
 
@@ -87,20 +90,26 @@ async function fehlerAus(antwort: Response): Promise<KernFehler> {
   return new KernFehler(antwort.status, text, code);
 }
 
+/** abbruch: optionales Signal von außen (Knopf "Abbrechen"); es endet mit KernFehler(0, "Abgebrochen"), nie als Zeitüberschreitung. */
 async function anfrage<T>(
   pfad: string,
   init: RequestInit,
   lesen: (antwort: Response) => Promise<T>,
   zeitlimit = ZEITLIMIT_MS,
+  abbruch?: AbortSignal,
 ): Promise<T> {
   const basis = basisUrl();
   for (let versuch = 0; versuch < 2; versuch++) {
+    if (abbruch?.aborted) throw new KernFehler(0, ABGEBROCHEN);
     const token = versuch === 0 ? await accessToken() : await frischesToken();
     if (!token) break;
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${token}`);
     const steuerung = new AbortController();
     const uhr = setTimeout(() => steuerung.abort(), zeitlimit);
+    const abbrechen = () => steuerung.abort();
+    abbruch?.addEventListener("abort", abbrechen);
+    if (abbruch?.aborted) steuerung.abort(); // während des Tokens abgebrochen: das Ereignis ist schon vorbei
     try {
       const antwort = await fetch(`${basis}/wamo/api${pfad}`, {
         ...init,
@@ -130,9 +139,11 @@ async function anfrage<T>(
       return await lesen(antwort); // auch das Lesen der Antwort liegt in der Zeitgrenze
     } catch (e) {
       if (e instanceof KernFehler) throw e;
+      if (abbruch?.aborted) throw new KernFehler(0, ABGEBROCHEN);
       throw new KernFehler(0, steuerung.signal.aborted ? "Zeitüberschreitung" : "Kern nicht erreichbar");
     } finally {
       clearTimeout(uhr);
+      abbruch?.removeEventListener("abort", abbrechen);
     }
   }
   abmelden(ABGELAUFEN);
@@ -163,6 +174,78 @@ export async function kernDateiSenden(pfad: string, datei: File): Promise<unknow
     (a) => a.json() as Promise<unknown>,
     ZEITLIMIT_DATEI_MS,
   );
+}
+
+/** Fortschritt eines gestreamten Downloads: geladene Bytes und die angekündigte Größe (null, wenn der Kern keine nennt). */
+export type Fortschritt = (geladen: number, gesamt: number | null) => void;
+
+const ZU_GROSS = "Die Datei ist größer als angekündigt.";
+
+/**
+ * Antwort in Stücken lesen und den Fortschritt melden. Mit bekannter Länge (Content-Length) landen die Bytes direkt in
+ * einem Puffer dieser Größe, sonst in Stücken, die am Ende zusammengesetzt werden. Kommen mehr Bytes als angekündigt
+ * (zum Beispiel komprimiert übertragen), geht es in Stücken weiter. Mehr als hoechstens Bytes bricht ab.
+ */
+async function stromLesen(
+  antwort: Response,
+  hoechstens: number,
+  onFortschritt?: Fortschritt,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const angegeben = Number(antwort.headers.get("Content-Length") ?? "");
+  const gesamt = Number.isSafeInteger(angegeben) && angegeben > 0 ? angegeben : null;
+  if (gesamt !== null && gesamt > hoechstens) {
+    await antwort.body?.cancel().catch(() => undefined);
+    throw new KernFehler(413, ZU_GROSS);
+  }
+  onFortschritt?.(0, gesamt);
+  const leser = antwort.body?.getReader();
+  if (!leser) {
+    const alles = new Uint8Array(await antwort.arrayBuffer());
+    if (alles.byteLength > hoechstens) throw new KernFehler(413, ZU_GROSS);
+    onFortschritt?.(alles.byteLength, gesamt);
+    return alles;
+  }
+  let puffer: Uint8Array<ArrayBuffer> | null = gesamt !== null ? new Uint8Array(gesamt) : null;
+  const stuecke: Uint8Array[] = [];
+  let geladen = 0;
+  for (;;) {
+    const { done, value } = await leser.read();
+    if (done) break;
+    if (geladen + value.byteLength > hoechstens) {
+      await leser.cancel().catch(() => undefined);
+      throw new KernFehler(413, ZU_GROSS);
+    }
+    if (puffer && geladen + value.byteLength > puffer.byteLength) {
+      stuecke.push(puffer.subarray(0, geladen)); // mehr als angekündigt: ab hier in Stücken
+      puffer = null;
+    }
+    if (puffer) puffer.set(value, geladen);
+    else stuecke.push(value);
+    geladen += value.byteLength;
+    onFortschritt?.(geladen, gesamt);
+  }
+  // kürzer als angekündigt: nur der gelesene Teil (der Aufrufer prüft die Größe gegen das Manifest)
+  if (puffer) return geladen === puffer.byteLength ? puffer : puffer.subarray(0, geladen);
+  const ganz = new Uint8Array(geladen);
+  let pos = 0;
+  for (const s of stuecke) {
+    ganz.set(s, pos);
+    pos += s.byteLength;
+  }
+  return ganz;
+}
+
+/**
+ * Große Datei gestreamt laden (Installer, lib/installerApi.ts), mit denselben Regeln wie jede Anfrage an den Kern (Token,
+ * Erneuerung bei 401, kein Cache, keine Cookies, keine Umleitung). Zeitgrenze 30 Minuten einschließlich Lesen, Abbruch über
+ * signal (endet mit KernFehler(0, "Abgebrochen")). hoechstens: mehr Bytes nimmt die Oberfläche nicht an (413). Die Bytes
+ * bleiben im Speicher des Aufrufers; hier wird nichts gespeichert oder angeboten.
+ */
+export async function kernDateiStrom(
+  pfad: string,
+  o: { hoechstens: number; onFortschritt?: Fortschritt; signal?: AbortSignal },
+): Promise<Uint8Array<ArrayBuffer>> {
+  return anfrage(pfad, {}, (a) => stromLesen(a, o.hoechstens, o.onFortschritt), ZEITLIMIT_STROM_MS, o.signal);
 }
 
 /** Datei herunterladen und als Download anbieten (immer als Datei, nie im Fenster geöffnet). */

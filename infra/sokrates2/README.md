@@ -1727,6 +1727,46 @@ Einrichten, Environments, Token und Rückweg: `docs/runner-einrichten.md` (Einri
 einrichten`, Zustand mit `status`, Rückweg mit `rueckweg`). Das Ausrollen von Hand (Abschnitte 12 und 14) bleibt möglich, nimmt aber die Sperre
 des Einstiegs nicht: nie gleichzeitig mit einem laufenden Workflow.
 
+## 22. Installer vom Server (Ablage `wamo-verteilung`, Paket P2, vorbereitet am 15.11.2026, nicht eingerichtet)
+
+Der Kern liefert den Installer der Desktop-App nur angemeldet aus (`GET /wamo/api/installer` für das Manifest, `GET /wamo/api/installer/datei`
+für die Datei, `voice-core/verteilung_api.py`): mit zweitem Faktor, aktivem Profil, nie für Laborprofile, höchstens drei ganze Downloads je
+Stunde und Profil. Er liest nur die Ablage; eingesetzt wird sie mit `wamo-verteilung-einrichten.sh` (nur root). Planpapier
+`docs/ausrollen-neue-nutzer.md`, Abschnitt 4.2.
+
+| Teil | Wert |
+| --- | --- |
+| Ablage | `/var/lib/wamo-verteilung` (root:wamo-core 0750), `staende/<Version>/` mit `aktuell.json`, optional `aktuell.json.sig`, `WAIS-Setup-<Version>.exe` (je 0640), Links `aktuell` und `vorher`, höchstens drei Stände |
+| Schlüsselliste | `/etc/wamo-verteilung/update-schluessel.json` (root:root 0644, JSON-Liste Base64 je 32 Byte Ed25519); liegt sie dort, ist eine gültige Signatur Pflicht, sonst geht ein unsignierter Stand mit Warnung durch (Übergang für 0.2.0) |
+| Manifest | genau `v`, `produkt`, `version`, `datei`, `groesse`, `sha256`, `bauzeit`, `commit`; geprüft und signiert werden die exakten Bytes (Regel `wamo_verteilung_manifest.py`, gleich im Kern) |
+| Sperre, Journal | `/run/wamo-verteilung/lock`, `logger -t wamo-verteilung` |
+
+**Einsetzen** (vom PC, das Skript muss vorher in `~/wamo-infra` liegen): Ein signierter Bau bringt `aktuell.json` und `aktuell.json.sig`
+neben der exe schon mit; das lokale Werkzeug prüft die Signatur gegen `desktop/update-schluessel.json`. Für den unsignierten Übergang 0.2.0
+zuerst `python scripts/wamo_installer_sokrates2.py manifest <exe> --commit <40 hex> --aus <ordner>` und bei `pruefen` und `verteilen`
+ausdrücklich `--unsigniert` (geht am Server nur, solange dort keine Schlüsselliste liegt). Die Schlüsselliste kommt an den Server, sobald der
+erste signierte Stand eingesetzt ist (danach ist eine gültige Signatur Pflicht, ein Rückweg auf 0.2.0 nur mit `--ohne-signatur`):
+`scp desktop/update-schluessel.json wamo-sokrates2:~/wamo-infra/` und
+`ssh wamo-sokrates2 "sudo install -D -o root -g root -m 0644 ~/wamo-infra/update-schluessel.json /etc/wamo-verteilung/update-schluessel.json"`.
+Dann immer zuerst trocken:
+
+```text
+python scripts/wamo_installer_sokrates2.py pruefen <exe> [--unsigniert]
+python scripts/wamo_installer_sokrates2.py verteilen <exe> --trocken [--unsigniert]
+python scripts/wamo_installer_sokrates2.py verteilen <exe> [--unsigniert]
+python scripts/wamo_installer_sokrates2.py status
+```
+
+`verteilen` prüft lokal Name, Größe, SHA-256, Manifest und Signatur, bricht ohne streng steigende Version vor dem Kopieren ab, kopiert nach
+`~/wamo-verteilung-eingang/<Version>/` und ruft `sudo bash ~/wamo-infra/wamo-verteilung-einrichten.sh einsetzen <eingang> [--trocken]`. Am
+Server prüft das Skript nur root-eigene Kopien des Eingangs noch einmal und stellt die Links atomar um. Der Kern muss dafür nicht neu starten.
+
+**Rückweg:** `python scripts/wamo_installer_sokrates2.py rueckweg --trocken`, dann ohne `--trocken` (stellt `aktuell` auf `vorher`). Ohne
+Kern-Release mit `verteilung_api.py` ist die Ablage wirkungslos; sie darf liegen bleiben oder mit `sudo rm -rf /var/lib/wamo-verteilung` weg.
+
+Tests: `voice-core/test_verteilung_skript.py` (Probelauf mit `WAMO_VERTEILUNG_WURZEL`, auch unter Git Bash), `scripts/test_wamo_installer_sokrates2.py`,
+`voice-core/test_verteilung_api.py`. Echte Besitzer, die Gruppe `wamo-core` und das Lesen durch den Kern sind nur am Server prüfbar.
+
 ---
 
 WAMOCON GmbH, Mergenthalerallee 79-81, 65760 Eschborn

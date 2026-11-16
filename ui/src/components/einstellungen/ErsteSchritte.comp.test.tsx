@@ -11,6 +11,9 @@ import { ErsteSchritteAbschnitt } from "./ErsteSchritte";
 
 vi.mock("@/lib/kernApi", () => ({ kernJson: vi.fn() }));
 vi.mock("@/lib/supabase", () => ({ accessToken: vi.fn() }));
+// Modellzugang in Schritten und Installer haben eigene Tests (components/einrichtung/EinrichtungsAblauf.comp.test.tsx); hier nur Platzhalter
+vi.mock("@/components/einrichtung/EinrichtungsAblauf", () => ({ EinrichtungsAblauf: () => <div data-testid="modellzugang-schritte" /> }));
+vi.mock("@/components/einrichtung/InstallerDownload", () => ({ InstallerDownload: () => <div data-testid="installer-download" /> }));
 
 const KERN_IDS = ["passwort", "geraet", "tunnel", "stimme", "gespraech", "entwicklung", "stimmabdruck", "pc"];
 const KERN = { punkte: KERN_IDS.map((id) => ({ id, stufe: "gruen", text: `Punkt ${id} ist bereit.` })), geprueft: "2026-11-15T10:00:00Z" };
@@ -83,6 +86,17 @@ describe("ErsteSchritteAbschnitt", () => {
     expect(screen.getByText("Punkt stimme ist bereit.")).toBeTruthy();
     expect(vi.mocked(kernJson).mock.calls.map((c) => c[0])).toEqual(["/einrichtung/stand"]);
     expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
+  });
+
+  it("zuerst Modellzugang, dann Installer, zuletzt die Prüfliste", async () => {
+    kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
+    await zeige();
+    const schritte = screen.getByTestId("modellzugang-schritte");
+    const installer = screen.getByTestId("installer-download");
+    const liste = screen.getByRole("list", { name: "Prüfliste" });
+    expect(schritte.compareDocumentPosition(installer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(installer.compareDocumentPosition(liste) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Installer laden" })).toBeTruthy();
   });
 
   it("in der App: Reihenfolge der Tabelle, Zustand als Wort neben dem Zeichen", async () => {
