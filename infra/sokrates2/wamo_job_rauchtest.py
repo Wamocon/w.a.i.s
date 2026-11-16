@@ -775,7 +775,7 @@ def start_attrappe(spec_pfad: str) -> int:
     D.SCHLUESSEL_BESITZER = (0, os.getuid())  # Testschlüssel gehört wamo statt root
     D.lese_geheimnisse = lambda path=None: dict(spec["geheim"])
     D._https = _github_attrappe(spec)
-    D.claude_argv = lambda system, modell, session=None: ["/bin/bash", "-c", GH_PRUEFSKRIPT, "pruefung",
+    D.claude_argv = lambda system, modell, *_, **__: ["/bin/bash", "-c", GH_PRUEFSKRIPT, "pruefung",
                                                           spec["schluessel"], str(spec["schlaf"])]
     return D.main(["start", spec["job"], PROJEKT, spec["art"]])
 
@@ -971,13 +971,13 @@ def start_token(spec_pfad: str) -> int:
     spec = json.loads(Path(spec_pfad).read_text())
     D.lese_geheimnisse = lambda path=None: dict(spec["geheim"])
     if spec["modus"] == "pruef":
-        D.claude_argv = lambda system, modell, session=None: ["/bin/bash", "-c", TOKEN_PRUEFSKRIPT, "pruefung", modell,
+        D.claude_argv = lambda system, modell, *_, **__: ["/bin/bash", "-c", TOKEN_PRUEFSKRIPT, "pruefung", modell,
                                                               str(spec["schlaf"])]
     else:
         echt = D.claude_argv
 
-        def mit_attrappe(system, modell, session=None):
-            claude = shlex.join(echt(system, modell, session))
+        def mit_attrappe(system, modell, session=None, grenzen=None, haus=False):
+            claude = shlex.join(echt(system, modell, session, grenzen, haus=haus))
             innen = (f"ATTRAPPE_LIMITS={int(spec['limits'])} ATTRAPPE_EINMAL=1 python3 -I /run/wamo/zustand/attrappe.py "
                      f"{PORT_ATTRAPPE} </dev/null >/dev/null 2>&1 & "
                      f"for i in $(seq 100); do (exec 3<>/dev/tcp/127.0.0.1/{PORT_ATTRAPPE}) 2>/dev/null && break; sleep 0.1; done; "
