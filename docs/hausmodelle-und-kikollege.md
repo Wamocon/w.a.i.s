@@ -366,6 +366,21 @@ auch für Laborprofile, denn er ist für den Fall gedacht, dass gar nichts mehr 
 - **Karte Modellzugang der Person:** zeigt den wirksamen Stand und seinen Grund ("vom Admin für alle festgelegt"), sperrt die Wahl, wenn eine höhere Ebene sie festlegt,
   und bietet die Stimme an, mit dem Hinweis, dass die Stimme im Haus heute ohne Zwischenergebnisse arbeitet.
 - **Statusleiste:** kurzer Hinweis "im Haus", wie heute der Modellname mit "(LiteLLM)" (`voice-core/llm_anbieter.py:202`).
+- **Stand 16.11.2026 (Wunsch von Niko: "alle Anbieter und Modelle umschaltbar in der UI"):** Die Karte Modellzugang der Person ist gebaut,
+  der Abschnitt "Modelle im Betrieb" für den Admin noch nicht. Je Person wählbar, gültig ab der nächsten Sitzung, je Wahl eine Zeile in
+  `actions` (Werkzeug `modell_wahl` bzw. `stimme_wahl`), Migration 0024 (in `wamo_dev` und `wamo_test` eingespielt):
+  - Modelle je Aufgabe: Gesprächsmodell, Bildschirm und Bilder, Lernen und Zusammenfassung, je "Automatisch" (Standard, der Boss wählt)
+    oder ein Modell aus der festen Liste, die der Kern aus der Modellkarte bildet (`voice-core/modellwahl.py`, nur Status `standard`, je
+    Modell eine Zeile zu Güte und Tempo, Notlösungen gekennzeichnet). Claude-Modelle (Haiku, Sonnet, Opus) nur mit eigenem Claude-Zugang;
+    eine Claude-Wahl prüft der Kern mit einer Anfrage über ein Ausgabe-Token mit dem Schlüssel der Person. Ein Hausprofil sieht keine
+    Claude-Modelle, ein vom Admin festgelegtes Profil sieht die Modellwahl gesperrt mit Grund, ein vom Admin gesetztes Claude-Modell ist das
+    einzige Claude-Modell. Reihenfolge in der Sitzung: Vorgabe des Betriebs (`WAMO_LLM_*`), dann die Wahl der Person, dann der Boss; ist
+    das gewählte Modell nicht nutzbar, übernimmt das nächstbeste, und die Statusleiste nennt den Grund.
+  - Spracherkennung und Sprachausgabe getrennt (Soniox oder im Haus), dazu die Stimme im Haus. Wählbar sind nach den Hörproben nur
+    `sohee` (Standard), `uncle_fu` und `ono_anna` (Entscheidung von Niko vom 16.11.2026, genau diese drei), festgelegt an einer
+    Stelle (`HAUS_STIMMEN` in `voice-core/sprache_anbieter.py`, eine weitere Stimme ist eine Zeile); die Oberfläche bekommt die Liste vom
+    Kern, mit dem Hinweis, dass keine nativ deutsch ist.
+  - Laborprofile: nichts davon sichtbar, alle Wege 403, beim Laden gilt für sie keine Wahl.
 
 ### 3.4 Was im Kern fehlt
 
@@ -373,7 +388,7 @@ auch für Laborprofile, denn er ist für den Fall gedacht, dass gar nichts mehr 
 | --- | --- | --- | --- |
 | L1 | Globaler Schalter mit Quelle `betrieb`, dazu Notschalter `WAMO_LLM_NUR_HAUS`; fehlende Tabelle heißt "aus" (3.2) | neue Tabelle per Migration 0021 (mit `.down.sql`, RLS, Policy `core_all`, nur nötige Grants, Selbsttest), `modellzugang.zugang_laden` | H3 |
 | L2 | Admin-Zwang je Profil (`nur_haus`, `stt`, `tts`, Modell) aus der Oberfläche. Migration 0010 gibt `wamo_core` darauf bewusst keine Schreibrechte, ihr Selbsttest bricht sogar ab, sobald `wamo_core` `nur_haus` schreiben darf (`supabase/migrations/0010_modellzugang.sql:86` und `:115`). Nötig ist ein eigener Weg, etwa eine `security definer`-Funktion mit Prüfung der Rolle `admin` des aufrufenden Profils und Audit, und ein angepasster Selbsttest (F10) | Migration 0021, `voice-core/modellzugang_api.py` | H3 |
-| L3 | Die Stimme hängt schon heute nur an der Wahl des Profils (`voice-core/bot.py:735`); Soniox bleibt also im Modus "nur Haus". Nur `boss.sprache_wunsch` (`voice-core/boss.py:224`) behauptet anderes und wird allein in Tests benutzt: aufräumen. Neu ist nur, dass die Person ihre Stimme selbst wählen darf (wie L2). **Stand 16.11.2026:** Die Wahl der Person ist gebaut (Migration 0023 statt 0021, Aktion `stimme`, H5); das Aufräumen von `boss.sprache_wunsch` bleibt bei H3 | `boss.py`, Migration 0023 | H3, H5 |
+| L3 | Die Stimme hängt schon heute nur an der Wahl des Profils (`voice-core/bot.py:735`); Soniox bleibt also im Modus "nur Haus". Nur `boss.sprache_wunsch` (`voice-core/boss.py:224`) behauptet anderes und wird allein in Tests benutzt: aufräumen. Neu ist nur, dass die Person ihre Stimme selbst wählen darf (wie L2). **Stand 16.11.2026:** Die Wahl der Person ist gebaut (Migration 0023 statt 0021, Aktion `stimme`, H5), seit 0024 auch getrennt für Spracherkennung und Sprachausgabe und mit der Stimme im Haus (Aktion `haus_stimme`); das Aufräumen von `boss.sprache_wunsch` bleibt bei H3 | `boss.py`, Migration 0023 | H3, H5 |
 | L4 | Audiomodelle im Gateway (Qwen3-ASR, Qwen3-TTS). **Stand 16.11.2026:** Einträge `wamo-stt-haus` und `wamo-tts-haus` vorbereitet (2.5), nicht eingetragen | zentrales LiteLLM, Betreiber fragen | H5 |
 | L5 | Neues Gesprächsmodell als Dienst mit Rauchtest und Rückweg | `infra/sokrates2/` (Skript mit `--trocken`), Alias `wamo-gespraech` | H1 |
 | L6 | Warmhalten des Gesprächsmodells | `boss.py`, Sitzungsstart | H2 |

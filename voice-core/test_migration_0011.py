@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import modellwahl
 import modellzugang
 
 WURZEL = Path(__file__).resolve().parent.parent / "supabase"
@@ -122,7 +123,11 @@ def test_kern_benutzt_nur_spalten_die_die_migration_anlegt():
     assert len(inserts) >= 3  # API-Schlüssel, Claude-Code-Token, Wahl
     erlaubt = {"user_id", "claude_schluessel", "claude_schluessel_ende", "claude_workspace", "claude_geprueft_at",
                *NEUE_SPALTEN,
-               "stt", "tts"}  # seit 0023 für wamo_core (Wahl von Hören und Stimme, test_migration_0023.py)
+               "stt", "tts",  # seit 0023 für wamo_core (Wahl von Hören und Stimme, test_migration_0023.py)
+               *modellwahl.SPALTEN.values(), "tts_stimme"}  # seit 0024 (Modellwahl und Stimme im Haus, test_migration_0024.py)
     for spalten in inserts:
         spalten = re.sub(r'"\s*"', "", spalten)  # zusammengesetzte Zeichenketten im Quelltext
-        assert {s.strip() for s in spalten.split(",")} <= erlaubt, spalten
+        namen = {s.strip() for s in spalten.split(",")}
+        if "{spalte}" in namen:  # modellzugang._spalte_schreiben setzt den Namen nur aus dieser festen Liste ein
+            namen = (namen - {"{spalte}"}) | {*modellwahl.SPALTEN.values(), "tts_stimme"}
+        assert namen <= erlaubt, spalten

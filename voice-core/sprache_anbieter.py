@@ -5,7 +5,7 @@ Wahl je Baustein, in dieser Reihenfolge:
      Profil noch die Übersteuerung in der Umgebung gilt dort, das Gateway wird gar nicht gefragt.
   1. WAMO_STT_ANBIETER bzw. WAMO_TTS_ANBIETER (soniox | haus), wenn gesetzt: gilt für alle Sitzungen dieses Kerns,
      z. B. für Tests oder um bei einer Störung im Haus alle auf Soniox zu stellen.
-  2. die Wahl des Profils (Modellzugang, Felder stt und tts). Soniox gilt für alle Profile, unabhängig vom Modellzugang
+  2. die Wahl des Profils (Modellzugang, Felder stt und tts, getrennt wählbar; dazu die Stimme im Haus, tts_stimme). Soniox gilt für alle Profile, unabhängig vom Modellzugang
      (Entscheidung D3 in docs/ausrollen-neue-nutzer.md): auch ein Profil ohne Claude-Zugang hört und spricht über Soniox.
      Die Person wählt selbst in der Oberfläche (modellzugang.stimme_setzen, Migration 0023), ein Admin über wamo_admin.py.
   3. sonst soniox.
@@ -63,6 +63,35 @@ GRUND_BETRIEB_HAUS = "vom Betrieb für alle auf Im Haus gestellt"
 # Nur Aliase mit Hausnamen gelten als Modell im Haus: ein Alias des Gateways auf einen Cloud-Dienst bekäme sonst Audio und Text
 # unter dem Namen "Im Haus" (Sicherheitsreview 16.11.2026). Die Einträge heißen wamo-stt-haus und wamo-tts-haus.
 HAUS_MODELL_RE = re.compile(r"wamo-[a-z0-9][a-z0-9-]{0,40}")
+# Stimmen der Sprachausgabe im Haus, die eine Person wählen darf: genau diese Liste, an dieser einen Stelle (Entscheidung von Niko vom
+# 16.11.2026 nach den Hörproben aus Messung M7, docs/hausmodelle-und-kikollege.md). Reihenfolge wie in der Oberfläche, die erste ist der
+# Standard, wenn WAMO_TTS_HAUS_STIMME keine dieser Stimmen nennt. Eine weitere Stimme ist eine Zeile hier (Kennung, Name, Hinweis); der Kern
+# lehnt alles andere ab (modellzugang.haus_stimme_setzen) und spricht nie mit einer anderen Stimme (sprach_wahl, haus_tts). Der Dienst kennt
+# neun Stimmen, keine ist nativ deutsch. Spalte tts_stimme (Migration 0024), NULL heißt Standard.
+HAUS_STIMMEN: tuple[tuple[str, str, str], ...] = (
+    ("sohee", "Sohee", "am schnellsten gemessen, fehlerfrei zurückgelesen"),
+    ("uncle_fu", "Uncle Fu", ""),
+    ("ono_anna", "Ono Anna", ""),
+)
+HAUS_STIMMEN_IDS: tuple[str, ...] = tuple(s[0] for s in HAUS_STIMMEN)
+STIMMEN_HINWEIS = "Keine der Stimmen ist nativ deutsch; sie sprechen Deutsch mit Akzent."
+
+
+def haus_stimmen() -> list[dict[str, str]]:
+    """Die wählbaren Stimmen im Haus für die Oberfläche (Kennung, Name, Hinweis), in der festgelegten Reihenfolge."""
+    return [{"id": k, "name": n, "hinweis": h} for k, n, h in HAUS_STIMMEN]
+
+
+def stimme_normal(wert: object) -> str | None:
+    """Kennung einer freigegebenen Stimme (Kleinschreibung, ohne Leerraum) oder None."""
+    w = wert.strip().lower() if isinstance(wert, str) else ""
+    return w if w in HAUS_STIMMEN_IDS else None
+
+
+def haus_stimme_standard() -> str:
+    """Stimme ohne Wahl der Person: WAMO_TTS_HAUS_STIMME, wenn sie freigegeben ist, sonst die erste der Liste. So spricht die Sitzung nie
+    mit einer Stimme außerhalb der Liste, und die Oberfläche zeigt denselben Standard, mit dem gesprochen wird."""
+    return stimme_normal(_env("WAMO_TTS_HAUS_STIMME")) or HAUS_STIMMEN_IDS[0]
 
 
 def _env(name: str) -> str:
@@ -101,6 +130,7 @@ class Baustein:
     modell: str | None = None
     problem: str | None = None  # Grund für den Rückfall
     uebersteuert: bool = False  # WAMO_STT_ANBIETER bzw. WAMO_TTS_ANBIETER weicht von der Wahl des Profils ab
+    stimme: str | None = None  # nur tts im Haus: Wahl der Person (HAUS_STIMMEN), sonst haus_stimme_standard()
 
     @property
     def rueckfall(self) -> bool:
@@ -161,7 +191,7 @@ def haus_problem_statisch() -> str | None:
     return _problem_statisch("stt") or _problem_statisch("tts")
 
 
-async def _baustein(baustein: str, profil_wert: str | None) -> Baustein:
+async def _baustein(baustein: str, profil_wert: str | None, stimme: str | None = None) -> Baustein:
     wunsch = gewuenscht(baustein, profil_wert)
     profil = (profil_wert or "").strip().lower()
     uebersteuert = _env(f"WAMO_{baustein.upper()}_ANBIETER").lower() in ANBIETER and wunsch != (profil if profil in ANBIETER else "soniox")
@@ -175,7 +205,10 @@ async def _baustein(baustein: str, profil_wert: str | None) -> Baustein:
         logger.error("{} im Haus nicht nutzbar ({}), Rückfall auf Soniox", baustein.upper(), problem)
         return Baustein("haus", "soniox", modell or None, problem, uebersteuert=uebersteuert)
     logger.info("{} im Haus über LiteLLM: {}", baustein.upper(), modell)
-    return Baustein("haus", "haus", modell, uebersteuert=uebersteuert)
+    if baustein != "tts":
+        return Baustein("haus", "haus", modell, uebersteuert=uebersteuert)
+    # Nur eine Stimme aus der festen Liste; alles andere (auch ein Wert aus einer alten Zeile) heißt Standard
+    return Baustein("haus", "haus", modell, uebersteuert=uebersteuert, stimme=stimme_normal(stimme) or haus_stimme_standard())
 
 
 async def sprach_wahl(zugang: object | None = None, *, labor: bool = False) -> SprachWahl:
@@ -185,7 +218,7 @@ async def sprach_wahl(zugang: object | None = None, *, labor: bool = False) -> S
         return SprachWahl(stt=Baustein("soniox", "soniox"), tts=Baustein("soniox", "soniox"))
     return SprachWahl(
         stt=await _baustein("stt", getattr(zugang, "stt", None)),
-        tts=await _baustein("tts", getattr(zugang, "tts", None)),
+        tts=await _baustein("tts", getattr(zugang, "tts", None), getattr(zugang, "tts_stimme", None)),
     )
 
 
@@ -317,4 +350,4 @@ class HausTTSService(TTSService):
 
 
 def haus_tts(b: Baustein) -> HausTTSService:
-    return HausTTSService(modell=b.modell or "", stimme=_env("WAMO_TTS_HAUS_STIMME"))
+    return HausTTSService(modell=b.modell or "", stimme=stimme_normal(b.stimme) or haus_stimme_standard())

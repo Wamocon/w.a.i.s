@@ -75,12 +75,30 @@ export type Gemerkt = {
   id?: string;
 };
 
+/** Bereiche der Modellwahl je Person (voice-core/modellwahl.py, Migration 0024) */
+export const MODELL_BEREICHE = ["gespraech", "bilder", "hintergrund"] as const;
+export type ModellBereich = (typeof MODELL_BEREICHE)[number];
+/** Ein wählbares Modell, wie der Kern es für diesen Zugang anbietet (Name und eine Zeile zu Tempo und Güte) */
+export type ModellOption = { id: string; name: string; art: "haus" | "claude"; zeile: string };
+/** Je Bereich: gültige Wahl ("automatisch" oder eine Kennung aus optionen), Angebot und ein Hinweis, wenn eine gespeicherte Wahl
+ *  mit dem Zugang gerade nicht gilt */
+export type ModellBereichStand = { wahl: string; optionen: ModellOption[]; hinweis?: string };
+/** Eine der freigegebenen Stimmen im Haus (voice-core/sprache_anbieter.py, HAUS_STIMMEN: die Liste kommt allein vom Kern) */
+export type HausStimme = { id: string; name: string; hinweis?: string };
+/** Wahl "kein bestimmtes Modell": der Boss wählt (Standard) */
+export const AUTOMATISCH = "automatisch";
+// Form der Kennungen wie die Prüfungen der Datenbank (Migration 0024); voice-core/test_migration_0024.py hält beide gleich
+const MODELL_ID = /^[a-z0-9][a-z0-9.-]{1,62}$/;
+const STIMME_ID = /^[a-z][a-z0-9_]{1,31}$/;
+const MAX_MODELLE = 12;
+const MAX_STIMMEN = 20;
+
 /**
  * Modellzugang des Profils (voice-core/modellzugang.py): eigener Claude-Schlüssel oder nur Hausmodelle.
  * Enthält nie den Schlüssel, nur ob einer hinterlegt ist und seine letzten vier Zeichen.
  */
 export type Modellzugang = {
-  aktion: "status" | "hinterlegen" | "loeschen" | "modus" | "stimme";
+  aktion: "status" | "hinterlegen" | "loeschen" | "modus" | "stimme" | "modell" | "haus_stimme";
   /** fehlt, wenn der Kern den Stand gerade nicht lesen konnte (dann steht nur fehler da) */
   art?: "claude" | "haus";
   /** profil: eigener Schlüssel, zuordnung: Schlüssel des Kerns für genau dieses Profil, festgelegt: vom Admin,
@@ -106,9 +124,62 @@ export type Modellzugang = {
   /** "bereit" oder ein Satz, warum Hören und Stimme im Haus in diesem Kern gerade nicht gehen; fehlt bei einem Kern, der die Wahl
    *  noch nicht kennt */
   stimmeHaus?: string;
+  /** Modellwahl je Bereich (Kern ab Migration 0024); fehlt bei einem Kern, der die Wahl noch nicht kennt */
+  modelle?: Partial<Record<ModellBereich, ModellBereichStand>>;
+  /** warum die Modellwahl gesperrt ist (Admin hat Hausmodelle festgelegt) */
+  modellSperre?: string;
+  /** Stimme im Haus: Wahl der Person (fehlt: Standard des Kerns), die Stimme des Kerns und die Auswahl */
+  hausStimme?: string;
+  hausStimmeStandard?: string;
+  hausStimmen?: HausStimme[];
+  hausStimmenHinweis?: string;
   wirksam?: string;
   fehler?: string;
 };
+
+const istObjekt = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** Ohne doppelte Kennungen (die erste gilt), damit Auswahl und React-Schlüssel eindeutig bleiben. */
+function eindeutig<T extends { id: string }>(liste: T[]): T[] {
+  const gesehen = new Set<string>();
+  return liste.filter((x) => !gesehen.has(x.id) && gesehen.add(x.id));
+}
+
+/** Modellwahl aus der Meldung des Kerns: nur bekannte Bereiche, Kennungen in der Form der Datenbank, erst prüfen, dann höchstens
+ *  MAX_MODELLE je Bereich, ohne doppelte Kennungen. Eine Wahl, die nicht im Angebot steht, gilt als automatisch. */
+function modelleAus(roh: unknown): Partial<Record<ModellBereich, ModellBereichStand>> | undefined {
+  if (!istObjekt(roh)) return undefined;
+  const ergebnis: Partial<Record<ModellBereich, ModellBereichStand>> = {};
+  for (const bereich of MODELL_BEREICHE) {
+    const e = roh[bereich];
+    if (!istObjekt(e)) continue;
+    const geprueft = (Array.isArray(e.optionen) ? e.optionen : []).slice(0, 100).flatMap((o): ModellOption[] => {
+      if (!istObjekt(o)) return [];
+      const { id, name, art } = o;
+      if (!isStr(id) || id === AUTOMATISCH || !MODELL_ID.test(id) || !oneOf(art, ["haus", "claude"] as const)) return [];
+      return [{ id, name: zeile(name, 60) ?? id, art, zeile: zeile(o.zeile, 160) ?? "" }];
+    });
+    const liste = eindeutig(geprueft).slice(0, MAX_MODELLE);
+    const wahl = isStr(e.wahl) && liste.some((o) => o.id === e.wahl) ? e.wahl : AUTOMATISCH;
+    ergebnis[bereich] = { wahl, optionen: liste, hinweis: zeile(e.hinweis, 200) };
+  }
+  return Object.keys(ergebnis).length > 0 ? ergebnis : undefined;
+}
+
+function hausStimmenAus(roh: unknown): HausStimme[] | undefined {
+  if (!Array.isArray(roh)) return undefined;
+  const geprueft = roh.slice(0, 100).flatMap((s): HausStimme[] => {
+    if (!istObjekt(s) || !isStr(s.id) || !STIMME_ID.test(s.id)) return [];
+    return [{ id: s.id, name: zeile(s.name, 40) ?? s.id, hinweis: zeile(s.hinweis, 120) }];
+  });
+  const liste = eindeutig(geprueft).slice(0, MAX_STIMMEN);
+  return liste.length > 0 ? liste : undefined;
+}
+
+/** Eine Stimme nur, wenn sie in der Liste des Kerns steht (sonst hätte die Auswahl keinen passenden Eintrag). */
+function stimmeAus(roh: unknown, liste: HausStimme[] | undefined): string | undefined {
+  return isStr(roh) && liste?.some((s) => s.id === roh) ? roh : undefined;
+}
 
 /**
  * Kontingent des Max-Abos (voice-core/kontingent.py, aus rate_limit_event von Claude Code): sitzung = 5-Stunden-Fenster,
@@ -777,7 +848,7 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         anmelden: m.anmelden === true ? true : undefined,
       };
     case "modellzugang": {
-      if (!oneOf(m.aktion, ["status", "hinterlegen", "loeschen", "modus", "stimme"] as const)) return null;
+      if (!oneOf(m.aktion, ["status", "hinterlegen", "loeschen", "modus", "stimme", "modell", "haus_stimme"] as const)) return null;
       // Minutengenau, mit Zeitzone (der Kern liefert UTC mit +00:00): ohne sie läse der Browser den Wert als Ortszeit
       const zeit = (v: unknown) => {
         const t = isStr(v) ? /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:\d{2})?/.exec(v) : null;
@@ -804,6 +875,12 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         stt: oneOf(m.stt, SPRACH_ANBIETER) ? m.stt : undefined,
         tts: oneOf(m.tts, SPRACH_ANBIETER) ? m.tts : undefined,
         stimmeHaus: zeile(m.stimme_haus, 160),
+        modelle: modelleAus(m.modelle),
+        modellSperre: zeile(m.modell_sperre, 200),
+        hausStimme: stimmeAus(m.haus_stimme, hausStimmenAus(m.haus_stimmen)),
+        hausStimmeStandard: stimmeAus(m.haus_stimme_standard, hausStimmenAus(m.haus_stimmen)),
+        hausStimmen: hausStimmenAus(m.haus_stimmen),
+        hausStimmenHinweis: zeile(m.haus_stimmen_hinweis, 200),
         wirksam: isStr(m.wirksam) ? sauber(m.wirksam, 60, false) : undefined,
         // Absicherung: auch wenn der Kern je einen Schlüssel in einen Fehlertext schriebe, zeigt die Oberfläche ihn nicht
         fehler:

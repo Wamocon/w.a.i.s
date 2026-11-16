@@ -180,6 +180,12 @@ def rangliste(klasse: str, *, claude_erlaubt: bool, vertraulich: bool = False, c
     return sorted(gut, key=lambda k: -k.punkte) + sorted(notfall, key=lambda k: -k.punkte)
 
 
+def lesbar(alias: str) -> str:
+    """Name für Gründe und Anzeige: aus der Karte, sonst der lesbare Claude-Name, sonst der Alias."""
+    m = karte.modell(alias)
+    return m.anzeige if m else la.lesbarer_modellname(alias)
+
+
 def hausstandard(klasse: str) -> str | None:
     """Das beste Hausmodell der Klasse (ohne Netz): der Standard für Hausprofile aus der Modellkarte."""
     liste = [k for k in rangliste(klasse, claude_erlaubt=False) if not k.notfall]
@@ -336,11 +342,14 @@ async def waehlen(klasse: str, zugang: Zugang, *, baustein: str | None = None, v
     Claude als Rückfall hinter einem Hausmodell gilt nur, wenn WAMO_LLM_RUECKFALL es erlaubt."""
     claude_ok = zugang.art == "claude" and not vertraulich
     # Das Bildmodell von Claude ist VISION_MODEL, sonst Haiku: die Klasse gibt den Baustein vor
-    claude_modell = claude_standardmodell("vision" if klasse == "vision" else (baustein or klasse), zugang) if claude_ok else None
+    # Die Modellwahl der Person gilt nur für die Bausteine der Sitzung (llm_anbieter.BAUSTEIN_BEREICH), nie für Aufgaben des Boss
+    claude_modell = claude_standardmodell("vision" if klasse == "vision" else (baustein or klasse), zugang,
+                                          wahl=baustein in la.BAUSTEIN_BEREICH) if claude_ok else None
     liste = rangliste(klasse, claude_erlaubt=claude_ok, vertraulich=vertraulich, claude_modell=claude_modell,
                       ausschluss=ausschluss)
     if bevorzugt is not None and bevorzugt[1] not in ausschluss and (bevorzugt[0] != "claude" or claude_ok):
-        liste = [Kandidat(bevorzugt[1], bevorzugt[0], 1.0, False, bevorzugt[1]),
+        # Vorgabe des Betriebs oder Wahl der Person (llm_anbieter.waehlen): steht vor der Rangliste, mit lesbarem Namen für den Grund
+        liste = [Kandidat(bevorzugt[1], bevorzugt[0], 1.0, False, lesbar(bevorzugt[1])),
                  *[k for k in liste if (k.anbieter, k.alias) != bevorzugt]]
     gruende: list[str] = []
     beginn = time.monotonic()
@@ -688,7 +697,10 @@ class Boss:
     async def _einordnen(self, a: Aufgabe) -> str:
         """Unklarer Auftrag: ein kleines Modell wählt die Art (Hausprofil: bestes Hausmodell, Claude-Profil im Modus
         Automatisch: Haiku). Nur die Arten der Sitzung sind möglich; alles andere ist ein Fehler."""
-        wahl = await waehlen("gespraech", self._zugang, vertraulich=a.vertraulich, probe=False)
+        # eigener Baustein: die Modellwahl der Person für das Gespräch gilt hier nicht, das Einordnen bleibt beim kleinen Standardmodell.
+        # Folge: Eine Liste in WAMO_LLM_RUECKFALL (etwa "gespraech") gilt für das Einordnen nicht mehr; der Rückfall auf Claude greift dort
+        # nur bei leerem Wert oder "claude" (beim Claude-Profil steht Claude ohnehin vorn, ein Rückfall dorthin ist selten)
+        wahl = await waehlen("gespraech", self._zugang, baustein="boss_einordnen", vertraulich=a.vertraulich, probe=False)
         antwort = await modell_anfrage(wahl, zugang=self._zugang, system=EINORDNEN_SYSTEM, inhalt=a.auftrag[:2000],
                                        max_tokens=60, timeout=30.0, baustein="boss_einordnen",
                                        json_schema=EINORDNEN_SCHEMA, schema_name="einordnen")
