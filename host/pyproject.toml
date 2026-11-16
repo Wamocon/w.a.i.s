@@ -1,6 +1,6 @@
 [project]
 name = "wamo-host"
-version = "0.4.0"
+version = "0.4.1"
 description = "WAMO-Host: Windows-Werkzeugserver (MCP) mit Freigabe-Klassen"
 requires-python = ">=3.11"
 dependencies = [

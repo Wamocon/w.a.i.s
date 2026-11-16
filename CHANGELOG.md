@@ -6,6 +6,13 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.4.1] - 2026-11-16
+
+### Behoben
+
+- Host verlangt eine Karte beim Lesen von Verlauf, Prozess-Befehlszeilen, Schlüsseln und Browser-Passwörtern
+- Mitglieder: Karte nach Fremdinhalt bis Sitzungsende, Einwilligung fürs Bildschirmbild
+
 ## [0.4.0] - 2026-11-16
 
 ### Hinzugefügt
@@ -809,7 +816,8 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.0...HEAD
+[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.1.0...v0.2.0
