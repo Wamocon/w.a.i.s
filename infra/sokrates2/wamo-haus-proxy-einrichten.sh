@@ -32,7 +32,7 @@ TMPFILES="$WURZEL/etc/tmpfiles.d/wamo-haus.conf"
 SICHERUNG="$WURZEL/var/backups/wamo-haus-proxy/$(date +%Y%m%d-%H%M%S)"
 LISTEN=127.0.0.1:18090
 ZIEL=http://192.168.178.75:4000
-MODELLE=qwen3.6-35b
+MODELLE=wamo-haus-coder,qwen3.6-35b
 PARALLEL=2
 TAG_TOKEN_MAX=30000000
 

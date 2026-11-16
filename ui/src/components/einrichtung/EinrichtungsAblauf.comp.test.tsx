@@ -6,6 +6,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EinrichtungsAblauf } from "@/components/einrichtung/EinrichtungsAblauf";
+import { EinrichtungZusammenfassung } from "@/components/einrichtung/EinrichtungZusammenfassung";
 import { InstallerDownload } from "@/components/einrichtung/InstallerDownload";
 import { EINRICHTUNG_SCHRITTE } from "@/components/einrichtung/schritte";
 import { KernFehler } from "@/lib/kernApi";
@@ -153,6 +154,129 @@ describe("EinrichtungsAblauf: Modellzugang nach D2", () => {
     await user.click(await screen.findByRole("button", { name: "Überspringen" }));
     expect(weiter).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Zurück" })).toBeNull();
+  });
+});
+
+describe("Eingabe nie still verlieren (Überspringen, Weiter oder Zurück mit Text im Feld)", () => {
+  const FRAGE = "Du hast schon etwas eingegeben. Hinterlegen oder verwerfen?";
+  const feld = (name: string) => screen.findByLabelText(name, { selector: "input" });
+
+  it("Überspringen mit Text im Feld fragt nach, der Fokus liegt auf der Frage, nichts geht weiter", async () => {
+    const user = userEvent.setup();
+    render(<EinrichtungsAblauf schritte={MODELL} />);
+    await user.type(await feld("Claude-Code-Token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Überspringen" }));
+    const frage = await screen.findByText(FRAGE);
+    expect(document.activeElement).toBe(frage);
+    const gruppe = screen.getByRole("group", { name: FRAGE });
+    expect(gruppe).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Claude-Code-Token" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Überspringen" })).toBeNull();
+    expect(posts()).toEqual([]);
+  });
+
+  it("Eingabe verwerfen: weiter zum API-Schlüssel, nichts gespeichert, der Wert steht nirgends", async () => {
+    const user = userEvent.setup();
+    render(<EinrichtungsAblauf schritte={MODELL} />);
+    await user.type(await feld("Claude-Code-Token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Überspringen" }));
+    await user.click(await screen.findByRole("button", { name: "Eingabe verwerfen" }));
+    expect(await screen.findByRole("heading", { name: "API-Schlüssel" })).toBeTruthy();
+    expect(posts()).toEqual([]);
+    for (const f of document.querySelectorAll("input")) expect(f.value).not.toContain("sk-ant");
+  });
+
+  it("Eingabe hinterlegen: der Wert geht einmal an den Kern, danach geht es von selbst weiter", async () => {
+    const user = userEvent.setup();
+    render(<EinrichtungsAblauf schritte={MODELL} />);
+    await user.type(await feld("Claude-Code-Token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Überspringen" }));
+    await user.click(await screen.findByRole("button", { name: "Eingabe hinterlegen" }));
+    expect(await screen.findByRole("heading", { name: "API-Schlüssel" })).toBeTruthy();
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0][2]).toEqual({ aktion: "hinterlegen", schluessel: TOKEN, schluesselart: "code" });
+  });
+
+  it("mit der Tastatur: Tab erreicht beide Wahlen, Enter auf Eingabe verwerfen geht weiter", async () => {
+    const user = userEvent.setup();
+    render(<EinrichtungsAblauf schritte={MODELL} />);
+    await user.type(await feld("Claude-Code-Token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Überspringen" }));
+    await screen.findByText(FRAGE);
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Eingabe hinterlegen" }));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Eingabe verwerfen" }));
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("heading", { name: "API-Schlüssel" })).toBeTruthy();
+  });
+
+  it("wird das Feld wieder leer, verschwindet die Frage und Überspringen ist zurück", async () => {
+    const user = userEvent.setup();
+    render(<EinrichtungsAblauf schritte={MODELL} />);
+    const eingabe = await feld("Claude-Code-Token");
+    await user.type(eingabe, "abc");
+    await user.click(screen.getByRole("button", { name: "Überspringen" }));
+    await screen.findByText(FRAGE);
+    await user.clear(eingabe);
+    await waitFor(() => expect(screen.queryByText(FRAGE)).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Überspringen" }));
+    expect(await screen.findByRole("heading", { name: "API-Schlüssel" })).toBeTruthy();
+  });
+
+  it("Zurück mit Text im Feld fragt ebenso nach; Eingabe verwerfen führt dann zurück", async () => {
+    const user = userEvent.setup();
+    render(<EinrichtungsAblauf schritte={MODELL} />);
+    await user.click(await screen.findByRole("button", { name: "Überspringen" }));
+    await user.type(await feld("Anthropic-API-Schlüssel"), "sk-ant-api03-" + "y".repeat(30));
+    await user.click(screen.getByRole("button", { name: "Zurück" }));
+    await screen.findByText(FRAGE);
+    expect(screen.getByRole("heading", { name: "API-Schlüssel" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Eingabe verwerfen" }));
+    expect(await screen.findByRole("heading", { name: "Claude-Code-Token" })).toBeTruthy();
+    expect(posts()).toEqual([]);
+  });
+
+  it("auch im Schritt allein (Gerüst der Erstanmeldung): Überspringen ruft weiter() erst nach Eingabe verwerfen", async () => {
+    const weiter = vi.fn();
+    const Token = EINRICHTUNG_SCHRITTE[0].Komponente;
+    const user = userEvent.setup();
+    render(<Token weiter={weiter} />);
+    await user.type(await feld("Claude-Code-Token"), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Überspringen" }));
+    expect(weiter).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: "Eingabe verwerfen" }));
+    expect(weiter).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Fehler beim Hinterlegen und Statusabfrage", () => {
+  it("ein Netzfehler beim Hinterlegen lässt das Formular stehen und zeigt den Fehler, kein Erneut versuchen", async () => {
+    const normal = kern.kernJson.getMockImplementation();
+    kern.kernJson.mockImplementation(async (pfad: string, methode = "GET", body?: Roh) => {
+      if (pfad === "/modellzugang" && methode === "POST") throw new KernFehler(0, "Kern nicht erreichbar");
+      return normal?.(pfad, methode, body);
+    });
+    const user = userEvent.setup();
+    render(<EinrichtungsAblauf schritte={MODELL} />);
+    await user.type(await screen.findByLabelText("Claude-Code-Token", { selector: "input" }), TOKEN);
+    await user.click(screen.getByRole("button", { name: "Hinterlegen" }));
+    expect(await screen.findByText(/Kern nicht erreichbar|nicht erreichbar/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Erneut versuchen" })).toBeNull();
+    expect(screen.getByLabelText("Claude-Code-Token", { selector: "input" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Überspringen" })).toBeTruthy();
+  });
+
+  it("mehrere Teile, die den Stand brauchen, fragen ihn bei leerem Speicher nur einmal ab", async () => {
+    render(
+      <>
+        <EinrichtungsAblauf schritte={MODELL} />
+        <EinrichtungZusammenfassung weiter={() => undefined} />
+      </>,
+    );
+    await screen.findByLabelText("Claude-Code-Token", { selector: "input" });
+    const abfragen = kern.kernJson.mock.calls.filter((c) => c[0] === "/modellzugang" && (c[1] ?? "GET") === "GET");
+    expect(abfragen).toHaveLength(1);
   });
 });
 

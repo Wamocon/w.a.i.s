@@ -224,8 +224,11 @@ SK_ANT_RE = re.compile(rb"sk-ant-[A-Za-z0-9_-]{20,}")  # jeder Anthropic-Schlüs
 HAUS_SCHALTER = "WAMO_HAUS"  # in geheim.env, nur "an" schaltet ein (Standard aus)
 HAUS_MAX_TOKEN_NAME = "WAMO_HAUS_MAX_TOKEN"  # in geheim.env, Höchstmenge an Token je Lauf, die der Proxy durchsetzt
 HAUS_URL = "http://127.0.0.1:18090"
-HAUS_MODELL = "qwen3.6-35b"
-HAUS_MODELLE = (HAUS_MODELL,)  # ein Wunsch im Kopfzeilenfeld modell gilt bei haus nur aus dieser Liste, nie aus der Allowlist der Werkzeugkarte
+# wamo-haus-coder: eigene Gewichte qwen3.6:35b-a3b-coding (Q4_K_M, eigener Digest) im Ollama von Sokrates-2 mit num_ctx 65536, also ein
+# eigener Runner neben dem Chat-Modell qwen3.6:35b mit 16k (sie laden sich nie gegenseitig neu); im zentralen LiteLLM als eigenes Modell.
+# qwen3.6-35b (Sokrates-1, Kontext 32768) bleibt als Wunsch erlaubt
+HAUS_MODELL = "wamo-haus-coder"
+HAUS_MODELLE = (HAUS_MODELL, "qwen3.6-35b")  # ein Wunsch im Kopfzeilenfeld modell gilt bei haus nur aus dieser Liste, nie aus der Allowlist der Werkzeugkarte
 HAUS_MODELL_VARIABLEN = ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
                          "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL")  # jede Modellklasse von Claude Code zeigt aufs Hausmodell
 HAUS_ORDNER = Path("/run/wamo-haus")  # tmpfiles.d des Proxys: 2750 wamo:wamo-haus-proxy; der Dispatcher legt ihn nie selbst an

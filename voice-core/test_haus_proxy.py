@@ -596,7 +596,7 @@ class DienstUndSkripte(unittest.TestCase):
         self.assertIn("d /run/wamo-haus 2750 wamo wamo-haus-proxy - -", tmpfiles)
         skript = (INFRA / "wamo-haus-proxy-einrichten.sh").read_text(encoding="utf-8")
         self.assertIn("ZIEL=http://192.168.178.75:4000\n", skript)  # Hausregel: nur das zentrale LiteLLM, passend zu IPAddressAllow
-        self.assertIn("MODELLE=qwen3.6-35b\n", skript)
+        self.assertIn("MODELLE=wamo-haus-coder,qwen3.6-35b\n", skript)
 
     @unittest.skipUnless(_bash() and os.name == "posix", "nur unter Linux (Probelauf mit Pfaden ohne Laufwerk)")
     def test_probelauf_einrichten_und_schluessel(self):

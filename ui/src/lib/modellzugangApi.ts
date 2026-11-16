@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { KernFehler, kernJson } from "@/lib/kernApi";
 import { fehlerStand, fehlerText, standAusAntwort, STATUS_MS } from "@/lib/modellzugangHilfe";
 import { useSelect } from "@/lib/store";
@@ -62,19 +62,23 @@ export function useModellzugangSenden(onAnfrage?: (anfrage: ModellzugangAnfrage)
  * Kurzzeile und die Einstellungsseite ihren Stand haben, auch wenn die Karte Modellzugang gerade nicht offen ist. Die
  * Karte selbst fragt nicht mehr; sie setzt zum erneuten Versuch den Stand auf null zurück.
  * aktiv = false (Laborkonten, lib/laborPlatz.ts): gar kein Abruf. Der Hook wird trotzdem in jedem Render aufgerufen (Regeln der Hooks).
+ * Mehrere Teile halten den Stand zugleich (Hauptansicht, Schritte beim Ausrollen, Zusammenfassung): Die Marke "für diese Lücke schon
+ * gefragt" gilt für alle gemeinsam, also fragt nur einer. Sie hängt an der Epoche des Speichers (Abmelden, neuer Speicher) und fällt
+ * weg, sobald ein Stand da ist.
  */
+let gefragtInEpoche: number | null = null;
+
 export function useModellzugangStandHalten(onAnfrage?: (anfrage: ModellzugangAnfrage) => boolean, aktiv = true) {
   const sende = useModellzugangSenden(onAnfrage);
   const zugang = useSelect(wamo, (s) => s.modellzugang);
-  const angefragt = useRef(false);
   useEffect(() => {
     if (!aktiv) return;
     if (zugang) {
-      angefragt.current = false;
+      gefragtInEpoche = null;
       return;
     }
-    if (angefragt.current) return;
-    angefragt.current = true;
+    if (gefragtInEpoche === wamoEpoche()) return;
+    gefragtInEpoche = wamoEpoche();
     sende({ aktion: "status" });
   }, [aktiv, zugang, sende]);
 }
