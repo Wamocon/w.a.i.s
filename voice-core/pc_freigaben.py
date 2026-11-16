@@ -16,7 +16,8 @@ Ablauf
 
 Freigaben des Kerns (Aktion aendern, nur Mitglieder, pc_mitglied.py): Nach Fremdinhalt im Zug führt der Host ein änderndes
 Werkzeug sonst ohne Karte aus. Der Kern merkt Werkzeug und Argumente vor (kern_vormerken), die Karte entsteht wie oben über
-activity.py, und erst nach dem Ja ruft der Kern das Werkzeug selbst am Laptop auf (pc_host.call_host_tool). Ein Nein oder das
+activity.py, und erst nach dem Ja ruft der Kern das Werkzeug selbst am Laptop auf (pc_host.call_host_tool; Werkzeuge, die der Kern
+selbst ausführt, wie auf_bildschirm_klicken und canvas_exportieren, über ihren Ausführer aus kern_ausfuehrer). Ein Nein oder das
 Sitzungsende verwerfen es, ohne den Host zu fragen. Verlangt der Host dabei selbst eine Freigabe (kritisch), entsteht dafür eine
 zweite Karte. Eine Anfrage mit der Aktion aendern ohne Vormerkung des Kerns bekommt nie eine Karte.
      Jeder Schritt landet in actions: pending, approved oder rejected, running, done oder failed.
@@ -37,7 +38,7 @@ import copy
 import json
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from loguru import logger
@@ -56,6 +57,8 @@ AKTION_TEXT = {"powershell": "den PowerShell-Befehl", "senden": "das Senden", "w
                "klicken": "den Klick", "github": "das Anlegen des GitHub-Repositorys", "mail": "die Mail",
                "teams": "das Öffnen des Teams-Chats", "aendern": "die Änderung am Laptop"}
 KERN_AKTION = "aendern"  # Freigabe des Kerns (pc_mitglied.py)
+# Mitglieder (Sicherheitsreview 16.11.2026): jede Karte nach Inhalten von außen trägt diesen Hinweis, auch die des Hosts (PowerShell, GitHub, Klick)
+WARNUNG_FREMD = "Kurz davor kamen Inhalte von außen (Webseite, Suche, Bildschirm). Nur freigeben, wenn du genau das selbst willst."
 UNVERWERTBAR = {"status": "error", "summary": "Der PC hat keine verwertbare Antwort geliefert."}
 
 
@@ -89,8 +92,10 @@ class PcFreigaben:
     Oberfläche (Karte, Aktivität, Lichtrahmen); von: Anzeigename des Profils; pc_name(): Rechnername oder None;
     markierung_von(): (Gerätekennung, Rechnername) des Laptops für den Lichtrahmen oder None.
     kern_erlaubt: Werkzeuge, für die der Kern Karten vormerken darf (bot.py: nur die ändernden Werkzeuge eines Mitglieds,
-    pc_mitglied.AENDERN_MITGLIED; leer heißt keine). knapp: Protokoll in actions ohne Wortlaut, Adresse oder Titel (Mitglieder),
-    nur Aktion, Werkzeug und Längen.
+    pc_mitglied.kern_erlaubt; leer heißt keine). fremd_warnung (nur Mitglieder): gilt Fremdinhalt, bekommt jede Karte außer der des Kerns
+    den Hinweis WARNUNG_FREMD. kern_ausfuehrer: für Werkzeuge, die der Kern selbst ausführt, die Funktion, die nach
+    dem Ja mit den vorgemerkten Argumenten läuft (statt pc_host.call_host_tool). knapp: Protokoll in actions ohne Wortlaut, Adresse oder
+    Titel (Mitglieder), nur Aktion, Werkzeug und Längen.
     """
 
     def __init__(
@@ -107,9 +112,13 @@ class PcFreigaben:
         markierung_von: Callable[[], tuple[str | None, str | None]] | None = None,
         uhr: Callable[[], float] = time.monotonic,
         kern_erlaubt: frozenset[str] = frozenset(),
+        kern_ausfuehrer: Mapping[str, Callable[[dict], Awaitable[dict]]] | None = None,
         knapp: bool = False,
+        fremd_warnung: Callable[[], bool] | None = None,
     ):
+        self._fremd_warnung = fremd_warnung  # Mitglieder: gilt Fremdinhalt für die Karte (turn.fremd_fuer_karte), dann WARNUNG_FREMD
         self._kern_erlaubt = frozenset(kern_erlaubt)
+        self._kern_ausfuehrer = dict(kern_ausfuehrer or {})
         self._knapp = knapp
         self._memory = memory
         self._client = client
@@ -163,6 +172,8 @@ class PcFreigaben:
         if len(self._offen) >= MAX_OFFEN:  # der Host lehnt dann ohnehin ab; nie eine offene verdrängen
             logger.warning("PC-Freigabe {} ohne Karte: schon {} offen", a["id"], MAX_OFFEN)
             return None
+        if self._fremd_warnung is not None and a["aktion"] != KERN_AKTION and not a.get("warnung") and self._fremd_warnung():
+            a = dict(a, warnung=WARNUNG_FREMD)  # die Karte des Kerns nennt den Grund schon im Titel
         gueltig = min(GUELTIG_SECS, float(a.get("gueltig_s") or GUELTIG_SECS))
         offen = _Offen(a, self._uhr(), gueltig, self._protokollieren(a), kern=(kern[1], kern[2]) if kern else None)
         self._offen[a["id"]] = offen
@@ -294,22 +305,26 @@ class PcFreigaben:
         return await self._kern_ausfuehren(offen)
 
     async def _kern_ausfuehren(self, offen: _Offen) -> dict:
-        """Nach dem Ja: das vorgemerkte Werkzeug genau einmal am Laptop dieser Sitzung aufrufen. Verlangt der Host dafür selbst eine
-        Freigabe (kritische Aktion), bekommt sie ihre eigene Karte."""
+        """Nach dem Ja: das vorgemerkte Werkzeug genau einmal am Laptop dieser Sitzung aufrufen, ein Werkzeug des Kerns über seinen
+        Ausführer. Verlangt der Host dafür selbst eine Freigabe (kritische Aktion), bekommt sie ihre eigene Karte."""
         werkzeug, argumente = offen.kern
         if werkzeug not in self._kern_erlaubt:  # noch einmal direkt vor dem Aufruf (call_host_tool umgeht den Filter des Host-Clients)
             return {"status": "blocked", "summary": "Dieses Werkzeug ist für Freigaben des Kerns nicht erlaubt."}
         client = self._client()
         if client is None:
             return {"status": "error", "summary": "Der Laptop ist nicht verbunden."}
+        ausfuehrer = self._kern_ausfuehrer.get(werkzeug)
         try:
-            text = await pc_host.call_host_tool(client, werkzeug, argumente)
+            if ausfuehrer is not None:  # ausgeführt wird genau, was die Karte zeigt: eine Kopie, kein geteiltes Objekt
+                ergebnis = await ausfuehrer(copy.deepcopy(argumente))
+            else:
+                ergebnis = _als_dict(await pc_host.call_host_tool(client, werkzeug, argumente))
         except PcNichtErreichbar:
             return dict(PC_NICHT_ERREICHBAR)
         except Exception as e:  # noqa: BLE001 (Antwort kaputt oder Host weg: klares Ergebnis statt Ausnahme)
             logger.warning("PC-Freigabe des Kerns: Host antwortet nicht verwertbar ({})", type(e).__name__)
             return dict(UNVERWERTBAR)
-        ergebnis = _als_dict(text) or dict(UNVERWERTBAR)
+        ergebnis = ergebnis if isinstance(ergebnis, dict) and ergebnis else dict(UNVERWERTBAR)
         if ergebnis.get("status") != "needs_approval":
             return ergebnis
         weitere = freigabe_anfrage(werkzeug, argumente, ergebnis)

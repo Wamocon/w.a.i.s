@@ -16,9 +16,9 @@ Werkzeugparameter, keine Liste, keine Bindung in der Umgebung, kein Ausweichen a
 Sperre gilt dann je Gerät. Ohne den Schalter (Standard) bleibt der alte Weg unverändert.
 
 Risikoklassen und Freigaben prüft der Host selbst. Im alten Weg bekommen nur Profile mit der Rolle admin die
-PC-Werkzeuge, im Tunnel je Gerät auch Mitglieder mit ihrer user_id in WAMO_PC_MITGLIEDER_PROFILE (rechte.pc_stufe), und zwar
-nur die engere Liste LLM_TOOLS_MITGLIED (ohne PowerShell, Git und GitHub; Bildschirm, Live-Bild und Office ruft ohnehin nur der
-Kern auf und nur für Admins). WAMO_PC_HOST=off schaltet sie ganz ab.
+PC-Werkzeuge, im Tunnel je Gerät auch Mitglieder mit ihrer user_id in WAMO_PC_MITGLIEDER_PROFILE (rechte.pc_stufe), und zwar seit
+dem 16.11.2026 dieselbe Liste LLM_TOOLS wie Admins (Entscheidung Niko zu N10); enger ist für Mitglieder nur der Schutz im Kern
+(pc_mitglied.py). WAMO_PC_HOST=off schaltet sie ganz ab.
 
 Freigaben kritischer PC-Aktionen (Host: status=needs_approval): Nur pc_freigabe_entscheiden ruft nach einem Klick in
 der Oberfläche das Host-Werkzeug freigabe_entscheiden auf. Es steht nicht in LLM_TOOLS (das Sprachmodell sieht es
@@ -65,16 +65,14 @@ LLM_TOOLS = [
     "ordner_anlegen", "elemente_auflisten", "element_klicken", "element_text_setzen", "element_lesen", "browser_lesen",
     "git_klonen", "github_repo_anlegen",
 ]
-# Mitglieder (Plan docs/ausrollen-neue-nutzer.md 4.5, Entscheidung N10): dieselbe Liste ohne PowerShell, Git und GitHub
-LLM_TOOLS_MITGLIED = [w for w in LLM_TOOLS if w not in ("powershell_lesen", "git_klonen", "github_repo_anlegen")]
 
 
 def werkzeuge_fuer(stufe: str | None) -> list[str]:
-    """Werkzeuge des Hosts, die das Sprachmodell einer Stufe (rechte.pc_stufe) sieht; für alles andere keine."""
-    if stufe == "admin":
+    """Werkzeuge des Hosts, die das Sprachmodell einer Stufe (rechte.pc_stufe) sieht; für alles andere keine. Admins und freigeschaltete
+    Mitglieder bekommen seit dem 16.11.2026 dieselbe Liste (Entscheidung Niko zu N10, Plan docs/ausrollen-neue-nutzer.md 4.5); den
+    zusätzlichen Schutz der Mitglieder (Stimmabdruck, Karte nach Fremdinhalt) legt pc_mitglied.py darüber."""
+    if stufe in ("admin", "mitglied"):
         return list(LLM_TOOLS)
-    if stufe == "mitglied":
-        return list(LLM_TOOLS_MITGLIED)
     return []
 
 

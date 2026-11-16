@@ -139,7 +139,7 @@ class ZugangTests(unittest.IsolatedAsyncioTestCase):
             mitglied = pc_host.host_client(await pc_geraet.pc_zugang_fuer(identitaet(rolle="mitglied"), reg))
         try:
             self.assertEqual(admin._filter, set(pc_host.LLM_TOOLS))
-            self.assertEqual(mitglied._filter, set(pc_host.LLM_TOOLS_MITGLIED))
+            self.assertEqual(mitglied._filter, set(pc_host.LLM_TOOLS))  # seit dem 16.11.2026 dieselbe Liste
         finally:
             await admin.close()
             await mitglied.close()
@@ -730,16 +730,16 @@ class GeheimnisseTests(unittest.TestCase):
             self.lies()
 
 
-def test_werkzeugliste_der_mitglieder_ist_genau_die_der_admins_ohne_powershell_git_und_github():
-    assert pc_host.LLM_TOOLS_MITGLIED == [w for w in pc_host.LLM_TOOLS
-                                          if w not in ("powershell_lesen", "git_klonen", "github_repo_anlegen")]
+def test_werkzeugliste_der_mitglieder_ist_die_der_admins():
+    """Entscheidung Niko vom 16.11.2026: Mitglieder bekommen für ihren eigenen Laptop dieselben Werkzeuge wie Admins."""
     assert pc_host.werkzeuge_fuer("admin") == pc_host.LLM_TOOLS
-    assert pc_host.werkzeuge_fuer("mitglied") == pc_host.LLM_TOOLS_MITGLIED
+    assert pc_host.werkzeuge_fuer("mitglied") == pc_host.LLM_TOOLS
+    assert pc_host.werkzeuge_fuer("mitglied") is not pc_host.LLM_TOOLS  # eine Kopie: niemand ändert die Liste von außen
     assert pc_host.werkzeuge_fuer(None) == [] and pc_host.werkzeuge_fuer("gast") == []
     # Bildschirm, Live-Bild, Office, Outlook, Teams und OneNote ruft nur der Kern auf (screen.py, bildstrom.py, office_werkzeuge.py ...)
     for nur_kern in ("bildschirmfoto", "maus_klicken", "bild_holen", "office_datei_erstellen", "outlook_mail_anfragen",
                      "teams_chat_anfragen", "onenote_seite_anfragen", "freigabe_entscheiden", "sperre_pruefen"):
-        assert nur_kern not in pc_host.LLM_TOOLS_MITGLIED
+        assert nur_kern not in pc_host.LLM_TOOLS
 
 
 if __name__ == "__main__":

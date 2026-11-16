@@ -1,12 +1,15 @@
 """Live-Bild des eigenen Laptops in der Oberfläche (Betriebsart Büro, Tunnel je Gerät).
 
 Was der Host entscheidet (host/live_bild.py, bei jedem Bild): Schalter AM Laptop (Standard aus; ihn setzt nur die Desktop-App am
-Laptop, per Tray-Menü oder, seit 04.11.2026, auf eine Fernanfrage des Besitzers mit frischem Code, siehe bild_fern.py), Einwilligung, Hinweis am Laptop sichtbar, Laptop eines Admins, kein gesperrter
-Bildschirm, keine offene Freigabe, kein Vollbild, kein Passwortfenster, ein Zuschauer, Bilder je Sekunde und je Minute.
+Laptop, per Tray-Menü oder, seit 04.11.2026, auf eine Fernanfrage des Besitzers mit frischem Code, siehe bild_fern.py), Einwilligung,
+Hinweis am Laptop sichtbar, eingerichteter Laptop (Stufe admin oder, seit dem 16.11.2026, mitglied; ein älterer Host meldet bei
+Mitgliedern "stufe"), kein gesperrter Bildschirm, keine offene Freigabe, kein Vollbild, kein Passwortfenster, ein Zuschauer, Bilder je
+Sekunde und je Minute.
 
 Was dieser Kern zusätzlich erzwingt:
-  * Nur die Sitzung des Admins, der diesen Laptop gebunden hat (Tunnel je Gerät, aal2 hat das Tor schon geprüft),
-    mit eingeschalteter PC-Steuerung und gehaltener PC-Sperre. Ein Gerät kommt nie aus einer Nachricht der Oberfläche.
+  * Nur die Sitzung der Person, die diesen Laptop gebunden hat und eine Stufe der PC-Steuerung hat (rechte.pc_stufe: Admin oder
+    freigeschaltetes Mitglied, nie ein Laborprofil; Tunnel je Gerät, aal2 hat das Tor schon geprüft), mit eingeschalteter
+    PC-Steuerung und gehaltener PC-Sperre. Ein Gerät kommt nie aus einer Nachricht der Oberfläche.
   * Ein Bild nach dem anderen: die Oberfläche bestätigt jedes Bild (ack). Das ist der Rückstau, damit die Bilder die
     Untertitel und das Gespräch im selben Datenkanal nicht ausbremsen, und zugleich die Inaktivitätsprüfung.
   * Zeitlimit je Ansicht (ZEITLIMIT_SECS), Ende bei Sperre, Trennen, Abmelden, abgelöster Sitzung, entzogenem Gerät und
@@ -54,8 +57,9 @@ BILD_B64_MAX = 150_000  # Zeichen; der Host liefert höchstens 110 KB JPEG (Base
 MONITOR_MAX = 16
 _B64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
 
-NICHT_ERLAUBT = ("Das Live-Bild gibt es nur für Admins am eigenen, gebundenen Laptop und nur bei eingeschalteter "
-                 "PC-Steuerung.")
+NICHT_ERLAUBT = ("Das Live-Bild gibt es nur am eigenen, gebundenen Laptop und nur bei eingeschalteter PC-Steuerung.")
+# Ein Host vor dem 16.11.2026 lässt das Live-Bild nur am Laptop eines Admins zu (host/live_bild.py, Grund "stufe")
+NICHT_ERLAUBT_LAPTOP = "Dieser Laptop lässt das Live-Bild noch nicht zu. Dafür braucht er die neue Version von W.A.I.S."
 TEXT_PAUSIERT = {
     "freigabe": "Eine Freigabe ist offen: Das Bild ruht, bis sie entschieden ist.",
     "vollbild": "Am Laptop läuft ein Programm im Vollbild: Das Bild ruht.",
@@ -69,7 +73,7 @@ TEXT_AUS = {
     "abgelaufen": "Die Zeit des Live-Bilds am Laptop ist abgelaufen.",
     "hinweis_fehlt": "Der rote Hinweis am Laptop ist nicht sichtbar.",
     "keine_einwilligung": "Die Einwilligung am Laptop fehlt.",
-    "stufe": "Dieser Laptop gehört keinem Admin.",
+    "stufe": NICHT_ERLAUBT_LAPTOP,
     "nicht_eingerichtet": "Dieser Laptop ist nicht für das Live-Bild eingerichtet.",
 }
 TEXT_ENDE = {
@@ -254,8 +258,8 @@ class Bildstrom:
                 monitore = _ganz(status.get("monitore"), 1, MONITOR_MAX) or 1
                 break
             grund = status.get("grund") if isinstance(status.get("grund"), str) else "schalter_aus"
-            if grund == "stufe":
-                return NICHT_ERLAUBT
+            if grund == "stufe":  # älterer Host am Laptop eines Mitglieds: warten hilft nicht, erst die neue Version
+                return NICHT_ERLAUBT_LAPTOP
             if grund != letzter_grund:
                 letzter_grund = grund
                 if self._angefordert and grund == "schalter_aus":

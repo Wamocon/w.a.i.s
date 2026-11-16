@@ -1,10 +1,12 @@
 """Office-Dateien aus dem Canvas (Paket 1 von docs/office-und-versand.md): Werkzeug canvas_exportieren und die Klicks canvas_export
 und datei_oeffnen.
 
-Wer: nur admin, nie in einer Laborsitzung (fuer_sitzung, dazu prüft der Konstruktor selbst), nur mit WAMO_OFFICE (Teil "dateien",
-Standard leer = aus), nur bei eingeschalteter PC-Steuerung mit gehaltener Sperre (darf) und nur in den Formaten, die der Host meldet
-(office_faehigkeiten). Das Werkzeug wird am LLM registriert, nachdem werkzeuge_absichern das Stimmabdruck-Gate eingehängt hat; es
-steht nicht in OFFENE_WERKZEUGE.
+Wer: nur mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder, seit dem 16.11.2026, freigeschaltetes Mitglied am eigenen Laptop),
+nie in einer Laborsitzung (fuer_sitzung, dazu prüft der Konstruktor selbst), nur mit WAMO_OFFICE (Teil "dateien", Standard leer = aus),
+nur bei eingeschalteter PC-Steuerung mit gehaltener Sperre (darf) und nur in den Formaten, die der Host meldet (office_faehigkeiten). Das
+Werkzeug wird am LLM registriert, nachdem werkzeuge_absichern das Stimmabdruck-Gate eingehängt hat; es steht nicht in OFFENE_WERKZEUGE.
+Bei Mitgliedern prüft pc_mitglied.py davor Stimmabdruck und Fremdinhalt (nach Fremdinhalt erst nach der Karte, nach_freigabe), und in
+actions steht dann kein Dateiname (knapp).
 
 Was: Der Kern liest das eigene Canvas-Element aus canvas_items (canvas_quelle.py) und schickt dem Host nur dessen feste Struktur, nie
 Dateibytes. Der Host prüft, baut, legt die Datei in Dokumente\\WAIS ab und öffnet sie (office_datei_erstellen, nie in LLM_TOOLS).
@@ -18,7 +20,8 @@ Oberfläche zur Datei passen, die der PC ohnehin anlegt.
 Rückmeldung: Das Modell bekommt nur gespeichert, Dateiname, geöffnet und den Ordner, nie den vollen Pfad; ist die Datei nicht geöffnet,
 dazu den bereinigten Grund (hinweis). Die Oberfläche bekommt die
 Nachricht {"type": "datei", "ok", "kennung", "name", "format", "ordner", "pfad", "geoeffnet"} oder {"type": "datei", "ok": false,
-"grund"}. In actions stehen Werkzeug, Format, Canvas-Kennung, Quelle, Dateiname, Größe und Prüfsummenanfang, nie der Inhalt.
+"grund"}. In actions stehen Werkzeug, Format, Canvas-Kennung, Quelle, Dateiname (bei Mitgliedern nicht), Größe und
+Prüfsummenanfang, nie der Inhalt.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 import labor
+import rechte
 from canvas_quelle import CanvasNichtErreichbar, canvas_lesen, kennung_gueltig
 from memory import DB_ERRORS
 from pc_host import call_host_tool
@@ -72,9 +76,15 @@ def dateien_an(wert: str | None = None) -> bool:
     return "dateien" in office_teile(wert)
 
 
+def pc_person(identity) -> bool:
+    """Darf diese Identität Office am eigenen Laptop nutzen? Nur mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder freigeschaltetes
+    Mitglied), nie ein Laborprofil. Gilt für Dateien, Outlook, Teams und OneNote gleich."""
+    return rechte.pc_stufe(identity) is not None and not labor.ist_labor(identity)
+
+
 def fuer_sitzung(identity) -> bool:
-    """Bekommt diese Sitzung Office-Dateien? Nur admin, nie ein Laborprofil, nur mit Schalter."""
-    return bool(getattr(identity, "is_admin", False)) and not labor.ist_labor(identity) and dateien_an()
+    """Bekommt diese Sitzung Office-Dateien? Nur mit Stufe der PC-Steuerung, nie ein Laborprofil, nur mit Schalter."""
+    return pc_person(identity) and dateien_an()
 
 
 def schema(formate: tuple[str, ...]) -> FunctionSchema:
@@ -98,10 +108,11 @@ def schema(formate: tuple[str, ...]) -> FunctionSchema:
 
 class OfficeDateien:
     def __init__(self, identity, memory, *, client: Callable[[], object], darf: Callable[[], bool],
-                 senden: Callable[[dict], Awaitable[None]] | None):
-        if not getattr(identity, "is_admin", False) or labor.ist_labor(identity):
-            raise ValueError("Office-Dateien gibt es nur für Admins und nie im Labor")
+                 senden: Callable[[dict], Awaitable[None]] | None, knapp: bool = False):
+        if not pc_person(identity):
+            raise ValueError("Office-Dateien gibt es nur mit PC-Steuerung am eigenen Laptop und nie im Labor")
         self.identity, self.memory = identity, memory
+        self._knapp = knapp  # Mitglieder: kein Dateiname in actions
         self._client, self._darf, self._senden = client, darf, senden
         self.formate: tuple[str, ...] = ()
         self._export_laeuft = False  # je Sitzung höchstens ein Export (Doppelklick, doppelter Werkzeugaufruf)
@@ -134,7 +145,10 @@ class OfficeDateien:
 
     # ---------- Werkzeug ----------
     async def _werkzeug(self, params) -> None:
-        a = params.arguments if isinstance(params.arguments, dict) else {}
+        await params.result_callback(await self.werkzeug_ergebnis(params.arguments if isinstance(params.arguments, dict) else {}))
+
+    async def werkzeug_ergebnis(self, a: dict) -> dict:
+        """Das Werkzeug als Funktion seiner Argumente: das Ergebnis für das Modell."""
         titel = a.get("canvas") if isinstance(a.get("canvas"), str) and a.get("canvas").strip() else None
         oeffnen = a.get("oeffnen") is not False
         ergebnis = await self.exportieren(a.get("format"), titel=titel, oeffnen=oeffnen, quelle="sprache")
@@ -144,9 +158,17 @@ class OfficeDateien:
                        "geoeffnet": bool(ergebnis.get("geoeffnet")), "ordner": datei.get("ordner", "")}
             if oeffnen and not antwort["geoeffnet"] and ergebnis.get("summary"):
                 antwort["hinweis"] = ergebnis["summary"]  # bereinigt in _bereinigen, ohne Pfad: warum sie nicht offen ist
-            await params.result_callback(antwort)
-            return
-        await params.result_callback({"status": ergebnis.get("status", "error"), "summary": ergebnis.get("summary", "")})
+            return antwort
+        return {"status": ergebnis.get("status", "error"), "summary": ergebnis.get("summary", "")}
+
+    async def nach_freigabe(self, argumente: dict) -> dict:
+        """Nach dem Ja auf der Karte des Kerns (nur Mitglieder nach Fremdinhalt, pc_mitglied.py; pc_freigaben.PcFreigaben, kern_ausfuehrer):
+        derselbe Weg wie das Werkzeug. PcFreigaben gibt dem Modell nur status und summary weiter, deshalb nennt summary Datei und Ordner."""
+        antwort = await self.werkzeug_ergebnis(argumente)
+        if antwort.get("status") == "success":
+            offen = " und geöffnet" if antwort.get("geoeffnet") else ", nicht geöffnet"
+            antwort["summary"] = f"{antwort.get('datei', '')} im Ordner {antwort.get('ordner', '')} gespeichert{offen}"
+        return antwort
 
     async def exportieren(self, fmt: object, *, canvas_id: object = None, titel: str | None = None, oeffnen: bool = True,
                           quelle: str) -> dict:
@@ -259,6 +281,8 @@ class OfficeDateien:
         params = {"format": fmt, "canvas_id": canvas_id, "quelle": quelle}
         resultat = {"status": ergebnis["status"], "datei": datei.get("name", ""), "groesse": datei.get("groesse", 0),
                     "sha256": str(datei.get("sha256", ""))[:16]}
+        if self._knapp:  # Mitglieder: der Dateiname kommt aus dem Titel des Canvas, also kein Wortlaut in actions
+            del resultat["datei"]
         db = self.memory.db
         try:
             await db.execute(

@@ -855,7 +855,7 @@ function aktualisiereTray() {
         ],
       },
       {
-        // Standard aus; nur die Person am Laptop schaltet es ein (mit Einwilligung), nur auf dem Laptop eines Admins
+        // Standard aus; nur die Person am Laptop schaltet es ein (mit Einwilligung), auf dem Laptop eines Admins oder Mitglieds
         label: live.an ? "Live-Bild ausschalten (läuft)" : "Live-Bild einschalten …",
         click: () => void liveBildUmschalten(),
       },

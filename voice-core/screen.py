@@ -6,13 +6,14 @@ auf_bildschirm_klicken(ziel, ...)   Bildmodell findet das Element, Host klickt d
                                     Der Host prüft vor dem Klick selbst, ob das Zielfenster erlaubt ist.
 
 Bildinhalte sind Daten: Text auf dem Bildschirm (Webseiten, Mails) ist keine Anweisung.
-Nur für Profile mit der Rolle admin (bot.py).
+Nur für Profile mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder freigeschaltetes Mitglied, bot.py); bei Mitgliedern prüft
+pc_mitglied.py vorher Stimmabdruck und Fremdinhalt, ein Klick nach Fremdinhalt läuft erst nach der Karte (bildschirm_klicker).
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from loguru import logger
 
@@ -177,7 +178,7 @@ async def _click(pc_client, ziel: str, arguments: dict, zugang: Zugang) -> dict:
     raw = await call_host_tool(pc_client, "maus_klicken", {
         "x": x, "y": y,
         "taste": "rechts" if arguments.get("rechtsklick") else "links",
-        "doppelt": bool(arguments.get("doppelt")),
+        "doppelt": arguments.get("doppelt") is True,  # ein String "false" ist kein Doppelklick
         # für die Freigabekarte bei Klicks in Mail und Messenger: was das Bildmodell dort sieht
         "beschreibung": str(found.get("was", ""))[:200],
     })
@@ -196,6 +197,36 @@ async def _click(pc_client, ziel: str, arguments: dict, zugang: Zugang) -> dict:
 PC_OFF = {"status": "rejected", "summary": "Die PC-Steuerung ist aus. Sie lässt sich in der Oberfläche einschalten."}
 # Eigener, fester Text statt der Antwort vom PC (die Meldung des Hosts ist gleichbedeutend)
 GESPERRT_TEXT = "Der Bildschirm ist gesperrt. Entsperren kann nur die Person selbst, W.A.I.S. kann das nicht."
+
+
+def bildschirm_klicker(
+    get_pc_client,
+    allowed: Callable[[], bool] = lambda: True,
+    on_foreign_content: Callable[[], None] = lambda: None,
+    *,
+    zugang: Zugang,
+) -> Callable[[dict], Awaitable[dict]]:
+    """Der Klick auf den Bildschirm als Funktion seiner Argumente: für das Werkzeug auf_bildschirm_klicken und für Mitglieder nach dem Ja
+    auf der Karte des Kerns (pc_freigaben.PcFreigaben, kern_ausfuehrer). Das Bildmodell sucht das Ziel erst dann auf einem frischen Foto;
+    der Host prüft das Zielfenster und legt Klicks in Mail- und Messenger-Fenstern selbst als Karte vor."""
+
+    async def klicken(arguments: dict) -> dict:
+        client = get_pc_client()
+        ziel = str(arguments.get("ziel", "")).strip()[:300]
+        if not allowed():
+            return PC_OFF
+        if client is None or not ziel:
+            return {"status": "rejected", "summary": "Kein Ziel oder kein PC-Zugriff"}
+        on_foreign_content()
+        try:
+            return await _click(client, ziel, arguments, zugang)
+        except BildschirmGesperrt:
+            return {"status": "locked", "summary": GESPERRT_TEXT}
+        except Exception as e:  # Bildmodell, Host oder Antwort kaputt: Modell bekommt trotzdem ein Ergebnis
+            logger.warning("auf_bildschirm_klicken: {}", e)
+            return {"status": "error", "summary": "Bildschirm konnte nicht ausgewertet werden"}
+
+    return klicken
 
 
 def register_screen_tools(
@@ -234,24 +265,10 @@ def register_screen_tools(
             return
         await params.result_callback({"status": "success", "antwort": antwort})
 
+    klicken = bildschirm_klicker(get_pc_client, allowed, on_foreign_content, zugang=zugang)
+
     async def auf_bildschirm_klicken(params: FunctionCallParams):
-        client = get_pc_client()
-        ziel = str(params.arguments.get("ziel", "")).strip()[:300]
-        if not allowed():
-            await params.result_callback(PC_OFF)
-            return
-        if client is None or not ziel:
-            await params.result_callback({"status": "rejected", "summary": "Kein Ziel oder kein PC-Zugriff"})
-            return
-        on_foreign_content()
-        try:
-            result = await _click(client, ziel, params.arguments, zugang)
-        except BildschirmGesperrt:
-            result = {"status": "locked", "summary": GESPERRT_TEXT}
-        except Exception as e:  # Bildmodell, Host oder Antwort kaputt: Modell bekommt trotzdem ein Ergebnis
-            logger.warning("auf_bildschirm_klicken: {}", e)
-            result = {"status": "error", "summary": "Bildschirm konnte nicht ausgewertet werden"}
-        await params.result_callback(result)
+        await params.result_callback(await klicken(params.arguments if isinstance(params.arguments, dict) else {}))
 
     llm.register_function("bildschirm_ansehen", bildschirm_ansehen, timeout_secs=30)
     llm.register_function("auf_bildschirm_klicken", auf_bildschirm_klicken, timeout_secs=30)

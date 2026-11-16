@@ -78,7 +78,8 @@ Laptop, nur mit der Mitgliederliste und nur wenn es freigeschaltet ist; ein Labo
 fehlt" und "kein Modellzugang" und nennt je einen Satz, was zu tun ist.
 
 **Nicht-Ziele.** Selbstregistrierung, Passwort vergessen per Mail, Single Sign-on mit Microsoft, automatische Rollenvergabe, Admin-Rechte für Mitglieder,
-Bildschirm sehen und Office-Werkzeuge für Mitglieder (eigene Einwilligung nötig, später), Repos in Entwicklungsaufträgen der Mitglieder vor Folgepaket 1,
+Repos in Entwicklungsaufträgen der Mitglieder vor Folgepaket 1 (Bildschirm sehen und Office-Werkzeuge für Mitglieder waren bis zum 16.11.2026 ein Nicht-Ziel;
+seitdem gelten sie für den eigenen Laptop, siehe N10 und 4.5),
 Einrichtung im NSIS-Installer selbst (der Installer kennt keine Anmeldung; eingerichtet wird beim ersten Anmelden in der App), Änderungen an Laborcode.
 
 ## 2. IST und SOLL je Schritt
@@ -366,8 +367,25 @@ Bindung. Eine Pflichtfreigabe für jedes Gerät kostet Niko sieben Klicks und ve
   Host-Client (`host_client` bekommt die Stufe und filtert mit ihr, `voice-core/pc_host.py:212`, `:225`, `:243`, auch beim Nachholen `voice-core/bot.py:1310`), der
   Prompt (`build_system_prompt` bekommt die Stufe und einen eigenen Textblock für Mitglieder, statt `voice-core/persona.py:271` bis `:273` mit PowerShell und
   Bildschirm) und die Oberfläche (PC-Block und Schalter für freigeschaltete Mitglieder, `ui/src/lib/einstellungenAbschnitte.ts:157`, `ui/src/lib/usePcSchalter.ts`).
-- **Werkzeugliste:** `LLM_TOOLS_MITGLIED` in `voice-core/pc_host.py` = `LLM_TOOLS` ohne `powershell_lesen`, `git_klonen`, `github_repo_anlegen`. Bildschirm sehen
-  und klicken, Live-Bild, Office, Outlook, Teams und OneNote bleiben bei Admins.
+- **Werkzeugliste (geändert am 16.11.2026, N10):** Freigeschaltete Mitglieder bekommen für ihren eigenen Laptop dieselben PC-Werkzeuge wie Admins:
+  `pc_host.werkzeuge_fuer` gibt beiden Stufen `LLM_TOOLS` (also auch `powershell_lesen`, `git_klonen`, `github_repo_anlegen`), dazu Bildschirm sehen und klicken
+  (`screen.py`), Live-Bild (`bildstrom.py`, Fernanfrage `bild_fern.py`) und Office (`office_werkzeuge.py`, `outlook_werkzeuge.py`, `teams_werkzeuge.py`,
+  `onenote_werkzeuge.py`), jeweils nur mit dem Schalter am Server (`WAMO_OFFICE` usw.). Die eigene Liste `LLM_TOOLS_MITGLIED` und der eigene Prompt
+  `PC_MITGLIED_PROMPT` entfallen; Mitglieder bekommen den PC-Block der Admins und den Zusatz `PC_MITGLIED_ZUSATZ` (eigener Laptop, Stimmabdruck, Karte nach
+  Fremdinhalt). Wer Office und Live-Bild bekommt, entscheidet überall `rechte.pc_stufe` (`office_werkzeuge.pc_person`), nie die Rolle allein. Unverändert:
+  nur das eigene, gebundene Gerät, Freischaltung je Person, Laborprofile nie, Admin-Rechte am Server (Geräte freigeben, Gedächtnis, Konten) nur für Admins.
+- **Schutz der Mitglieder für alle PC-Werkzeuge (16.11.2026):** `pc_mitglied.MitgliedSchutz` gilt jetzt auch für die Werkzeuge, die der Kern selbst ausführt
+  (`KERN_WERKZEUGE`: `bildschirm_ansehen`, `auf_bildschirm_klicken`, `canvas_exportieren`, `outlook_senden`, `teams_nachricht`, `onenote_seite`), über
+  `kern_werkzeuge_absichern` nach dem Gate der Stimmprüfung. Einteilung: lesend ohne Karte (`LESEN_MITGLIED`, dazu `powershell_lesen`, das der Host nur als
+  reines Lesen ausführt und sonst selbst als Karte vorlegt, und `bildschirm_ansehen`), mit eigener Karte bei jedem Aufruf (`EIGENE_KARTE`: `github_repo_anlegen`
+  ist beim Host critical, Mail, Teams und OneNote legen ihre Karte immer an), alles andere ändernd (`AENDERN_MITGLIED`, auch `git_klonen`,
+  `auf_bildschirm_klicken`, `canvas_exportieren`): nach Fremdinhalt Karte des Kerns. Ein Klick auf den Bildschirm und eine Office-Datei laufen nach dem Ja
+  über ihren Ausführer (`PcFreigaben`, `kern_ausfuehrer`); das Bildmodell sucht das Ziel erst dann auf einem frischen Foto. Der Auftrag an den Boss mit der
+  Art `bild` fragt vor dem Foto denselben Schutz. In `actions` steht bei Mitgliedern auch für Office-Dateien kein Dateiname (`knapp`).
+- **Live-Bild am Laptop eines Mitglieds (16.11.2026):** Host (`host/live_bild.py`) und Desktop-App (`desktop/livebild.js`) lassen das Live-Bild auch bei der
+  Stufe `mitglied` in `geraet.json` zu; Einwilligung, Schalter am Laptop, roter Rahmen, Herzschlag, ein Zuschauer und die Fernanfrage nur mit frischem Code
+  bleiben wie bei Admins. Ob jemand zusehen darf, entscheidet der Kern (Freischaltung je Person). Ein Host vor 0.4.0 meldet bei Mitgliedern weiter `stufe`;
+  dann sagt der Kern, dass der Laptop dafür die neue Version braucht.
 - **Prompt-Injection (S15):** Mitglieder behalten Lesewerkzeuge (`browser_lesen`, `element_lesen`) und ändernde Werkzeuge (`webseite_oeffnen`, `tastatur_tippen`),
   deren Klasse `change` heute ohne Karte läuft (`host/wamo_host.py:9` bis `:23`). Für Mitglieder verlangt der Kern deshalb nach Fremdinhalt im selben Zug
   (`turn.tainted`) auch für `change` eine Karte; die Lesewerkzeuge kommen erst mit diesem Schutz dazu. Eval-Fälle in `voice-core/eval/faelle.py`.
@@ -538,7 +556,10 @@ Admin-Rechte.
 **P4 PC-Steuerung für Mitglieder.** Tests zuerst: `voice-core/test_rechte.py` (Wertetabelle Rolle, Freischaltung, Labor), Erweiterung von
 `voice-core/test_labor_pc_unveraendert.py`, ein Test, dass `pc_steuerung` mit `an: true` für ein nicht freigeschaltetes Mitglied aus bleibt, Werkzeugliste eines
 Mitglieds exakt `LLM_TOOLS_MITGLIED` (auch nach dem Nachholen), Prompt eines Mitglieds ohne PowerShell und Bildschirm, Karte für `change` nach Fremdinhalt,
-Eval-Fälle. Review `security-reviewer` Pflicht.
+Eval-Fälle. Review `security-reviewer` Pflicht. Nachtrag 16.11.2026 (N10 geändert): Werkzeugliste eines Mitglieds gleich der Liste der Admins bei gleichen
+Schaltern (`voice-core/test_pc_mitglied.py`, `test_rechte.py`, `test_pc_geraet.py`), Office, Bildschirm und Live-Bild nur mit Freischaltung und Schalter,
+Laborprofile weiter ohne alles (`test_labor_pc_unveraendert.py`), Schutz für die Werkzeuge des Kerns, Karte und Ausführer für Klick und Datei, Prompt der
+Admins mit Zusatz, Eval-Fall g01 neu (Anweisung auf einer Webseite, PowerShell zu nutzen), Host- und App-Tests für das Live-Bild und die Texte der Karten.
 
 **P5 Entwicklungsaufträge für Mitglieder.** Tests zuerst: `voice-core/test_entwicklung_betrieb.py` und `voice-core/test_entwicklung_haertung.py` erweitert
 (Mitglied mit und ohne Schalter, nicht in der Liste, Laborprofil), Projektname mit Profilkennung auf beiden Seiten (`voice-core/test_kernkanal_vertrag.py`), fremder
@@ -646,6 +667,7 @@ nacheinander, je mit `bewaehren 30`. Der Cache des Merkers wird nur im antworten
 | P2 | 1. Ablage einrichten und Installer einsetzen. 2. Kern. 3. Oberfläche | Oberfläche und Kern zurück; Ablage bleibt (wirkungslos ohne Route) oder `wamo-verteilung-einrichten.sh rueckweg` |
 | P3 | 1. Installer 0.3.0 bauen, signieren, REA, einsetzen über P2. 2. Kern. 3. Oberfläche | Kern und Oberfläche zurück; App 0.3.0 bleibt nutzbar (Prüfliste fehlt nur) |
 | P4 | Kern-Release mit leerer Freischaltung, dann `wamo-core-env setzen WAMO_PC_MITGLIEDER_PROFILE <user_id>` für eine Pilotperson, nächster Kern-Release, Rauchprobe | sofort je Person: Gerät sperren; dann Liste leer und Kern-Release |
+| P4 Nachtrag 16.11.2026 (Werkzeuge der Admins für Mitglieder) | Kern-Release (wirkt sofort für alle Personen in `WAMO_PC_MITGLIEDER_PROFILE`; PowerShell, Git, GitHub und Bildschirm ohne weiteren Schalter, Office nur mit `WAMO_OFFICE`), Oberfläche; Live-Bild und die neuen Texte der Karten am Laptop erst mit Installer 0.4.0 | sofort je Person: Gerät sperren oder Person aus der Liste nehmen und Kern-Release; ganz: `rueckweg-kern` auf den Stand davor, Oberfläche `zurueck`; Installer 0.3.0 bleibt nutzbar (Mitglieder ohne Live-Bild) |
 | P5 | Kern-Release, Dispatcher, dann `wamo-job-kern-einrichten.sh schalter --mitglieder an` | sofort: `wamo-job-kern-rueckweg.sh notaus`; dann Schalter aus |
 | P6a, P6b | Proxy einrichten (Rauchtest mit Attrappe), LiteLLM-Schlüssel, Sandbox, Dispatcher, Kern-Release, Schalter `WAMO_ENTWICKLUNG_HAUS` | sofort: Proxy stoppen (Aufträge mit Hausmodellen scheitern geschlossen), dann Schalter aus |
 | P7 | Kern und Oberfläche; Codesignatur ab dem nächsten Installer | Übersicht über die Oberfläche zurück |
@@ -665,7 +687,7 @@ Ohne Antwort gilt die Empfehlung.
 | N7 | Entwicklungsaufträge mit Hausmodellen (D2): was gilt, wenn der Prüfauftrag schlecht ausfällt | Prüfauftrag zuerst mit `qwen3.6:35b` über LiteLLM; reicht die Qualität nicht, vorerst keine Entwicklungsaufträge für Kollegen ohne Token und Schlüssel, Gespräch und Stimme gelten trotzdem sofort |
 | N8 | Codesignatur des Installers (Zertifikat OV oder Signaturdienst von Microsoft, etwa 10 US-Dollar im Monat, V) | Ja, vor einer Ausgabe an mehr als die sieben Kollegen; bis dahin Prüfsumme auf dem Blatt und signiertes Manifest |
 | N9 | Downloadweg bis P2 (das Repo wird privat) | Ordner der Firma nur für Mitarbeiter, Prüfsumme auf dem Blatt |
-| N10 | PC-Werkzeuge der Mitglieder: Liste ohne PowerShell lesen, Git klonen, Repo anlegen, ohne Bildschirm und Office; Sprache nur mit Stimmabdruck (damit wird der Abdruck für gesprochene PC-Befehle Pflicht, heute ist er freiwillig) | Ja, so; der Abdruck wird ein Schritt der Prüfliste |
+| N10 | PC-Werkzeuge der Mitglieder: Liste ohne PowerShell lesen, Git klonen, Repo anlegen, ohne Bildschirm und Office; Sprache nur mit Stimmabdruck (damit wird der Abdruck für gesprochene PC-Befehle Pflicht, heute ist er freiwillig) | Ja, so; der Abdruck wird ein Schritt der Prüfliste. **Geändert am 16.11.2026**, Niko wörtlich zur Regel "Nie für Kollegen: PowerShell, Git und GitHub, Bildschirmbild, Live-Bild und Office": "DAS SOLLTE FÜR KOLLEGEN AUCH MÖGLICH SEIN FÜR IHREN LAPTOP!" Seitdem bekommen freigeschaltete Mitglieder für ihren eigenen Laptop dieselben PC-Werkzeuge wie Admins (jeweils nur mit dem Schalter am Server); Stimmabdruck als Pflicht, Karte nach Fremdinhalt, Freischaltung je Person und Laborprofile nie bleiben (4.5, 11.1) |
 | N11 | Bleiben die sieben Kollegen Mitglieder (nicht Admin)? | Ja |
 | N12 | Signaturschlüssel für Updates: Hardware-Token (zum Beispiel ein FIDO2- oder PIV-Schlüssel) statt Datei auf dem Bau-Laptop | Ja, ein eigenes Token nur dafür, bei dir verwahrt |
 | N13 | Kapazität der Entwicklungsaufträge: ein Auftrag gleichzeitig für alle, Warteschlange mit höchstens einem wartenden Auftrag je Person | Ja; mehr Parallelität erst mit eigenem Netz-Namensraum je Auftrag (eigenes Paket) |
@@ -712,6 +734,27 @@ Zwei unabhängige Reviews des Entwurfs vom 15.11.2026 (Agent `security-reviewer`
 | 17 | mittel | Auth-Neustart vor Kernfreigabe, nie in der Labor-Woche; sieben Konten sofort sperrbar | Abschnitt 8 und 9, N4 |
 | 18 | gering | Station 5 fragte Token und Schlüssel doppelt; Offboarding fehlte; Übersicht braucht eigene Funktion; Modellname | Station 5 gekürzt, `austreten`, P7, Namensangleich (3, 4.1, 4.7) |
 
+### 11.1 Nachtrag 16.11.2026: Werkzeuge der Admins für Mitglieder (N10 geändert)
+
+Review `security-reviewer` und `python-reviewer` des Zweigs `feat/mitglieder-werkzeuge`, nur lesend. Urteil Sicherheit: **kein CRITICAL, zwei HIGH**; Python:
+kein CRITICAL, kein HIGH.
+
+**Abwägung.** Seit dem 16.11.2026 beruht der Schutz der Mitglieder nicht mehr auf einer engen Werkzeugliste, sondern auf drei Schichten im Kern: Stimmabdruck als
+Pflicht für gesprochene PC-Befehle, eine Karte für jede Änderung am Laptop nach Inhalten von außen und die Karten des Hosts für alles Kritische (PowerShell, das
+nicht rein liest, GitHub, Senden, Klicks in Mail und Messenger). Restrisiken sind der Mensch, der eine Karte ungeprüft bestätigt, und Fremdinhalt, der länger
+im Gesprächsverlauf bleibt als die Nachwirkung von zwei Beiträgen (`NACHWIRKUNG_ZUEGE`). Das gilt bei Admins gleich, trifft bei Mitgliedern aber weniger geübte
+Freigebende. Lesen am Laptop (PowerShell, Bildschirm) gibt Inhalte an das Modell des Profils weiter (eigener Zugang oder Hausmodell); der Datenschutz gehört
+deshalb zur Freischaltung je Person.
+
+| Nr | Stufe | Befund | Stand |
+| --- | --- | --- | --- |
+| 1 | HIGH | Karten des Hosts (PowerShell, GitHub, Klick) trugen nach Fremdinhalt keinen Hinweis, nur Mail-Karten | behoben: bei Mitgliedern trägt nach Fremdinhalt jede Karte außer der des Kerns `WARNUNG_FREMD` (`PcFreigaben`, `fremd_warnung`) |
+| 2 | HIGH | Die Kartenpflicht nach Fremdinhalt läuft nach zwei Beiträgen ab, der Fremdtext bleibt im Verlauf; danach gehen auch Klick auf den Bildschirm, `git_klonen` und `canvas_exportieren` ohne Karte | offen, Entscheidung für Niko: vorbestehend seit P4 (Befund M1, bewusst zwei Beiträge wegen zu vieler Rückfragen); Vorschlag des Reviews: für Mitglieder bis Sitzungsende |
+| 3 | MEDIUM | `SENSITIVE_READ` des Hosts lässt einige Pfade und Befehle als reines Lesen durch (zum Beispiel PSReadLine-Verlauf, Prozess-Befehlszeilen) | offen, eigener Host-Zweig |
+| 4 | MEDIUM | Klickziel und Canvas-Inhalt werden erst nach dem Ja gesucht beziehungsweise gelesen | offen; der Host prüft Mail- und Messenger-Fenster weiter selbst |
+| 5 | MEDIUM | Bildschirmbild und Boss-Bild gehen an das Bildmodell ohne eigene Einwilligung | offen, Entscheidung für Niko (Schalter am Server oder Einwilligung am Laptop, AVV) |
+| 6 bis 9 | LOW | Doppelklick aus einem Text, Stufenprüfung des Hosts beim Live-Bild fast wirkungslos, parallele Aufrufe vor dem Vormerken, Absenderkonto in actions bei Mail | Doppelklick behoben (`is True`), Rest offen |
+
 ## 12. Neue Namen (passend zum Namensvertrag in `CLAUDE.md`)
 
 | Bereich | Name |
@@ -722,7 +765,7 @@ Zwei unabhängige Reviews des Entwurfs vom 15.11.2026 (Agent `security-reviewer`
 | Kern, Module | `voice-core/erstanmeldung_api.py`, `voice-core/verteilung_api.py`, `voice-core/einrichtung_api.py`, `voice-core/rechte.py` |
 | Kern, Routen | `GET /wamo/api/erstanmeldung`, `POST /wamo/api/erstanmeldung/passwort` (Zweig A mit Sperre in Caddy, 6.2), `GET /wamo/api/installer`, `GET /wamo/api/installer/datei`, `GET /wamo/api/einrichtung/stand` |
 | Kern, Codes | `passwort_wechsel_noetig`, `startpasswort_abgelaufen`; Aktion `installer_download` in `actions`; Quelle `haus` in `entwicklung_quelle` |
-| Kern, Umgebung | `WAMO_PC_MITGLIEDER_PROFILE` (neu in der Erlaubnisliste von `wamo-core-env`, ersetzt `WAMO_PC_MITGLIEDER`), im Drop-in `WAMO_ENTWICKLUNG_MITGLIEDER` und `WAMO_ENTWICKLUNG_HAUS`; Liste `LLM_TOOLS_MITGLIED` in `voice-core/pc_host.py`; `SCHRANKEN_VERSION = 2` |
+| Kern, Umgebung | `WAMO_PC_MITGLIEDER_PROFILE` (neu in der Erlaubnisliste von `wamo-core-env`, ersetzt `WAMO_PC_MITGLIEDER`), im Drop-in `WAMO_ENTWICKLUNG_MITGLIEDER` und `WAMO_ENTWICKLUNG_HAUS`; Liste `LLM_TOOLS_MITGLIED` in `voice-core/pc_host.py` (seit 16.11.2026 entfallen, Mitglieder bekommen `LLM_TOOLS`); `SCHRANKEN_VERSION = 2` |
 | Server | Ablage `/var/lib/wamo-verteilung` (`aktuell.json`, `aktuell.json.sig`), Skript `wamo-verteilung-einrichten.sh`, Proxy `wamo-haus-proxy` (eigener Benutzer, Dienst, TCP-Port auf Loopback), Projektnamen `kern-<kennung>-<Name>` |
 | Skripte am PC | `scripts/wamo_installer_sokrates2.py`, `scripts/wamo-dist-signieren.cjs`, `wamo_nutzer.py` mit `freischalten`, `zuruecksetzen`, `umbenennen`, `sperren --schema`, `austreten`, `passwort` (Option Ü) |
 | Oberfläche und App | Abschnitt `start` ("Erste Schritte") in den Einstellungen, `ui/src/lib/erstanmeldung.ts`, `ui/src/lib/einrichtung.ts`, Brücke `window.wamoDesktop.version` und `update` |

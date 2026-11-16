@@ -2,7 +2,8 @@ import type { CanvasItem } from "@/components/Canvas";
 
 /**
  * Canvas als Datei am PC speichern (voice-core/office_werkzeuge.py, host/office_dateien.py): welche Knöpfe ein Canvas-Element zeigt und
- * was der Hinweis danach sagt. Die Oberfläche bietet nur an, was der Kern in betrieb.office meldet (Admin, PC-Steuerung an, Host kann es);
+ * was der Hinweis danach sagt. Die Oberfläche bietet nur an, was der Kern in betrieb.office meldet (Admin oder freigeschaltetes Mitglied,
+ * PC-Steuerung an, Host kann es);
  * geprüft wird trotzdem im Kern und im Host.
  */
 export const OFFICE_FORMATE = ["word", "excel", "powerpoint", "pdf", "csv", "markdown"] as const;

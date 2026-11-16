@@ -1,4 +1,5 @@
-"""Tests der Prüfung für die Fernanfrage des Live-Bilds (bild_fern.py): Token passt zur Sitzung, Admin, frischer Code."""
+"""Tests der Prüfung für die Fernanfrage des Live-Bilds (bild_fern.py): Token passt zur Sitzung, Stufe der PC-Steuerung (Admin oder
+freigeschaltetes Mitglied, nie ein Laborprofil), frischer Code."""
 
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ import time
 from types import SimpleNamespace
 
 import jwt
+import pytest
 
 import bild_fern
 
@@ -29,8 +31,14 @@ class Tor:
                                erstanmeldung="erledigt")
 
 
-def ich(user=USER, admin=True):
-    return SimpleNamespace(user_id=user, is_admin=admin)
+def ich(user=USER, admin=True, rolle=None, labor_art=None):
+    return SimpleNamespace(user_id=user, is_admin=admin, rolle=rolle or ("admin" if admin else "mitglied"), labor_art=labor_art)
+
+
+@pytest.fixture(autouse=True)
+def ohne_freischaltung(monkeypatch):
+    monkeypatch.delenv("WAMO_PC_MITGLIEDER_PROFILE", raising=False)
+    return monkeypatch
 
 
 async def pruefen(tok, tor):
@@ -54,6 +62,18 @@ async def test_fremdes_token_nicht_admin_oder_abgelehnt():
     assert await pruefen(token(), Tor(ich(user="99999999-2222-3333-4444-555555555555"))) == bild_fern.TEXT_FALSCH
     assert await pruefen(token(), Tor(ich(admin=False))) == bild_fern.TEXT_FALSCH
     assert await pruefen(token(), Tor(None)) == bild_fern.TEXT_FALSCH
+
+
+async def test_freigeschaltetes_mitglied_darf_den_eigenen_laptop_anfordern(ohne_freischaltung):
+    """Entscheidung Niko vom 16.11.2026: das Live-Bild auch für freigeschaltete Mitglieder, am eigenen Laptop, mit Einwilligung dort."""
+    assert await pruefen(token(), Tor(ich(admin=False))) == bild_fern.TEXT_FALSCH  # ohne Freischaltung nicht
+    ohne_freischaltung.setenv("WAMO_PC_MITGLIEDER_PROFILE", USER)
+    assert await pruefen(token(), Tor(ich(admin=False))) is None
+    assert await pruefen(token(), Tor(ich(admin=False, labor_art="platz"))) == bild_fern.TEXT_FALSCH  # ein Laborprofil nie
+    assert await pruefen(token(alter=500), Tor(ich(admin=False))) == bild_fern.TEXT_ALT  # frischer Code wie bei Admins
+    anderes = "99999999-2222-3333-4444-555555555555"
+    ohne_freischaltung.setenv("WAMO_PC_MITGLIEDER_PROFILE", f"{USER},{anderes}")
+    assert await pruefen(token(), Tor(ich(user=anderes, admin=False))) == bild_fern.TEXT_FALSCH  # nie ein fremdes Token
 
 
 async def test_ungueltige_eingaben_und_fehlendes_tor():

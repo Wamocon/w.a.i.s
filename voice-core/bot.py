@@ -5,7 +5,9 @@ Pipeline:  Mikrofon (WebRTC, Browser-AEC) -> Silero-VAD -> Soniox STT (Streaming
 
 Anmeldung: auth_gate.py prüft Token, zweiten Faktor und aktives Profil und schreibt die geprüfte
 Identität in runner_args.body["wamo"]. Fehlt sie, endet die Sitzung sofort; einen Weg ohne
-Anmeldung gibt es nicht. PC-Werkzeuge und Entwicklungsaufträge bekommt nur die Rolle admin. Laborprofile (labor.py, Testlabor) bekommen
+Anmeldung gibt es nicht. PC-Werkzeuge bekommt nur ein Profil mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder freigeschaltetes
+Mitglied am eigenen Laptop, mit denselben Werkzeugen und dem Schutz aus pc_mitglied.py), Entwicklungsaufträge Admins und freigeschaltete
+Mitglieder im Büro (entwicklung_betrieb.py). Laborprofile (labor.py, Testlabor) bekommen
 einen eigenen, engen Zweig: nur Zeit, Websuche und Canvas, kein Gedächtnis, kein PC, keine Entwicklung.
 
 Unterbrechungen:
@@ -45,26 +47,31 @@ Nachrichten von der Oberfläche:
   {"type": "freigabe", "data": {"job": "labor", "id", "entscheidung"}}
                                           Freigabe einer schreibenden Labor-Aktion (labor_freigaben.py; nur Laborprofile)
   {"type": "bildstrom", "data": {"aktion", ...}}
-                                          Live-Bild des eigenen Laptops (bildstrom.py; nur admin mit gebundenem Gerät)
+                                          Live-Bild des eigenen Laptops (bildstrom.py; nur mit Stufe der PC-Steuerung und
+                                          gebundenem Gerät)
   {"type": "canvas_export", "data": {"canvas_id", "format"}} und {"type": "datei_oeffnen", "data": {"kennung"}}
                                           eigenes Canvas-Element als Datei am PC speichern, gespeicherte Datei öffnen
-                                          (office_werkzeuge.py; nur admin mit WAMO_OFFICE=dateien, nie im Labor). Antwort an die
+                                          (office_werkzeuge.py; nur mit Stufe der PC-Steuerung und WAMO_OFFICE=dateien, nie im
+                                          Labor). Antwort an die
                                           Oberfläche: {"type": "datei", "ok", ...}; betrieb trägt dann "office" (Formate)
   {"type": "mail_vorbereiten", "data": {"canvas_id"?, "an", "cc", "betreff", "text", "anhang"?}} und
   {"type": "mail_zurueckholen", "data": {"id"}}
                                           Mail über Outlook am PC zur Freigabe vorbereiten, geplanten Versand zurückholen
-                                          (outlook_werkzeuge.py; nur admin mit WAMO_OFFICE=outlook, nie im Labor). Antworten:
+                                          (outlook_werkzeuge.py; nur mit Stufe der PC-Steuerung und WAMO_OFFICE=outlook, nie im
+                                          Labor). Antworten:
                                           {"type": "mail_antwort", "ok", ...} und {"type": "mail_versand", ...}; betrieb trägt "mail"
   {"type": "onenote_seite", "data": {"canvas_id"}}
                                           eigenes Canvas-Element als OneNote-Seite, erst nach der Freigabekarte (onenote_werkzeuge.py;
-                                          nur admin mit WAMO_OFFICE=onenote, nie im Labor). Antwort: {"type": "onenote", "ok", "text"}
+                                          nur mit Stufe der PC-Steuerung und WAMO_OFFICE=onenote, nie im Labor). Antwort:
+                                          {"type": "onenote", "ok", "text"}
   {"type": "canvas_aktiv", "data": {"canvas_id"}}
                                           offener Reiter auf dem Canvas (Kennung der Oberfläche oder null, canvas_sitzung.py): nur
                                           Elemente dieser Sitzung lassen sich überarbeiten; weicht er ab, bekommt das Modell einen
                                           Systemhinweis ohne Antwort (nie im Labor)
   {"type": "teams_vorbereiten", "data": {"an", "gruppenname"?, "text"}}
-                                          Teams-Chat mit vorbefülltem Text zur Freigabe vorbereiten (teams_werkzeuge.py; nur admin
-                                          mit WAMO_OFFICE=teams, nie im Labor; gesendet wird in Teams nur von der Person). Antwort:
+                                          Teams-Chat mit vorbefülltem Text zur Freigabe vorbereiten (teams_werkzeuge.py; nur mit
+                                          Stufe der PC-Steuerung und WAMO_OFFICE=teams, nie im Labor; gesendet wird in Teams nur
+                                          von der Person). Antwort:
                                           {"type": "teams_antwort", "ok", ...}; betrieb trägt "teams"
   {"type": "freigabe", "data": {...}}     sonst Freigabe für Entwicklungsaufträge (nur admin)
 Live-Untertitel: Pipecat sendet bot-output (mit Wortfortschritt aus den Soniox-Zeitstempeln) und
@@ -209,10 +216,10 @@ import teams_werkzeuge
 from pc_freigaben import PcFreigaben
 import pc_nachverbinden
 import rechte
-from pc_mitglied import AENDERN_MITGLIED, NACHWIRKUNG_ZUEGE, MitgliedSchutz
+from pc_mitglied import NACHWIRKUNG_ZUEGE, MitgliedSchutz, kern_erlaubt, kern_werkzeuge_absichern
 from pc_nachverbinden import PcNachholer, nachholen_moeglich
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
-from screen import PC_OFF, foto as screen_foto, register_screen_tools
+from screen import PC_OFF, bildschirm_klicker, foto as screen_foto, register_screen_tools
 from sitzungen import Sitzung, Sitzungen
 from soft_interrupt import (
     MeaningfulWordsUserTurnStartStrategy,
@@ -697,9 +704,11 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     is_admin = identity.is_admin
     # Stufe der PC-Steuerung (rechte.py): admin, mitglied (nur mit Freischaltung je Profil, WAMO_PC_MITGLIEDER_PROFILE) oder None; im Labor nie.
     pc_stufe = None if labor_sitzung else rechte.pc_stufe(identity)
+    # Bildschirm, Live-Bild und Office hängen an der Stufe (Admin oder, seit dem 16.11.2026, freigeschaltetes Mitglied), nie an der Rolle allein
+    pc_person = pc_stufe is not None
     # PC-Werkzeuge. Alter Weg: admin, im Büro zusätzlich an diesen PC gebunden (pc_host.py). Tunnel je Gerät
-    # (WAMO_PC_REGISTER=an): die Sitzung bekommt nur IHREN Laptop aus dem Geräteregister, sonst keine (pc_geraet.py); Mitglieder nur
-    # die engere Werkzeugliste (pc_host.LLM_TOOLS_MITGLIED) und den Schutz aus pc_mitglied.py.
+    # (WAMO_PC_REGISTER=an): die Sitzung bekommt nur IHREN Laptop aus dem Geräteregister, sonst keine (pc_geraet.py); Mitglieder dieselben
+    # Werkzeuge wie Admins (pc_host.werkzeuge_fuer) mit dem Schutz aus pc_mitglied.py.
     geraet_zugang = await pc_zugang(identity) if register_modus() and not labor_sitzung else None
     pc_enabled = False if labor_sitzung else (geraet_zugang is not None if register_modus() else pc_host_fuer(identity))
     # Steht der Tunnel beim Start noch nicht (App-Start, stiller Start, Neuaufbau), holt die Sitzung den Zugang nach (pc_nachverbinden.py):
@@ -849,17 +858,28 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         # Abgelöst oder Sperre verloren (Büro): sofort keine PC-Aktionen mehr, auch vor dem Trennen
         return bool(state["pc_steuerung"]) and state["geraet_ok"] and sitzung.pc_lease_haelt()
 
-    # Bildschirm sehen/klicken: Foto vom Host, Bildmodell entscheidet (siehe screen.py)
-    # Bildschirm sehen und klicken: Das Bild geht an das Bildmodell, deshalb nur für admin, bis die Einwilligung der
-    # Mitglieder geregelt ist (Bauplan S6)
-    screen_schemas = (register_screen_tools(llm, lambda: pc_client, pc_allowed, turn.taint, zugang=zugang)
-                      if pc_teile and is_admin else [])
+    # Mitglieder (pc_mitglied.py): Auch die PC-Werkzeuge, die der Kern selbst ausführt (Bildschirm, Office, Outlook, Teams, OneNote), fragen
+    # vorher den Schutz der Mitglieder (Stimmabdruck, wartende Karte, Karte nach Fremdinhalt), nach dem Gate der Stimmprüfung. Der Schutz
+    # entsteht weiter unten; bis dahin (und falls nie) geht nichts. Muss vor den register_function der Werkzeuge unten stehen.
+    mitglied_schutz: MitgliedSchutz | None = None
+    if pc_stufe == rechte.MITGLIED and pc_teile:
+        kern_werkzeuge_absichern(llm, lambda: mitglied_schutz, pc_allowed)
 
-    # Office-Dateien aus dem Canvas (office_werkzeuge.py): nur admin mit PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=dateien.
-    # Das Werkzeug läuft durch das Stimmabdruck-Gate (registriert nach werkzeuge_absichern); sein Schema kommt erst dazu, wenn der Host
-    # meldet, welche Formate gehen (attach_pc_tools). Speichern und Öffnen nur mit PC-Steuerung und gehaltener Sperre (pc_allowed).
-    office = (office_werkzeuge.OfficeDateien(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d))
-              if (pc_teile and is_admin and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
+    # Bildschirm sehen und klicken: Foto vom Host, Bildmodell entscheidet (siehe screen.py). Das Bild geht an das Bildmodell des Profils (eigener
+    # Zugang oder Hausmodell); seit dem 16.11.2026 auch für freigeschaltete Mitglieder am eigenen Laptop (Entscheidung Niko zu N10).
+    screen_schemas = (register_screen_tools(llm, lambda: pc_client, pc_allowed, turn.taint, zugang=zugang)
+                      if pc_teile and pc_person else [])
+    # Klick auf den Bildschirm als Funktion (Mitglieder: nach dem Ja auf der Karte des Kerns, pc_freigaben.PcFreigaben, kern_ausfuehrer)
+    bildschirm_klick = (bildschirm_klicker(lambda: pc_client, pc_allowed, turn.taint, zugang=zugang)
+                        if pc_teile and pc_person else None)
+
+    # Office-Dateien aus dem Canvas (office_werkzeuge.py): nur mit Stufe der PC-Steuerung und PC-Werkzeugen, nie im Labor, nur mit
+    # WAMO_OFFICE=dateien. Das Werkzeug läuft durch das Stimmabdruck-Gate (registriert nach werkzeuge_absichern); sein Schema kommt erst dazu,
+    # wenn der Host meldet, welche Formate gehen (attach_pc_tools). Speichern und Öffnen nur mit PC-Steuerung und gehaltener Sperre
+    # (pc_allowed). Mitglieder: in actions kein Dateiname (knapp).
+    office = (office_werkzeuge.OfficeDateien(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
+                                             knapp=pc_stufe == rechte.MITGLIED)
+              if (pc_teile and pc_person and not labor_sitzung and office_werkzeuge.fuer_sitzung(identity)) else None)
     if office is not None:
         office.register(llm)
     # OneNote-Seite aus dem Canvas (onenote_werkzeuge.py): dieselben Bedingungen, aber WAMO_OFFICE=onenote. Die Seite entsteht erst nach dem
@@ -867,41 +887,45 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # Der Klick "Als OneNote-Seite" bekommt seine Karte über die PC-Freigaben (freigaben steht weiter unten, gilt beim Klick längst).
     onenote = (onenote_werkzeuge.OneNoteSeiten(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
                                                karte=lambda a: freigaben.anfrage(a) if freigaben is not None else None)
-               if (pc_teile and is_admin and not labor_sitzung and onenote_werkzeuge.fuer_sitzung(identity)) else None)
+               if (pc_teile and pc_person and not labor_sitzung and onenote_werkzeuge.fuer_sitzung(identity)) else None)
     if onenote is not None:
         onenote.register(llm)
 
-    # Mail über Outlook am PC (outlook_werkzeuge.py): nur admin mit PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=outlook. Auch dieses
-    # Werkzeug läuft durch das Stimmabdruck-Gate; die Karte legt PcFreigaben an (unten verdrahtet), den Anhang exportiert office.
+    # Mail über Outlook am PC (outlook_werkzeuge.py): nur mit Stufe der PC-Steuerung und PC-Werkzeugen, nie im Labor, nur mit
+    # WAMO_OFFICE=outlook. Auch dieses Werkzeug läuft durch das Stimmabdruck-Gate; die Karte legt PcFreigaben an (unten verdrahtet), den
+    # Anhang exportiert office.
     mail = (outlook_werkzeuge.OutlookMail(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
                                           melden=lambda t: melde_llm(t), fremd=lambda: turn.tainted,
                                           exportieren=office.exportieren if office is not None else None,
                                           formate=(lambda: office.formate) if office is not None else (lambda: ()))
-            if (pc_teile and is_admin and not labor_sitzung and outlook_werkzeuge.fuer_sitzung(identity)) else None)
+            if (pc_teile and pc_person and not labor_sitzung and outlook_werkzeuge.fuer_sitzung(identity)) else None)
     if mail is not None:
         mail.register(llm)
 
-    # Teams-Nachricht am PC (teams_werkzeuge.py): nur admin mit PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=teams. Auch dieses
-    # Werkzeug läuft durch das Stimmabdruck-Gate; die Karte legt PcFreigaben an (unten verdrahtet). W.A.I.S. öffnet Teams nur, senden
-    # muss die Person selbst.
+    # Teams-Nachricht am PC (teams_werkzeuge.py): nur mit Stufe der PC-Steuerung und PC-Werkzeugen, nie im Labor, nur mit WAMO_OFFICE=teams.
+    # Auch dieses Werkzeug läuft durch das Stimmabdruck-Gate; die Karte legt PcFreigaben an (unten verdrahtet). W.A.I.S. öffnet Teams nur,
+    # senden muss die Person selbst.
     teams = (teams_werkzeuge.TeamsNachricht(identity, memory, client=lambda: pc_client, darf=pc_allowed, senden=lambda d: send(d),
                                             fremd=lambda: turn.tainted)
-             if (pc_teile and is_admin and not labor_sitzung and teams_werkzeuge.fuer_sitzung(identity)) else None)
+             if (pc_teile and pc_person and not labor_sitzung and teams_werkzeuge.fuer_sitzung(identity)) else None)
     if teams is not None:
         teams.register(llm)
 
     # WAMO Boss (boss.py): Aufgaben an Spezialisten verteilen; Karte unter Vorgänge, Ergebnis als Daten (turn.taint).
-    # Die Art "bild" gibt es nur mit PC-Steuerung und Rolle admin, wie bildschirm_ansehen.
+    # Die Art "bild" gibt es nur mit PC-Steuerung und Stufe der PC-Steuerung, wie bildschirm_ansehen. Bei Mitgliedern fragt das Foto vorher
+    # denselben Schutz wie bildschirm_ansehen (Stimmabdruck, wartende Karte): der Auftrag an den Boss ist kein PC-Werkzeug, das Foto schon.
     async def bildschirm_foto():
         if not pc_allowed():
             raise RuntimeError("PC-Steuerung aus")
+        if pc_stufe == rechte.MITGLIED and (mitglied_schutz is None or await mitglied_schutz.vorab("bildschirm_ansehen", {}) is not None):
+            raise RuntimeError("Bildschirmfoto für dieses Profil gerade nicht erlaubt")
         return await screen_foto(pc_client)
 
     # Labor: kein Boss (nicht in der Erlaubnisliste), er wird nicht einmal gebaut
     boss = None if labor_sitzung else Boss(
         zugang, senden=lambda d: send(d), melden=lambda t: melde_llm(t), fremdinhalt=turn.taint,
         gefaerbt=lambda: turn.tainted, auftraggeber=identity.name, canvas=lambda item: canvas_legen(item),
-        bild_quelle=bildschirm_foto if (pc_teile and is_admin) else None, vorgaenge=vorgaenge)
+        bild_quelle=bildschirm_foto if (pc_teile and pc_person) else None, vorgaenge=vorgaenge)
     if boss is not None:
         boss.register(llm)
         standard_tools += boss.schemas()
@@ -1120,17 +1144,18 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                      LLMMessagesAppendFrame(messages=[{"role": "user", "content": f"Systemhinweis: {text}"}],
                                                             run_llm=False)])
 
-    # Live-Bild des eigenen Laptops: nur Admin mit gebundenem Gerät (Tunnel je Gerät), PC-Steuerung an, Sperre gehalten
+    # Live-Bild des eigenen Laptops: nur mit Stufe der PC-Steuerung (Admin oder, seit dem 16.11.2026, freigeschaltetes Mitglied) und
+    # gebundenem Gerät (Tunnel je Gerät), PC-Steuerung an, Sperre gehalten. Einwilligung, Schalter und roter Rahmen entscheidet der Laptop.
     def zugangstor():
         import wamo_api  # erst hier: wamo_api wird nach bot.py geladen
         return wamo_api.gate_holen()
 
     bild = Bildstrom(
-        client=lambda: pc_client, darf=lambda: bool(is_admin and geraet_zugang is not None and pc_allowed()),
+        client=lambda: pc_client, darf=lambda: bool(pc_person and geraet_zugang is not None and pc_allowed()),
         senden=send, ansage=ansage, aufruf=call_host_tool,
         # Fernanfrage vom Handy: Token dieser Sitzung mit frischem Code des zweiten Faktors (bild_fern.py)
         fern_pruefen=bild_fern.pruefer(identity.user_id, zugangstor),
-    ) if (pc_teile and is_admin and (geraet_zugang is not None or pc_nachholen)) else None
+    ) if (pc_teile and pc_person and (geraet_zugang is not None or pc_nachholen)) else None
 
     async def set_sperre(gesperrt: bool) -> None:
         """Bildschirm am PC gesperrt oder entsperrt (Werkzeugergebnis, Tunnel-Probe, system_info)."""
@@ -1179,13 +1204,23 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             await task.queue_frames([LLMMessagesAppendFrame(messages=[{"role": "user", "content": text}], run_llm=True)])
 
     # Freigaben kritischer PC-Aktionen (pc_freigaben.py): nur mit PC-Werkzeugen; die Karte entsteht in activity.py
+    # Mitglieder: Werkzeuge des Kerns, die nach dem Ja auf einer Karte des Kerns laufen (Klick auf den Bildschirm, Office-Datei)
+    kern_ausfuehrer = {}
+    if pc_stufe == rechte.MITGLIED:
+        if bildschirm_klick is not None:
+            kern_ausfuehrer["auf_bildschirm_klicken"] = bildschirm_klick
+        if office is not None:
+            kern_ausfuehrer[office_werkzeuge.WERKZEUG] = office.nach_freigabe
     freigaben = PcFreigaben(
         memory, client=lambda: pc_client, melden=melde_llm, fremdinhalt=turn.taint, senden=send, von=identity.name,
         darf=lambda: darf_pc_freigeben(identity, pc_enabled, bool(state["pc_steuerung"]), sitzung.pc_lease_haelt())
         and bool(state["geraet_ok"]),  # wie pc_allowed: nach einem Entzug oder falschen Rechnernamen keine Freigabe mehr
         pc_name=lambda: state["pc_name"], markierung_von=markierung_von,
         # Mitglieder: Karten des Kerns nur für ihre ändernden Werkzeuge, im Protokoll nie Wortlaut, Adresse oder Titel
-        kern_erlaubt=AENDERN_MITGLIED if pc_stufe == rechte.MITGLIED else frozenset(), knapp=pc_stufe == rechte.MITGLIED,
+        kern_erlaubt=kern_erlaubt(kern_ausfuehrer) if pc_stufe == rechte.MITGLIED else frozenset(),
+        kern_ausfuehrer=kern_ausfuehrer, knapp=pc_stufe == rechte.MITGLIED,
+        # Mitglieder: nach Inhalten von außen trägt jede Karte (auch PowerShell, GitHub, Klick des Hosts) einen Hinweis
+        fremd_warnung=(lambda: turn.fremd_fuer_karte(NACHWIRKUNG_ZUEGE)) if pc_stufe == rechte.MITGLIED else None,
     ) if pc_teile else None
     # Mitglieder mit Freischaltung geben Aktionen am eigenen Laptop selbst frei (darf_pc_freigeben); ohne Stufe keine Karte, die ins Leere läuft
     if freigaben is not None and pc_stufe is not None:
@@ -1196,8 +1231,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         if teams is not None:  # Teams: Karte über dieselbe Freigabe (Job pc, Aktion teams), danach öffnet der Host nur den Chat
             teams.karte_anlegen = freigaben.anfrage
 
-    # Mitglieder (pc_mitglied.py): nur die engere Werkzeugliste, Pflichtstufe der Stimme (ohne Abdruck nur getippt, in jedem Modus) und nach
-    # Fremdinhalt im Zug auch für ändernde Werkzeuge eine Karte; die Karte merkt PcFreigaben vor, der Klick führt aus.
+    # Mitglieder (pc_mitglied.py): dieselben Werkzeuge wie Admins, aber Pflichtstufe der Stimme (ohne Abdruck nur getippt, in jedem Modus)
+    # und nach Fremdinhalt im Zug auch für ändernde Werkzeuge eine Karte; die Karte merkt PcFreigaben vor, der Klick führt aus. Gilt für die
+    # Werkzeuge des Hosts (gate_pc_tools, vorab) und die des Kerns (kern_werkzeuge_absichern oben).
     mitglied_schutz = (MitgliedSchutz(gate=stimme.gate if stimme is not None else None,
                                       fremd=lambda: turn.fremd_fuer_karte(NACHWIRKUNG_ZUEGE),
                                       vormerken=lambda k, w, a: freigaben is not None and freigaben.kern_vormerken(k, w, a),
@@ -1300,7 +1336,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         latenz = None
         if pc:
             pc_liste = list(pc.standard_tools)
-            if mitglied_schutz is not None:  # Mitglied: nur die engere Liste, auch wenn der Host mehr meldet (Host-Client filtert schon)
+            if mitglied_schutz is not None:  # Mitglied: nur die Liste der Stufe, auch wenn der Host mehr meldet (Host-Client filtert schon)
                 erlaubt = set(werkzeuge_fuer(pc_stufe))
                 pc_liste = [s for s in pc_liste if s.name in erlaubt]
             pc_schemas = gate_pc_tools(pc_liste, pc_allowed, turn.taint, doppel,
@@ -1476,7 +1512,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 await pc_nicht_nachgeholt()
             await send_betrieb()
         elif msg.type == "bildstrom":
-            # Live-Bild: ohne Admin, gebundenes Gerät und PC-Steuerung gibt es nichts (Bilder sendet nur bildstrom.py)
+            # Live-Bild: ohne Stufe der PC-Steuerung, gebundenes Gerät und PC-Steuerung gibt es nichts (Bilder sendet nur bildstrom.py)
             if bild is None:
                 await send({"type": "bildstrom", "zustand": "aus", "grund": "nicht_erlaubt", "text": BILD_NICHT_ERLAUBT})
             else:

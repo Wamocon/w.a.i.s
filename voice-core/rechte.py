@@ -1,8 +1,9 @@
 """Rechte für die PC-Steuerung an einer Stelle (Plan docs/ausrollen-neue-nutzer.md 4.5, Befund H1, Paket P4).
 
 pc_stufe(identity) liefert "admin", "mitglied" oder None. Jede Stelle, die über PC-Werkzeuge entscheidet, fragt diese Funktion:
-pc_geraet.pc_zugang_fuer (und damit der Host-Client über PcZugang.stufe), pc_nachverbinden.nachholen_moeglich und bot.py (Handler
-pc_steuerung, darf_pc_freigeben, Freigabekarten, Prompt, Schutz der Mitglieder in pc_mitglied.py).
+pc_geraet.pc_zugang_fuer (und damit der Host-Client über PcZugang.stufe), pc_nachverbinden.nachholen_moeglich, bot.py (Handler
+pc_steuerung, darf_pc_freigeben, Freigabekarten, Prompt, Bildschirm, Live-Bild, Schutz der Mitglieder in pc_mitglied.py),
+office_werkzeuge.pc_person (Dateien, Outlook, Teams, OneNote) und bild_fern.py (Fernanfrage des Live-Bilds).
 
   * None für jedes Laborprofil (ausdrücklich: Laborprofile haben die Rolle mitglied), für Mitglieder ohne Freischaltung und für jede
     unbekannte Rolle.
@@ -12,8 +13,11 @@ pc_steuerung, darf_pc_freigeben, Freigabekarten, Prompt, Schutz der Mitglieder i
     vom Server (wamo-core-env, wirkt mit dem nächsten Kern-Release); Standard leer heißt aus, so geht auch ein Pilot mit einer Person.
     Der frühere kernweite Schalter WAMO_PC_MITGLIEDER wirkt nicht mehr.
 
-Was ein Mitglied darf, ist enger als bei Admins (pc_host.LLM_TOOLS_MITGLIED, pc_mitglied.py): kein PowerShell, kein Git, kein GitHub, kein
-Bildschirm, kein Live-Bild, kein Office; gesprochene PC-Befehle nur mit eingelerntem Stimmabdruck (stimme_gate.pflicht_pruefen).
+Werkzeuge: Seit dem 16.11.2026 (Entscheidung Niko zu N10) bekommt ein freigeschaltetes Mitglied für seinen eigenen Laptop dieselben
+PC-Werkzeuge wie ein Admin (pc_host.werkzeuge_fuer): PowerShell lesen, Git und GitHub, Bildschirm, Live-Bild (mit Einwilligung und rotem
+Rahmen am Laptop) und Office, jeweils nur mit dem Schalter am Server. Enger als bei Admins bleibt der Schutz (pc_mitglied.py): gesprochene
+PC-Befehle nur mit eingelerntem Stimmabdruck (stimme_gate.pflicht_pruefen), nach Fremdinhalt eine Karte für jede Änderung am Laptop,
+in actions kein Wortlaut. Admin-Rechte am Server (Geräte freigeben, Gedächtnis, Konten) hängen nie an pc_stufe, sondern an der Rolle.
 """
 
 from __future__ import annotations

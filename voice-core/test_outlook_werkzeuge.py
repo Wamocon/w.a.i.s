@@ -120,8 +120,17 @@ def test_schalter(wert, an, monkeypatch):
     assert not om.fuer_sitzung(MITGLIED)
 
 
-def test_nie_im_labor_und_nie_fuer_mitglieder(monkeypatch):
+def test_freigeschaltetes_mitglied_bekommt_outlook(monkeypatch):
     monkeypatch.setenv("WAMO_OFFICE", "outlook")
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER_PROFILE", UID)
+    assert om.fuer_sitzung(MITGLIED)
+    om.OutlookMail(MITGLIED, Memory(), client=lambda: CLIENT, darf=lambda: True, senden=None, fremd=lambda: False)
+    assert not om.fuer_sitzung(LaborIdentity(UID, "Gast", "mitglied", "du"))
+
+
+def test_nie_im_labor_und_nie_fuer_mitglieder_ohne_freischaltung(monkeypatch):
+    monkeypatch.setenv("WAMO_OFFICE", "outlook")
+    monkeypatch.delenv("WAMO_PC_MITGLIEDER_PROFILE", raising=False)
     for art in ("platz", "schaufenster", "unbekannt"):
         assert not om.fuer_sitzung(LaborIdentity(UID, "Gast", "admin", "du", labor_art=art))
     for identitaet in (MITGLIED, LaborIdentity(UID, "Gast", "admin", "du")):
@@ -444,7 +453,8 @@ def test_bot_baut_outlook_nur_fuer_admin_ohne_labor():
     zeile = next(z for z in BOT.splitlines() if "OutlookMail(" in z)
     block = BOT[BOT.index(zeile) - 300: BOT.index(zeile) + 700]
     assert "outlook_werkzeuge.fuer_sitzung(identity)" in block
-    assert "is_admin" in block and "not labor_sitzung" in block and "pc_teile and is_admin" in block
+    assert "pc_person" in block and "not labor_sitzung" in block and "pc_teile and pc_person" in block
+    assert "is_admin" not in block  # die Stufe der PC-Steuerung entscheidet, nicht die Rolle allein
     # pc_teile: mit Client oder solange der Zugang zum Laptop nachgeholt werden kann (pc_nachverbinden.py), sonst nie
     assert "pc_teile = pc_client is not None or pc_nachholen" in BOT
     assert "darf=pc_allowed" in block and "fremd=lambda: turn.tainted" in block

@@ -915,8 +915,9 @@ ssh sokrates2 "cd ~/wamo-infra && sudo PYTHONDONTWRITEBYTECODE=1 WAMO_INFRA=\$HO
    15 s) prüft eine Wache, ob das Gerät noch aktiv ist; gesperrt, widerrufen oder drei Ausfälle des Registers beenden die
    PC-Steuerung der Sitzung. Mitglieder bekommen Werkzeuge nur mit ihrer `user_id` in `WAMO_PC_MITGLIEDER_PROFILE`
    (Freischaltung je Person, durch Komma getrennt, Standard leer; `voice-core/rechte.py`, Paket P4 aus
-   `docs/ausrollen-neue-nutzer.md`), und zwar nur `LLM_TOOLS_MITGLIED` (ohne PowerShell, Git, GitHub, Bildschirm, Live-Bild und
-   Office), gesprochene Befehle nur mit eingelerntem Stimmabdruck (sonst nur getippt) und nach Fremdinhalt im Zug auch für
+   `docs/ausrollen-neue-nutzer.md`), und zwar seit dem 16.11.2026 dieselben Werkzeuge wie Admins für den eigenen Laptop
+   (PowerShell lesen, Git, GitHub, Bildschirm, Live-Bild mit Einwilligung am Laptop ab Installer 0.4.0, Office nur mit
+   `WAMO_OFFICE`), gesprochene Befehle nur mit eingelerntem Stimmabdruck (sonst nur getippt) und nach Fremdinhalt im Zug auch für
    ändernde Werkzeuge mit Freigabekarte (`voice-core/pc_mitglied.py`). Laborprofile nie. Setzen nur über
    `printf 'WAMO_PC_MITGLIEDER_PROFILE=%s\n' '<user_id>[,<user_id>]' | sudo /usr/local/sbin/wamo-core-env setzen` (Werte nur über
    stdin), wirksam mit dem nächsten Kern-Release; Notaus je Person: Gerät in der Geräteverwaltung sperren, dann die Liste ohne die

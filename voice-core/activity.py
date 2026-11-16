@@ -56,12 +56,13 @@ APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
 FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote", "teams", "aendern")
 # Nur diese Werkzeuge können eine Freigabe-Anfrage liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
 # über onenote_seite_anfragen, onenote_werkzeuge.py; outlook_senden und teams_nachricht legen ihre Karte selbst über diese Funktion
-# an, outlook_werkzeuge.py und teams_werkzeuge.py; die ändernden Werkzeuge der Mitglieder über pc_mitglied.py)
+# an, outlook_werkzeuge.py und teams_werkzeuge.py; die ändernden Werkzeuge der Mitglieder über pc_mitglied.py, auch git_klonen und
+# canvas_exportieren, test_pc_mitglied.py prüft, dass jedes davon hier steht)
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
                                 "github_repo_anlegen", "onenote_seite", "outlook_senden", "teams_nachricht",
                                 "programm_oeffnen", "dark_mode", "fenster_fokussieren", "maus_scrollen", "oeffnen_mit",
-                                "ordner_anlegen"})
+                                "ordner_anlegen", "git_klonen", "canvas_exportieren"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
 FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails und Teams (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
