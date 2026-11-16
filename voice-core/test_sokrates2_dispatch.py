@@ -2871,7 +2871,7 @@ class KernKanalDispatchTests(unittest.TestCase):
         ping = self.ereignisse[-1]
         self.assertEqual(ping["version"], "9")
         self.assertEqual(ping["kanal"], "kern")
-        self.assertEqual(ping["parallel"], {"gesamt": 6, "profil": 3, "hart": 6})  # Standard der Datei ohne die Schlüssel MAX_PARALLEL*
+        self.assertEqual(ping["parallel"], {"gesamt": 1, "profil": 1, "hart": 6})  # Datei ohne die Schlüssel MAX_PARALLEL*: einer (Review)
         kk = ping["kernkanal"]
         self.assertTrue(kk["strikt"] and kk["offen"])
         self.assertEqual((kk["grund"], kk["arten"], kk["repos"]), (None, ["recherche", "review", "analyse", "sicherheit"], ["acme/test-repo"]))
