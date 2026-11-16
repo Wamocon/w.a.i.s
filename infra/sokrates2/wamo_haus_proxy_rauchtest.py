@@ -10,7 +10,7 @@ Proben:
             Abweisungen (Weg, Token, Modell, Budget) gehen nie an die Attrappe. Kein Netz, kein Schlüssel.
   dienst    wamo-haus-proxy läuft, lauscht nur auf 127.0.0.1:18090, weist ohne Token (401), falschen Weg (404) und GET (405) ab.
   rechte    litellm.key root:root 0400 und für wamo unlesbar; /run/wamo-haus 2750 wamo:wamo-haus-proxy.
-  echt      Tokendatei für einen Probe-Auftrag, eine Anfrage mit max_tokens 8 an qwen3.6-35b, 200 und message_stop, gezählte Token (nicht
+  echt      Tokendatei für einen Probe-Auftrag, eine Anfrage mit max_tokens 8 an wamo-haus-coder, 200 und message_stop, gezählte Token (nicht
             geschätzt) in verbrauch.jsonl, Datei wieder weg.
 Ausgabe: je Probe eine Zeile OK oder FEHLER, nie ein Inhalt, nie ein Schlüssel. Exit 0 nur, wenn alle Proben bestehen.
 """
@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wamo_haus_proxy as X  # noqa: E402
 
 PORT = 18090
-MODELL = "qwen3.6-35b"
+MODELL = "wamo-haus-coder"  # das Modell des Dispatchers (HAUS_MODELL)
 ORDNER = Path("/run/wamo-haus")
 SCHLUESSEL_DATEI = Path("/etc/wamo-haus-proxy/litellm.key")
 VERBRAUCH = Path("/var/lib/wamo-haus-proxy/verbrauch.jsonl")

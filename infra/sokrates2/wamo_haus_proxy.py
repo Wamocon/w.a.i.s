@@ -24,7 +24,7 @@ LiteLLM ging: bei Abbruch, Zeitgrenze oder fehlendem usage mindestens eine Schä
 Im Protokoll (stderr, Journal): Ergebnis, Auftrag, Weg, Modell, Status, Token, Dauer. Nie ein Inhalt, nie ein Token, nie der Schlüssel.
 
 Aufruf (durch wamo-haus-proxy.service):
-  python3 -I wamo_haus_proxy.py --listen 127.0.0.1:18090 --ziel http://192.168.178.75:4000 --modelle qwen3.6-35b \
+  python3 -I wamo_haus_proxy.py --listen 127.0.0.1:18090 --ziel http://192.168.178.75:4000 --modelle wamo-haus-coder,qwen3.6-35b \
       --auftraege /run/wamo-haus --verbrauch /var/lib/wamo-haus-proxy/verbrauch.jsonl --schluessel-datei "$CREDENTIALS_DIRECTORY/litellm.key"
 Nur Standardbibliothek.
 """
@@ -76,7 +76,7 @@ TAG_TOKEN_MAX = 30_000_000
 PROFIL_TAG_TOKEN_MAX = 10_000_000
 VERBINDUNGEN_MAX = 16  # offene Verbindungen insgesamt (der Körper wird erst nach dem Platz gelesen, aber Köpfe kosten auch Speicher)
 VERBINDUNGEN_JE_AUFTRAG = 4
-MAX_AUSGABE_TOKEN = 32768  # max_tokens wird darauf gekürzt (Kontext von qwen3.6:35b im Ollama des Gateways: 32768)
+MAX_AUSGABE_TOKEN = 32768  # max_tokens wird darauf gekürzt (die Hälfte des Kontexts von wamo-haus-coder, 65536)
 # Oberste Felder einer Anfrage: genau die, die Claude Code schickt (gemessen mit 2.1.303), plus die üblichen der Messages-API. Felder, mit
 # denen LiteLLM selbst gesteuert wird (fallbacks, api_base, extra_headers, mock_response, metadata.tags, litellm_*), kommen nie durch.
 FELDER_ERLAUBT = frozenset({"model", "messages", "system", "max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences",

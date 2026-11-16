@@ -2205,7 +2205,8 @@ class HausZugangTests(unittest.TestCase):
 
     def test_vertrag_mit_dem_proxy(self):
         self.assertEqual(D.HAUS_URL, "http://127.0.0.1:18090")
-        self.assertEqual(D.HAUS_MODELL, "qwen3.6-35b")
+        self.assertEqual(D.HAUS_MODELL, "wamo-haus-coder")
+        self.assertEqual(D.HAUS_MODELLE, ("wamo-haus-coder", "qwen3.6-35b"))
         self.assertIn(D.HAUS_MODELL, D.HAUS_MODELLE)
         for modell in D.HAUS_MODELLE:
             self.assertIsNotNone(D.MODELL_RE.fullmatch(modell), modell)  # passt durch die Prüfung der Kopfzeile
@@ -2293,7 +2294,7 @@ class HausZugangTests(unittest.TestCase):
                 self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:18090")
                 self.assertEqual(env["ANTHROPIC_API_KEY"], HAUS_TOKEN)
                 for name in D.HAUS_MODELL_VARIABLEN:
-                    self.assertEqual(env[name], "qwen3.6-35b")
+                    self.assertEqual(env[name], "wamo-haus-coder")
                 self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
                 for verboten in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_WORKSPACE_ID", "LITELLM_API_KEY",
                                  "WAMO_HAUS"):
@@ -2303,7 +2304,7 @@ class HausZugangTests(unittest.TestCase):
                 erlaubt = set(D.basis_env()) | HAUS_ENV_NAMEN | {wk.sandbox_name(n) for n in wk.zugangs_variablen(art)}
                 self.assertLessEqual({k for k in env if not k.startswith("GIT_CONFIG_")}, erlaubt)
         self.assertEqual(D.sandbox_env("umsetzung", HAUS_GEHEIM, zugang=haus_zugang())["GH_TOKEN"], "ghp_cccccccccccc")  # Dienst-Token wie bisher
-        self.assertEqual(D.sandbox_env("review", {}, zugang=haus_zugang())["ANTHROPIC_DEFAULT_OPUS_MODEL"], "qwen3.6-35b")  # Standard
+        self.assertEqual(D.sandbox_env("review", {}, zugang=haus_zugang())["ANTHROPIC_DEFAULT_OPUS_MODEL"], "wamo-haus-coder")  # Standard
         # die anderen Zugangsarten bekommen nichts davon, auch nicht die Basis-URL aus geheim.env
         for zugang in (None, D.ClaudeZugang("oauth", OAUTH_WERT, None, "1a2b3c4d"), D.ClaudeZugang("api", API_WERT, None, "1a2b3c4d")):
             env = D.sandbox_env("review", HAUS_GEHEIM, zugang=zugang)
@@ -2311,7 +2312,7 @@ class HausZugangTests(unittest.TestCase):
 
     def test_modell_bei_haus_nur_aus_der_eigenen_liste(self):
         for art in wk.AUFTRAGSARTEN:
-            self.assertEqual(D.modell_waehlen(art, None, "haus"), "qwen3.6-35b")
+            self.assertEqual(D.modell_waehlen(art, None, "haus"), "wamo-haus-coder")
         self.assertEqual(D.modell_waehlen("umsetzung", "qwen3.6-35b", "haus"), "qwen3.6-35b")
         for wunsch in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5", "qwen3.6-35b-gross", "sokrates-steuer"):
             with self.subTest(wunsch=wunsch), self.assertRaises(ValueError):  # die Allowlist der Werkzeugkarte gilt hier nicht
@@ -2511,20 +2512,20 @@ class HausStartTests(unittest.TestCase):
         self.assertRegex(token, rf"^wh1-{JOB}-[0-9a-f]{{64}}$")
         self.assertEqual(env["ANTHROPIC_BASE_URL"], D.HAUS_URL)
         for name in D.HAUS_MODELL_VARIABLEN:
-            self.assertEqual(env[name], "qwen3.6-35b")
+            self.assertEqual(env[name], "wamo-haus-coder")
         self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
         for verboten in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "LITELLM_API_KEY"):
             self.assertNotIn(verboten, env)
         self.assertEqual([v for v in env.values() if "sk-ant-" in v or "sk-litellm" in v], [])
         self.assertEqual(env["GH_TOKEN"], "ghp_cccccccccccc")  # Dienst-Token der Art wie bisher
-        self.assertEqual(argv[argv.index("--model") + 1], "qwen3.6-35b")
+        self.assertEqual(argv[argv.index("--model") + 1], "wamo-haus-coder")
         self.assertNotIn(token, " ".join(argv))
         self.assertEqual(list(dateien), [f"{JOB}.json"])  # die Tokendatei liegt während des Laufs bereit ...
         daten = json.loads(dateien[f"{JOB}.json"])
         self.assertEqual((daten["hash"], daten["profil"], daten["max_token"], daten["job"]),
                          (hashlib.sha256(token.encode()).hexdigest(), "1a2b3c4d", 3_000_000, JOB))
         self.assertEqual(list(self.haus.iterdir()), [])  # ... und ist danach weg
-        self.assertTrue(any("claude=haus" in z and "modell=qwen3.6-35b" in z and "HAUS@1a2b3c4d" in z for z in self.logzeilen))
+        self.assertTrue(any("claude=haus" in z and "modell=wamo-haus-coder" in z and "HAUS@1a2b3c4d" in z for z in self.logzeilen))
         self.nirgends(token, NIKO_GEHEIM["ANTHROPIC_API_KEY"], NIKO_GEHEIM["CLAUDE_CODE_OAUTH_TOKEN"], HAUS_GEHEIM["LITELLM_API_KEY"])
 
     def test_jeder_lauf_bekommt_ein_neues_token(self):
