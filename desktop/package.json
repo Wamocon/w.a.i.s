@@ -1,6 +1,6 @@
 {
   "name": "wamo-desktop",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "W.A.I.S. als Desktop-Client: ungedrosseltes Gespräch, Markierung am Zielfenster, Autostart",
   "author": "WAMOCON GmbH",

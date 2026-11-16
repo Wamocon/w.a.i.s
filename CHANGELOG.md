@@ -6,14 +6,50 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.4.0] - 2026-11-16
+
 ### Hinzugefügt
 
+- Prüfliste "Erste Schritte" und signierte Updates der App (Paket P3)
+- Installer vom Server und Schritte Token und API-Schlüssel (Ausrollen P2)
+- Entwicklungsaufträge der Mitglieder, Trennung je Profil im Kern-Kanal (P5, Teil ohne bot.py)
+- Zugangsart haus für Entwicklungsaufträge mit Hausmodellen (P6b)
+- Proxy für Entwicklungsaufträge mit Hausmodellen und Ausnahme in der Sandbox (P6a)
 - Admin-Übersicht „Neue Mitglieder“ (Paket P7, `docs/ausrollen-neue-nutzer.md`): je Profil der letzten 90 Tage ohne
   Laborprofile (Daten nur als Datum, nie als Uhrzeit), wie weit die Einrichtung ist (angemeldet, zweiter Faktor, Passwort gewechselt, Laptop, Stimmabdruck, Art des Modellzugangs). Migration
   `0022_neue_mitglieder` mit der Lesefunktion `neue_mitglieder(p_admin)` (SECURITY DEFINER, nur `wamo_core`, nur Stände, nie
   Geheimnisse), Kern-Route `GET /wamo/api/admin/neue-mitglieder`, Abschnitt `mitglieder` in den Einstellungen.
 - Weg für die Codesignatur des Installers (Entscheidung N8): `npm run dist:signiert` verlangt die Signatur, `npm run dist:codesign`
   prüft Installer und `WAMO.exe` (Authenticode, Herausgeber „WAMOCON GmbH“). Ohne Zertifikat baut `npm run dist` wie bisher.
+- PC-Steuerung für freigeschaltete Mitglieder (Paket P4, Befund H1)
+- Entwicklungsaufträge der Mitglieder in der Sitzung (P5, Teil bot.py)
+- Ausrollen P1a, Erstanmeldung auf der Ebene des Kontos
+- Ausrollen P1b, Erstanmeldung im Kern und in der Oberfläche
+- Schritte Token und API-Schlüssel in der Erstanmeldung (Ausrollen P2, Nachtrag)
+- Entwicklungsaufträge mit Hausmodellen auf wamo-haus-coder mit 64k Kontext
+- Gleichzeitige Entwicklungsaufträge, sechs gesamt und drei je Person (Dispatcher 9)
+- Mitglieder bekommen für ihren Laptop dieselben PC-Werkzeuge wie Admins
+
+### Behoben
+
+- Verteilen der Oberfläche setzt die Zeit des Verteilens statt 0 (Test zuerst)
+- Anzeigename immer der volle Name, nie der Teil der E-Mail vor dem @ (Test zuerst)
+- Befunde der Reviews zu P2 (Downloadgrenze, Manifesttext, Rückweg)
+- Befunde der Reviews zu P3 eingearbeitet
+- Befunde des Sicherheitsreviews im Haus-Proxy (P6a)
+- Befunde des Sicherheitsreviews bei der Zugangsart haus (P6b)
+- Befunde des Datenbank-Reviews zu 0022 eingearbeitet
+- Befunde des Sicherheitsreviews zu P7 eingearbeitet
+- Befunde des Python-Reviews im Haus-Proxy (P6a)
+- Befunde des Python-Reviews bei der Zugangsart haus (P6b)
+- Startpasswort verdeckt eintippen statt ausgeben (CodeQL)
+- Gründe für Mitglieder in der Statusleiste, Prompt nur Recherche (P5, Reviews)
+- Befunde der Reviews zum Kern-Kanal der Mitglieder (P5)
+- Prüfliste fragt für die PC-Steuerung rechte.pc_stufe (nach P4)
+- Proxy nimmt bei voller Verbindungsgrenze zuerst den Kopf ab (P6a)
+- Mitglieder ohne eigene Kostengrenze, es gelten die Grenzen aus dem Drop-in
+- Eingabe im Schlüsselschritt geht beim Überspringen nicht mehr still verloren
+- Git_klonen und canvas_exportieren bekommen nur die Karte des Kerns
 
 ## [0.3.0] - 2026-11-15
 
@@ -773,7 +809,8 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.3.0...HEAD
+[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Wamocon/w.a.i.s/releases/tag/v0.1.0
