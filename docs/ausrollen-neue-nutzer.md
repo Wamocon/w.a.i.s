@@ -749,10 +749,10 @@ deshalb zur Freischaltung je Person.
 | Nr | Stufe | Befund | Stand |
 | --- | --- | --- | --- |
 | 1 | HIGH | Karten des Hosts (PowerShell, GitHub, Klick) trugen nach Fremdinhalt keinen Hinweis, nur Mail-Karten | behoben: bei Mitgliedern trägt nach Fremdinhalt jede Karte außer der des Kerns `WARNUNG_FREMD` (`PcFreigaben`, `fremd_warnung`) |
-| 2 | HIGH | Die Kartenpflicht nach Fremdinhalt läuft nach zwei Beiträgen ab, der Fremdtext bleibt im Verlauf; danach gehen auch Klick auf den Bildschirm, `git_klonen` und `canvas_exportieren` ohne Karte | offen, Entscheidung für Niko: vorbestehend seit P4 (Befund M1, bewusst zwei Beiträge wegen zu vieler Rückfragen); Vorschlag des Reviews: für Mitglieder bis Sitzungsende |
+| 2 | HIGH | Die Kartenpflicht nach Fremdinhalt läuft nach zwei Beiträgen ab, der Fremdtext bleibt im Verlauf; danach gehen auch Klick auf den Bildschirm, `git_klonen` und `canvas_exportieren` ohne Karte | behoben (Entscheidung Niko vom 16.11.2026: "Deine Empfehlung passt!"): für Mitglieder gilt die Kartenpflicht nach Fremdinhalt bis zum Ende der Sitzung (`pc_mitglied.NACHWIRKUNG_MITGLIED`, `TurnState.fremd_fuer_karte(None)`); Admins und Laborprofile unverändert |
 | 3 | MEDIUM | `SENSITIVE_READ` des Hosts lässt einige Pfade und Befehle als reines Lesen durch (zum Beispiel PSReadLine-Verlauf, Prozess-Befehlszeilen) | offen, eigener Host-Zweig |
 | 4 | MEDIUM | Klickziel und Canvas-Inhalt werden erst nach dem Ja gesucht beziehungsweise gelesen | offen; der Host prüft Mail- und Messenger-Fenster weiter selbst |
-| 5 | MEDIUM | Bildschirmbild und Boss-Bild gehen an das Bildmodell ohne eigene Einwilligung | offen, Entscheidung für Niko (Schalter am Server oder Einwilligung am Laptop, AVV) |
+| 5 | MEDIUM | Bildschirmbild und Boss-Bild gehen an das Bildmodell ohne eigene Einwilligung | behoben im Kern (Entscheidung Niko vom 16.11.2026: "Ja, setze A und B um"): Mitglieder geben das erste Bildschirmbild einer Sitzung per Karte des Kerns frei (Aktion `bildschirm`, `pc_mitglied.GRUND_BILD`, `BILD_WERKZEUGE`), nach dem Ja gilt es bis zum Ende der Sitzung, nach dem Nein gibt es kein Bild; das Boss-Bild nur nach dieser Einwilligung; Admins und Laborprofile unverändert. Teil B im Host folgt in einem eigenen Zweig |
 | 6 bis 9 | LOW | Doppelklick aus einem Text, Stufenprüfung des Hosts beim Live-Bild fast wirkungslos, parallele Aufrufe vor dem Vormerken, Absenderkonto in actions bei Mail | Doppelklick behoben (`is True`), Rest offen |
 
 ## 12. Neue Namen (passend zum Namensvertrag in `CLAUDE.md`)

@@ -31,7 +31,9 @@ HIER = pathlib.Path(__file__).parent
 # Werkzeuge, die der Kern selbst ausführt (auf_bildschirm_klicken, canvas_exportieren), über kern_ausfuehrer aus und warnt bei Mitgliedern
 # nach Fremdinhalt auf jeder Karte (fremd_warnung). darf_pc_freigeben bleibt unverändert, Laborprofile bekommen weiter nie eine Stufe, kein
 # Bildschirm, kein Live-Bild und kein Office (Tests unten).
-HASH_PC_FREIGABEN = "f7d8cb1feb0627ce86b3593f9376863929384202bdea445e0283f5325ad0929e"
+# 16.11.2026 (Entscheidungen Niko zu HIGH 2 und Befund 5 aus PR 165): pc_freigaben.py kennt die Karte des Kerns mit der Aktion
+# bildschirm (Einwilligung der Mitglieder für das Bildschirmbild, KERN_AKTIONEN); Admins und Laborprofile unverändert.
+HASH_PC_FREIGABEN = "ee5bae8fd313d4af3be4b7075419b881d7c69742d297e6815fd1ca33c821d1e5"
 HASH_PC_HOST = "bfdab8be2dd3e875b575291d668726dd513941f852dd4d94dc3a468ede9be6f7"
 HASH_DARF_PC_FREIGEBEN = "f2e90ef81b444e26b95408748e0158c298188332e1df46496dee83024b00252a"
 

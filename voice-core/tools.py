@@ -102,10 +102,15 @@ class TurnState:
         if nachwirkend:
             self.fremd_zug = self.person_zuege
 
-    def fremd_fuer_karte(self, nachwirkung: int) -> bool:
+    def fremd_fuer_karte(self, nachwirkung: int | None) -> bool:
         """Braucht eine Änderung am Laptop eines Mitglieds eine Karte? Ja bei Fremdinhalt im laufenden Zug und bis nachwirkung weitere
-        Beiträge der Person nach Inhalt aus einer nachwirkenden Fremdquelle (ein "mach weiter" nach einer Webseite)."""
-        return self.tainted or (self.fremd_zug is not None and self.person_zuege - self.fremd_zug <= nachwirkung)
+        Beiträge der Person nach Inhalt aus einer nachwirkenden Fremdquelle (ein "mach weiter" nach einer Webseite). nachwirkung None: bis
+        zum Ende der Sitzung (pc_mitglied.NACHWIRKUNG_MITGLIED)."""
+        if self.tainted:
+            return True
+        if self.fremd_zug is None:
+            return False
+        return nachwirkung is None or self.person_zuege - self.fremd_zug <= nachwirkung
 
     def section_tainted(self, start: int, end: int) -> bool:
         return any(start <= m <= end for m in self.taint_marks)

@@ -129,13 +129,46 @@ class Vormerken:
         return self.ok
 
 
-def schutz(fremd: bool = False, ok: bool = True, mit_gate: bool = True):
+def schutz(fremd: bool = False, ok: bool = True, mit_gate: bool = True, bild: bool = True):
+    """bild: die Einwilligung für das Bildschirmbild liegt schon vor (eigene Tests unten prüfen den Weg dorthin)."""
     g = gate()
     g.getippt()
     v = Vormerken(ok)
     s = pc_mitglied.MitgliedSchutz(gate=g if mit_gate else None, fremd=lambda: fremd, vormerken=v,
                                    kennung=lambda: "00112233aabbccdd")
+    if bild:
+        s.bild_einwilligen()
     return s, v, g
+
+
+# ---------- Einwilligung für das Bildschirmbild (Entscheidung Niko vom 16.11.2026 zu Befund 5) ----------
+@pytest.mark.parametrize("werkzeug", sorted(pc_mitglied.BILD_WERKZEUGE))
+async def test_erstes_bildschirmbild_braucht_die_einwilligung_danach_nicht_mehr(werkzeug):
+    s, v, _g = schutz(bild=False)
+    assert not s.bild_einwilligung
+    ergebnis = await s.vorab(werkzeug, {"frage": "Was ist offen?"})
+    assert ergebnis["status"] == "needs_approval" and ergebnis["aktion"] == pc_mitglied.AKTION_BILD
+    assert ergebnis["grund"] == pc_mitglied.GRUND_BILD and "KI-Modell" in ergebnis["grund"]
+    assert v.aufrufe == [("00112233aabbccdd", werkzeug, {"frage": "Was ist offen?"})]
+    anfrage = activity.freigabe_anfrage(werkzeug, {}, ergebnis, "call-1")  # activity.py macht daraus eine Karte
+    assert anfrage["aktion"] == pc_mitglied.AKTION_BILD and anfrage["grund"] == pc_mitglied.GRUND_BILD
+    s.bild_einwilligen()
+    assert await s.vorab("bildschirm_ansehen", {}) is None  # danach bis zum Ende der Sitzung ohne Karte
+    assert await s.vorab("bildschirm_ansehen", {}) is None
+
+
+async def test_ohne_einwilligung_auch_ohne_stimme_keine_karte():
+    s, v, g = schutz(bild=False)
+    g.uhr.t += 1
+    g.gesprochen()  # erst die Stimme, dann die Einwilligung: ohne Abdruck gesprochen gibt es nicht einmal die Karte
+    assert (await s.vorab("bildschirm_ansehen", {}))["status"] == "blocked" and v.aufrufe == []
+
+
+def test_karte_der_einwilligung_nur_mit_vormerkung_des_kerns():
+    ergebnis = {"status": "needs_approval", "approval_id": "0123456789abcdef", "aktion": "bildschirm", "grund": "x", "detail": "d"}
+    assert activity.freigabe_anfrage("bildschirm_ansehen", {}, ergebnis)["aktion"] == "bildschirm"
+    assert activity.freigabe_anfrage("bildschirm_ansehen", {}, dict(ergebnis, aktion="klicken")) is None
+    assert activity.freigabe_anfrage("tastatur_tippen", {}, dict(ergebnis)) is not None  # PcFreigaben verlangt dann die Vormerkung
 
 
 @pytest.mark.parametrize("werkzeug", NUR_KERN)
@@ -182,7 +215,8 @@ def test_kern_erlaubt_nur_mit_ausfuehrer_fuer_werkzeuge_des_kerns():
     assert ohne == pc_mitglied.AENDERN_MITGLIED - pc_mitglied.KERN_WERKZEUGE
     assert "git_klonen" in ohne and "auf_bildschirm_klicken" not in ohne and "canvas_exportieren" not in ohne
     mit = pc_mitglied.kern_erlaubt(["auf_bildschirm_klicken", "canvas_exportieren", "bildschirm_ansehen", "maus_klicken"])
-    assert mit == pc_mitglied.AENDERN_MITGLIED  # lesende oder fremde Namen öffnen nichts zusätzlich
+    # fremde Namen öffnen nichts zusätzlich, nur bildschirm_ansehen für die Karte der Einwilligung (Aktion bildschirm)
+    assert mit == pc_mitglied.AENDERN_MITGLIED | {"bildschirm_ansehen"}
 
 
 async def test_ohne_gate_geht_nichts():
@@ -288,6 +322,43 @@ def test_faerben_wirkt_nur_bei_lesenden_werkzeugen_nach():
     turn.taint()  # jede andere Quelle (Websuche, Boss, Freigabe) wirkt nach
     turn.new_user_turn("weiter")
     assert turn.fremd_fuer_karte(n)
+
+
+def test_mitglieder_karte_nach_fremdinhalt_bis_zum_ende_der_sitzung():
+    """Entscheidung Niko vom 16.11.2026 (Sicherheitsreview HIGH 2 aus PR 165): Für Mitglieder gilt die Kartenpflicht nach Inhalten aus
+    echten Fremdquellen bis zum Ende der Sitzung, nicht nur NACHWIRKUNG_ZUEGE Beiträge lang."""
+    from tools import TurnState
+
+    assert pc_mitglied.NACHWIRKUNG_MITGLIED is None  # None heißt: bis zum Ende der Sitzung
+    turn = TurnState()
+    turn.new_user_turn("Lies die Seite vor")
+    assert not turn.fremd_fuer_karte(pc_mitglied.NACHWIRKUNG_MITGLIED)  # vor dem ersten Fremdinhalt keine Karte
+    turn.taint()  # Webseite, Websuche, Bildschirm, Boss
+    for beitrag in range(1, 11):
+        turn.new_user_turn("Mach weiter")
+        assert turn.fremd_fuer_karte(pc_mitglied.NACHWIRKUNG_MITGLIED), beitrag  # auch nach 3 und nach 10 Beiträgen
+    # Ergebnisse ändernder Werkzeuge der Mitglieder (Status, Fenstertitel) färben weiter nur den laufenden Zug
+    eigen = TurnState()
+    eigen.new_user_turn("Öffne Notepad")
+    eigen.taint(nachwirkend=False)
+    assert eigen.fremd_fuer_karte(pc_mitglied.NACHWIRKUNG_MITGLIED)
+    eigen.new_user_turn("Tippe Hallo")
+    assert not eigen.fremd_fuer_karte(pc_mitglied.NACHWIRKUNG_MITGLIED)
+
+
+def test_die_nachwirkung_von_zwei_beitraegen_bleibt_wie_bisher():
+    """Mit einer Zahl bleibt TurnState.fremd_fuer_karte unverändert: nach 3 Beiträgen keine Karte mehr."""
+    from tools import TurnState
+
+    assert pc_mitglied.NACHWIRKUNG_ZUEGE == 2
+    turn = TurnState()
+    turn.new_user_turn("Lies die Seite vor")
+    turn.taint()
+    for _ in range(2):
+        turn.new_user_turn("Mach weiter")
+        assert turn.fremd_fuer_karte(pc_mitglied.NACHWIRKUNG_ZUEGE)
+    turn.new_user_turn("Und jetzt?")
+    assert not turn.fremd_fuer_karte(pc_mitglied.NACHWIRKUNG_ZUEGE)
 
 
 async def test_gate_pc_tools_faerbt_je_werkzeug_und_ruft_bei_ablehnung_nichts():
@@ -503,6 +574,24 @@ async def test_verlangt_der_host_beim_klick_des_kerns_eine_freigabe_gibt_es_eine
     ergebnis = await t.freigaben.entscheiden({"job": "pc", "id": AID, "entscheidung": "ja"})
     assert ergebnis["status"] == "wartet"
     assert [k["items"][0]["id"] for k in t.karten if k.get("type") == "freigaben"] == [zweite]
+
+
+async def test_einwilligung_ja_fuehrt_aus_nein_gibt_kein_bild(monkeypatch):
+    for entscheidung in ("ja", "nein"):
+        blick = Ausfuehrer({"status": "success", "summary": "Ein Browser mit der Startseite"})
+        t = Aufbau(monkeypatch, ausfuehrer={"bildschirm_ansehen": blick})
+        argumente = {"frage": "Was ist offen?"}
+        assert t.freigaben.kern_vormerken(AID, "bildschirm_ansehen", argumente)
+        ergebnis = {"status": "needs_approval", "approval_id": AID, "aktion": "bildschirm", "grund": pc_mitglied.GRUND_BILD,
+                    "detail": pc_mitglied.karten_detail("bildschirm_ansehen", argumente), "gueltig_s": 300}
+        karte = t.freigaben.anfrage(activity.freigabe_anfrage("bildschirm_ansehen", {}, ergebnis, "call-1"))
+        assert karte["items"][0]["grund"] == pc_mitglied.GRUND_BILD and "warnung" not in karte["items"][0]
+        await t.freigaben.entscheiden({"job": "pc", "id": AID, "entscheidung": entscheidung})
+        if entscheidung == "ja":
+            assert blick.aufrufe == [argumente] and "Startseite" in t.meldungen[-1]
+        else:
+            assert blick.aufrufe == [] and "abgelehnt" in t.meldungen[-1] and "das Ansehen des Bildschirms" in t.meldungen[-1]
+        assert t.gedaechtnis.protokoll[0]["params"] == {"approval_id": AID, "aktion": "bildschirm", "werkzeug": "bildschirm_ansehen"}
 
 
 async def test_ausfuehrer_mit_ausnahme_heisst_klares_ergebnis(monkeypatch):
@@ -776,6 +865,129 @@ async def test_karte_nach_fremdinhalt_und_ausfuehrung_erst_nach_dem_klick(freige
         type="freigabe", data={"job": "pc", "id": ergebnisse[0]["approval_id"], "entscheidung": "ja"}))
     await abwarten()
     assert host.aufrufe == [("programm_oeffnen", {"name": "notepad"})]
+    await session.cleanup()
+
+
+@pytest.mark.parametrize("beitraege", [3, 10])
+async def test_sitzung_mitglied_karte_auch_viele_beitraege_nach_fremdinhalt(freigeschaltet, beitraege):
+    zugang = pc_zugang_test()
+    zugang.stufe = "mitglied"
+    Lage(freigeschaltet, [zugang])
+    host = Host()
+    freigeschaltet.setattr(pc_host, "call_host_tool", host)
+    session, stufen, _llm = await bauen(mitglied())
+    await klick(session, True)
+    nutzer = next(p for p in stufen if isinstance(p, LLMUserAggregator))
+    schema = next(s for s in nutzer.context.tools.standard_tools if isinstance(s, FunctionSchema) and s.name == "programm_oeffnen")
+    session.turn.new_user_turn("Was steht auf der Seite?")
+    session.turn.taint()  # etwa browser_lesen
+    for _ in range(beitraege):
+        session.turn.new_user_turn("Mach weiter")
+    session.stimme.gate.getippt()
+    ergebnis = await aufrufen(schema.handler, "programm_oeffnen", {"name": "notepad"})
+    assert ergebnis[0]["status"] == "needs_approval" and host.aufrufe == []
+    await session.cleanup()
+
+
+async def test_sitzung_mitglied_bildschirm_einmal_einwilligen(freigeschaltet):
+    import screen
+
+    zugang = pc_zugang_test()
+    zugang.stufe = "mitglied"
+    Lage(freigeschaltet, [zugang])
+    fotos = []
+
+    async def beschreiben(_client, frage, _zugang, _fenster=""):
+        fotos.append(frage)
+        return "Ein Editor ist offen"
+
+    freigeschaltet.setattr(screen, "describe", beschreiben)
+    session, stufen, llm = await bauen(mitglied())
+    await klick(session, True)
+    session.stimme.gate.getippt()
+    handler = llm._functions["bildschirm_ansehen"].handler
+    erstes = await aufrufen(handler, "bildschirm_ansehen", {"frage": "Was ist offen?"})
+    assert erstes[0]["status"] == "needs_approval" and erstes[0]["aktion"] == "bildschirm" and fotos == []
+    reporter = next(p for p in stufen if isinstance(p, activity.ActivityReporter))
+    karte = reporter.on_freigabe(activity.freigabe_anfrage("bildschirm_ansehen", {"frage": "Was ist offen?"}, erstes[0], "call-1"))
+    assert karte["items"][0]["grund"] == pc_mitglied.GRUND_BILD
+    await session.task.rtvi._call_event_handler("on_client_message", types.SimpleNamespace(
+        type="freigabe", data={"job": "pc", "id": erstes[0]["approval_id"], "entscheidung": "ja"}))
+    await abwarten()
+    assert fotos == ["Was ist offen?"]  # nach dem Ja das angefragte Bild
+    zweites = await aufrufen(handler, "bildschirm_ansehen", {"frage": "Und jetzt?"})
+    assert zweites == [{"status": "success", "antwort": "Ein Editor ist offen"}] and fotos == ["Was ist offen?", "Und jetzt?"]
+    await session.cleanup()
+
+
+async def test_sitzung_mitglied_nein_kein_bild(freigeschaltet):
+    import screen
+
+    zugang = pc_zugang_test()
+    zugang.stufe = "mitglied"
+    Lage(freigeschaltet, [zugang])
+    fotos = []
+
+    async def beschreiben(_client, frage, _zugang, _fenster=""):
+        fotos.append(frage)
+        return "x"
+
+    freigeschaltet.setattr(screen, "describe", beschreiben)
+    session, stufen, llm = await bauen(mitglied())
+    await klick(session, True)
+    session.stimme.gate.getippt()
+    handler = llm._functions["bildschirm_ansehen"].handler
+    erstes = await aufrufen(handler, "bildschirm_ansehen", {"frage": "Was ist offen?"})
+    reporter = next(p for p in stufen if isinstance(p, activity.ActivityReporter))
+    reporter.on_freigabe(activity.freigabe_anfrage("bildschirm_ansehen", {"frage": "Was ist offen?"}, erstes[0], "call-1"))
+    await session.task.rtvi._call_event_handler("on_client_message", types.SimpleNamespace(
+        type="freigabe", data={"job": "pc", "id": erstes[0]["approval_id"], "entscheidung": "nein"}))
+    await abwarten()
+    assert fotos == []
+    nochmal = await aufrufen(handler, "bildschirm_ansehen", {"frage": "Was ist offen?"})
+    assert nochmal[0]["status"] == "needs_approval" and fotos == []  # ohne Ja nie ein Bild, die Frage kommt wieder
+    await session.cleanup()
+
+
+async def test_sitzung_admin_bildschirm_ohne_karte(buero):  # noqa: F811
+    import screen
+
+    zugang = pc_zugang_test()
+    zugang.stufe = "admin"
+    Lage(buero, [zugang])
+    fotos = []
+
+    async def beschreiben(_client, frage, _zugang, _fenster=""):
+        fotos.append(frage)
+        return "Ein Editor ist offen"
+
+    buero.setattr(screen, "describe", beschreiben)
+    session, _stufen, llm = await bauen(Identity(USER, "Niko", "admin", "du"))
+    await klick(session, True)
+    session.stimme.gate.getippt()
+    ergebnis = await aufrufen(llm._functions["bildschirm_ansehen"].handler, "bildschirm_ansehen", {"frage": "Was ist offen?"})
+    assert ergebnis == [{"status": "success", "antwort": "Ein Editor ist offen"}] and fotos == ["Was ist offen?"]
+    await session.cleanup()
+
+
+async def test_sitzung_admin_ohne_karte_des_kerns_nach_drei_beitraegen(buero):  # noqa: F811
+    zugang = pc_zugang_test()
+    zugang.stufe = "admin"
+    buero.setenv("WAMO_WERKZEUG_DOPPELT", "aus")  # die Doppelwache braucht echte Parameter von Pipecat, hier geht es nur um die Karte
+    Lage(buero, [zugang])
+    host = Host()
+    buero.setattr(pc_host, "call_host_tool", host)
+    session, stufen, _llm = await bauen(Identity(USER, "Niko", "admin", "du"))
+    await klick(session, True)
+    nutzer = next(p for p in stufen if isinstance(p, LLMUserAggregator))
+    schema = next(s for s in nutzer.context.tools.standard_tools if isinstance(s, FunctionSchema) and s.name == "programm_oeffnen")
+    session.turn.new_user_turn("Was steht auf der Seite?")
+    session.turn.taint()
+    for _ in range(3):
+        session.turn.new_user_turn("Mach weiter")
+    session.stimme.gate.getippt()
+    ergebnis = await aufrufen(schema.handler, "programm_oeffnen", {"name": "notepad"})
+    assert ergebnis == [{"status": "success"}]  # Admins: wie bisher keine Karte des Kerns, das Werkzeug läuft
     await session.cleanup()
 
 

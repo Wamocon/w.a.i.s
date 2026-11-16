@@ -55,8 +55,9 @@ MAX_ERGEBNIS_ZEICHEN = 800  # so viel vom Ergebnis des PCs bekommt das Sprachmod
 SCHLIESSEN_TIMEOUT_SECS = 3.0
 AKTION_TEXT = {"powershell": "den PowerShell-Befehl", "senden": "das Senden", "webseite": "das Öffnen der Webseite",
                "klicken": "den Klick", "github": "das Anlegen des GitHub-Repositorys", "mail": "die Mail",
-               "teams": "das Öffnen des Teams-Chats", "aendern": "die Änderung am Laptop"}
+               "teams": "das Öffnen des Teams-Chats", "aendern": "die Änderung am Laptop", "bildschirm": "das Ansehen des Bildschirms"}
 KERN_AKTION = "aendern"  # Freigabe des Kerns (pc_mitglied.py)
+KERN_AKTIONEN = (KERN_AKTION, "bildschirm")  # bildschirm: Einwilligung der Mitglieder für das Bildschirmbild (pc_mitglied.GRUND_BILD)
 # Mitglieder (Sicherheitsreview 16.11.2026): jede Karte nach Inhalten von außen trägt diesen Hinweis, auch die des Hosts (PowerShell, GitHub, Klick)
 WARNUNG_FREMD = "Kurz davor kamen Inhalte von außen (Webseite, Suche, Bildschirm). Nur freigeben, wenn du genau das selbst willst."
 UNVERWERTBAR = {"status": "error", "summary": "Der PC hat keine verwertbare Antwort geliefert."}
@@ -165,14 +166,14 @@ class PcFreigaben:
         if a["id"] in self._offen or a["id"] in self._entschieden:
             return None
         kern = self._vorgemerkt.pop(a["id"], None)
-        if (a["aktion"] == KERN_AKTION) != (kern is not None) or (kern is not None and kern[1] != a["werkzeug"]):
+        if (a["aktion"] in KERN_AKTIONEN) != (kern is not None) or (kern is not None and kern[1] != a["werkzeug"]):
             # aendern gibt es nur mit Vormerkung des Kerns, und eine Vormerkung nur für genau dieses Werkzeug
             logger.warning("PC-Freigabe {} ohne Karte: Aktion und Vormerkung des Kerns passen nicht zusammen", a["id"])
             return None
         if len(self._offen) >= MAX_OFFEN:  # der Host lehnt dann ohnehin ab; nie eine offene verdrängen
             logger.warning("PC-Freigabe {} ohne Karte: schon {} offen", a["id"], MAX_OFFEN)
             return None
-        if self._fremd_warnung is not None and a["aktion"] != KERN_AKTION and not a.get("warnung") and self._fremd_warnung():
+        if self._fremd_warnung is not None and a["aktion"] not in KERN_AKTIONEN and not a.get("warnung") and self._fremd_warnung():
             a = dict(a, warnung=WARNUNG_FREMD)  # die Karte des Kerns nennt den Grund schon im Titel
         gueltig = min(GUELTIG_SECS, float(a.get("gueltig_s") or GUELTIG_SECS))
         offen = _Offen(a, self._uhr(), gueltig, self._protokollieren(a), kern=(kern[1], kern[2]) if kern else None)
@@ -199,7 +200,7 @@ class PcFreigaben:
     def _protokollieren(self, a: dict) -> asyncio.Future:
         params = {"approval_id": a["id"], "aktion": a["aktion"], "ziel": a.get("ziel", ""), "detail": a["detail"]}
         risiko = "critical"
-        if a["aktion"] == KERN_AKTION:  # ändernde Werkzeuge eines Mitglieds: nie die Argumente (getippter Text) in actions
+        if a["aktion"] in KERN_AKTIONEN:  # Karten des Kerns für Mitglieder: nie die Argumente (getippter Text, Frage) in actions
             params = {"approval_id": a["id"], "aktion": a["aktion"], "werkzeug": a["werkzeug"]}
             risiko = "change"
         elif a["aktion"] in ("mail", "teams"):  # nie Betreff, Text oder Adressen in actions: nur Zahlen, Domänen (activity.py)

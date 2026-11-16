@@ -216,10 +216,10 @@ import teams_werkzeuge
 from pc_freigaben import PcFreigaben
 import pc_nachverbinden
 import rechte
-from pc_mitglied import NACHWIRKUNG_ZUEGE, MitgliedSchutz, kern_erlaubt, kern_werkzeuge_absichern
+from pc_mitglied import NACHWIRKUNG_MITGLIED, MitgliedSchutz, kern_erlaubt, kern_werkzeuge_absichern
 from pc_nachverbinden import PcNachholer, nachholen_moeglich
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
-from screen import PC_OFF, bildschirm_klicker, foto as screen_foto, register_screen_tools
+from screen import PC_OFF, bildschirm_betrachter, bildschirm_klicker, foto as screen_foto, register_screen_tools
 from sitzungen import Sitzung, Sitzungen
 from soft_interrupt import (
     MeaningfulWordsUserTurnStartStrategy,
@@ -872,6 +872,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # Klick auf den Bildschirm als Funktion (Mitglieder: nach dem Ja auf der Karte des Kerns, pc_freigaben.PcFreigaben, kern_ausfuehrer)
     bildschirm_klick = (bildschirm_klicker(lambda: pc_client, pc_allowed, turn.taint, zugang=zugang)
                         if pc_teile and pc_person else None)
+    # Bildschirm ansehen als Funktion (Mitglieder: nach dem Ja auf der Karte der Einwilligung für das Bildschirmbild)
+    bildschirm_blick = (bildschirm_betrachter(lambda: pc_client, pc_allowed, turn.taint, zugang=zugang)
+                        if pc_teile and pc_person else None)
 
     # Office-Dateien aus dem Canvas (office_werkzeuge.py): nur mit Stufe der PC-Steuerung und PC-Werkzeugen, nie im Labor, nur mit
     # WAMO_OFFICE=dateien. Das Werkzeug läuft durch das Stimmabdruck-Gate (registriert nach werkzeuge_absichern); sein Schema kommt erst dazu,
@@ -917,8 +920,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     async def bildschirm_foto():
         if not pc_allowed():
             raise RuntimeError("PC-Steuerung aus")
-        if pc_stufe == rechte.MITGLIED and (mitglied_schutz is None or await mitglied_schutz.vorab("bildschirm_ansehen", {}) is not None):
-            raise RuntimeError("Bildschirmfoto für dieses Profil gerade nicht erlaubt")
+        if pc_stufe == rechte.MITGLIED:
+            # Einwilligung für das Bildschirmbild nur per Karte (bildschirm_ansehen); der Boss legt keine an, er fragt nur nach dem Stand
+            if mitglied_schutz is None or not mitglied_schutz.bild_einwilligung:
+                raise RuntimeError("Bildschirmfoto erst nach der Einwilligung in dieser Sitzung")
+            if await mitglied_schutz.vorab("bildschirm_ansehen", {}) is not None:
+                raise RuntimeError("Bildschirmfoto für dieses Profil gerade nicht erlaubt")
         return await screen_foto(pc_client)
 
     # Labor: kein Boss (nicht in der Erlaubnisliste), er wird nicht einmal gebaut
@@ -1206,9 +1213,21 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # Freigaben kritischer PC-Aktionen (pc_freigaben.py): nur mit PC-Werkzeugen; die Karte entsteht in activity.py
     # Mitglieder: Werkzeuge des Kerns, die nach dem Ja auf einer Karte des Kerns laufen (Klick auf den Bildschirm, Office-Datei)
     kern_ausfuehrer = {}
+
+    def mit_einwilligung(ausfuehren):
+        """Ausführer der Bildschirmwerkzeuge: Die Karte für das Bildschirmbild (Aktion bildschirm) gibt nach dem Ja die Einwilligung bis zum
+        Ende der Sitzung. Eine Karte nach Fremdinhalt (aendern) für einen Klick gibt es erst, wenn die Einwilligung schon besteht."""
+        async def mit(argumente: dict) -> dict:
+            if mitglied_schutz is not None:
+                mitglied_schutz.bild_einwilligen()
+            return await ausfuehren(argumente)
+        return mit
+
     if pc_stufe == rechte.MITGLIED:
         if bildschirm_klick is not None:
-            kern_ausfuehrer["auf_bildschirm_klicken"] = bildschirm_klick
+            kern_ausfuehrer["auf_bildschirm_klicken"] = mit_einwilligung(bildschirm_klick)
+        if bildschirm_blick is not None:
+            kern_ausfuehrer["bildschirm_ansehen"] = mit_einwilligung(bildschirm_blick)
         if office is not None:
             kern_ausfuehrer[office_werkzeuge.WERKZEUG] = office.nach_freigabe
     freigaben = PcFreigaben(
@@ -1220,7 +1239,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         kern_erlaubt=kern_erlaubt(kern_ausfuehrer) if pc_stufe == rechte.MITGLIED else frozenset(),
         kern_ausfuehrer=kern_ausfuehrer, knapp=pc_stufe == rechte.MITGLIED,
         # Mitglieder: nach Inhalten von außen trägt jede Karte (auch PowerShell, GitHub, Klick des Hosts) einen Hinweis
-        fremd_warnung=(lambda: turn.fremd_fuer_karte(NACHWIRKUNG_ZUEGE)) if pc_stufe == rechte.MITGLIED else None,
+        fremd_warnung=(lambda: turn.fremd_fuer_karte(NACHWIRKUNG_MITGLIED)) if pc_stufe == rechte.MITGLIED else None,
     ) if pc_teile else None
     # Mitglieder mit Freischaltung geben Aktionen am eigenen Laptop selbst frei (darf_pc_freigeben); ohne Stufe keine Karte, die ins Leere läuft
     if freigaben is not None and pc_stufe is not None:
@@ -1235,7 +1254,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # und nach Fremdinhalt im Zug auch für ändernde Werkzeuge eine Karte; die Karte merkt PcFreigaben vor, der Klick führt aus. Gilt für die
     # Werkzeuge des Hosts (gate_pc_tools, vorab) und die des Kerns (kern_werkzeuge_absichern oben).
     mitglied_schutz = (MitgliedSchutz(gate=stimme.gate if stimme is not None else None,
-                                      fremd=lambda: turn.fremd_fuer_karte(NACHWIRKUNG_ZUEGE),
+                                      fremd=lambda: turn.fremd_fuer_karte(NACHWIRKUNG_MITGLIED),  # bis zum Ende der Sitzung
                                       vormerken=lambda k, w, a: freigaben is not None and freigaben.kern_vormerken(k, w, a),
                                       karte_offen=lambda: freigaben is not None and freigaben.kern_offen(),
                                       faerben=lambda nachwirkend: turn.taint(nachwirkend=nachwirkend),
