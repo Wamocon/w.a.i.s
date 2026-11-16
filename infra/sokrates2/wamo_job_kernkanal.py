@@ -1,4 +1,4 @@
-"""Kern-Kanal des WAMO-Auftragsdispatchers auf Sokrates-2 (Dispatcher Version 8).
+"""Kern-Kanal des WAMO-Auftragsdispatchers auf Sokrates-2 (Dispatcher Version 9).
 
 Installiert als /opt/wamo/waechter/wamo_job_kernkanal.py (root:wamo 0640) durch wamo-job-einrichten.sh. Der Dispatcher
 (wamo_job_dispatch.py) lädt dieses Modul erst, wenn er es braucht, und ruft nur die Funktionen von hier auf. Hier steht
@@ -48,6 +48,17 @@ Kern: Der Kern setzt profil selbst, der Dispatcher kann es nicht unabhängig pr�
 
 Die Fenster der Zähler gleiten (Stunde = 3600 s, Tag = 86400 s). Die Zähler stehen in /srv/wamo/logs/kernkanal.jsonl,
 je Start und je Ende eine Zeile {"t", "job", "ereignis", "dauer_s" (nur bei ende), "profil" (Kennung, wenn bekannt)}.
+
+Gleichzeitige Aufträge (Dispatcher 9, Entscheidung von Niko 16.11.2026: sechs gesamt, je Person drei). MAX_PARALLEL (1 bis PARALLEL_HART,
+Standard 6) begrenzt die gleichzeitig laufenden Aufträge aller Kanäle zusammen, MAX_PARALLEL_PROFIL (1 bis MAX_PARALLEL, Standard 3) die einer
+Person. Die harte Obergrenze PARALLEL_HART steht fest im Code (der Dispatcher hält dieselbe Zahl als PARALLEL_MAX), die Datei kann sie nur
+senken. Person heißt: im Kern-Kanal die Kennung des Profils, im PC-Kanal (ohne Profil) alle Aufträge des PC-Kanals zusammen ("pc"), lokale
+Aufrufe (Betreiber, Rauchtests) zusammen ("lokal"); alle zählen gegen die Gesamtgrenze. Ohne gültige kernkanal.conf (Stufe 0, fehlerhaft)
+gilt wie bis Dispatcher 8 höchstens ein Auftrag gleichzeitig (fail closed). Ein Start an einer dieser Grenzen endet mit dem Ereignis belegt
+und einem Code aus BELEGT_GRENZEN (nicht mit kanal_gesperrt: dieselbe Sperre gilt in jedem Kanal).
+Bei gleichzeitigen Läufen zählt die Laufzeit je Tag (gesamt und je Profil) jeden Start ohne eigenes Ende mit dem vollen Zeitlimit eines Laufs
+(laufzeit_reserve_s): ein laufender Auftrag reserviert seine Zeit, zwei gleichzeitige Starts überschreiten die Grenze so nicht gemeinsam.
+Ein Start, dessen Ende nie gebucht wurde (Dispatcher mit SIGKILL beendet), zählt ebenso (fail closed), bis er aus dem Tagesfenster fällt.
 """
 
 from __future__ import annotations
@@ -90,6 +101,14 @@ MAX_ABLAUF_TAGE = 400
 # Versuche je Stunde für alle Profile zusammen (jeder Start, der die erste Prüfung besteht, auch wenn er später an Sperren scheitert).
 # 60 seit Dispatcher 8: mit mehreren Profilen dürfen zwei Personen mit je ihrer Grenze den Admin nicht aussperren. Nur nach unten einstellbar.
 MAX_VERSUCH_STUNDE_FEST = 60
+# Gleichzeitige Aufträge: harte Obergrenze (wie PARALLEL_MAX im Dispatcher), kernkanal.conf kann sie nur senken. Mehr als zehn gingen nie:
+# jeder Platz hat 100 eigene Entwicklungsports, der Ausgangsfilter lässt auf Loopback genau 20000 bis 20999 zu.
+PARALLEL_HART = 6
+# Codes im Ereignis belegt (Feld grenze; Schnittstelle zum Kern: BELEGT_SAETZE in voice-core/entwicklung_betrieb.py hat dieselben Schlüssel).
+# auftrag: dieser Auftrag läuft schon, projekt: im Projekt läuft ein anderer, gesamt: alle Plätze belegt, profil: Grenze je Person erreicht.
+BELEGT_GRENZEN = ("auftrag", "projekt", "gesamt", "profil")
+PERSON_RE = re.compile(r"[0-9a-f]{8}|pc|lokal")  # Schlüssel der Grenze je Person: Kennung des Profils, PC-Kanal oder lokal
+LAUFZEIT_RESERVE_STANDARD_S = 1800  # wie ZEITLIMIT_S in wamo-job.sh; der Dispatcher gibt das Zeitlimit aus wamo-job.conf mit
 MAX_SCHLUESSELDATEI_BYTES = 256 * 1024
 MAX_AUTH_BYTES = 16 * 1024
 MAX_KONFIG_BYTES = 64 * 1024
@@ -119,7 +138,9 @@ ZAHLEN = {"MAX_TURNS": (1, 200), "MAX_START_STUNDE": (1, 60), "MAX_START_TAG": (
           "MAX_VERSUCH_STUNDE": (1, MAX_VERSUCH_STUNDE_FEST),  # Versuche je Stunde: der Wert darf den festen nur senken
           # je Profil (Dispatcher 8): neue Aufträge je Stunde und Tag (Folgen zählen nicht), Versuche je Stunde, Laufzeit je Tag
           "MAX_NEU_STUNDE_PROFIL": (1, 60), "MAX_NEU_TAG_PROFIL": (1, 200), "MAX_VERSUCH_STUNDE_PROFIL": (1, MAX_VERSUCH_STUNDE_FEST),
-          "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400)}
+          "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400),
+          # gleichzeitige Aufträge (Dispatcher 9): gesamt und je Person, nie über PARALLEL_HART; je Person nie über gesamt (konfig_lesen)
+          "MAX_PARALLEL": (1, PARALLEL_HART), "MAX_PARALLEL_PROFIL": (1, PARALLEL_HART)}
 LISTEN = ("ARTEN", "REPOS", "DIENSTE")
 BEKANNTE_SCHLUESSEL = frozenset({"KANAL", "ABLAUF", "MAX_BUDGET_USD", *ZAHLEN, *LISTEN})
 
@@ -166,6 +187,11 @@ class Konfig:
     max_neu_tag_profil: int = 8
     max_versuch_stunde_profil: int = 10
     max_laufzeit_tag_s_profil: int = 7200
+    # Fehlen die Schlüssel in der Datei (etwa nach dem Einspielen von Dispatcher 9 mit einer alten kernkanal.conf), gilt einer gleichzeitig.
+    # Die Standards 6 und 3 (Entscheidung von Niko 16.11.2026) schreibt erst schluessel oder kanal (STD_MAX_PARALLEL* im Skript), also ein
+    # ausdrücklicher Schritt nach Kern-Release und Rauchtest (Befund des Sicherheitsreviews).
+    max_parallel: int = 1
+    max_parallel_profil: int = 1
     min_abstand_s: int = 60
     min_platz_mb: int = 2048
 
@@ -457,6 +483,10 @@ def konfig_lesen(pfad, *, jetzt: float | None = None, lesen: Callable = datei_le
         raise KonfigFehler("KANAL ist weder zu noch offen")
     standard = Konfig()
     zahlen = {n.lower(): _zahl(n, werte[n]) if n in werte else getattr(standard, n.lower()) for n in ZAHLEN}
+    if "MAX_PARALLEL_PROFIL" not in werte:  # der Standard je Person gilt höchstens bis zur Gesamtgrenze
+        zahlen["max_parallel_profil"] = min(zahlen["max_parallel_profil"], zahlen["max_parallel"])
+    elif zahlen["max_parallel_profil"] > zahlen["max_parallel"]:
+        raise KonfigFehler("MAX_PARALLEL_PROFIL ist größer als MAX_PARALLEL")
     return Konfig(
         kanal=kanal,
         ablauf=_ablauf(werte["ABLAUF"], _heute(jetzt)) if "ABLAUF" in werte else None,
@@ -681,10 +711,54 @@ def freier_platz_mb(pfad) -> int | None:
         return None
 
 
-def pruefe_grenzen_profil(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, profil: str | None) -> str | None:
+# ---------------------------------------------------------------- Gleichzeitige Aufträge (Dispatcher 9)
+def parallel_grenzen(zustand: KernZustand | None, hart: int = PARALLEL_HART) -> tuple[int, int]:
+    """(gesamt, je Person) für gleichzeitig laufende Aufträge aller Kanäle: aus kernkanal.conf, nie über hart. Ohne gültige Konfiguration
+    (fehlt, fehlerhaft) höchstens einer gleichzeitig wie bis Dispatcher 8 (fail closed). Ein Notaus ändert die Plätze nicht: er sperrt den
+    Kern-Kanal selbst, der PC-Kanal bleibt bei seinen Grenzen."""
+    konfig = zustand.konfig if isinstance(zustand, KernZustand) else None
+    if konfig is None:
+        return 1, 1
+    gesamt = max(1, min(int(hart), konfig.max_parallel))
+    return gesamt, max(1, min(gesamt, konfig.max_parallel_profil))
+
+
+def person_schluessel(kanal: str | None, profil: str | None) -> str | None:
+    """Wer für die Grenze je Person zählt: im Kern-Kanal die Kennung des Profils (ohne gültige Kennung None, der Start scheitert), im
+    PC-Kanal alle seine Aufträge zusammen (pc, auch wenn die Kopfzeile ein Profil nennt: der PC-Kanal kann es nicht belegen), lokal (Betreiber,
+    Rauchtests) zusammen. Jeder andere Kanal: None."""
+    if kanal == "kern":
+        return profil if isinstance(profil, str) and PROFIL_RE.fullmatch(profil) else None
+    return kanal if kanal in ("pc", "lokal") else None
+
+
+def offene_starts(ereignisse: list[dict]) -> list[dict]:
+    """Starts ohne eigenes Ende, in der Reihenfolge des Zählers: ein Ende schließt den jüngsten offenen Start desselben Auftrags (ein Auftrag
+    läuft nie zweimal gleichzeitig). Übrig bleiben laufende Läufe und solche, deren Ende nie gebucht wurde (Dispatcher mit SIGKILL beendet)."""
+    offen: dict[str, list[dict]] = {}
+    for e in ereignisse:
+        if e["ereignis"] == "start":
+            offen.setdefault(e["job"], []).append(e)
+        elif e["ereignis"] == "ende" and offen.get(e["job"]):
+            offen[e["job"]].pop()
+    return [e for liste in offen.values() for e in liste]
+
+
+def laufzeit_tag(ereignisse: list[dict], jetzt: float, reserve_s: int) -> int:
+    """Laufzeit des gleitenden Tages: die Dauer jedes Endes im Fenster plus reserve_s (das Zeitlimit eines Laufs) für jeden Start ohne Ende
+    im Fenster. So reserviert ein laufender Auftrag seine Zeit, bis sein Ende die echte Dauer bringt."""
+    if not isinstance(reserve_s, int) or isinstance(reserve_s, bool) or reserve_s < 0:
+        raise ValueError("laufzeit_reserve_s ungültig")
+    beendet = sum(e.get("dauer_s", 0) for e in ereignisse if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S)
+    return beendet + sum(reserve_s for e in offene_starts(ereignisse) if e["t"] > jetzt - TAG_S)
+
+
+def pruefe_grenzen_profil(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, profil: str | None,
+                          laufzeit_reserve_s: int = LAUFZEIT_RESERVE_STANDARD_S) -> str | None:
     """Die Grenzen je Profil (grenze_profil) aus kernkanal.conf: neue Aufträge je Stunde und Tag (gezählt wird je Auftrag nur sein erster
     Start, eine Folge ist kein neuer Auftrag), Versuche je Stunde (gilt nicht für die Folge eines eigenen Auftrags, die begrenzt MAX_FOLGEN),
-    Laufzeit je Tag. Gezählt werden nur Zeilen mit derselben Kennung. Ohne gültige Kennung: grenze_profil (fail closed)."""
+    Laufzeit je Tag (laufende eigene Aufträge mit ihrem Zeitlimit, laufzeit_tag). Gezählt werden nur Zeilen mit derselben Kennung. Ohne
+    gültige Kennung: grenze_profil (fail closed)."""
     if not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil):
         return "grenze_profil"
     eigene = [e for e in ereignisse if e.get("profil") == profil]
@@ -700,26 +774,26 @@ def pruefe_grenzen_profil(konfig: Konfig, ereignisse: list[dict], job: str, jetz
             return "grenze_profil"
         if sum(1 for e in eigene if e["ereignis"] == "versuch" and e["t"] > jetzt - STUNDE_S) >= konfig.max_versuch_stunde_profil:
             return "grenze_profil"
-    if sum(e.get("dauer_s", 0) for e in eigene if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S) >= konfig.max_laufzeit_tag_s_profil:
+    if laufzeit_tag(eigene, jetzt, laufzeit_reserve_s) >= konfig.max_laufzeit_tag_s_profil:
         return "grenze_profil"
     return None
 
 
 def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, platz_mb: int | None,
-                   profil: str | None) -> str | None:
+                   profil: str | None, laufzeit_reserve_s: int = LAUFZEIT_RESERVE_STANDARD_S) -> str | None:
     """Regel 9 in der Reihenfolge grenze_start, grenze_laufzeit, grenze_profil, grenze_folgen, abstand, platz. Der n-te Start im
     Fenster geht, der (n+1)-te nicht (n ist die Grenze). Fenster gleiten: Stunde 3600 s, Tag 86400 s. profil: die Kennung aus der
-    Kopfzeile für die Grenzen je Profil."""
+    Kopfzeile für die Grenzen je Profil. laufzeit_reserve_s: das Zeitlimit eines Laufs (wamo-job.conf), mit dem jeder laufende Auftrag in
+    der Laufzeit je Tag zählt (gleichzeitige Läufe)."""
     starts = [e for e in ereignisse if e["ereignis"] == "start"]
     in_stunde = sum(1 for e in starts if e["t"] > jetzt - STUNDE_S)
     am_tag = sum(1 for e in starts if e["t"] > jetzt - TAG_S)
     versuche = sum(1 for e in ereignisse if e["ereignis"] == "versuch" and e["t"] > jetzt - STUNDE_S)
     if in_stunde >= konfig.max_start_stunde or am_tag >= konfig.max_start_tag or versuche >= konfig.max_versuch_stunde:
         return "grenze_start"
-    laufzeit = sum(e.get("dauer_s", 0) for e in ereignisse if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S)
-    if laufzeit >= konfig.max_laufzeit_tag_s:
+    if laufzeit_tag(ereignisse, jetzt, laufzeit_reserve_s) >= konfig.max_laufzeit_tag_s:
         return "grenze_laufzeit"
-    grund = pruefe_grenzen_profil(konfig, ereignisse, job, jetzt, profil)
+    grund = pruefe_grenzen_profil(konfig, ereignisse, job, jetzt, profil, laufzeit_reserve_s)
     if grund is not None:
         return grund
     folge = any(e["job"] == job for e in starts)  # eine Folge desselben Auftrags (Abnahme-Runde): MAX_FOLGEN begrenzt sie, der Abstand nicht
@@ -735,10 +809,12 @@ def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: floa
 
 # ---------------------------------------------------------------- Start: Regeln 1 bis 9
 def pruefe_start(anfrage: StartAnfrage, zustand: KernZustand, *, ereignisse: list[dict] | None, jetzt: float,
-                 freier_platz_mb: int | None) -> str | None:
+                 freier_platz_mb: int | None, laufzeit_reserve_s: int = LAUFZEIT_RESERVE_STANDARD_S) -> str | None:
     """Alle Regeln, die ein Start im Kern-Kanal vor dem ersten GitHub-Zugriff erfüllen muss (Regel 8 folgt mit fork_pruefen,
     sobald es Repo-Daten gibt). ereignisse None heißt: der Zähler ist nicht lesbar. Der Dispatcher ruft das vor dem Lesen der Geheimnisse und ein zweites Mal unmittelbar vor der
-    Erzeugung des GitHub-Tokens, damit eine Notaus-Datei oder eine Konfigurationsänderung dazwischen noch greift."""
+    Erzeugung des GitHub-Tokens, damit eine Notaus-Datei oder eine Konfigurationsänderung dazwischen noch greift. Die zweite Prüfung und das
+    Buchen des Starts laufen im Dispatcher unter einer gemeinsamen Sperre (gleichzeitige Starts sehen einander). laufzeit_reserve_s: das
+    Zeitlimit eines Laufs, mit dem laufende Aufträge in der Laufzeit je Tag zählen."""
     grund = pruefe_befehl("start", zustand)
     if grund is not None:
         return grund
@@ -769,7 +845,7 @@ def pruefe_start(anfrage: StartAnfrage, zustand: KernZustand, *, ereignisse: lis
         return "zugang"
     if ereignisse is None:  # der Zähler ist nicht lesbar: die Grenzen lassen sich nicht prüfen
         return "grenze_start"
-    return pruefe_grenzen(konfig, ereignisse, anfrage.job, jetzt, freier_platz_mb, anfrage.profil)
+    return pruefe_grenzen(konfig, ereignisse, anfrage.job, jetzt, freier_platz_mb, anfrage.profil, laufzeit_reserve_s)
 
 
 # ---------------------------------------------------------------- Regel 8: Fork-Prüfung

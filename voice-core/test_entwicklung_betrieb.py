@@ -41,8 +41,8 @@ class SchrankenVersionTests(unittest.TestCase):
     def test_genau_eine_zeile_im_muster_des_server_skripts(self):
         quelle = (Path(__file__).parent / "entwicklung_betrieb.py").read_text(encoding="utf-8")
         treffer = [z for z in quelle.splitlines() if re.fullmatch(r"SCHRANKEN_VERSION = [1-9][0-9]*", z)]
-        self.assertEqual(treffer, ["SCHRANKEN_VERSION = 2"])  # 2: Mitglieder und Trennung je Profil (Ausrollen P5)
-        self.assertEqual(eb.SCHRANKEN_VERSION, 2)
+        self.assertEqual(treffer, ["SCHRANKEN_VERSION = 3"])  # 2: Mitglieder und Trennung je Profil (P5), 3: gleichzeitige Aufträge
+        self.assertEqual(eb.SCHRANKEN_VERSION, 3)
 
 
 class KonftestTests(unittest.TestCase):

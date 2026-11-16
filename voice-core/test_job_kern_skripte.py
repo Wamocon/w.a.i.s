@@ -402,10 +402,11 @@ def test_die_proben_decken_den_katalog_aus_abschnitt_7_ab_und_starten_nie_einen_
 
 def test_die_bewertung_unterscheidet_ja_und_nein():
     ja, nein = R.proben()[0], R.proben()[1]
-    gut = json.dumps({"ok": True, "version": "8", "kanal": "kern", "kernkanal": {"offen": False}})
+    gut = json.dumps({"ok": True, "version": "9", "kanal": "kern", "kernkanal": {"offen": False}})
     assert R.bewerte(ja, 0, gut + "\n")
-    for schlecht in (json.dumps({"ok": True, "version": "6", "kanal": "kern"}), json.dumps({"ok": True, "version": "8", "kanal": "pc"}),
+    for schlecht in (json.dumps({"ok": True, "version": "6", "kanal": "kern"}), json.dumps({"ok": True, "version": "9", "kanal": "pc"}),
                      json.dumps({"ok": True, "version": "7", "kanal": "kern", "kernkanal": {"offen": False}}),  # Dispatcher 7: zu alt
+                     json.dumps({"ok": True, "version": "8", "kanal": "kern", "kernkanal": {"offen": False}}),  # Dispatcher 8: ohne Plätze
                      json.dumps({"ok": False, "version": "7", "kanal": "kern"}), "kein json", ""):
         assert not R.bewerte(ja, 0, schlecht)
     assert not R.bewerte(ja, 2, gut) and not R.bewerte(ja, None, gut)
@@ -700,7 +701,8 @@ def welt(wurzel, hostschluessel):
     schreibe("opt/wamo/bin/wamo-job-dispatch", (INFRA / "wamo_job_dispatch.py").read_bytes())  # der echte Dispatcher (die Skripte lesen VERSION)
     schreibe("opt/wamo/waechter/wamo_job_kernkanal.py", (INFRA / "wamo_job_kernkanal.py").read_bytes())
     schreibe("opt/wamo/waechter/werkzeugkarte.py", (VOICE_CORE / "werkzeugkarte.py").read_bytes())
-    schreibe(f"opt/wamo-core/releases/{RELEASE}/voice-core/entwicklung_betrieb.py", "SCHRANKEN_VERSION = 1\n")
+    # 3: der echte Dispatcher der Probewelt ist Version 9 (gleichzeitige Aufträge), schalter an verlangt dann SCHRANKEN_VERSION ab 3
+    schreibe(f"opt/wamo-core/releases/{RELEASE}/voice-core/entwicklung_betrieb.py", "SCHRANKEN_VERSION = 3\n")
     (w / "srv" / "wamo" / "jobs").mkdir(parents=True)
     (w / "srv" / "wamo" / "projekte").mkdir(parents=True)
     a = w / "attrappen"
@@ -958,7 +960,7 @@ def test_ein_falscher_hostfingerabdruck_stoppt_mit_exit_3_vor_jeder_aenderung(we
 
 @braucht_bash
 @pytest.mark.parametrize("fall, erwartet", [
-    ("dispatcher_alt", "älter als Version 8"), ("dispatcher_7", "älter als Version 8"), ("modul_alt", "Grenzen je Profil"),
+    ("dispatcher_alt", "älter als Version 9"), ("dispatcher_7", "älter als Version 9"), ("modul_alt", "Grenzen je Profil"),
     ("modul_fehlt", "wamo_job_kernkanal.py fehlt"), ("sshd_block_fehlt", "sshd-Block"),
     ("auftrag_laeuft", "Ruhe fehlt"), ("totmann_offen", "Totmannschalter"), ("openssh_alt", "zu alt"),
     ("fail2ban_ohne_ausnahme", "fail2ban"), ("hostschluessel_fehlt", "Hostschlüssel"),
@@ -1177,7 +1179,7 @@ def test_die_versionspruefung_liest_die_echte_zeile_des_dispatchers(tmp_path):
     funktion = re.search(r"^dispatcher_version\(\) \{.*?^\}$", text, flags=re.M | re.S).group(0)
     proben = {"echt": (INFRA / "wamo_job_dispatch.py").read_text(encoding="utf-8"), "kommentar": 'VERSION = "9"  # neu\n',
               "alt": 'VERSION = "7"\n', "kaputt": "VERSION = 8\n", "fehlt": "x = 1\n"}
-    erwartet = {"echt": "8", "kommentar": "9", "alt": "7", "kaputt": "", "fehlt": ""}
+    erwartet = {"echt": "9", "kommentar": "9", "alt": "7", "kaputt": "", "fehlt": ""}
     for name, inhalt in proben.items():
         datei = tmp_path / f"{name}.py"
         datei.write_text(inhalt, encoding="utf-8", newline="\n")
@@ -1187,13 +1189,13 @@ def test_die_versionspruefung_liest_die_echte_zeile_des_dispatchers(tmp_path):
 
 
 @braucht_bash
-def test_schalter_mit_mitgliedern_verlangt_dispatcher_8_und_das_neue_modul(welt):
+def test_schalter_mit_mitgliedern_verlangt_dispatcher_9_und_das_neue_modul(welt):
     schluessel_einrichten(welt)
-    release_version(welt, 2)
+    release_version(welt, 3)
     w = welt["w"]
     (w / "opt/wamo/bin/wamo-job-dispatch").write_text('VERSION = "7"\n')
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
-    assert p.returncode == 3 and "älter als Version 8" in p.stderr, p.stdout + p.stderr
+    assert p.returncode == 3 and "älter als Version 9" in p.stderr, p.stdout + p.stderr
     dispatcher_7(welt)
     (w / "opt/wamo/waechter/wamo_job_kernkanal.py").write_text("KANAL_GRUENDE = ()\n")
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
@@ -1207,7 +1209,7 @@ def test_schalter_mit_mitgliedern_verlangt_dispatcher_8_und_das_neue_modul(welt)
 def test_mitglieder_verlangen_kein_bestimmtes_budget_je_lauf(welt):
     # Entscheidung von Niko (16.11.2026): keine Grenze von 2 USD für Mitglieder; MAX_BUDGET_USD gilt wie bisher für alle Läufe
     schluessel_einrichten(welt)
-    release_version(welt, 2)
+    release_version(welt, 3)
     konfig = welt["w"] / "etc/wamo/kernkanal.conf"
     konfig.write_text(konfig.read_text().replace("MAX_BUDGET_USD=2.00", "MAX_BUDGET_USD=2.50"))
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
@@ -1232,9 +1234,26 @@ def test_kanal_setzt_die_grenzen_je_profil_und_verlangt_dispatcher_8(welt):
     for option, wert in (("--max-versuch-stunde", "61"), ("--max-neu-stunde-profil", "0"), ("--max-neu-tag-profil", "201"),
                          ("--max-versuch-stunde-profil", "61"), ("--max-laufzeit-tag-s-profil", "59")):
         assert einr(welt, "kanal", "--arten", "recherche", option, wert).returncode == 2, option
-    (welt["w"] / "opt/wamo/bin/wamo-job-dispatch").write_text('VERSION = "7"\n')
+    (welt["w"] / "opt/wamo/bin/wamo-job-dispatch").write_text('VERSION = "8"\n')
     p = einr(welt, "kanal", "--arten", "recherche")
-    assert p.returncode == 3 and "älter als Version 8" in p.stderr  # Dispatcher 7 hielte die neuen Schlüssel für einen Fehler
+    assert p.returncode == 3 and "älter als Version 9" in p.stderr  # Dispatcher 8 hielte MAX_PARALLEL für einen Fehler
+
+
+@braucht_bash
+def test_kanal_setzt_die_gleichzeitigen_auftraege_gesamt_und_je_person(welt):
+    """Dispatcher 9 (Entscheidung von Niko 16.11.2026): Standard 6 gesamt und 3 je Person, einstellbar von 1 bis 6, je Person nie über gesamt."""
+    schluessel_einrichten(welt)
+    k = konfig_von(welt)
+    assert (k["MAX_PARALLEL"], k["MAX_PARALLEL_PROFIL"]) == ("6", "3")  # schluessel schreibt die Standardwerte
+    assert einr(welt, "kanal", "--arten", "recherche", "--max-parallel", "4", "--max-parallel-profil", "2").returncode == 0
+    k = konfig_von(welt)
+    assert (k["MAX_PARALLEL"], k["MAX_PARALLEL_PROFIL"]) == ("4", "2")
+    assert einr(welt, "kanal", "--arten", "recherche", "--max-parallel", "1", "--max-parallel-profil", "1").returncode == 0  # wie früher
+    for option, wert in (("--max-parallel", "0"), ("--max-parallel", "7"), ("--max-parallel-profil", "0"), ("--max-parallel-profil", "7")):
+        assert einr(welt, "kanal", "--arten", "recherche", option, wert).returncode == 2, (option, wert)
+    p = einr(welt, "kanal", "--arten", "recherche", "--max-parallel", "2", "--max-parallel-profil", "3")
+    assert p.returncode == 3 and "je Person nie mehr als gesamt" in p.stderr, p.stdout + p.stderr
+    assert (konfig_von(welt)["MAX_PARALLEL"], konfig_von(welt)["MAX_PARALLEL_PROFIL"]) == ("1", "1")  # nichts geschrieben
 
 
 @braucht_bash
@@ -1251,7 +1270,7 @@ def test_schalter_lehnt_doppelte_kennungen_und_zu_viele_profile_ab(welt, profile
 @braucht_bash
 def test_schalter_meldet_wenn_mitglieder_ausgehen_und_trocken_kuerzt_die_user_id(welt):
     schluessel_einrichten(welt)
-    release_version(welt, 2)
+    release_version(welt, 3)
     assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an").returncode == 0
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--trocken")
     assert p.returncode == 0 and "Mitglieder sind danach aus" in p.stdout, p.stdout + p.stderr
@@ -1263,7 +1282,7 @@ def test_schalter_meldet_wenn_mitglieder_ausgehen_und_trocken_kuerzt_die_user_id
 @braucht_bash
 def test_status_meldet_eine_abweichung_des_mitglieder_schalters_je_slot(welt):
     schluessel_einrichten(welt)
-    release_version(welt, 2)
+    release_version(welt, 3)
     assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an").returncode == 0
     a, w = welt["a"], welt["w"]
     (a / "aktiv.txt").write_text("wamo-core@a active\n")
@@ -1282,12 +1301,13 @@ def release_version(welt, version: int) -> None:
 @braucht_bash
 def test_schalter_mit_mitgliedern_verlangt_schranken_version_2_und_schreibt_den_schalter(welt):
     schluessel_einrichten(welt)
+    release_version(welt, 1)  # ein Release vor den Schranken der Mitglieder
     vorher = dateien_liste(welt["w"])
-    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")  # das Release der Welt hat Version 1
+    p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
     assert p.returncode == 3 and "Schranken der Mitglieder" in p.stderr and "SCHRANKEN_VERSION 1" in p.stderr, p.stdout + p.stderr
     assert not (welt["w"] / DROPIN_REL).exists() and not [z for z in aufrufe(welt) if "umschalten-kern" in z]
     assert ohne_spur(dateien_liste(welt["w"])) == ohne_spur(vorher)
-    release_version(welt, 2)
+    release_version(welt, 3)
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
     assert p.returncode == 0, p.stdout + p.stderr
     text = (welt["w"] / DROPIN_REL).read_text(encoding="utf-8")
@@ -1319,7 +1339,7 @@ def test_schalter_mit_falschen_mitglieder_angaben_ist_eine_falsche_aufrufform(we
 @braucht_bash
 def test_schalter_trocken_prueft_zeigt_das_dropin_und_aendert_nichts(welt):
     schluessel_einrichten(welt)
-    release_version(welt, 2)
+    release_version(welt, 3)
     vorher = dateien_liste(welt["w"])
     anzahl = len(aufrufe(welt))
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an", "--trocken")
@@ -1333,6 +1353,7 @@ def test_schalter_trocken_prueft_zeigt_das_dropin_und_aendert_nichts(welt):
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an", "--trocken")
     assert p.returncode == 3 and "Schranken der Mitglieder" in p.stderr
     # schalter aus trocken: das Drop-in bleibt
+    release_version(welt, 3)
     assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL).returncode == 0
     p = einr(welt, "schalter", "aus", RELEASE, "--trocken")
     assert p.returncode == 0 and "würde entfernt" in p.stdout and (welt["w"] / DROPIN_REL).exists()
@@ -1341,7 +1362,7 @@ def test_schalter_trocken_prueft_zeigt_das_dropin_und_aendert_nichts(welt):
 @braucht_bash
 def test_status_nennt_den_schalter_der_mitglieder(welt):
     schluessel_einrichten(welt)
-    release_version(welt, 2)
+    release_version(welt, 3)
     assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an").returncode == 0
     a, w = welt["a"], welt["w"]
     (a / "aktiv.txt").write_text("wamo-core@a active\n")
@@ -1386,7 +1407,7 @@ def test_jede_vorabpruefung_von_schalter_an_endet_mit_exit_3_ohne_etwas_zu_aende
 
 # ---------------------------------------------------------------- schalter --haus (Paket P6b: Entwicklungsaufträge mit Hausmodellen)
 DISPATCHER_HAUS = '#!/usr/bin/python3 -I\nVERSION = "7"\nZUGANG_MODI = ("folgt", "server", "haus")\n'
-RELEASE_HAUS = 'SCHRANKEN_VERSION = 1\nENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"\n'
+RELEASE_HAUS = 'SCHRANKEN_VERSION = 3\nENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"\n'
 
 
 def haus_bereit(welt) -> None:
@@ -1428,8 +1449,8 @@ def test_haus_an_braucht_dispatcher_kern_kanal_und_release_mit_haus_sonst_exit_3
         modul = w / "opt/wamo/waechter/wamo_job_kernkanal.py"
         modul.write_text(re.sub(r"(?m)^ZUGAENGE_KERN = .*$", 'ZUGAENGE_KERN = ("folgt",)', modul.read_text(encoding="utf-8")),
                          encoding="utf-8")
-    else:
-        welt["schreibe"](f"opt/wamo-core/releases/{RELEASE}/voice-core/entwicklung_betrieb.py", "SCHRANKEN_VERSION = 1\n")
+    else:  # ein Release ohne ENV_HAUS (Version 3, sonst griffe schon die Prüfung für gleichzeitige Aufträge)
+        welt["schreibe"](f"opt/wamo-core/releases/{RELEASE}/voice-core/entwicklung_betrieb.py", "SCHRANKEN_VERSION = 3\n")
     vorher = dateien_liste(w)
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--haus", "an")
     assert p.returncode == 3 and erwartet in p.stderr, (p.returncode, p.stdout, p.stderr)
@@ -1630,11 +1651,13 @@ def test_das_einrichtungsskript_schreibt_nie_in_die_pc_datei_und_hat_die_standar
     assert std == {"KANAL": "zu", "ABLAUF_TAGE": "30", "MAX_TURNS": "40", "MAX_BUDGET_USD": "2.00", "MAX_START_STUNDE": "4", "MAX_START_TAG": "8",
                    "MAX_LAUFZEIT_TAG_S": "14400", "MAX_FOLGEN": "5", "MIN_ABSTAND_S": "60", "MIN_PLATZ_MB": "2048",
                    "MAX_VERSUCH_STUNDE": "60", "KOSTEN_AUFTRAG_USD": "3", "KOSTEN_TAG_USD": "10", "MITGLIEDER": "aus",
-                   "MAX_NEU_STUNDE_PROFIL": "3", "MAX_NEU_TAG_PROFIL": "8", "MAX_VERSUCH_STUNDE_PROFIL": "10", "MAX_LAUFZEIT_TAG_S_PROFIL": "7200"}
+                   "MAX_NEU_STUNDE_PROFIL": "3", "MAX_NEU_TAG_PROFIL": "8", "MAX_VERSUCH_STUNDE_PROFIL": "10", "MAX_LAUFZEIT_TAG_S_PROFIL": "7200",
+                   "MAX_PARALLEL": "6", "MAX_PARALLEL_PROFIL": "3"}
     schluessel = re.search(r"^KONFIG_SCHLUESSEL=\((.*?)\)$", text, re.M | re.S).group(1).split()
     assert schluessel == ["KANAL", "ABLAUF", "ARTEN", "REPOS", "DIENSTE", "MAX_TURNS", "MAX_BUDGET_USD", "MAX_START_STUNDE", "MAX_START_TAG",
                           "MAX_LAUFZEIT_TAG_S", "MAX_FOLGEN", "MIN_ABSTAND_S", "MIN_PLATZ_MB", "MAX_VERSUCH_STUNDE", "MAX_NEU_STUNDE_PROFIL",
-                          "MAX_NEU_TAG_PROFIL", "MAX_VERSUCH_STUNDE_PROFIL", "MAX_LAUFZEIT_TAG_S_PROFIL"]  # genau die Schlüssel, die der Dispatcher kennt
+                          "MAX_NEU_TAG_PROFIL", "MAX_VERSUCH_STUNDE_PROFIL", "MAX_LAUFZEIT_TAG_S_PROFIL", "MAX_PARALLEL",
+                          "MAX_PARALLEL_PROFIL"]  # genau die Schlüssel, die der Dispatcher kennt
 
 
 def test_die_exit_codes_stehen_im_kopf_der_skripte():
@@ -1916,3 +1939,17 @@ def test_werte_mit_zeilenumbruechen_und_steuerzeichen_werden_ganz_geprueft_und_a
 def test_gueltige_werte_bestehen_die_ganze_pruefung(aufruf_zeile):
     p = _pruef_snippet(aufruf_zeile)
     assert p.returncode == 0 and "GEPRUEFT" in p.stdout, (aufruf_zeile, p.stdout, p.stderr)
+
+
+@braucht_bash
+def test_mit_dispatcher_9_verlangt_schalter_an_ein_release_mit_gleichzeitigen_starts(welt):
+    """Dispatcher 9 lässt Aufträge gleichzeitig laufen: ein Kern-Release vor SCHRANKEN_VERSION 3 prüfte Starts desselben Profils nicht
+    hintereinander. schalter an bricht dann ab, mit und ohne Mitglieder, und schreibt kein Drop-in."""
+    schluessel_einrichten(welt)
+    release_version(welt, 2)
+    for extra in ((), ("--mitglieder", "an")):
+        p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, *extra)
+        assert p.returncode == 3 and "SCHRANKEN_VERSION 2" in p.stderr and "gleichzeitig" in p.stderr, p.stdout + p.stderr
+        assert not (welt["w"] / DROPIN_REL).exists()
+    release_version(welt, 3)
+    assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL).returncode == 0

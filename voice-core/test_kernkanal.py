@@ -639,7 +639,8 @@ def test_grenze_laufzeit_je_tag():
     assert start(anfrage(), z(), [_ende(5000, 14400)]) == "grenze_laufzeit"
     assert start(anfrage(), z(), [_ende(5000, 7200), _ende(9000, 7200)]) == "grenze_laufzeit"
     assert start(anfrage(), z(), [_ende(86500, 99999)]) is None  # älter als ein Tag
-    assert start(anfrage(), z(), [_start(5000)]) is None  # ein Start ohne Ende zählt keine Laufzeit
+    assert start(anfrage(), z(), [_start(5000)]) is None  # ein Start ohne Ende reserviert das Zeitlimit (1800 s), unter der Grenze
+    assert start(anfrage(), z(), [_ende(5000, 12600), _start(100, "e" * 16)]) == "grenze_laufzeit"  # 12600 + 1800 laufend
 
 
 def test_grenze_folgen_je_auftrag():
@@ -974,6 +975,11 @@ def _p(e: dict, profil: str | None = PROFIL_A) -> dict:
     return {**e, "profil": profil} if profil else e
 
 
+def _beendet(alter_s: float, job: str, profil: str | None = PROFIL_A) -> list[dict]:
+    """Ein beendeter Lauf (Start und Ende nach 10 s): seit Dispatcher 9 reserviert ein Start ohne Ende das Zeitlimit in der Laufzeit."""
+    return [_p(_start(alter_s, job), profil), _p(_ende(alter_s - 10, 10, job), profil)]
+
+
 def test_grenze_profil_neue_auftraege_je_stunde_folgen_zaehlen_nicht():
     zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200")
     zwei = [_p(_start(100, "a" * 16)), _p(_start(200, "b" * 16))]
@@ -990,10 +996,10 @@ def test_grenze_profil_neue_auftraege_je_stunde_folgen_zaehlen_nicht():
 
 def test_grenze_profil_neue_auftraege_je_tag():
     zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200")
-    sieben = [_p(_start(4000 + i * 4000, f"{i + 1:x}" * 16)) for i in range(7)]
+    sieben = [e for i in range(7) for e in _beendet(4000 + i * 4000, f"{i + 1:x}" * 16)]
     assert start(anfrage(), zs, sieben) is None
-    assert start(anfrage(), zs, sieben + [_p(_start(40000, "e" * 16))]) == "grenze_profil"
-    assert start(anfrage(), zs, sieben + [_p(_start(90000, "e" * 16))]) is None  # älter als ein Tag
+    assert start(anfrage(), zs, sieben + _beendet(40000, "e" * 16)) == "grenze_profil"
+    assert start(anfrage(), zs, sieben + _beendet(90000, "e" * 16)) is None  # älter als ein Tag
 
 
 def test_grenze_profil_versuche_und_laufzeit():
@@ -1038,7 +1044,8 @@ def test_der_zaehler_traegt_die_kennung(tmp_path):
 def test_grenze_profil_zaehlt_je_auftrag_nur_den_ersten_start():
     zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20")
     # drei alte Aufträge (erster Start vor mehr als einer Stunde) mit Folgen in dieser Stunde: keiner ist in dieser Stunde neu
-    alt_mit_folgen = [_p(_start(5000 + i, f"{i + 1:x}" * 16)) for i in range(3)] + [_p(_start(100 + i, f"{i + 1:x}" * 16)) for i in range(3)]
+    # (die ersten Läufe sind beendet, die Folgen laufen noch: drei laufende Aufträge reservieren 3 x 1800 s, unter 7200 s je Profil)
+    alt_mit_folgen = [e for i in range(3) for e in _beendet(5000 + i, f"{i + 1:x}" * 16)] + [_p(_start(100 + i, f"{i + 1:x}" * 16)) for i in range(3)]
     assert start(anfrage(), zs, alt_mit_folgen) is None
     # am Tag zählen sie je einmal, nicht je Start
     tag = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20", MAX_NEU_TAG_PROFIL="4")

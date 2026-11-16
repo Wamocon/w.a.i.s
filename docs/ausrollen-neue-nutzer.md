@@ -668,7 +668,7 @@ Ohne Antwort gilt die Empfehlung.
 | N10 | PC-Werkzeuge der Mitglieder: Liste ohne PowerShell lesen, Git klonen, Repo anlegen, ohne Bildschirm und Office; Sprache nur mit Stimmabdruck (damit wird der Abdruck für gesprochene PC-Befehle Pflicht, heute ist er freiwillig) | Ja, so; der Abdruck wird ein Schritt der Prüfliste |
 | N11 | Bleiben die sieben Kollegen Mitglieder (nicht Admin)? | Ja |
 | N12 | Signaturschlüssel für Updates: Hardware-Token (zum Beispiel ein FIDO2- oder PIV-Schlüssel) statt Datei auf dem Bau-Laptop | Ja, ein eigenes Token nur dafür, bei dir verwahrt |
-| N13 | Kapazität der Entwicklungsaufträge: ein Auftrag gleichzeitig für alle, Warteschlange mit höchstens einem wartenden Auftrag je Person | Ja; mehr Parallelität erst mit eigenem Netz-Namensraum je Auftrag (eigenes Paket) |
+| N13 | Kapazität der Entwicklungsaufträge: ein Auftrag gleichzeitig für alle, Warteschlange mit höchstens einem wartenden Auftrag je Person | Zuerst empfohlen: ja, mehr Parallelität erst mit eigenem Netz-Namensraum je Auftrag. **Entschieden am 16.11.2026: sechs gleichzeitig gesamt, je Person drei** (Dispatcher 9, einstellbar in `kernkanal.conf`); die Trennung gleichzeitiger Aufträge leistet ein eigener Portbereich je Platz mit Landlock, ein eigener Netz-Namensraum bleibt ein Folgepaket (`infra/sokrates2/README.md` 18.2) |
 
 ## 11. Ergebnis des Sicherheitsreviews
 

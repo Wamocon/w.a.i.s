@@ -114,6 +114,7 @@ class Welt:
         self.stopps: list[str] = []
         self.lebenslinien: list = []
         self.selbsttests: list[tuple] = []
+        self.plaetze: list = []  # der Platz, den der Selbsttest bekam (Dispatcher 9)
         self.selbsttest_ergebnis = (True, "Hook lehnt ab, Grenzen und Netz geprüft")
         self.geheim: dict[str, str] = {"WAMO_PRUEFEN": "an"}
         self.freier_platz = 10 * 1024**3  # die Platte der Entwicklungsmaschine zählt in diesen Tests nie
@@ -136,9 +137,10 @@ class Welt:
         monkeypatch.setattr(D, "lebenslinie_beobachten", lambda bei_ende: self.lebenslinien.append(bei_ende))
         monkeypatch.setattr(PM, "Lauf", FakeLauf)
 
-    def _selbsttest(self, job, projekt, modus="lauf"):
+    def _selbsttest(self, job, projekt, modus="lauf", platz=None):
         self.ablauf.append("selbsttest")
         self.selbsttests.append((job, projekt, modus))
+        self.plaetze.append(platz)
         return self.selbsttest_ergebnis
 
     def status(self, daten):
@@ -184,7 +186,7 @@ def test_schlechte_aufrufe_werden_abgewiesen(roh):
 
 
 def test_die_version_zaehlt_hoch():
-    assert D.VERSION == "8"  # 8: Trennung je Profil im Kern-Kanal (7: Kern-Kanal, 6: Befehl pruefen)
+    assert D.VERSION == "9"  # 9: gleichzeitige Aufträge (8: Trennung je Profil im Kern-Kanal, 7: Kern-Kanal, 6: Befehl pruefen)
 
 
 @pytest.mark.parametrize("geheim, erwartet", [
@@ -218,7 +220,7 @@ def test_ping_meldet_ob_pruefen_aktiv_ist_und_die_pruefsumme_der_allowlist(welt)
     erwartet = hashlib.sha256((VOICE_CORE / "abnahme_befehl.py").read_bytes()).hexdigest()
     D.cmd_ping()
     ping = welt.emitted[-1]
-    assert ping["pruefen"] is True and ping["abnahme_befehl_sha256"] == erwartet and ping["version"] == "8" and ping["ok"] is True
+    assert ping["pruefen"] is True and ping["abnahme_befehl_sha256"] == erwartet and ping["version"] == "9" and ping["ok"] is True
     welt.geheim = {}
     welt.emitted.clear()
     D.cmd_ping()
@@ -401,8 +403,10 @@ def test_andere_befehle_brauchen_keine_venv(welt):
 # ---------------------------------------------------------------- Sperren
 def test_die_sperren_wie_beim_start_in_dieser_reihenfolge(welt):
     welt.pruefen()
-    assert FakeSperre.versucht == [".lauf", f"projekt-{PROJEKT}", "platz-0"]
-    assert D.PARALLEL_MAX == 1
+    # Dispatcher 9: nach Auftrag und Projekt unter der Sperre plaetze ein Platz der Person (pruefen: pc oder lokal) und einer gesamt
+    assert FakeSperre.versucht[:3] == [".lauf", f"projekt-{PROJEKT}", "plaetze"]
+    assert any(n.startswith("person-") for n in FakeSperre.versucht) and "platz-0" in FakeSperre.versucht
+    assert D.PARALLEL_MAX == 6
 
 
 @pytest.mark.parametrize("belegt, text", [(".lauf", "Auftrag"), (f"projekt-{PROJEKT}", "Projekt"), ("platz-0", "Auftrag")])
@@ -438,7 +442,7 @@ def test_nach_cancel_laeuft_nichts_mehr(welt):
 
 
 def test_cancel_waehrend_des_selbsttests_verhindert_den_start(welt):
-    def selbsttest(job, projekt, modus="lauf"):
+    def selbsttest(job, projekt, modus="lauf", platz=None):
         (welt.jobs / JOB / "abbruch").write_text("1", encoding="utf-8")  # cancel kommt, während die Sandbox des Selbsttests läuft
         return True, "ok"
     welt.mp.setattr(D, "selbsttest", selbsttest)
@@ -447,7 +451,7 @@ def test_cancel_waehrend_des_selbsttests_verhindert_den_start(welt):
 
 
 def test_cancel_waehrend_des_selbsttests_zaehlt_als_abbruch_auch_wenn_er_dabei_scheitert(welt):
-    def selbsttest(job, projekt, modus="lauf"):
+    def selbsttest(job, projekt, modus="lauf", platz=None):
         (welt.jobs / JOB / "abbruch").write_text("1", encoding="utf-8")
         return False, "Sandbox oder Hook lief nicht (die Einheit wurde von cancel beendet)"
     welt.mp.setattr(D, "selbsttest", selbsttest)
@@ -524,8 +528,8 @@ def test_der_echte_selbsttest_gibt_dem_laeufer_im_modus_pruefen_die_git_umgebung
         return Fertig()
 
     monkeypatch.setattr(D.subprocess, "run", fake_run)
-    D.selbsttest(JOB, PROJEKT, "pruefen")
-    D.selbsttest(JOB, PROJEKT, "lauf")
+    D.selbsttest(JOB, PROJEKT, "pruefen", 0)
+    D.selbsttest(JOB, PROJEKT, "lauf", 0)
     (argv_p, env_p), (argv_l, env_l) = aufrufe
     assert "--modus" in argv_p and "--modus" not in argv_l
     assert env_p["GIT_CONFIG_COUNT"] == str(len(D.GIT_OHNE_HOOKS))
@@ -573,7 +577,7 @@ def test_die_umgebung_ist_die_basisumgebung_plus_git_hooks_aus_und_nichts_sonst(
 def test_der_laeufer_im_modus_pruefen_mit_zeitlimit_120_und_dem_argv_nach_dem_trenner(welt):
     welt.pruefen(["npm", "run", "test:unit"])
     lauf = welt.lauf()
-    assert lauf.argv == [str(D.RUNNER), "--auftrag", JOB, "--projekt", PROJEKT, "--modus", "pruefen", "--zeitlimit", "120",
+    assert lauf.argv == [str(D.RUNNER), "--auftrag", JOB, "--projekt", PROJEKT, "--platz", "0", "--modus", "pruefen", "--zeitlimit", "120",
                          "--einheit-zusatz", "pruefen", "--", "npm", "run", "test:unit"]
     assert lauf.kw["zeitlimit_s"] == PM.ZEITLIMIT_S == 120
     assert lauf.kw["cwd"] == "/"
@@ -746,7 +750,7 @@ def test_das_ende_der_lebenslinie_ruft_stoppen_verlassen_und_stop_units(welt):
 
 
 def test_ende_der_lebenslinie_waehrend_des_selbsttests_startet_nichts(welt):
-    def selbsttest(job, projekt, modus="lauf"):
+    def selbsttest(job, projekt, modus="lauf", platz=None):
         welt.lebenslinien[0]()  # der Kern legt auf, während die Sandbox des Selbsttests läuft
         return False, "Sandbox oder Hook lief nicht"  # weil die Einheit gestoppt wurde
     welt.mp.setattr(D, "selbsttest", selbsttest)
@@ -877,7 +881,7 @@ def test_die_platte_wird_vor_jedem_aufruf_und_im_projekt_des_auftrags_gemessen(w
 def test_die_plattenpruefung_laeuft_nach_den_sperren_und_vor_dem_entschaerfen(welt, monkeypatch):
     monkeypatch.setattr(PM, "platten_grund", lambda projektdir, platzpfad: welt.ablauf.append("platte") or None)
     welt.pruefen()
-    assert FakeSperre.versucht == [".lauf", f"projekt-{PROJEKT}", "platz-0"]
+    assert FakeSperre.versucht[:3] == [".lauf", f"projekt-{PROJEKT}", "plaetze"] and "platz-0" in FakeSperre.versucht
     assert welt.ablauf[:3] == ["stop", "platte", "entschaerfen"]
 
 
@@ -992,7 +996,7 @@ def test_vor_dem_start_werden_reste_der_einheit_beendet_erst_wenn_alle_sperren_g
     monkeypatch.setattr(D, "stop_units", lambda job: stand.append((job, list(FakeSperre.versucht), list(welt.ablauf))))
     welt.pruefen()
     job, versucht, ablauf = stand[0]
-    assert job == JOB and versucht == [".lauf", f"projekt-{PROJEKT}", "platz-0"] and ablauf == []  # vor entschärfen und Selbsttest
+    assert job == JOB and versucht[:3] == [".lauf", f"projekt-{PROJEKT}", "plaetze"] and "platz-0" in versucht and ablauf == []  # vor entschärfen und Selbsttest
 
 
 def test_ein_cancel_unmittelbar_vor_dem_start_verpufft_nicht(welt, monkeypatch):
@@ -1045,8 +1049,11 @@ class FakeRun:
         return self.p
 
 
-NETZ_PRUEFEN_ZU = "landlock=zu lo9=zu lo9mptcp=zu netz10=zu netz10mptcp=zu bruecke=zu lan=zu internet=zu"
-NETZ_LAUF = "landlock=zu lo9=zu lo9mptcp=zu netz10=zu netz10mptcp=zu bruecke=zu lan=zu github=offen"
+# Dispatcher 9: dazu die Proben des eigenen Portbereichs (platz_eigen offen, fremder Bereich für connect und bind zu)
+NETZ_PRUEFEN_ZU = ("landlock=zu lo9=zu lo9mptcp=zu netz10=zu netz10mptcp=zu bruecke=zu lan=zu platz_eigen=offen platz_fremd=zu "
+                   "platz_fremd_bind=zu internet=zu")
+NETZ_LAUF = ("landlock=zu lo9=zu lo9mptcp=zu netz10=zu netz10mptcp=zu bruecke=zu lan=zu platz_eigen=offen platz_fremd=zu "
+             "platz_fremd_bind=zu github=offen")
 
 
 @pytest.fixture
@@ -1062,7 +1069,7 @@ def selbsttest_umgebung(tmp_path, monkeypatch):
 def test_der_selbsttest_im_modus_pruefen_laeuft_im_selben_modus_wie_der_befehl(selbsttest_umgebung):
     run = FakeRun(NETZ_PRUEFEN_ZU)
     selbsttest_umgebung.setattr(D.subprocess, "run", run)
-    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen")
+    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen", 0)
     assert ok is True, grund
     argv = run.aufrufe[0][0]
     assert argv[argv.index("--modus") + 1] == "pruefen" and "--einheit-zusatz" in argv
@@ -1075,7 +1082,7 @@ def test_der_selbsttest_im_modus_pruefen_laeuft_im_selben_modus_wie_der_befehl(s
 def test_der_selbsttest_im_lauf_modus_bleibt_unveraendert(selbsttest_umgebung):
     run = FakeRun(NETZ_LAUF)
     selbsttest_umgebung.setattr(D.subprocess, "run", run)
-    ok, grund = D.selbsttest(JOB, PROJEKT)
+    ok, grund = D.selbsttest(JOB, PROJEKT, "lauf", 0)
     assert ok is True, grund
     argv = run.aufrufe[0][0]
     assert "--modus" not in argv and "github.com" in argv[-1] and "1.1.1.1" not in argv[-1] and "/proc/net/dev" not in argv[-1]
@@ -1089,29 +1096,33 @@ def test_der_selbsttest_im_lauf_modus_bleibt_unveraendert(selbsttest_umgebung):
 ])
 def test_im_modus_pruefen_muss_jedes_netzziel_zu_sein(selbsttest_umgebung, netz):
     selbsttest_umgebung.setattr(D.subprocess, "run", FakeRun(netz))
-    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen")
+    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen", 0)
     assert ok is False and "Netzgrenzen" in grund
 
 
 def test_loopback_ohne_lauscher_im_leeren_netz_ist_in_ordnung_ein_name_ohne_dns_nicht(selbsttest_umgebung):
     selbsttest_umgebung.setattr(D.subprocess, "run", FakeRun(NETZ_PRUEFEN_ZU.replace("lo9=zu", "lo9=fehler-ECONNREFUSED")))
-    assert D.selbsttest(JOB, PROJEKT, "pruefen")[0] is True
+    assert D.selbsttest(JOB, PROJEKT, "pruefen", 0)[0] is True
     selbsttest_umgebung.setattr(D.subprocess, "run", FakeRun(NETZ_PRUEFEN_ZU.replace("internet=zu", "internet=fehler-gaierror")))
-    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen")
+    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen", 0)
     assert ok is False and "internet=fehler-gaierror" in grund
 
 
 def test_eine_verletzte_grenze_laesst_den_selbsttest_scheitern(selbsttest_umgebung):
     selbsttest_umgebung.setattr(D.subprocess, "run", FakeRun(NETZ_PRUEFEN_ZU, fehler=1))
-    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen")
+    ok, grund = D.selbsttest(JOB, PROJEKT, "pruefen", 0)
     assert ok is False and "Grenzen verletzt" in grund
 
 
 def test_die_erwartung_im_modus_pruefen_ist_alles_zu():
+    # Dispatcher 9: platz_eigen ist der eigene Lauscher im eigenen, leeren Netz-Namensraum (Loopback ist an): der einzige erreichbare Ort
     for ziel, erlaubt in D.NETZ_ERWARTET_PRUEFEN.items():
+        if ziel == "platz_eigen":
+            assert erlaubt == ("offen",), ziel
+            continue
         assert "zu" in erlaubt and "offen" not in erlaubt and "zeit" not in erlaubt, ziel
     assert D.NETZ_ERWARTET_PRUEFEN["lo9"] == ("zu", "fehler-ECONNREFUSED")  # im leeren Netz-Namensraum lauscht nichts, Loopback ist an
-    assert all(v == ("zu",) for k, v in D.NETZ_ERWARTET_PRUEFEN.items() if k != "lo9")
+    assert all(v == ("zu",) for k, v in D.NETZ_ERWARTET_PRUEFEN.items() if k not in ("lo9", "platz_eigen"))
     assert set(D.NETZ_ERWARTET_PRUEFEN) == set(D.NETZ_ERWARTET) - {"github"} | {"internet"}
     assert D.NETZ_ERWARTET["github"] == "offen"  # der Lauf-Modus bleibt, wie er war
     assert D.NETZPROBE_PRUEFEN != D.NETZPROBE and "'" not in D.NETZPROBE_PRUEFEN  # kommt in einfache Anführungszeichen

@@ -9,7 +9,7 @@ Installiert als /opt/wamo/bin/wamo-job-rauchtest durch wamo-job-einrichten.sh. A
     sudo -u wamo -H /opt/wamo/bin/wamo-job-rauchtest --app-echt   zusätzlich die eingerichtete GitHub-App (echt, nur lesend)
     sudo -u wamo -H /opt/wamo/bin/wamo-job-rauchtest --token-attrappe   zusätzlich der persönliche Claude-Zugang (Attrappen)
 
---attrappe startet in der Sandbox eine Attrappe der Messages-API (127.0.0.1:20180, nur Standardbibliothek) und
+--attrappe startet in der Sandbox eine Attrappe der Messages-API (127.0.0.1:20980, Platz 9, nur Standardbibliothek) und
 lässt Claude Code mit einem Dummy-Schlüssel dagegen laufen. Die Attrappe verlangt den Befehl
 "git push origin main"; geprüft wird, dass der Wächter-Hook aus managed-settings.json in der Sandbox greift,
 nur der Wächter als Hook läuft (keine ECC-Hooks, keine Benutzer- und Projekt-Hooks), ECC-Skills und
@@ -57,7 +57,10 @@ D = importlib.machinery.SourceFileLoader("wamo_job_dispatch", "/opt/wamo/bin/wam
 DISPATCH = str(D.BIN / "wamo-job-dispatch")
 PROJEKT = "rauchtest-sandbox"
 PROJ = D.PROJEKTE / PROJEKT
-PORT_ATTRAPPE = 20180  # im Bereich, den der Ausgangsfilter auf Loopback zulässt
+# Dispatcher 9: jeder Lauf braucht einen Platz (wamo-job.sh --platz). Der Rauchtest nimmt Platz 9 (Ports 20900 bis 20999); der Dispatcher
+# vergibt höchstens PARALLEL_MAX (6) Plätze, also 0 bis 5: so stört der Rauchtest nie einen laufenden Auftrag und umgekehrt.
+RAUCHTEST_PLATZ = 9
+PORT_ATTRAPPE = 20980  # im eigenen Teil der Entwicklungsports (Platz 9)
 ERGEBNISSE: list[tuple[str, bool]] = []
 
 ATTRAPPE = r'''
@@ -187,15 +190,16 @@ def bind_an(host, port):
     finally: s.close()
 def eigener_server():
     srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(("127.0.0.1", 20123)); srv.listen(1)
+    srv.bind(("127.0.0.1", 20923)); srv.listen(1)
     threading.Thread(target=lambda: srv.accept(), daemon=True).start()
-    return t("127.0.0.1", 20123)
+    return t("127.0.0.1", 20923)
 w = {"postgres": t("127.0.0.1", 55322), "ollama": t("127.0.0.1", 11434), "lo9": t("127.0.0.1", 9),
      "lo9mptcp": t("127.0.0.1", 9, 262), "netz10": t("10.255.255.254", 9), "netz10mptcp": t("10.255.255.254", 9, 262),
      "bruecke": t(sys.argv[1], 9), "lan443": t("192.168.178.1", 443), "github": t("github.com", 443, timeout=10),
      "ipv6": t("2606:4700:4700::1111", 443, fam=socket.AF_INET6), "x11": t("\0/tmp/.X11-unix/X1", fam=socket.AF_UNIX),
-     "tfo55322": tfo(55322), "eigener20123": eigener_server(),
-     "bind_dev": bind_an("127.0.0.1", 20511), "bind_0.0.0.0:55999": bind_an("0.0.0.0", 55999),
+     "tfo55322": tfo(55322), "eigener20923": eigener_server(),
+     "bind_dev": bind_an("127.0.0.1", 20911), "bind_fremd": bind_an("127.0.0.1", 20511), "connect_fremd": t("127.0.0.1", 20511),
+     "bind_0.0.0.0:55999": bind_an("0.0.0.0", 55999),
      "bind_80": bind_an("127.0.0.1", 80), "bind_ephemer": bind_an("127.0.0.1", 0)}
 for k, v in w.items(): print(k, v)
 '''
@@ -230,7 +234,7 @@ def pruefe(name: str, ok: bool, detail: str = "") -> bool:
 
 def sandbox(job: str, befehl: str, zeit: int | None = None, timeout: int = 180, env: dict | None = None,
             stdin: bytes | None = None) -> subprocess.CompletedProcess:
-    argv = [str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT]
+    argv = [str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT, "--platz", str(RAUCHTEST_PLATZ)]
     if zeit:
         argv += ["--zeitlimit", str(zeit)]
     argv += ["--", "/bin/bash", "-c", befehl]
@@ -358,12 +362,15 @@ def grenzen() -> None:
     pruefe("TCP Fast Open umgeht die Portsperre nicht", n.get("tfo55322") in ("EPERM", "EACCES"), n.get("tfo55322", "?"))
     pruefe("abstrakter X11-Socket gesperrt", n.get("x11") in ("EPERM", "EACCES", "ECONNREFUSED"), n.get("x11", "?"))
     pruefe("Internet über 443 offen (github.com)", n.get("github") == "offen", n.get("github", "?"))
-    pruefe("eigener Entwicklungsserver auf 127.0.0.1:20123 erreichbar", n.get("eigener20123") == "offen",
-           n.get("eigener20123", "?"))
-    pruefe("Landlock bind: 20000-20999 erlaubt, Port 80 und 0.0.0.0:55999 gesperrt, Port 0 frei (M3)",
+    pruefe("eigener Entwicklungsserver auf 127.0.0.1:20923 (eigener Platz 9) erreichbar", n.get("eigener20923") == "offen",
+           n.get("eigener20923", "?"))
+    pruefe("Landlock bind: eigener Teil 20900-20999 erlaubt, Port 80 und 0.0.0.0:55999 gesperrt, Port 0 frei (M3)",
            n.get("bind_dev") == "ok" and n.get("bind_ephemer") == "ok"
            and n.get("bind_80") in zu and n.get("bind_0.0.0.0:55999") in zu,
            " ".join(f"{k}={n.get(k)}" for k in ("bind_dev", "bind_0.0.0.0:55999", "bind_80", "bind_ephemer")))
+    pruefe("Landlock: Teil eines anderen Platzes (20511) weder bindbar noch erreichbar (gleichzeitige Aufträge, Dispatcher 9)",
+           n.get("bind_fremd") in zu and n.get("connect_fremd") in zu,
+           f"bind_fremd={n.get('bind_fremd')} connect_fremd={n.get('connect_fremd')}")
 
     out, err = text(sandbox(job, f"cd {PROJ} && git clone -q --depth 1 https://github.com/octocat/Hello-World.git hallo && ls hallo"))
     pruefe("git clone über HTTPS im Projektordner", "README" in out, (err or out).strip()[-150:])
@@ -373,7 +380,8 @@ def grenzen() -> None:
     dauer = time.monotonic() - start
     pruefe("Zeitlimit greift (3 s)", p.returncode == 124 and dauer < 25, f"Exit {p.returncode} nach {dauer:.1f} s")
 
-    hinter = subprocess.Popen([str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT, "--", "/bin/sleep", "120"],
+    hinter = subprocess.Popen([str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT, "--platz", str(RAUCHTEST_PLATZ), "--",
+                               "/bin/sleep", "120"],
                               env=D.basis_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     time.sleep(3)
     unit = einheiten(job).split()[0] if einheiten(job) else ""
@@ -394,7 +402,7 @@ def grenzen() -> None:
 
     (PROJ / "bleibt.txt").write_text("Inhalt des Projekts")
     vorher = sorted(os.listdir(PROJ))
-    ok, grund = D.selbsttest(job, PROJEKT)
+    ok, grund = D.selbsttest(job, PROJEKT, "lauf", RAUCHTEST_PLATZ)
     pruefe("Selbsttest des Dispatchers (Hook, Grenzen, Kanarienvögel)", ok, grund)
     pruefe("Selbsttest lässt den Projektinhalt unangetastet", sorted(os.listdir(PROJ)) == vorher
            and (PROJ / "bleibt.txt").read_text() == "Inhalt des Projekts", f"vorher {vorher}, nachher {sorted(os.listdir(PROJ))}")
@@ -570,7 +578,7 @@ def lauf_mit_attrappe(job: str, jobdir: Path, session: str | None = None, pause:
     innen = (f"ATTRAPPE_PAUSE={pause} python3 -I {PROJ}/.rauchtest/attrappe.py {PORT_ATTRAPPE} </dev/null >/dev/null 2>&1 & "
              f"for i in $(seq 100); do (exec 3<>/dev/tcp/127.0.0.1/{PORT_ATTRAPPE}) 2>/dev/null && break; sleep 0.1; done; "
              f"exec {claude}")
-    spec = {"argv": [str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT, "--zeitlimit", "300", "--",
+    spec = {"argv": [str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT, "--platz", str(RAUCHTEST_PLATZ), "--zeitlimit", "300", "--",
                      "/bin/bash", "-c", innen],
             "env": {**D.basis_env(), "ANTHROPIC_API_KEY": "rauchtest-attrappe",
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{PORT_ATTRAPPE}"},
