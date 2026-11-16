@@ -53,6 +53,9 @@ function kontextBauen(optionen: { standStart?: ErstanmeldungStand; staende?: Ers
 }
 
 /** Schritt mit einfacher Komponente: Text, "Weiter" und (wenn angeboten) "Überspringen". */
+/** Nur der Passwortschritt der echten Liste; die Schritte des Ausrollens dahinter prüft EinrichtungImAblauf.comp.test.tsx. */
+const NUR_PASSWORT = ERSTANMELDUNG_SCHRITTE.filter((s) => s.id === "passwort");
+
 function schritt(id: string, zusatz: Partial<ErstanmeldungSchritt> = {}): ErstanmeldungSchritt {
   function Inhalt({ weiter, ueberspringen }: SchrittProps) {
     return (
@@ -173,8 +176,8 @@ describe("Ablauf: Reihenfolge und Leiste", () => {
 });
 
 describe("Gerüst für weitere Schritte", () => {
-  it("die Liste der Schritte hat jetzt genau einen Eintrag: passwort, nicht überspringbar, mit Titel und Komponente", () => {
-    expect(ERSTANMELDUNG_SCHRITTE.map((s) => s.id)).toEqual(["passwort"]);
+  it("die Liste beginnt mit passwort (nicht überspringbar, mit Titel und Komponente), danach die Schritte des Ausrollens", () => {
+    expect(ERSTANMELDUNG_SCHRITTE.map((s) => s.id)).toEqual(["passwort", "token", "api", "zusammenfassung", "installer"]);
     const passwort = ERSTANMELDUNG_SCHRITTE[0];
     expect(passwort.ueberspringbar).toBe(false);
     expect(passwort.titel).toBe("Passwort");
@@ -190,8 +193,8 @@ describe("Gerüst für weitere Schritte", () => {
   it("nach einem Neuladen mit erledigtem Passwort übergeht der Ablauf den Passwortschritt und zeigt den nächsten (Strang 2 hängt sich so ein)", async () => {
     const { kontext } = kontextBauen({ standStart: "erledigt" });
     ablaufMerkerSetzen(USER);
-    render(<Erstanmeldung kontext={kontext} fertig={vi.fn()} schritte={[...ERSTANMELDUNG_SCHRITTE, schritt("token")]} />);
-    expect(await screen.findByText("Inhalt token")).toBeTruthy();
+    render(<Erstanmeldung kontext={kontext} fertig={vi.fn()} schritte={[...NUR_PASSWORT, schritt("probe")]} />);
+    expect(await screen.findByText("Inhalt probe")).toBeTruthy();
     expect(screen.queryByLabelText("Neues Passwort")).toBeNull();
     expect(zustaende()).toEqual(["erledigt", "aktuell"]);
   });
@@ -262,7 +265,7 @@ describe("Schritt Passwort", () => {
     const bau = kontextBauen(optionen);
     const fertig = vi.fn();
     const benutzer = userEvent.setup();
-    render(<Erstanmeldung kontext={bau.kontext} fertig={fertig} />);
+    render(<Erstanmeldung kontext={bau.kontext} fertig={fertig} schritte={NUR_PASSWORT} />);
     const neu = (await screen.findByLabelText("Neues Passwort")) as HTMLInputElement;
     const wieder = screen.getByLabelText("Neues Passwort wiederholen") as HTMLInputElement;
     const eingeben = async (a = NEUES_PASSWORT, b = a) => {

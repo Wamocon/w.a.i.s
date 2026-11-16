@@ -48,8 +48,8 @@ export function EinrichtungsAblauf({
 
   if (fertig) {
     return (
-      <section className="ea" aria-labelledby={kopfId}>
-        <h4 id={kopfId} ref={titelRef} tabIndex={-1} className="ea-titel">
+      <section className="ea-ablauf" aria-labelledby={kopfId}>
+        <h4 id={kopfId} ref={titelRef} tabIndex={-1} className="ea-ueberschrift">
           Erste Schritte erledigt
         </h4>
         <p className="ea-text">Den Stand siehst und änderst du jederzeit unter Einstellungen, Modellzugang.</p>
@@ -84,10 +84,10 @@ export function EinrichtungsAblauf({
   const Schritt = aktuell.Komponente;
 
   return (
-    <section className="ea" aria-labelledby={kopfId}>
+    <section className="ea-ablauf" aria-labelledby={kopfId}>
       <div className="ea-kopf">
         <p className="ea-position">{position.text}</p>
-        <ol className="ea-leiste" aria-label="Fortschritt der Einrichtung">
+        <ol className="ea-balken" aria-label="Fortschritt der Einrichtung">
           {sichtbar.map((s, i) => (
             <li
               key={s.id}
@@ -98,7 +98,7 @@ export function EinrichtungsAblauf({
             </li>
           ))}
         </ol>
-        <h4 id={kopfId} ref={titelRef} tabIndex={-1} className="ea-titel">
+        <h4 id={kopfId} ref={titelRef} tabIndex={-1} className="ea-ueberschrift">
           {aktuell.titel}
         </h4>
       </div>

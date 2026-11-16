@@ -2,15 +2,15 @@
    Regeln mit Präfix .ea-, Farben über die Variablen aus globals.css. WMC-Rot nur für Flächen, Linien und Marken, nie für
    kleine Schrift; Zustand steht immer auch als Text da. Kein Blau, keine eigenen Schriften. Karten und Felder kommen aus
    modellzugang.css (.mz-) und hud.css. */
-.ea { display: grid; gap: 14px; min-width: 0; }
+.ea-ablauf { display: grid; gap: 14px; min-width: 0; }
 .ea-kopf { display: grid; gap: 8px; }
 .ea-position { margin: 0; font: 600 12px/1.2 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-soft); }
-.ea-leiste { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; max-width: 360px; }
-.ea-leiste li { flex: 1 1 0; height: 4px; border-radius: 2px; background: var(--rule-strong); }
-.ea-leiste li[data-stand="erledigt"] { background: color-mix(in srgb, var(--accent) 55%, var(--rule-strong)); }
-.ea-leiste li[data-stand="aktuell"] { background: var(--accent); }
-.ea-titel { margin: 0; justify-self: start; font: 700 clamp(18px, 2vw, 22px)/1.2 var(--display); letter-spacing: 0.02em; }
-.ea-titel:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.ea-balken { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; max-width: 360px; }
+.ea-balken li { flex: 1 1 0; height: 4px; border-radius: 2px; background: var(--rule-strong); }
+.ea-balken li[data-stand="erledigt"] { background: color-mix(in srgb, var(--accent) 55%, var(--rule-strong)); }
+.ea-balken li[data-stand="aktuell"] { background: var(--accent); }
+.ea-ueberschrift { margin: 0; justify-self: start; font: 700 clamp(18px, 2vw, 22px)/1.2 var(--display); letter-spacing: 0.02em; }
+.ea-ueberschrift:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 
 .ea-schritt { display: grid; gap: 12px; min-width: 0; }
 .ea-frage { margin: 0; font-size: 17px; line-height: 1.45; }

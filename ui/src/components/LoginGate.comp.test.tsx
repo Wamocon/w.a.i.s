@@ -34,13 +34,16 @@ vi.mock("@/lib/kernApi", async (original) => ({
   ...(await original<typeof import("@/lib/kernApi")>()),
   kernBasis: () => "https://kern.test",
 }));
-// Ein zweiter Schritt hinter dem Passwort, wie ihn die Schritte Token und Schlüssel später bringen
+// Hinter dem Passwort ein Probe-Schritt statt der Schritte des Ausrollens (die haben ihren eigenen Test, EinrichtungImAblauf.comp.test.tsx)
 vi.mock("@/components/erstanmeldung/schritte", async (original) => {
   const echt = await original<typeof import("@/components/erstanmeldung/schritte")>();
   const Probe = ({ weiter }: { weiter: () => void }) =>
     createElement("div", null, createElement("p", null, "Inhalt probe"), createElement("button", { onClick: weiter }, "Weiter probe"));
   return {
-    ERSTANMELDUNG_SCHRITTE: [...echt.ERSTANMELDUNG_SCHRITTE, { id: "probe", titel: "Probe", ueberspringbar: false, komponente: Probe }],
+    ERSTANMELDUNG_SCHRITTE: [
+      ...echt.ERSTANMELDUNG_SCHRITTE.filter((s) => s.id === "passwort"),
+      { id: "probe", titel: "Probe", ueberspringbar: false, komponente: Probe },
+    ],
   };
 });
 
