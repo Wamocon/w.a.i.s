@@ -25,8 +25,8 @@ Sicherheit
 
 Quellen (Funktionen auf Modulebene, die Tests ersetzen): erstanmeldung_stand (Paket P1b dockt nur dort an), aktives_geraet und
 geraete_status (Register devices), dateien_pruefen und gegenstelle_pruefen (Tunnel), modellzugang_stand (model_access),
-soniox_gesetzt, entwicklung_problem und abdruck_vorhanden (speakers). Rechte der PC-Steuerung aus rechte.pc_stufe (WAMO_PC_MITGLIEDER_PROFILE,
-entwicklung_betrieb); mit rechte.py (P4, P5) fragt die Prüfliste dort.
+soniox_gesetzt, entwicklung_problem und abdruck_vorhanden (speakers). Rechte der PC-Steuerung aus rechte.pc_stufe (P4,
+WAMO_PC_MITGLIEDER_PROFILE); Entwicklungsaufträge noch nach entwicklung_betrieb, bis P5 sie auf rechte.py umstellt.
 """
 
 from __future__ import annotations
