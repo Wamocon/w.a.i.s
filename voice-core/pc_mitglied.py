@@ -16,13 +16,17 @@ PC-Werkzeug, das der Kern selbst ausführt (KERN_WERKZEUGE); davor liegt wie bei
   3. Pflichtstufe der Stimme (Entscheidung N10): Sprache nur mit eingelerntem Stimmabdruck und sicher erkannter Stimme, sonst nur getippt,
      unabhängig vom Modus WAMO_STIMME_PRUEFUNG (stimme_gate.StimmGate.pflicht_pruefen). Ohne Gate (darf es für Mitglieder nicht geben): nie.
   4. Fremdinhalt (Befund S15 aus dem Sicherheitsreview): Kamen im laufenden Zug Inhalte von außen ins Gespräch (Webseite, Websuche, Ergebnis
-     vom Laptop, Bildschirm, Boss, turn.tainted) oder in den letzten NACHWIRKUNG_ZUEGE Beiträgen der Person Inhalte aus echten Fremdquellen
+     vom Laptop, Bildschirm, Boss, turn.tainted) oder früher in dieser Sitzung Inhalte aus echten Fremdquellen (NACHWIRKUNG_MITGLIED, seit
+     dem 16.11.2026 bis zum Ende der Sitzung statt NACHWIRKUNG_ZUEGE Beiträge)
      (alles außer den Ergebnissen ändernder Werkzeuge der Mitglieder, siehe faerben), braucht jedes ändernde Werkzeug (AENDERN_MITGLIED)
      eine Freigabekarte. Der Host führt die Klasse change ohne Karte aus; deshalb legt der Kern die Karte selbst an: Er merkt Werkzeug und
      Argumente unter einer eigenen Kennung vor (pc_freigaben.PcFreigaben.kern_vormerken) und gibt dem Modell status=needs_approval zurück.
      Die Karte baut activity.py wie bei Anfragen des Hosts, den Klick nimmt PcFreigaben.entscheiden an und ruft erst dann das Werkzeug am
      Laptop auf (Werkzeuge des Kerns über ihren Ausführer, kern_erlaubt). Die Karte zeigt jedes Argument vollständig; enthält ein Argument
      Zeichen, die sie nicht zeigen kann (Steuer-, Format- und unsichtbare Zeichen), wird nichts ausgeführt. Jedes Enter steht als ⏎ da.
+     Bildschirmbild (BILD_WERKZEUGE, Entscheidung Niko vom 16.11.2026 zu Befund 5): Bevor das erste Foto an das Bildmodell geht, braucht es
+     einmal je Sitzung eine Einwilligung per Klick, eine Karte des Kerns mit der Aktion bildschirm (GRUND_BILD). Nach dem Ja gilt sie bis zum
+     Ende der Sitzung (bild_einwilligen), nach dem Nein gibt es kein Bild. Der Auftrag an den Boss mit einem Bild fragt nur nach dem Stand.
      Keine zusätzliche Karte brauchen lesende Werkzeuge (LESEN_MITGLIED: sie ändern nichts; powershell_lesen führt der Host nur als reines
      Lesen aus, alles andere legt er selbst als Karte vor) und Werkzeuge, die immer eine Karte haben (EIGENE_KARTE: github_repo_anlegen ist
      beim Host critical, Mail, Teams und OneNote legen ihre Karte immer an).
@@ -60,9 +64,15 @@ EIGENE_KARTE = frozenset({"github_repo_anlegen", "outlook_senden", "teams_nachri
 AENDERN_MITGLIED = WERKZEUGE_MITGLIED - LESEN_MITGLIED - EIGENE_KARTE
 AKTION = "aendern"
 GRUND_KARTE = "Änderung am Laptop nach Inhalten von außen"
+# Einwilligung für das Bildschirmbild: Werkzeuge, die ein Foto an das Bildmodell geben, und die Karte dafür (Aktion bildschirm)
+BILD_WERKZEUGE = frozenset({"bildschirm_ansehen", "auf_bildschirm_klicken"})
+AKTION_BILD = "bildschirm"
+GRUND_BILD = "W.A.I.S. möchte deinen Bildschirm ansehen. Das Bild geht an das KI-Modell deines Profils."
 GUELTIG_SECS = 300
 MAX_WERT_ZEICHEN = 1500  # so viel eines einzelnen Arguments zeigt die Karte; länger heißt keine Karte und nicht ausgeführt
-NACHWIRKUNG_ZUEGE = 2  # so viele weitere Beiträge der Person gilt Inhalt aus echten Fremdquellen noch für die Karte
+NACHWIRKUNG_ZUEGE = 2  # so viele weitere Beiträge galt Inhalt aus echten Fremdquellen bis zum 16.11.2026 für die Karte der Mitglieder
+# Entscheidung Niko vom 16.11.2026 (Sicherheitsreview HIGH 2 aus PR 165): für Mitglieder bis zum Ende der Sitzung (TurnState.fremd_fuer_karte)
+NACHWIRKUNG_MITGLIED: int | None = None
 ENTER = "⏎"
 WARTET = {"status": "wartet", "summary": "Eine Freigabe wartet noch in der Oberfläche. Am Laptop passiert erst nach der Entscheidung dort "
                                          "wieder etwas."}
@@ -72,7 +82,7 @@ PC_AUS = {"status": "rejected", "summary": "Die PC-Steuerung ist aus. Sie lässt
 def kern_erlaubt(ausfuehrer: Iterable[str]) -> frozenset[str]:
     """Werkzeuge, für die der Kern eine Karte vormerken darf (PcFreigaben.kern_erlaubt): die ändernden Werkzeuge des Hosts und die ändernden
     Werkzeuge des Kerns, für die es in dieser Sitzung einen Ausführer gibt (sonst liefe das Ja ins Leere)."""
-    return frozenset((AENDERN_MITGLIED - KERN_WERKZEUGE) | (AENDERN_MITGLIED & frozenset(ausfuehrer)))
+    return frozenset((AENDERN_MITGLIED - KERN_WERKZEUGE) | ((AENDERN_MITGLIED | BILD_WERKZEUGE) & frozenset(ausfuehrer)))
 
 
 def _gesperrt(grund: str, hinweis: str = "Nicht erneut versuchen.") -> dict:
@@ -116,6 +126,18 @@ class MitgliedSchutz:
         self._faerben = faerben
         self._profil = profil
         self._kennung = kennung
+        self._bild_einwilligung = False  # einmal je Sitzung per Karte (BILD_WERKZEUGE), danach bis zum Ende der Sitzung
+
+    @property
+    def bild_einwilligung(self) -> bool:
+        """Hat die Person in dieser Sitzung erlaubt, dass Bildschirmfotos an das Bildmodell gehen?"""
+        return self._bild_einwilligung
+
+    def bild_einwilligen(self) -> None:
+        """Nach dem Ja auf der Karte mit der Aktion bildschirm (bot.py, Ausführer der Bildschirmwerkzeuge): gilt bis zum Ende der Sitzung."""
+        if not self._bild_einwilligung:
+            logger.info("WAMO-MITGLIED Profil {}: Einwilligung für das Bildschirmbild in dieser Sitzung", self._profil)
+        self._bild_einwilligung = True
 
     def faerben(self, werkzeug: str) -> None:
         """Vor jedem Aufruf am Laptop (bot.gate_pc_tools): Das Ergebnis färbt den laufenden Zug immer. Über den Zug hinaus wirkt es nur bei
@@ -135,12 +157,17 @@ class MitgliedSchutz:
         gesperrt = await self._gate.pflicht_pruefen(werkzeug)
         if gesperrt is not None:
             return gesperrt
+        if werkzeug in BILD_WERKZEUGE and not self._bild_einwilligung:
+            return self._karte(werkzeug, argumente, aktion=AKTION_BILD, grund=GRUND_BILD,
+                               summary="Die Person muss einmal in der Oberfläche erlauben, dass W.A.I.S. den Bildschirm ansieht.")
         if werkzeug in LESEN_MITGLIED or werkzeug in EIGENE_KARTE or not self._fremd():
             logger.info("WAMO-MITGLIED Profil {} Werkzeug {}", self._profil, werkzeug)
             return None
         return self._karte(werkzeug, argumente)
 
-    def _karte(self, werkzeug: str, argumente: dict | None) -> dict:
+    def _karte(self, werkzeug: str, argumente: dict | None, *, aktion: str = AKTION, grund: str = GRUND_KARTE,
+               summary: str = "Kurz davor kamen Inhalte von außen. Diese Änderung am Laptop muss in der Oberfläche freigegeben werden.",
+               ) -> dict:
         args = dict(argumente) if isinstance(argumente, dict) else {}
         detail = karten_detail(werkzeug, args)
         if detail is None:
@@ -149,11 +176,10 @@ class MitgliedSchutz:
         kennung = self._kennung()
         if not self._vormerken(kennung, werkzeug, args):
             return _gesperrt("Zu viele offene Freigaben.", "Erst die offenen Karten in der Oberfläche entscheiden.")
-        logger.info("WAMO-MITGLIED Profil {} Werkzeug {} nach Fremdinhalt: Freigabekarte {}", self._profil, werkzeug, kennung)
+        logger.info("WAMO-MITGLIED Profil {} Werkzeug {} Freigabekarte {} ({})", self._profil, werkzeug, kennung, aktion)
         return {
-            "status": "needs_approval", "approval_id": kennung, "aktion": AKTION, "grund": GRUND_KARTE, "detail": detail,
-            "gueltig_s": GUELTIG_SECS,
-            "summary": "Kurz davor kamen Inhalte von außen. Diese Änderung am Laptop muss in der Oberfläche freigegeben werden.",
+            "status": "needs_approval", "approval_id": kennung, "aktion": aktion, "grund": grund, "detail": detail,
+            "gueltig_s": GUELTIG_SECS, "summary": summary,
         }
 
 

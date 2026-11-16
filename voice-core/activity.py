@@ -53,7 +53,8 @@ def _detail(name: str, args: dict) -> str:
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
 # aendern: Freigabe des Kerns für ein änderndes Werkzeug eines Mitglieds nach Fremdinhalt im Zug (pc_mitglied.py); nur mit einer Kennung,
 # die der Kern selbst vorgemerkt hat (pc_freigaben.PcFreigaben.kern_vormerken), sonst gibt es keine Karte
-FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote", "teams", "aendern")
+FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote", "teams", "aendern", "bildschirm")
+KERN_AKTIONEN = ("aendern", "bildschirm")  # nur mit Vormerkung des Kerns (pc_freigaben.KERN_AKTIONEN); bildschirm: Einwilligung für das Bild
 # Nur diese Werkzeuge können eine Freigabe-Anfrage liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
 # über onenote_seite_anfragen, onenote_werkzeuge.py; outlook_senden und teams_nachricht legen ihre Karte selbst über diese Funktion
 # an, outlook_werkzeuge.py und teams_werkzeuge.py; die ändernden Werkzeuge der Mitglieder über pc_mitglied.py, auch git_klonen und
@@ -62,10 +63,10 @@ FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_d
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
                                 "github_repo_anlegen", "onenote_seite", "outlook_senden", "teams_nachricht",
                                 "programm_oeffnen", "dark_mode", "fenster_fokussieren", "maus_scrollen", "oeffnen_mit",
-                                "ordner_anlegen", "git_klonen", "canvas_exportieren"})
+                                "ordner_anlegen", "git_klonen", "canvas_exportieren", "bildschirm_ansehen"})
 # Diese beiden liefern nur die Karte des Kerns (Aktion aendern, Mitglieder nach Fremdinhalt); eine Anfrage mit anderer Aktion ergibt nie eine
 # Karte, so bleibt es bei Admins wie bisher (git_klonen und canvas_exportieren laufen dort ohne Karte)
-NUR_KERN_KARTE = frozenset({"git_klonen", "canvas_exportieren"})
+NUR_KERN_KARTE = frozenset({"git_klonen", "canvas_exportieren", "bildschirm_ansehen"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
 FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails und Teams (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
@@ -107,7 +108,7 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
     aid, aktion = data.get("approval_id"), data.get("aktion")
     if not isinstance(aid, str) or not APPROVAL_ID_RE.fullmatch(aid) or aktion not in FREIGABE_AKTIONEN:
         return None
-    if name in NUR_KERN_KARTE and aktion != "aendern":
+    if name in NUR_KERN_KARTE and aktion not in KERN_AKTIONEN:
         return None
     roh = data.get("detail") if isinstance(data.get("detail"), str) else ""
     if aktion == "senden":
