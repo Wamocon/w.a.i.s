@@ -1,0 +1,62 @@
+[Unit]
+Description=W.A.I.S.: Proxy für Entwicklungsaufträge mit Hausmodellen (wamo-haus-proxy)
+Documentation=file:///opt/wamo-haus-proxy/app/wamo_haus_proxy.py
+After=network-online.target systemd-tmpfiles-setup.service
+Wants=network-online.target
+ConditionPathExists=/etc/wamo-haus-proxy/proxy.env
+ConditionPathExists=/etc/wamo-haus-proxy/litellm.key
+
+[Service]
+Type=simple
+User=wamo-haus-proxy
+Group=wamo-haus-proxy
+# LISTEN, ZIEL, MODELLE, PARALLEL, TAG_TOKEN_MAX stehen in /etc/wamo-haus-proxy/proxy.env (root:root 0644, keine Geheimnisse)
+EnvironmentFile=/etc/wamo-haus-proxy/proxy.env
+# Der Schlüssel für LiteLLM (eigener virtueller Schlüssel wamo-haus-proxy) liegt root:root 0400 in /etc/wamo-haus-proxy/litellm.key.
+# systemd reicht ihn nur diesem Dienst als Credential durch (%d), der Benutzer wamo-haus-proxy kann die Datei selbst nicht lesen.
+LoadCredential=litellm.key:/etc/wamo-haus-proxy/litellm.key
+WorkingDirectory=/opt/wamo-haus-proxy/app
+StateDirectory=wamo-haus-proxy
+StateDirectoryMode=0700
+ExecStartPre=/usr/bin/sha256sum -c --quiet SHA256SUMS
+ExecStart=/usr/bin/python3 -I -B /opt/wamo-haus-proxy/app/wamo_haus_proxy.py --listen ${LISTEN} --ziel ${ZIEL} --modelle ${MODELLE} \
+  --auftraege /run/wamo-haus --verbrauch /var/lib/wamo-haus-proxy/verbrauch.jsonl --schluessel-datei %d/litellm.key \
+  --parallel ${PARALLEL} --tag-token-max ${TAG_TOKEN_MAX}
+Restart=on-failure
+RestartSec=3
+
+# Härtung (der Proxy braucht nur Loopback, LiteLLM und Leserechte auf seinen Code und /run/wamo-haus)
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+# Netz: nur Loopback (Sandbox) und das zentrale LiteLLM auf Sokrates-1 (Hausregel, nie Knoten direkt); alles andere ist zu
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8 192.168.178.75/32
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target
