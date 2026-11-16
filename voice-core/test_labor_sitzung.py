@@ -129,6 +129,14 @@ UMGEBUNGEN = [
     {"WAMO_PC_HOST": "an", "WAMO_PC_REGISTER": "an", "WAMO_RD_AKTIV": "ja"},
     {"WAMO_BETRIEB": "buero", "WAMO_PC_REGISTER": "an", "WAMO_ENTWICKLUNG_BUERO": "an", "WAMO_ENTWICKLUNG_PROFILE": USER,
      "WAMO_RD_AKTIV": "ja", "WAMO_PC_HOST": "an", "WAMO_AUSGABE_SCHWELLE": "500"},
+    # Alle Serverschalter, die seit dem Labor-Release (c751d04) dazugekommen sind, gleichzeitig an und mit der Kennung des
+    # Laborprofils in jeder Profilliste: Office, Outlook, Teams, OneNote, Jira, PC-Werkzeuge und Entwicklung der Mitglieder,
+    # Hausmodelle. Eine Laborsitzung bekommt trotzdem genau ihre Erlaubnisliste (Restplan 16.11., Lücke L1).
+    {"WAMO_BETRIEB": "buero", "WAMO_PC_REGISTER": "an", "WAMO_PC_HOST": "an", "WAMO_RD_AKTIV": "ja",
+     "WAMO_OFFICE": "dateien,outlook,teams,onenote", "WAMO_JIRA": "an", "WAMO_JIRA_URL": "https://jira.example.invalid",
+     "WAMO_JIRA_EMAIL": "technik@example.invalid", "WAMO_JIRA_TOKEN": "attrappe", "WAMO_JIRA_PROJEKTE": "LAB",
+     "WAMO_JIRA_STANDARD_PROJEKT": "LAB", "WAMO_ENTWICKLUNG_BUERO": "an", "WAMO_ENTWICKLUNG_PROFILE": USER,
+     "WAMO_ENTWICKLUNG_MITGLIEDER": "an", "WAMO_ENTWICKLUNG_HAUS": "an", "WAMO_PC_MITGLIEDER_PROFILE": USER},
 ]
 
 
@@ -145,7 +153,9 @@ class WerkzeugMatrixTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(b.llm_namen, erwartet)  # auch der Sammelhandler None wäre ein Fremdkörper
                 self.assertNotIn(None, b.llm_namen)
                 for gesperrt in ("merken", "fernzugriff_oeffnen", "ausgabe_nachladen", "entwicklung_starten", "aufgabe_delegieren",
-                                 "system_info", "bildschirm_ansehen", "geraet_liste", "teilen_anlegen"):
+                                 "system_info", "bildschirm_ansehen", "geraet_liste", "teilen_anlegen",
+                                 "canvas_exportieren", "outlook_senden", "teams_nachricht", "onenote_seite", "jira_story_anlegen",
+                                 "github_repo_anlegen", "git_klonen", "auf_bildschirm_klicken", "powershell_lesen"):
                     self.assertNotIn(gesperrt, b.kontext_namen)
                 await b.session.cleanup()
 
