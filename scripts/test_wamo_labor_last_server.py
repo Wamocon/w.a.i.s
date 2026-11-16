@@ -80,6 +80,13 @@ def test_ohne_cgroup_ordner_ist_der_kern_nicht_aktiv(ns, tmp_path):
     assert aus["aktiv"] is False and aus["cpu_usec"] is None
 
 
+def test_cgroup_wurzel_ist_der_slice_der_kern_slots(ns):
+    # Die Kern-Slots laufen als Instanzen der Vorlage wamo-core@.service; systemd legt sie in den Slice system-wamo\x2dcore.slice
+    # (am Server gemessen 16.11.2026: ControlGroup=/system.slice/system-wamo\x2dcore.slice/wamo-core@b.service). Der alte Pfad
+    # direkt unter system.slice ließ die Vorprüfung des ersten echten Laufs mit "keine cgroup" abbrechen.
+    assert ns["CGROUP_WURZEL"] == "/sys/fs/cgroup/system.slice/system-wamo\\x2dcore.slice"
+
+
 @pytest.mark.parametrize("slot", ["c", "", None, "b;rm", "../b", "ab", 1])
 def test_nur_die_slots_a_und_b_werden_gelesen(ns, tmp_path, slot):
     assert ns["verarbeite"]({"slot": slot, "seit": None}, str(tmp_path), lesbar([]), lambda: 5.0) == 1

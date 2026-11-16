@@ -37,7 +37,8 @@ ZUGRIFF = Callable[[str, str, str, float], wl.Ergebnis]
 REMOTE_MESSUNG = r'''
 import json, os, re, subprocess, sys, time
 
-CGROUP_WURZEL = "/sys/fs/cgroup/system.slice"
+# Die Kern-Slots sind Instanzen der Vorlage wamo-core@.service: systemd legt sie in den Slice system-wamo\x2dcore.slice
+CGROUP_WURZEL = "/sys/fs/cgroup/system.slice/system-wamo\\x2dcore.slice"
 SLOTS = ("a", "b")
 MAX_ZEILEN = 200000
 EIMER_S = 10  # Anfragen und Tokens werden in Eimern von 10 Sekunden gezählt, die Auswertung bildet daraus gleitende Minuten
