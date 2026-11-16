@@ -63,6 +63,9 @@ FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_d
                                 "github_repo_anlegen", "onenote_seite", "outlook_senden", "teams_nachricht",
                                 "programm_oeffnen", "dark_mode", "fenster_fokussieren", "maus_scrollen", "oeffnen_mit",
                                 "ordner_anlegen", "git_klonen", "canvas_exportieren"})
+# Diese beiden liefern nur die Karte des Kerns (Aktion aendern, Mitglieder nach Fremdinhalt); eine Anfrage mit anderer Aktion ergibt nie eine
+# Karte, so bleibt es bei Admins wie bisher (git_klonen und canvas_exportieren laufen dort ohne Karte)
+NUR_KERN_KARTE = frozenset({"git_klonen", "canvas_exportieren"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
 FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails und Teams (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
@@ -103,6 +106,8 @@ def freigabe_anfrage(name: str, _args: dict, result: object, aktivitaet_id: str 
         return None
     aid, aktion = data.get("approval_id"), data.get("aktion")
     if not isinstance(aid, str) or not APPROVAL_ID_RE.fullmatch(aid) or aktion not in FREIGABE_AKTIONEN:
+        return None
+    if name in NUR_KERN_KARTE and aktion != "aendern":
         return None
     roh = data.get("detail") if isinstance(data.get("detail"), str) else ""
     if aktion == "senden":
