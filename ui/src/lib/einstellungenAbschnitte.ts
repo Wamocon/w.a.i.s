@@ -14,6 +14,7 @@ import type { Modellzugang, Rolle } from "./nachrichten.ts";
 
 export const ABSCHNITT_IDS = [
   "konto",
+  "start",
   "modellzugang",
   "verbrauch",
   "sprache",
@@ -44,6 +45,8 @@ export type Abschnitt = {
 
 export const ABSCHNITTE: readonly Abschnitt[] = [
   { id: "konto", titel: "Konto und Profil", kurz: "E-Mail, Rolle und Abmelden" },
+  // Prüfliste der Einrichtung und Updates der App (lib/einrichtung.ts); Kennung "start", weil es "einrichtung" schon als Block in "Geräte und PC" gibt
+  { id: "start", titel: "Erste Schritte", kurz: "Prüfliste und Updates" },
   { id: "modellzugang", titel: "Modellzugang", kurz: "API-Schlüssel, Token und Modus" },
   { id: "verbrauch", titel: "Verbrauch", kurz: "Kontingent deines Claude-Abos", nurAdmin: true },
   { id: "sprache", titel: "Sprache und Ton", kurz: "Mikrofon, Hören und Stimme", laborSicht: true, laborKurz: "Mikrofon wählen" },

@@ -33,6 +33,7 @@ import { VerbrauchAbschnitt } from "./Verbrauch";
 import { AenderungenAbschnitt } from "./Aenderungen";
 import { GedaechtnisAbschnitt } from "./Gedaechtnis";
 import { NeueMitglieder } from "./NeueMitglieder";
+import { ErsteSchritteAbschnitt } from "./ErsteSchritte";
 
 /**
  * Die Einstellungsseite: eine Ansicht der Hauptseite, kein eigener Pfad (siehe lib/einstellungenAbschnitte.ts). Ab 860 px
@@ -219,6 +220,7 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
               </div>
               <div className="ez-abschnitt-inhalt" key={wirksam}>
                 {wirksam === "konto" && <KontoAbschnitt email={email} onAbmelden={onAbmelden} />}
+                {wirksam === "start" && <ErsteSchritteAbschnitt />}
                 {wirksam === "modellzugang" && <ModellZugang onAnfrage={aktionen.modellzugang} />}
                 {wirksam === "verbrauch" && <VerbrauchAbschnitt />}
                 {wirksam === "sprache" && (

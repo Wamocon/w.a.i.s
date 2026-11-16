@@ -369,6 +369,7 @@ describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
     const titel = within(nav).getAllByRole("link").map((l) => l.querySelector(".ez-nav-titel")?.textContent);
     expect(titel).toEqual([
       "Konto und Profil",
+      "Erste Schritte",
       "Modellzugang",
       "Verbrauch",
       "Sprache und Ton",
