@@ -121,7 +121,12 @@ ESCAPE_TOKENS = re.compile(
 SENSITIVE_READ = re.compile(
     r"(\.ssh|\.aws|\.gnupg|\.azure|\.kube|\.docker|credential|\.env\b|\.npmrc|\.netrc|\.pgpass|"
     r"id_rsa|id_ed25519|\.git-credentials|\.claude|\.config[\\/]gh|[\\/]wamo([\\/]|\b)|\benv:|"
-    r"Get-Clipboard|Cookies|Login Data|\.kdbx|\.pfx|\.pem)",
+    r"Get-Clipboard|Cookies|Login Data|\.kdbx|\.pfx|\.pem|"
+    # Befund 3 (16.11.2026): Verlauf der Eingaben, Befehlszeilen fremder Prozesse, eigene WAMO-Ordner im Benutzerordner,
+    # weitere Schlüsseldateien, Browser-Passwörter, Windows-Tresor, WireGuard, Registry-Dateien des Benutzers
+    r"PSReadLine|ConsoleHost_history|Get-History|CommandLine|Win32_Process|StartInfo|[\\/]\.wamo|"
+    r"\.key\b|\.p12\b|\.ppk\b|logins\.json|key[34]\.db|Local State|Web Data|"
+    r"[\\/]Protect([\\/]|\b)|[\\/]Vault([\\/]|\b)|WireGuard|secret|token|api[-_]?key|ntuser\.dat|usrclass\.dat)",
     re.IGNORECASE,
 )
 BLOCKED_PATTERNS = [

@@ -197,6 +197,41 @@ class PowershellTests(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertEqual(host.classify(cmd), "critical")
 
+    def test_heikle_lesepfade_brauchen_eine_karte(self):
+        """Befund 3 (Nachtrag 16.11.2026): Verlauf, Prozess-Befehlszeilen, eigene WAMO-Ordner, Schlüssel und Browser-Daten."""
+        h = str(host.HOME)
+        for cmd in [
+            f'Get-Content "{h}\\AppData\\Roaming\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt"',
+            "Get-History",
+            "Get-CimInstance Win32_Process | Select-Object Name, CommandLine",
+            "Get-WmiObject Win32_Process",
+            "Get-Process | Select-Object Name, CommandLine",
+            "Get-Process | Select-Object -ExpandProperty StartInfo",
+            f'Get-ChildItem "{h}\\.wamo-signatur"',
+            f'Get-Content "{h}\\.wamo-labor\\umschlag-labor.txt"',
+            f'Get-ChildItem "{h}\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles" -Recurse -Filter logins.json',
+            f'Get-ChildItem "{h}\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles" -Recurse -Filter key4.db',
+            f'Get-ChildItem "{h}\\AppData\\Roaming\\Microsoft\\Protect"',
+            f'Get-ChildItem "{h}\\AppData\\Local\\Microsoft\\Vault"',
+            f'Get-Content "{h}\\schluessel.key"', f'Get-Content "{h}\\zert.p12"', f'Get-Content "{h}\\putty.ppk"',
+            f'Get-ChildItem "{h}\\AppData\\Local\\WireGuard"',
+            f'Get-Content "{h}\\secrets.json"', f'Get-Content "{h}\\api-token.txt"', f'Get-Content "{h}\\api_key.txt"',
+            f'Get-Content "{h}\\ntuser.dat"',
+        ]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(host.classify(cmd), "critical")
+
+    def test_aehnliche_harmlose_namen_bleiben_lesen(self):
+        """Gegenprobe zu Befund 3: die engeren Muster treffen keine gewöhnlichen Ordner und Prozesslisten."""
+        h = str(host.HOME)
+        for cmd in [
+            "Get-Process", "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5",
+            f'Get-ChildItem "{h}\\Documents\\Vaulting"', f'Get-ChildItem "{h}\\Documents\\Protection"',
+            f'Get-Content "{h}\\Projekte\\keynote.txt"',
+        ]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(host.classify(cmd), "read")
+
     def test_critical_never_executes(self):
         with mock.patch.object(host, "_powershell") as run:
             result = host.powershell_lesen("Remove-Item C:\\wichtig -Recurse", "Test")
