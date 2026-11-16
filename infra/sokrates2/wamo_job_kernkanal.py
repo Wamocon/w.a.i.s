@@ -50,7 +50,8 @@ Die Fenster der Zähler gleiten (Stunde = 3600 s, Tag = 86400 s). Die Zähler st
 je Start und je Ende eine Zeile {"t", "job", "ereignis", "dauer_s" (nur bei ende), "profil" (Kennung, wenn bekannt)}.
 
 Gleichzeitige Aufträge (Dispatcher 9, Entscheidung von Niko 16.11.2026: sechs gesamt, je Person drei). MAX_PARALLEL (1 bis PARALLEL_HART,
-Standard 6) begrenzt die gleichzeitig laufenden Aufträge aller Kanäle zusammen, MAX_PARALLEL_PROFIL (1 bis MAX_PARALLEL, Standard 3) die einer
+6 schreibt das Skript) begrenzt die gleichzeitig laufenden Aufträge aller Kanäle zusammen, MAX_PARALLEL_PROFIL (1 bis MAX_PARALLEL, 3 schreibt
+das Skript; fehlen die Schlüssel in der Datei, gilt je einer) die einer
 Person. Die harte Obergrenze PARALLEL_HART steht fest im Code (der Dispatcher hält dieselbe Zahl als PARALLEL_MAX), die Datei kann sie nur
 senken. Person heißt: im Kern-Kanal die Kennung des Profils, im PC-Kanal (ohne Profil) alle Aufträge des PC-Kanals zusammen ("pc"), lokale
 Aufrufe (Betreiber, Rauchtests) zusammen ("lokal"); alle zählen gegen die Gesamtgrenze. Ohne gültige kernkanal.conf (Stufe 0, fehlerhaft)
