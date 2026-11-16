@@ -1,78 +1,85 @@
-# Testlabor 28.11.2026: Restplan ab Freitag, 13.11.2026
+# Testlabor 28.11.2026: Restplan ab Montag, 16.11.2026
 
-**Stand:** 13.11.2026, Abend. Dieser Plan ersetzt die Kalenderfolge in `docs/testlabor-wamo.md` (Abschnitt 4.2), die noch den Freeze am 20.11. und den Dienst der Kollegen kennt. Maßgeblich sind die Entscheidungen E13 bis E16 (W.A.I.S. baut den Dienst selbst, Entwicklung fertig am Sonntag 15.11.). Was belegt ist, steht mit Quelle im Text. Was nur ein Mensch klären oder ein echter Lauf zeigen kann, steht in Abschnitt 4 und 5.
+**Stand:** 16.11.2026, Nachmittag. Dieser Plan ersetzt die Fassung vom 13.11.2026. Der damalige Freeze am 15.11. ist überholt: Auf ausdrücklichen Auftrag von Niko liefen seitdem die Releases 0.2.0 bis 0.4.1 (Erstanmeldung, Werkzeuge und Entwicklungsaufträge für Mitglieder, Hausmodelle, gleichzeitige Aufträge). Der Plan entstand mit dem ECC-Planer (Regressionsanalyse) und REA (Analyse der ausgelieferten Oberfläche) und ist mit echten Läufen am Server belegt. Was belegt ist, steht mit Quelle im Text. Was nur ein Mensch klären oder ein echter Lauf zeigen kann, steht in Abschnitt 5 und 6.
 
-## 1. Stand am Freitagabend (am 13.11. gemessen)
+## 1. Stand am 16.11. (gemessen)
 
 | Baustein | Stand | Beleg |
 | --- | --- | --- |
-| Kern | Slot b `v0.1.0-c751d04` aktiv, Slot a inaktiv. Der Laufzeitcode des Kerns ist seit diesem Release unverändert, es kamen nur Tests und Messwerkzeug dazu | `wamo-core-slots.sh status` am Server, `git diff c751d04 HEAD` für `voice-core` ohne Tests und `eval/` leer |
-| Oberfläche | Commit `c08468e` live, seitdem keine Änderung in `ui/` | `https://192.168.178.136:55445/version.json`, `git diff c08468e HEAD -- ui desktop` leer |
-| Labor-Dienst | Container gesund, Rauchtest 20 OK, 0 Fehler, Aufbewahrung bis 11.12.2026 | `wamo-labor-einrichten.sh pruefen` am 13.11. |
-| Kern-Umgebung | `WAMO_LABOR_TEXT_SPEICHERN='an'`, `WAMO_LABOR_EINWILLIGUNG_MIN='1'`, Labordaten unter `/etc/wamo-labor/daten` | `core.env` (nur diese zwei Zeilen gelesen) |
-| Laborprofile | `labor-01` bis `labor-09` gesperrt, Seed des zweiten Faktors bei allen neun in der Umschlag-Datei | `wamo_labor_faktoren.py pruefen` (ohne Netz) |
-| Betreuer-Geräte | Namensliste mit einem Gerät, Timer aktiv, Plätze im Büro-LAN offen (Liste `plaetze-adressen` ohne Einträge) | `/etc/wamo-labor/*`, `systemctl is-active wamo-labor-geraete.timer` |
-| Lasttest | Trockenlauf sauber, 12 Sprechproben erzeugt, 8 Seeds da. **Echtlauf nie gelaufen** | `wamo_labor_last.py lauf` (Trockenlauf), `clips` |
-| Kartensatz | Entwurf für den Ausdruck liegt vor (17 Karten, Wortlaut deckt sich mit den Messfällen in `voice-core/eval/faelle_labor.py`) | `docs/labor-kartensatz.html` |
+| Kern | Slot b `v0.4.1-fecb8e5` aktiv, Slot a `v0.4.0-55eb122` inaktiv (Rückweg-Ziel, mit Erstanmeldung) | `wamo-core-slots.sh status` am Server |
+| Oberfläche | 0.4.1 live (Commit `fecb8e5`) | `https://192.168.178.136:55445/version.json` |
+| Labor-Dienst | Container gesund, Rauchtest mit root 0 Fehler | `wamo_labor_rauchtest.py --betrieb` am 16.11. |
+| Kern-Umgebung | `WAMO_LABOR_TEXT_SPEICHERN='an'`, `WAMO_LABOR_EINWILLIGUNG_MIN='1'`, Labordaten unter `/etc/wamo-labor/daten` | `core.env` (nur diese Zeilen gelesen) |
+| Laborprofile | `labor-01` bis `labor-09` gesperrt, Seeds in der Umschlag-Datei | `wamo_labor.py status` |
+| Plätze | Platz 1 nach dem Lasttest leer (ohne Starttickets), Plätze 2 bis 8 geschlossen mit 6 Starttickets | Betreuer-Schnittstelle |
+| Kern-Kanal | Dispatcher 9, Kanal für `recherche` offen bis 11.12., höchstens 6 Aufträge gleichzeitig, 3 je Person | `wamo-job-dispatch ping` |
 
-## 2. Besuchersicht mit REA (13.11., ohne Token, nur GET)
+## 2. Regression seit dem Labor-Release `c751d04`
 
-Frage: Was sieht und erreicht ein Besucher, der nur die Adresse `https://192.168.178.136:55447` kennt? Ausgeliefert wurden 12 Dateien (drei Seiten, acht JavaScript-Dateien, eine CSS-Datei). REA analysierte sie als Eingabe (`rea analyze-javascript-application`, Evidenz `ev_3b1c8c09f883bd6820688bcc66e158eb9e04a62836449caa99d93c0d197bb64c`, Herkunft "shipped-artifact", Vertrauen "derived").
+Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zeilen ohne Tests). Geprüft auf drei Wegen:
 
-**Beobachtet (REA):** 8 JavaScript-Dateien fehlerfrei geparst, genau zwei Netzaufrufe (`fetch` in `board.js` und `betreuer.js`), kein WebSocket, keine weiteren Ziele als `/api/browser/board` und `/api/betreuer/plaetze[/<platz>/<aktion>]`.
+**ECC-Planer (Code und Tests).** Kein Weg gefunden, auf dem Erstanmeldung, Sitzungswächter, Trigger 0021 (`profiles_freischaltung_guard`) oder die Einrichtungs-Prüfliste ein Laborprofil sperren oder abmelden. Jede neue Prüfung fragt zuerst `labor.ist_labor` oder `labor_art` ab und liest den Stand erst danach, jede Abzweigung hat einen eigenen Test (unter anderem `test_erstanmeldung.py` mit `test_laborprofil_fragt_den_stand_nie_ab`, `test_labor_sperre.py` mit `test_t2_jede_route_der_apps_ist_gesperrt_ausser_der_liste`). Die Pfadliste des Labors (`voice-core/labor.py`, `_ROUTEN_ART`) ist so eng wie vorher. Die Lücke im Werkzeugtest (Serverschalter seit dem Labor-Release fehlten in den Testumgebungen) ist mit PR #172 geschlossen: Auch mit allen neuen Schaltern gleichzeitig bekommt eine Laborsitzung genau ihre Erlaubnisliste.
 
-**Beobachtet (Textsuche, nicht REA):** kein `innerHTML`, `eval`, `document.write`, `localStorage`, `sessionStorage` und kein Cookie in den ausgelieferten Dateien. Das Platz-Token steht nur im Adressfragment und wird sofort mit `history.replaceState` entfernt. Das Betreuer-Token geht nur als `Authorization`-Kopf.
+**REA (ausgelieferte Oberfläche 0.4.1).** 94 JavaScript-Dateien ohne Anmeldung geladen, die Datei mit dem App-Code mit `rea analyze-javascript-application` untersucht (Evidenz `ev_dde490d0c5297373d6c56e9e51f9491a2ea6929d680d7c8e6104a5c33ae17767`). Die Oberfläche ruft den Kern über eine gemeinsame Hilfe `/wamo/api` plus Pfad auf, die Routen der Erstanmeldung stehen als Text im Bundle. Ein 403 `labor_pfad_gesperrt` behandelt die Oberfläche als „keine Erstanmeldung“ (`ui/src/lib/erstanmeldung.ts`), Laborkonten fragen den Stand gar nicht ab. **Grenzen:** REA liest nur Text, die Analyse einer sehr großen Bibliotheksdatei lief in die Zeitgrenze und ist nicht enthalten.
 
-**Beobachtet (HTTP):** `Content-Security-Policy: default-src 'none'; script-src 'self'; ...; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`. Keine Quellkarten (404), keine `/docs`, `/openapi.json`, `/.git`, `/.env` (alle 404), Pfadtrick mit `..%2f` ergibt 404, `/gesundheit` ergibt 403, beide API-Pfade ohne oder mit falschem Token ergeben 401.
+**Echte Läufe am Server.**
+- Probelauf einer Laborsitzung (labor-01, Niko im Browser): Anmeldung mit zweitem Faktor ohne Passwortwechsel und ohne „Erste Schritte“, Sitzung auf Platz 1 mit 6 Werkzeugen, Ticket-Suche im Dienst, Tafel, 0 Fehler im Journal. Danach gesperrt und gelöscht.
+- Lasttest-Probelauf mit 1 Sitzung und 3 Minuten (`last-20261116-145550`): Anmeldung im Browser, Gespräch mit Sprechproben, Freigabekarte bei J1, Aufräumen vollständig. 0 Abbrüche, 0 mal 429, Speicher 0,31 GiB, CPU des Kerns p95 43,5 Prozent eines Kerns, erster Ton p50 1,39 s und p95 4,47 s (nur 5 Schritte). Vorher behoben: Das Messwerkzeug suchte die cgroup der Kern-Slots am falschen Ort (PR #173).
+- Messrunde mit den 17 Karten (Haiku, 10 Läufe, Standardfassung, Kosten 0,08 US-Dollar): **0 Muss-Verstöße**, j1 bis j3, w1, m2 wie am 13.11. **Befund:** w2 fällt von 7 auf 0 von 10 (Haiku setzt den Marker ◐ statt ● und schweigt), a2 von 10 auf 7 von 10. Ursache und Korrektur sind in Arbeit (Abschnitt 4).
 
-**Ergebnis:** keine Befunde. **Grenzen:** REA liest nur Text und beweist keine Laufzeit. Geprüft ist nur der Besucher ohne Token. Ob der Dienst mit einem gültigen Platz-Token fremde Plätze sperrt, belegt das Abnahmeskript (A1 bis A11) und nicht diese Prüfung.
+## 3. Entscheidungen von Niko (16.11.2026)
 
-## 3. Fahrplan
+| Nr | Entscheidung |
+| --- | --- |
+| E1 | **Freeze Mo 23.11. früh.** Bis So 22.11. abends darf Code gemergt und ausgerollt werden, danach nur Sicherheitskorrekturen mit Nikos Ja. Daten-Freeze Fr 27.11., 12:00 bleibt |
+| E2 | Zweite Faktoren der Laborprofile neu auf die Betreuer-Geräte am **Fr 20.11. nach dem Lasttest**, damit gilt die Regel „keine Änderung an der Anmeldung in der Laborwoche“ |
+| E3 | Messrunde auf 0.4.1 wiederholt (erledigt, Ergebnis in Abschnitt 2) |
+| E4 | **Mitglieder bis Sa 21.11.** freigeschaltet und mit gewechseltem Passwort, wer es nicht schafft, kommt ab Mo 30.11. dran |
+| E6 | Rückweg-Ziel des Kerns ist immer ein Release mit Erstanmeldung (ab 0.3.0), nie `c751d04` oder älter. Ein solcher Kern kennt `wamo_auth` nicht und ließe Mitglieder mit offenem Passwortwechsel in die App |
+
+## 4. Fahrplan
 
 | Wann | Was | Wer | Bedingung |
 | --- | --- | --- | --- |
-| Fr 13.11. | Prüfstand, Besuchersicht mit REA, Kartensatz, Vorbereitung des Lasttests, Jira-Stand | W.A.I.S. | erledigt, der Jira-Stand wird am selben Abend nachgezogen |
-| Sa 14.11. | Ruhe am Server. Konsole des Sprachmodells prüfen: Ausgabenlimit, Ratenlimit, Guthaben, Preise (nur damit rechnet der Trockenlauf Dollar). Soniox: mindestens 9 gleichzeitige Sitzungen bestätigen | Niko | Handarbeit in den Konsolen |
-| So 15.11. | **Freeze** (E14). Ein Kern-Release ist nicht nötig, weil der Laufzeitcode seit `c751d04` unverändert ist. Das Etikett `labor-freeze` auf den Stand von main setzen | W.A.I.S. | Ja von Niko für das Etikett. Ab hier nur noch Sicherheitsfehler |
-| Mo 16.11. | **Lasttest, Probelauf mit 1 Sitzung und 3 Minuten** (`--sitzungen 1 --minuten 3`). Er prüft zum ersten Mal Anmeldung, Browser mit virtuellem Mikrofon, Messung und Aufräumen. Läuft das Werkzeug erst am 24.11. zum ersten Mal, bleibt keine Zeit mehr für Korrekturen | W.A.I.S., Niko | Ja von Niko. Das Werkzeug liegt nicht im Freeze, nur der Kern. Vorher `PLAYWRIGHT_MODUL` auf `D:\tmp\wamo-mikro\harness\node_modules\playwright-core` setzen (dort liegt Playwright 1.56.1, auf diesem PC ist die Variable nicht gesetzt) |
-| Di 17.11. bis Mi 18.11. | Entscheidungen Q6 (Fassung der Regeln, Standard empfohlen und am Server), Q13 (Büro-Adressen für 55446, 55322 und 56543), Weg des Betreuer-Tokens, Namen und Telefonnummern (Runbook Abschnitt 8) | Niko | Abschnitt 4 |
+| Mo 16.11. | Regression (Abschnitt 2), Korrektur des Markers bei w2 mit Messung vorher und nachher | W.A.I.S. | erledigt bis auf die Korrektur |
+| Di 17.11. | Korrektur des Markers mergen und ausrollen (Kern über die Slots, Bewährung 30 Minuten, Labor-Rauchtest), danach Messrunde der 17 Karten wiederholen | W.A.I.S. | CI grün |
+| Di 17.11. bis Mi 18.11. | Konsole des Sprachmodells: Preise, Ratenlimit, Ausgabenlimit (N3). Soniox: mindestens 9 gleichzeitige Sitzungen bestätigen. N4 bis N6 | Niko | Abschnitt 5 |
 | Do 19.11. | Erwartungswerte des Trainers zu W1 und W2 | Niko, Trainer | Pflicht vor dem Ausdruck |
-| Fr 20.11. | Seminar-Angaben. Aufzeichnung des Schaufensters (zwei Stunden, Jira WMCNL-3158) | Niko | Kanal `recherche` ist für sein Profil bis 11.12. offen |
-| Mo 23.11. | **Platz-Skript auf einem echten Platz-Laptop**: `einrichten`, CA, Kiosk-Konto, `pruefen`, `https://192.168.178.136:55447/board` öffnen. Das belegt, was der Rauchtest am Server nicht belegen kann | Niko, Kollegen (Geräte) | ein Laptop im Kiosk-Konto |
-| Di 24.11. | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen (`--murmeln 20,10,5`), mit Preisen und `--kosten-obergrenze` | W.A.I.S., Niko | Ja von Niko, Konsole geprüft (Sa 14.11.) |
-| Mi 25.11. | Zweite Faktoren der Betreuer-Geräte neu einrichten (`wamo_labor_faktoren.py einrichten --profile ... --neu`), damit die Seeds des Mess-PCs ungültig werden. Betreuer-Token übergeben | W.A.I.S., Betreuer | Weg aus Abschnitt 4 |
+| Fr 20.11. vormittags | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen, mit Preisen, Ratenlimit und `--kosten-obergrenze`. Vorher die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“, der Lasttest verlangt Plätze ohne Starttickets) und den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`), damit keine Entwicklungsaufträge mitlaufen | W.A.I.S., Niko | Ja von Niko, N3 |
+| Fr 20.11. nachmittags | Zweite Faktoren neu auf die Betreuer-Geräte (E2), zuerst ein Profil. Aufzeichnung des Schaufensters | W.A.I.S., Betreuer, Niko | E2 |
+| Sa 21.11. | Letzte Freischaltungen der Mitglieder (E4). Puffer für Befunde aus dem Lasttest | Niko, W.A.I.S. | E4 |
+| So 22.11. abends | Freeze-Kandidat ist ausgerollt (Kern mit Bewährung, Oberfläche, Labor-Rauchtest, Lasttest-Probelauf mit 1 Sitzung) | W.A.I.S. | E1 |
+| Mo 23.11. früh | **Freeze** (E1): Etikett `labor-freeze` auf den ausgerollten Stand. Platz-Skript auf einem echten Laptop im Kiosk-Konto und einem Ersatzgerät (`einrichten`, CA, `pruefen`, Board) | W.A.I.S., Niko, Kollegen | Geräte da |
+| Di 24.11. | Kartensatz drucken, Zahlen aus dem Lasttest ins Runbook | W.A.I.S., Niko | W1, W2 |
+| Mi 25.11. | Betreuer-Token persönlich übergeben, Namen und Telefonnummern eintragen | Niko | N6, N7 |
 | Do 26.11. | Generalprobe, drei Stunden, vier Kollegen als Besucher, zwei Betreuer, acht Geräte | alle | Kartensatz gedruckt |
-| Fr 27.11. | Daten-Freeze 12:00, Rückwegübung (Zeiten ins Runbook eintragen), Einweisung der Betreuer | W.A.I.S., Betreuer | Morgencheckliste Teil A |
-| Sa 28.11. | Labortag | alle | Morgencheckliste Teil B |
-| Mo 30.11. | Nachlauf: `wamo_labor_nachlauf.py nachlauf --ausfuehren` | W.A.I.S. | Runbook Abschnitt 10 |
-| bis Fr 11.12. | Laborkonten löschen und Sitzungen widerrufen, Umschlag-Datei und Sicherungen löschen. Ab 12.12.: Löschlauf des Dienstes | W.A.I.S., Niko | Lücke 1 in Abschnitt 5 |
+| Fr 27.11. | Daten-Freeze 12:00, Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer | W.A.I.S., Betreuer | Morgencheckliste Teil A |
+| Sa 28.11. | Labortag. Kern-Kanal morgens sperren (`notaus`) | alle | Morgencheckliste Teil B |
+| Mo 30.11. | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`) | W.A.I.S. | Runbook Abschnitt 10 |
+| Mo 30.11. bis Fr 04.12. | Skript zum Löschen der Laborkonten und Widerrufen der Sitzungen (Trockenlauf als Standard, Bestätigungswort, Nachweis), mit Review | W.A.I.S. | Lücke 1 |
+| bis Fr 11.12. | Skript ausführen, Umschlag-Datei und Sicherungen löschen. Ab 12.12. Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
 
-## 4. Was Niko entscheiden oder liefern muss
+## 5. Was Niko noch entscheiden oder liefern muss
 
 | Nr | Was | Frist | Empfehlung |
 | --- | --- | --- | --- |
-| N1 | Ja zum Etikett `labor-freeze` | So 15.11. | Ja. Es ändert nichts am Server |
-| N2 | Ja zum Lasttest, zuerst der Probelauf mit 1 Sitzung | Mo 16.11. | Ja. Kosten: wenige Züge, geschätzt weit unter einem Dollar (nicht gemessen) |
-| N3 | Preise und Ratenlimit aus der Konsole für den Lasttest | vor dem vollen Lauf | Eintragen, dann gilt `--kosten-obergrenze`. Der volle Plan schätzt rund 5,9 Millionen Eingabe-Tokens und 0,1 Millionen Ausgabe-Tokens, das Werkzeug rechnet Dollar nur mit Preisen |
-| N4 | Q6: Fassung der Regeln | Mi 18.11. | Standard (steht am Server, die Messrunde 1 empfiehlt sie) |
-| N5 | Q13: Büro-Adressen für 55446, 55322 und 56543 in `LAN_PORTS_ADMIN` | Mi 18.11. | Liste der Admin-Geräte nennen, die Firewall-Änderung folgt nach Ja mit `--trocken` und Rückweg |
-| N6 | Weg des Betreuer-Tokens zu den Betreuern (das Einrichtungsskript zeigt ihn nie an) | Mi 18.11. | Persönliche Übergabe durch Niko am Gerät, nie Chat, Mail oder Ausdruck |
-| N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | Vor der Generalprobe |
-| N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | 19.11. bis 20.11. | wie in der Morgencheckliste |
+| N3 | Preise und Ratenlimit aus der Konsole für den Lasttest | Mi 18.11. | Eintragen, dann gilt `--kosten-obergrenze` |
+| N4 | Q6: Fassung der Regeln | Mi 18.11. | Standard (steht am Server) |
+| N5 | Q13: Büro-Adressen für 55446, 55322 und 56543 in `LAN_PORTS_ADMIN` | Mi 18.11. | Liste der Admin-Geräte nennen, Firewall-Änderung mit `--trocken` und Rückweg |
+| N6 | Weg des Betreuer-Tokens | Mi 18.11. | Persönliche Übergabe am Gerät, nie Chat, Mail oder Ausdruck |
+| N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | vor der Generalprobe |
+| N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste |
+| E5 | Kern-Kanal während Lasttest und Labortag sperren | Fr 20.11. | Ja, das Schaufenster zeigt nur die Aufzeichnung |
 
-## 5. Lücken, für die es noch kein Werkzeug gibt
+## 6. Lücken und Risiken
 
-1. **Laborkonten löschen und Sitzungen widerrufen** (Runbook Abschnitt 10 Punkt 6). Es gibt kein Skript. Der Dienstschlüssel von GoTrue bleibt auf Sokrates-2, deshalb ein Skript am Server nach dem Muster von `wamo-labor-loeschlauf.sh` (Trockenlauf als Standard, Bestätigungswort, Nachweis). Bau zwischen Mo 30.11. und Fr 04.12., denn es wird erst nach dem Labortag gebraucht.
-2. **Betreuer-Token-Übergabe.** Nach N6 entscheiden, ob dafür ein Skript nötig ist.
-3. **Aufzeichnung für das Schaufenster.** Themenliste und Erzähltext fehlen (Runbook Abschnitt 7.2).
-4. **Erster echter Lasttest.** Alles in `docs/labor-lasttest.md` über Kosten, Dauer und Grenzen ist geschätzt, bis ein Lauf Zahlen liefert.
-
-## 6. Risiken, die dieser Plan kennt
-
-- Alle Plätze teilen einen Schlüssel für das Sprachmodell (Ratenlimit und Guthaben). Der Lasttest ist die einzige Messung dafür.
-- Ein Platz-Laptop mit WAMO-CA und Kiosk-Konto wurde noch nicht gesehen. Der Rauchtest am Server kann das nicht belegen.
-- Die Gäste-Laptops stehen vermutlich im flachen Büronetz. Das Netzkonzept liegt bei den Kollegen (Konzept 1.1).
-- Ohne Freigabe für die Spracheingabe durch Soniox (mindestens 9 Sitzungen) hilft der Rückfall nur mit Texteingabe oder der Aufzeichnung.
+1. **Laborkonten löschen und Sitzungen widerrufen:** noch kein Skript (Bau nach dem Labortag, Fahrplan).
+2. **Marker bei w2:** Bis zur Korrektur schweigt W.A.I.S. bei der Wissensfrage zur CTFL-Prüfung. Ob der Büro-Prompt betroffen ist, klärt die Ursachenanalyse.
+3. **CPU des Kerns:** schon bei 1 Sitzung p95 43,5 Prozent eines Kerns. Erst der volle Lasttest zeigt, ob 8 Sitzungen unter 70 Prozent bleiben.
+4. **Gemeinsamer Server:** Entwicklungsaufträge (bis 6) und das Hausmodell teilen sich Sokrates-2 mit dem Kern und dem Labor-Dienst. Darum sperrt der Kern-Kanal während Lasttest und Labortag.
+5. **Ein Schlüssel für alle Plätze** (Ratenlimit und Guthaben). Der Lasttest ist die einzige Messung dafür.
+6. **Platz-Laptop im Kiosk-Konto** wurde noch nicht gesehen, der Rauchtest am Server kann das nicht belegen.
+7. **Gäste-Laptops im flachen Büronetz**, das Netzkonzept liegt bei den Kollegen.
 
 ---
 

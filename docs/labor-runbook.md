@@ -179,7 +179,7 @@ Die Befehle laufen im Repo-Hauptordner auf dem PC der Technik (Voraussetzungen i
 | 3 | T | Dienst abschalten (Board, Tickets, Betreuer-Seite) | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-rueckweg.sh"` | Container, Site und Firewall-Kette weg, Daten und Token bleiben, der Kern nimmt keine Sitzung mehr an | `[offen: Dauer messen in der Rückwegübung am 27.11.]`, das Skript nennt die Ausfalldauer |
 | 4 | T | Kern zurück auf die vorige Instanz | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh rueckweg-kern"` | neue Sitzungen gehen auf den vorigen Kern, der Laborprofile mit 403 abweist | unter 5 Minuten, nur solange der vorige Slot noch läuft (`status` zeigt es) |
 
-Läuft der vorige Slot nicht mehr (nach `ausleiten`), gibt es keinen schnellen Rückweg. Dann stellt T das vorige Release erneut bereit (`wamo-core-slots.sh release` und `umschalten-kern`) `[offen: Dauer ist nicht gemessen, die Rückwegübung am 27.11. misst sie]`.
+Läuft der vorige Slot nicht mehr (nach `ausleiten`), gibt es keinen schnellen Rückweg. Dann stellt T das vorige Release erneut bereit (`wamo-core-slots.sh release` und `umschalten-kern`). Das vorige Release muss eines mit Erstanmeldung sein (ab 0.3.0, Restplan Entscheidung E6), nie `c751d04` oder älter: Ein solcher Kern kennt `wamo_auth` nicht und ließe Mitglieder mit offenem Passwortwechsel in die App `[offen: Dauer ist nicht gemessen, die Rückwegübung am 27.11. misst sie]`.
 
 ### 5.4 Welche Stufe
 
