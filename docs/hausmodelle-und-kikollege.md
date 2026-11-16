@@ -7,6 +7,11 @@ Prozessliste mit geschwärzten Argumenten), die Modellliste der Gateway-Konfigur
 öffentlichen Statusendpunkte der KiKollege-Laufzeit. Keine `.env`, kein Schlüssel und keine Konfiguration mit Geheimnissen wurde gelesen.
 Im Text heißt der Assistent W.A.I.S., technisch bleibt alles `wamo` (`CLAUDE.md`, Namensvertrag).
 
+**Nachtrag 16.11.2026 (Paket H5, Zweig `feat/stimme-im-haus`).** Entscheidung von Niko: "Jetzt messen und einbauen, aber nicht umstellen
+sondern in der Oberfläche umschaltbar machen". Messung M7 steht in Abschnitt 2.5, der Stand von H5 in Abschnitt 5. Soniox bleibt Standard,
+Laborprofile hören immer über Soniox (F4). Die zwei Einträge im Gateway (2.5) sind seit 16.11.2026, 18:27 Uhr aktiv (Nikos Ja,
+eingetragen vom Koordinator); Migration 0023 und `core.env` folgen nach demselben Ja.
+
 Das Testlabor am 28.11.2026 hat Vorrang. Der Freeze für Kern, Migration, Oberfläche und Dienste am Server gilt seit So 15.11.2026 (`docs/testlabor-wamo.md:34`,
 Entscheidung E14, vorher Fr 20.11. nach E5), der Daten-Freeze am Fr 27.11. Jedes Paket dieses Papiers beginnt deshalb frühestens am Mo 30.11.2026.
 
@@ -48,7 +53,7 @@ das heißt KiKollege von Erwin er hat schon Hermes eingebunden und viele Angente
 | --- | --- | --- | --- |
 | Sokrates-1 `192.168.178.75` | Ollama (systemweit) | `gemma4:31b` 19 GB, `qwen3.6:35b` 23 GB, `laaj-judge:v2` 36 GB, `sokrates-steuer:v0.1` 29 GB, `qwen3-embedding:8b` 4,7 GB, `all-minilm` (**B** `ollama list`) | Zum Zeitpunkt kein Modell geladen (`ollama ps` leer) |
 | Sokrates-1 | vLLM (Container `vllm-qwen3-asr`, :8101) | `Qwen/Qwen3-ASR-1.7B` als `qwen3-asr-1.7b`, `--gpu-memory-utilization 0.08`, `--max-model-len 8192` (**B** Prozessliste) | belegt rund 8,8 GB GPU-Speicher |
-| Sokrates-1 | Container `qwen3-tts` (:8102) | Qwen3-TTS, eigener Uvicorn-Dienst (**B** `docker ps`, Prozessliste) | rund 4,7 GB GPU-Speicher; API-Form nicht geprüft (**V**) |
+| Sokrates-1 | Container `qwen3-tts` (:8102) | Qwen3-TTS, eigener Uvicorn-Dienst (**B** `docker ps`, Prozessliste) | rund 4,7 GB GPU-Speicher; API siehe 2.5 (**B**, 16.11.) |
 | Sokrates-1 | LiteLLM (Container `uaol-litellm`, :4000) | zentrales Gateway, Modellliste siehe 1.2 | Hausregel: alle Modellaufrufe nur hierüber |
 | Sokrates-2 `192.168.178.136` | Ollama | `qwen3.6:35b` 23 GB (geladen, 16k Kontext), `wamocon-coder:latest` 84 GB, `qwen3-coder-next:q8_0` 84 GB, `tr-legal-tuned-raw` 29 GB, `bge-m3`, `nomic-embed-text` (**B** `ollama list`, `ollama ps`) | Kern von W.A.I.S. läuft hier (`/opt/wamo-core/slots/a`) |
 | Sokrates-2 | vLLM (Container `ocr-dots`, :8300) | OCR-Modell `dots-mocr`, `--gpu-memory-utilization 0.20` (**B**) | rund 20 GB GPU-Speicher |
@@ -139,8 +144,8 @@ MoE, 0,65 bei dichten Modellen). Hauszahlen (H) aus der Modellkarte.
 | Zusammenfassung | wie Gespräch | `qwen3.6-35b` 1/1 in 4,1 s, 262k Kontext \[8\] (H) | keiner | `qwen3.6-35b`, mit mehr Fällen nachmessen |
 | Boss (unklare Aufgaben) | Claude Haiku | unklare Aufträge laufen über die Klasse Gespräch (`voice-core/boss.py:682`), also über das Gesprächsmodell des Hauses | Router wie Ministral-3-3B (Apache 2.0) \[26\] | kein neues Modell und keine Codeänderung; der Boss fragt selten |
 | Entwicklungsaufträge | Claude Code (Token Sonnet, sonst Haiku) | `wamo-coder` 7/8 in 7,2 s; `qwen3.6-35b` 7/8 in 3,6 s (H) | `Qwen/Qwen3.6-35B-A3B` FP8: SWE-bench Verified 73,4, Terminal-Bench 2.0 51,5, M 54 bis 86 Token/s \[1\]\[8\]\[40\]; Coder-Next ist überholt (SWE-V 70,6) und 84 GB groß \[41\] | Spike H6: Agent (Claude Code über Gateway oder OpenCode) mit `qwen3.6-35b` |
-| STT | Soniox (EU) | `qwen3-asr` 1.7B, 0,65 s je Äußerung, ohne Zwischenergebnisse (H) | `mistralai/Voxtral-Mini-4B-Realtime-2602`, Apache 2.0, echtes Streaming, WER Deutsch FLEURS 6,19 % bei 480 ms \[43\]; `nvidia/parakeet-tdt-0.6b-v3` (CC-BY-4.0, WER 5,04 %, nur gepuffert) \[45\] | Soniox bleibt Standard; Option Haus zuerst mit Qwen3-ASR, später Voxtral Realtime |
-| TTS | Soniox (EU) | `qwen3-tts` (nicht gemessen), `piper-de` 0,1 bis 0,2 s (H) | Qwen3-TTS bleibt die beste freie Wahl (Apache 2.0, Streaming über vLLM-Omni) \[49\]\[50\]; Voxtral-4B-TTS ist nicht kommerziell (CC BY-NC) \[55\] | Soniox bleibt Standard; Option Haus mit Qwen3-TTS, Piper als schneller Rückfall (Lizenz der Stimme prüfen) |
+| STT | Soniox (EU) | `qwen3-asr` 1.7B: p50 280 ms, p95 573 ms je ganzer Äußerung, Wortfehlerrate 1,2 %, ohne Zwischenergebnisse (M7, 2.5) | `mistralai/Voxtral-Mini-4B-Realtime-2602`, Apache 2.0, echtes Streaming, WER Deutsch FLEURS 6,19 % bei 480 ms \[43\]; `nvidia/parakeet-tdt-0.6b-v3` (CC-BY-4.0, WER 5,04 %, nur gepuffert) \[45\] | Soniox bleibt Standard; Option Haus zuerst mit Qwen3-ASR, später Voxtral Realtime |
+| TTS | Soniox (EU) | `qwen3-tts`: kein Streaming, erstes Audio 1,4 bis 2,1 s je Satz, nur eine Anfrage zugleich (M7, 2.5); `piper-de` 0,1 bis 0,2 s (H) | Qwen3-TTS bleibt die beste freie Wahl (Apache 2.0, Streaming über vLLM-Omni) \[49\]\[50\]; Voxtral-4B-TTS ist nicht kommerziell (CC BY-NC) \[55\] | Soniox bleibt Standard; Option Haus mit Qwen3-TTS, Piper als schneller Rückfall (Lizenz der Stimme prüfen) |
 
 ### 2.3 Betrieb der neuen Modelle
 
@@ -168,6 +173,96 @@ nach den Läufen geändert, `test_modellkarte.py` rechnet jede Zahl nach.
 | M5 Neues Gesprächsmodell | M1, M2 und M4 mit dem neuen Alias `wamo-gespraech` | `gemma-4-26B-A4B-it` in vLLM | wie M1 | 2 h |
 | M6 Code | `uv run python eval/modellkarte_messen.py code --anbieter litellm --modell <alias>` und der Spike aus H6 | `qwen3.6-35b`, `wamo-coder` | 8/8, danach drei echte Aufgaben | 1 h plus Spike |
 | M7 Stimme | `scripts/wamo_stimme.py` und `scripts/wamo_latenz.py` mit `WAMO_STT_ANBIETER=haus` bzw. `WAMO_TTS_ANBIETER=haus` | Qwen3-ASR, Qwen3-TTS, später Voxtral | erster Ton nach Sprechende p95 höchstens 0,5 s über Soniox; Hörprobe von Niko | je Lauf 15 min |
+
+### 2.5 Messung M7: Stimme im Haus (16.11.2026)
+
+Einmalig direkt an den Diensten auf Sokrates-1 gemessen, vom Laptop im Büronetz (für diese Messung erlaubt; der Kern spricht die Dienste
+nie direkt an, nur über das Gateway). Nur lesend: `docker ps`, `docker inspect` ohne Werte der Umgebung, `/health`, `/openapi.json`, der
+Quelltext des TTS-Dienstes. Am Gateway wurde nichts geändert. Soniox nicht neu gemessen (Kosten); Vergleich aus
+`docs/sprache-elevenlabs-soniox.md` 6.2 (`LATENZ_JSON`, 03.11. bis 15.11.2026). Skript und Rohwerte lagen nur lokal, Hörproben
+der Stimmen unter `D:\tmp\stimme-hoerprobe-haus` (nicht im Repo).
+
+**Schnittstellen (B).**
+
+| Dienst | Container und Aufruf | Schnittstelle | Besonderheiten |
+| --- | --- | --- | --- |
+| Spracherkennung | `vllm-qwen3-asr`, Port 8101 auf 8000, `vllm serve Qwen/Qwen3-ASR-1.7B --served-model-name qwen3-asr-1.7b --gpu-memory-utilization 0.08 --max-model-len 8192 --max-num-seqs 16`, ohne Schlüssel | OpenAI-kompatibel: `POST /v1/audio/transcriptions` (multipart `file`, `model`, `language`, `prompt`, `response_format`, `temperature`), dazu `/v1/audio/translations`, `/v1/models`, `/health` | Antwort `{"text", "usage"}` als reiner Text, ohne Sprachpräfix; ganze Äußerung, keine Zwischenergebnisse |
+| Sprachausgabe | `qwen3-tts`, Port 8102 auf 8000, eigener FastAPI-Dienst mit `faster-qwen3-tts`, Modell `Qwen3-TTS-12Hz-1.7B-CustomVoice` (Apache 2.0), ohne Schlüssel | OpenAI-ähnlich: `POST /v1/audio/speech` mit JSON `input`, `voice`, `response_format` (Standard mp3; `wav` und `pcm` liefern WAV, sonst über ffmpeg), optional `language` und `instructions`; `model` wird nicht ausgewertet; `GET /health` nennt die Stimmen | ganze Datei, kein Streaming; WAV mono 16 Bit, 24 kHz; Kopfzeilen `X-Synth-Seconds`, `X-Language`; ein Lock: immer nur eine Anfrage zugleich |
+
+Stimmen: neun eingebaute Sprecher (`vivian`, `serena`, `uncle_fu`, `dylan`, `eric`, `ryan`, `aiden`, `ono_anna`, `sohee`), keiner nativ deutsch,
+Standard des Dienstes `aiden`. Die Sprache nimmt der Dienst aus `language`, sonst rät er sie am Text (Umlaute oder Wörter wie "und", "ich",
+"ist"), im Zweifel Englisch.
+
+**Ergebnisse.**
+
+| Messung | Haus (Qwen3) | Soniox (Vergleich) |
+| --- | --- | --- |
+| STT, 12 Sprechproben Windows-Stimme Hedda (2,2 bis 7,5 s, 16 kHz), je 3 Läufe, Zeit von der fertigen Äußerung bis zum Text | p50 280 ms, p95 573 ms, max 733 ms (n = 36); erste Anfrage nach Pause einmal 2,5 s | Sprechende bis endgültiges Transkript p50 229 ms, p95 280 ms |
+| STT, dazu vor dem Senden | Ende der Sprachaktivität `WAMO_VAD_STOP_SECS` (Standard 0,2 s), Weg über das Gateway (nicht gemessen) | im Wert oben enthalten |
+| STT, Wortfehlerrate gegen den bekannten Text | 1,2 % gewichtet (ein Fehler: "Mach" als "Macht"); Fachbegriffe als `prompt` ohne Wirkung | Herstellerangabe Deutsch 1,25 % |
+| STT, neuronale Stimme statt natürlicher Aufnahme (im Repo liegt keine; sechs Sätze aus Qwen3-TTS, je 2 Läufe) | p50 358 ms, p95 619 ms, Wortfehlerrate 2,9 % | nicht gemessen |
+| TTS, 1 Satz (39 Zeichen, 2,4 bis 3,3 s Audio), Stimmen `uncle_fu` und `sohee`, je 3 Läufe | erstes Audio 1,42 bis 2,13 s, gleich der Gesamtdauer | erster Satz bis erstes Audio p50 172 ms, p95 382 ms |
+| TTS, 2 Sätze (87 Zeichen, 5,0 bis 5,4 s Audio) | 2,9 bis 3,5 s | Streaming |
+| TTS, 4 Sätze (rund 200 Zeichen, 12,9 bis 13,2 s Audio) | 6,3 bis 8,6 s; Echtzeitfaktor 0,51 bis 0,62 | Streaming |
+| TTS, kurze Antworten ("Gerne.", "Fertig.", "Alles klar.") | 0,44 bis 0,58 s; "Erledigt." und "Moment." 1,3 bis 1,7 s | |
+| TTS, zwei Anfragen zugleich | die zweite wartet: 1,8 s und 3,4 s | |
+| TTS, Stimmenwahl Deutsch (2 Sätze, Rückweg über die Spracherkennung) | Wortfehlerrate 0 % bei acht Stimmen, 7 % bei `aiden` ("Gerne" als "Kenne"); Dauer 2,5 s (`sohee`) bis 4,1 s (`ryan`) | |
+| TTS, Sprache ohne Feld `language` (so kommt die Anfrage über das Gateway an) | 6 von 8 kurzen deutschen Antworten als Englisch gesprochen ("Alles klar.", "Erledigt.", "Moment.", "Gerne.", "Fertig.", "Guten Morgen!") | Deutsch fest eingestellt |
+
+**Über das Gateway (erste Proben des Koordinators nach dem Eintrag, Schlüssel des Kerns, Stimme `sohee`).** Spracherkennung ohne
+`response_format` lehnt das Gateway mit HTTP 400 ab (LiteLLM verlangt von sich aus verbose_json, das Qwen3-ASR nicht kann); mit `json`
+geht es, der Kern schickt es seitdem immer (`HausSTTService`). Sprachausgabe 0,56 bis 1,47 s je Satz. Beim Rücklesen kamen 3 von 4 kurzen
+Sätzen deutsch an, "Erledigt." nicht; zwei der drei guten waren auch direkt ohne Sprachangabe deutsch. Die volle Wiederholung von M7 über
+das Gateway (Skript mit eingebetteten Sprechproben, nur Messwerte in der Ausgabe) steht aus.
+
+**Bewertung.**
+
+1. **Spracherkennung im Haus taugt.** Gleiche Güte wie Soniox bei klarer Sprache, dafür rund 0,3 bis 0,5 s später (Ende der Sprachaktivität
+   plus ganze Äußerung) und ohne Live-Mitschreiben. Ungeprüft bleiben echte Stimmen, Störgeräusche und Fachwörter; das zeigt erst ein
+   Lauf mit `scripts/wamo_stimme.py`.
+2. **Sprachausgabe im Haus reißt die Latte von M7** (erster Ton höchstens 0,5 s über Soniox): je Satz 1,2 bis 1,8 s später, weil der Dienst die
+   ganze Datei erst am Ende liefert. Er bedient außerdem nur eine Anfrage zugleich; mehrere Personen im Haus warten aufeinander.
+3. **Sprache Deutsch erzwingen, bevor jemand "Im Haus" wählt.** Das Gateway reicht bei `/audio/speech` nur `response_format`, `speed` und
+   `instructions` weiter (LiteLLM 1.92.0, `litellm/main.py`, `speech`), nie `language`. Kurze Sätze ohne Umlaut oder Hinweiswort spricht der
+   Dienst deshalb englisch aus. Abhilfe am Dienst: im Zweifel Deutsch statt Englisch (eine Zeile in `_guess_language` oder eine Umgebungsvariable
+   wie `DEFAULT_SPEAKER`), nur mit Nikos Ja.
+4. **Stimme:** Vorschlag `sohee` (schnellste, 0 % Fehler), endgültig nach Nikos Hörprobe; `aiden` nicht nehmen.
+5. **Folge für die Oberfläche:** "Im Haus" ist ein Datenschutzmodus mit spürbarer Wartezeit, kein Ersatz für Soniox. Der Satz unter dem
+   Schalter nennt die Folgen. Für echtes Streaming der Stimme bleibt Qwen3-TTS über vLLM-Omni \[50\] (neues Paket, Messung wie hier).
+
+**Einträge im Gateway (seit 16.11.2026, 18:27 Uhr aktiv).** Unter `model_list` der Konfiguration des zentralen Gateways (`/app/config.yaml`
+im Container `uaol-litellm`, Bindung an eine Datei im Home von `wamocon` auf Sokrates-1), neben `wamo-haus-coder`. Eingetragen ist es mit
+`api_base` auf `192.168.178.75` (gleichwertig zu `host.docker.internal`, beide aus dem Container geprüft) und bei `wamo-tts-haus` zusätzlich
+`extra_body: {language: German}`. Nach dem Quelltext von LiteLLM 1.92.0 erreicht `extra_body` den Dienst bei Speech nicht (siehe Punkt 3
+oben); die Messung über das Gateway entscheidet. Der Schlüssel des Kerns sieht beide Modelle in `/v1/models`. Sicherung der Datei:
+`litellm_config.yaml.vor-wamo-stimme.20261116-182624`. Vorlage:
+
+```yaml
+  # W.A.I.S.: Hören und Stimme im Haus (Paket H5). Beide Dienste prüfen keinen Schlüssel; "none" ist ein Platzhalter und verhindert,
+  # dass LiteLLM einen OPENAI_API_KEY aus seiner Umgebung an die Dienste schickt.
+  - model_name: wamo-stt-haus
+    litellm_params:
+      model: openai/qwen3-asr-1.7b
+      api_base: http://host.docker.internal:8101/v1
+      api_key: "none"
+      timeout: 30
+    model_info:
+      id: wamo-stt-haus-node1
+      mode: audio_transcription
+  - model_name: wamo-tts-haus
+    litellm_params:
+      model: openai/qwen3-tts
+      api_base: http://host.docker.internal:8102/v1
+      api_key: "none"
+      timeout: 60
+    model_info:
+      id: wamo-tts-haus-node1
+      mode: audio_speech
+```
+
+Rückweg: die Sicherung `litellm_config.yaml.vor-wamo-stimme.20261116-182624` zurückkopieren (oder die beiden Blöcke löschen) und
+`docker restart uaol-litellm`. Ohne die Einträge fällt der Kern von selbst auf Soniox zurück und nennt den Grund.
+Der Neustart unterbricht das Gateway für alle Nutzer kurz; deshalb außerhalb von Gesprächen und Läufen.
 
 ## 3. Entwurf "Alles über Sokrates"
 
@@ -211,8 +306,8 @@ auch für Laborprofile, denn er ist für den Fall gedacht, dass gar nichts mehr 
 | --- | --- | --- | --- |
 | L1 | Globaler Schalter mit Quelle `betrieb`, dazu Notschalter `WAMO_LLM_NUR_HAUS`; fehlende Tabelle heißt "aus" (3.2) | neue Tabelle per Migration 0021 (mit `.down.sql`, RLS, Policy `core_all`, nur nötige Grants, Selbsttest), `modellzugang.zugang_laden` | H3 |
 | L2 | Admin-Zwang je Profil (`nur_haus`, `stt`, `tts`, Modell) aus der Oberfläche. Migration 0010 gibt `wamo_core` darauf bewusst keine Schreibrechte, ihr Selbsttest bricht sogar ab, sobald `wamo_core` `nur_haus` schreiben darf (`supabase/migrations/0010_modellzugang.sql:86` und `:115`). Nötig ist ein eigener Weg, etwa eine `security definer`-Funktion mit Prüfung der Rolle `admin` des aufrufenden Profils und Audit, und ein angepasster Selbsttest (F10) | Migration 0021, `voice-core/modellzugang_api.py` | H3 |
-| L3 | Die Stimme hängt schon heute nur an der Wahl des Profils (`voice-core/bot.py:735`); Soniox bleibt also im Modus "nur Haus". Nur `boss.sprache_wunsch` (`voice-core/boss.py:224`) behauptet anderes und wird allein in Tests benutzt: aufräumen. Neu ist nur, dass die Person ihre Stimme selbst wählen darf (wie L2) | `boss.py`, Migration 0021 | H3 |
-| L4 | Audiomodelle im Gateway (Qwen3-ASR, Qwen3-TTS) | zentrales LiteLLM, Betreiber fragen | H5 |
+| L3 | Die Stimme hängt schon heute nur an der Wahl des Profils (`voice-core/bot.py:735`); Soniox bleibt also im Modus "nur Haus". Nur `boss.sprache_wunsch` (`voice-core/boss.py:224`) behauptet anderes und wird allein in Tests benutzt: aufräumen. Neu ist nur, dass die Person ihre Stimme selbst wählen darf (wie L2). **Stand 16.11.2026:** Die Wahl der Person ist gebaut (Migration 0023 statt 0021, Aktion `stimme`, H5); das Aufräumen von `boss.sprache_wunsch` bleibt bei H3 | `boss.py`, Migration 0023 | H3, H5 |
+| L4 | Audiomodelle im Gateway (Qwen3-ASR, Qwen3-TTS). **Stand 16.11.2026:** Einträge `wamo-stt-haus` und `wamo-tts-haus` vorbereitet (2.5), nicht eingetragen | zentrales LiteLLM, Betreiber fragen | H5 |
 | L5 | Neues Gesprächsmodell als Dienst mit Rauchtest und Rückweg | `infra/sokrates2/` (Skript mit `--trocken`), Alias `wamo-gespraech` | H1 |
 | L6 | Warmhalten des Gesprächsmodells | `boss.py`, Sitzungsstart | H2 |
 | L7 | Entwicklungsaufträge im Haus: Die Auftragssandbox darf heute ins Internet (TCP 80 und 443), aber nicht ins LAN, dazu sperrt Landlock (`infra/sokrates2/wamo-job.sh:45` bis `:50`); das Gateway ist also nicht erreichbar. Der Dispatcher kennt und schwärzt nur Anthropic-Schlüssel (`infra/sokrates2/wamo_job_dispatch.py:177` bis `:189`). Nötig: genau eine Ausnahme in `wamo-egress.nft` für das Gateway (GitHub und npm bleiben offen), ein eigener virtueller Gateway-Schlüssel mit Budget, ein Schwärzmuster dafür und die Quelle `haus` in `boss.entwicklung_quelle` | Dispatcher, `wamo-egress.nft`, `boss.py` | H6 |
@@ -220,7 +315,7 @@ auch für Laborprofile, denn er ist für den Fall gedacht, dass gar nichts mehr 
 | L9 | Modellkarte und Boss mit den neuen Messungen; Caesar-Aliase und die 84-GB-Codermodelle aus der Wahl nehmen; veralteten Hinweis "US-Projekt" bei Soniox berichtigen (`voice-core/modellkarte.py:346`, seit 02.11. EU-Projekt laut `README.md`) | `voice-core/modellkarte.py`, `voice-core/test_boss.py` | H1, H2 |
 | L10 | Prüfung "kein Anthropic-Client im Haus-Modus" als Test, der jeden Aufbau eines Anthropic-Clients im Kern scheitern lässt | neue Tests | H3 |
 | L11 | Claude-Code-Aufträge im Haus-Modus sperren: Quelle `betrieb` in die Ausschlussliste von `boss.entwicklung_quelle` (`voice-core/boss.py:213`), Schalter und Notschalter auch in `claude_code_zugang_fuer` (`voice-core/modellzugang.py:434`), in `serverzugang_erlaubt` (`voice-core/dev_agent.py:187`) und beim Hinterlegen von Schlüssel und Token prüfen. L10 fängt das nicht, weil Claude Code in der Sandbox läuft | `boss.py`, `modellzugang.py`, `dev_agent.py` | H3 |
-| L12 | `wamo-core-env` lässt außer festen Namen nur das Präfix `WAMO_LLM_` zu (`infra/sokrates2/wamo_core_env.py:38` bis `:105`). `WAMO_STT_*`, `WAMO_TTS_*` und ein Schalter für KiKollege brauchen eine erweiterte Liste, auch in `scripts/wamo_kern_sokrates2.py`, mit Tests | `wamo_core_env.py` | H3 |
+| L12 | `wamo-core-env` lässt außer festen Namen nur das Präfix `WAMO_LLM_` zu (`infra/sokrates2/wamo_core_env.py:38` bis `:105`). `WAMO_STT_*`, `WAMO_TTS_*` und ein Schalter für KiKollege brauchen eine erweiterte Liste, mit Tests. **Stand 16.11.2026:** Die fünf Namen der Stimme stehen in `ERLAUBT`, bewusst nicht in `AUS_ENV` von `scripts/wamo_kern_sokrates2.py` (ein Testwert `haus` am PC darf nie alle Sitzungen umstellen); der Schalter für KiKollege folgt mit K1 | `wamo_core_env.py` | H3, H5 |
 
 ### 3.5 Was "alles" im Haus-Modus heißt
 
@@ -366,6 +461,17 @@ unabhängig von H3. Jedes Paket ist ein PR, mit
 | **H6** Entwicklungsaufträge im Haus | Spike (8 h): Claude Code über `/v1/messages` des Gateways gegen OpenCode oder Qwen Code, beide mit `qwen3.6-35b`, 8 Code-Aufgaben plus drei echte Aufgaben in einer Kopie; danach Umsetzung (24 h): Quelle `haus`, eine Ausnahme in `wamo-egress.nft` für das Gateway, eigener virtueller Gateway-Schlüssel mit Budget und Schwärzmuster (L7), Abnahme über die vorhandenen Prüfstufen | H1, H3, F5 | 32 | `test_dev_agent*`, `test_kernkanal_vertrag.py`, `test_job_kern_skripte.py`, `test_entwicklung_*` | Dispatcher-Version, Kern-Release | Quelle `haus` aus; der Claude-Weg bleibt unberührt |
 | **K1** KiKollege V2 | siehe 4.5 und 4.6 | M2 von KiKollege, F7, L12 | 30 | Vertragstest, Fremdinhalt, Freigabe, Grenzen, Größen, keine Kette | Brücke auf Caesar (KiKollege), Kern-Release | Werkzeug über einen Schalter in `core.env` abschalten (Name nach L12), Zeile der Brücke in `authorized_keys` entfernen |
 
+**Stand H5 (16.11.2026, Zweig `feat/stimme-im-haus`):** Messung M7 (2.5); Kern: Aktion `stimme` in `modellzugang.py` (Route
+`/wamo/api/modellzugang` und Nachricht der Sitzung, 403 für Laborprofile, Zeile in `actions` mit dem Werkzeug `stimme_wahl`), Laborsitzung
+immer Soniox, Grund einer Abweichung (Rückfall oder Vorgabe des Betriebs) als `sprache_grund` in `betrieb`, Feld `stimme_haus` im
+Modellzugang (die Oberfläche sperrt "Im Haus", solange der Kern es nicht eingerichtet meldet), nur Modelle mit Hausnamen `wamo-...`,
+Spracherkennung immer mit `response_format` json (sonst verlangt LiteLLM verbose_json, das Qwen3-ASR mit HTTP 400 ablehnt); Migration 0023 (Schreibrecht des Kerns nur auf `stt` und `tts`, mit
+Rückweg und SQL-Test); `wamo-core-env` mit den fünf Namen; Oberfläche: Schalter "Soniox (Standard) | Im Haus (Datenschutz)" in der Karte
+Modellzugang, eine Wahl für Hören und Stimme gemeinsam (die Zusage "Ton und Text bleiben in der Firma" gilt nur mit beidem; die Datenbank und
+die Schnittstelle kennen beide Bausteine weiter einzeln). Offen am Server, je mit Nikos Ja: Migration 0023, Gateway-Einträge mit Neustart,
+Deutsch als Rückfall im TTS-Dienst, `WAMO_STT_HAUS_MODELL`, `WAMO_TTS_HAUS_MODELL` und `WAMO_TTS_HAUS_STIMME` in `core.env`, Kern-Release,
+danach M7 über das Gateway und Nikos Hörprobe.
+
 **Summe W.A.I.S.:** H0 6 + H1 16 + H2 8 + H3 24 + H4 12 + H5 10 + H6 32 + K1 30 = **138 Stunden**, mit H5b **158 Stunden**. Dazu rund 10 Stunden auf Seite KiKollege
 und die Zeit des Gateway-Betreibers für drei bis vier Einträge.
 
@@ -373,7 +479,7 @@ und die Zeit des Gateway-Betreibers für drei bis vier Einträge.
 H3 zeigt im Test, dass im Haus-Modus kein Anthropic-Client entsteht und der Notschalter ohne Datenbank wirkt; H4 zeigt in den Tests, dass Mitglieder den Abschnitt nicht
 sehen; H5 besteht M7 und die Hörprobe; H6 schafft im Spike mindestens 7 von 8 und zwei von drei echten Aufgaben; K1 besteht den Vertragstest und den Sicherheitsreview.
 
-**Nicht angefasst bis nach dem Labortag am 28.11.2026:** Kern, Migrationen, Oberfläche, Dienste und Gateway; das Laborprofil und sein Modell (Haiku über den
+**Nicht angefasst bis nach dem Labortag am 28.11.2026** (Ausnahme seit 16.11.2026: H5 nach Nikos Entscheidung, eingebaut, ohne Umstellung): Kern, Migrationen, Oberfläche, Dienste und Gateway; das Laborprofil und sein Modell (Haiku über den
 Server-Schlüssel); `core.env`; Soniox-Einstellungen; die Modelle auf allen drei Sparks, auch keine Messläufe über das Gateway in der Woche vor dem Labortag. Erlaubt ist
 nur dieses Papier.
 

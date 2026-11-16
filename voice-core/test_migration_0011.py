@@ -121,7 +121,8 @@ def test_kern_benutzt_nur_spalten_die_die_migration_anlegt():
     inserts = re.findall(r"insert into \{db\.t\('model_access'\)\} \((user_id[^)]*)\)", quelle)
     assert len(inserts) >= 3  # API-Schlüssel, Claude-Code-Token, Wahl
     erlaubt = {"user_id", "claude_schluessel", "claude_schluessel_ende", "claude_workspace", "claude_geprueft_at",
-               *NEUE_SPALTEN}
+               *NEUE_SPALTEN,
+               "stt", "tts"}  # seit 0023 für wamo_core (Wahl von Hören und Stimme, test_migration_0023.py)
     for spalten in inserts:
         spalten = re.sub(r'"\s*"', "", spalten)  # zusammengesetzte Zeichenketten im Quelltext
         assert {s.strip() for s in spalten.split(",")} <= erlaubt, spalten

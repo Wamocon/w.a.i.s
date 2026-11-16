@@ -33,10 +33,12 @@ def _zeile(**werte) -> dict:
 class FakeDb:
     configured = True
 
-    def __init__(self, ohne_0011: bool = False):
+    def __init__(self, ohne_0011: bool = False, ohne_0023: bool = False):
         self.zeilen: dict[str, dict] = {}
         self.sql: list[str] = []
         self.ohne_0011 = ohne_0011
+        self.ohne_0023 = ohne_0023  # Migration 0023 fehlt: wamo_core darf stt und tts nicht schreiben
+        self.aktionen: list[tuple] = []  # Zeilen für actions (Argumente der Einfügung)
 
     def t(self, name: str) -> str:
         return f"wamo_test.{name}"
@@ -52,8 +54,15 @@ class FakeDb:
         self.sql.append(sql)
         if self.ohne_0011 and ("modell_modus" in sql or "claude_code_token" in sql):
             raise asyncpg.UndefinedColumnError("column does not exist")
+        if sql.startswith("insert into wamo_test.actions"):
+            self.aktionen.append(args)
+            return "INSERT 0 1"
+        if self.ohne_0023 and "(user_id, stt, tts)" in sql:
+            raise asyncpg.InsufficientPrivilegeError("permission denied for table model_access")
         z = self.zeilen.setdefault(args[0], _zeile())
-        if sql.startswith("insert") and "claude_schluessel," in sql:
+        if sql.startswith("insert") and "(user_id, stt, tts)" in sql:
+            z.update(stt=args[1], tts=args[2])
+        elif sql.startswith("insert") and "claude_schluessel," in sql:
             z.update(claude_schluessel=args[1], claude_schluessel_ende=args[2], claude_workspace=args[3],
                      claude_geprueft_at=datetime(2026, 10, 22, 8, 30, tzinfo=UTC))
         elif sql.startswith("insert") and "modell_modus" in sql:

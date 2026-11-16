@@ -80,6 +80,11 @@ ERLAUBT = set(PFLICHT) | {
     # wamo-entwicklung-buero.conf steht, nie hier), Schwelle zum Kürzen langer Werkzeugausgaben
     "WAMO_PERSONA_ABNAHME", "WAMO_ABNAHME_BEFEHLE", "WAMO_AUSGABE_SCHWELLE",
     "LITELLM_BASE_URL", "WAMO_SUCHE", "WAMO_SEARXNG_URL", "WAMO_LITELLM_EXTRA",
+    # Hören und Stimme im Haus (voice-core/sprache_anbieter.py, Paket H5, L12): Modelle des Gateways für Spracherkennung und
+    # Sprachausgabe, die Stimme des Hausmodells und die Übersteuerung für alle Sitzungen (soniox oder haus; leer heißt die Wahl
+    # des Profils, Standard Soniox). Laborsitzungen hören immer über Soniox. Kommen nur vom Server, nie aus der .env des PCs (nicht
+    # in AUS_ENV von scripts/wamo_kern_sokrates2.py): ein Testwert "haus" am PC darf nie alle Sitzungen umstellen.
+    "WAMO_STT_ANBIETER", "WAMO_TTS_ANBIETER", "WAMO_STT_HAUS_MODELL", "WAMO_TTS_HAUS_MODELL", "WAMO_TTS_HAUS_STIMME",
     # Eine Sitzung je Profil und Höchstalter der Anmeldung (bot.py, auth_gate.py)
     "WAMO_SITZUNG_EINZELN", "WAMO_ANMELDUNG_MAX_STUNDEN",
     # Fernzugriff ohne frischen Code je Start (voice-core/rd_api.py, KP-2): Höchstalter des Codes der Anmeldung nur für den Fernzugriff

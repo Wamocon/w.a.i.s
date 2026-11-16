@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { ModellWahl } from "@/components/ModellWahl";
 import { FELD, SchluesselFormular, useSchluesselAktionen } from "@/components/SchluesselFormular";
+import { SprachWahl } from "@/components/SprachWahl";
 import type { Modellzugang } from "@/lib/nachrichten";
 import { useSelect } from "@/lib/store";
 import type { ModellzugangAnfrage } from "@/lib/useWamo";
@@ -21,7 +22,8 @@ function kopfzeile(z: Modellzugang | null): string {
  * Karte Modellzugang des Profils (eigene Karte in der linken Spalte, auch ohne laufendes Gespräch). Oben der
  * Umschalter Automatisch oder Nur Hausmodelle (ModellWahl), darunter zwei getrennte Schlüsseltypen: der
  * Anthropic-API-Schlüssel für das Gespräch (bezahlt nach Verbrauch, Standardmodell Haiku) und der Claude-Code-Token
- * für Entwicklungsaufträge (aus dem Max-Tarif). Mit Sitzung gehen die Anfragen über den Datenkanal, sonst über die
+ * für Entwicklungsaufträge (aus dem Max-Tarif). Ganz unten die Wahl für Hören und Stimme (SprachWahl: Soniox oder im Haus).
+ * Mit Sitzung gehen die Anfragen über den Datenkanal, sonst über die
  * HTTP-Schnittstelle des Kerns (lib/modellzugangApi.ts); der Kern speichert den Schlüssel verschlüsselt. Der
  * API-Schlüssel wird vorher mit einer kleinen Anfrage geprüft, der Token nur auf sein Format (eine Anfrage würde das
  * Kontingent verbrauchen). Nichts kommt zurück: es erscheinen nur "hinterlegt" und die letzten vier Zeichen.
@@ -57,7 +59,7 @@ export const ModellZugang = memo(function ModellZugang({
     <div className="mz-inhalt">
       {!online && (
         <p className="mz-offline" role="status">
-          Gerade läuft kein Gespräch. Du kannst Schlüssel, Token und Modus trotzdem hier einstellen: Die Änderung wird
+          Gerade läuft kein Gespräch. Du kannst Schlüssel, Token, Modus und Stimme trotzdem hier einstellen: Die Änderung wird
           direkt am Kern gespeichert und gilt ab der nächsten Sitzung.
         </p>
       )}
@@ -123,6 +125,13 @@ export const ModellZugang = memo(function ModellZugang({
           </span>
         </p>
         <ModellWahl senden={sende} />
+      </section>
+      <section className="mz-abschnitt" aria-labelledby="modellzugang-stimme">
+        <h4 id="modellzugang-stimme" className="mz-ueberschrift">
+          Hören und Sprechen
+        </h4>
+        <p className="mz-zweck">Wo dein Gesprochenes in Text und die Antworten von W.A.I.S. in Sprache umgewandelt werden.</p>
+        <SprachWahl senden={sende} />
       </section>
       <p className="mz-klein">
         Beides liegt verschlüsselt im Kern, wird nie angezeigt und nie in Gesprächen, Aufgaben oder im Gedächtnis

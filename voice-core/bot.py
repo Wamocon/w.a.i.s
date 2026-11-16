@@ -411,7 +411,7 @@ def betrieb_message(
     llm: str | None = None, pc_name: str | None = None, pc_belegt: bool = False, sprache: dict[str, str] | None = None,
     modell_modus: str | None = None, modell_quelle: str | None = None, modell_hinweis: str | None = None,
     entwicklung_grund: str | None = None, office: list[str] | None = None, mail: bool = False,
-    onenote: bool = False, teams: bool = False, pc_stufe: str | None = None,
+    onenote: bool = False, teams: bool = False, pc_stufe: str | None = None, sprache_grund: str | None = None,
 ) -> dict:
     """pc: verbindet | verbunden | gesperrt | getrennt | aus (gesperrt: Bildschirm am PC gesperrt, pc_anzeige).
     pc_steuerung: ob die PC-Werkzeuge in dieser Sitzung eingeschaltet sind (Standard aus).
@@ -420,6 +420,8 @@ def betrieb_message(
     pc_name: Rechnername des gesteuerten PCs (aus system_info), damit die Oberfläche das Ziel zeigt.
     pc_belegt: Einschalten abgelehnt, weil eine andere Sitzung den PC gerade steuert (Büro).
     sprache: Anzeigenamen für Hören und Stimme (sprache_anbieter.SprachWahl.anzeige), Standard Soniox.
+    sprache_grund: warum die Sitzung trotz Wahl "haus" über Soniox hört oder spricht (SprachWahl.grund, höchstens 160 Zeichen,
+    ohne Namen aus der Umgebung); fehlt ohne Rückfall.
     modell_modus: wirksamer Modus dieser Sitzung (automatisch | nur_haus, boss.modus_wirksam), modell_quelle: warum
     (festgelegt: Admin, wahl: Person, keiner: kein eigener Schlüssel), modell_hinweis: warum der Boss nicht das beste
     Modell nehmen konnte (zu langsam, nicht erreichbar), für die Anzeige in der Statusleiste.
@@ -466,6 +468,8 @@ def betrieb_message(
         message["teams"] = True
     if pc_stufe in (rechte.ADMIN, rechte.MITGLIED):
         message["pc_stufe"] = pc_stufe
+    if sprache_grund:
+        message["sprache_grund"] = " ".join(sprache_grund.split())[:160]
     return message
 
 
@@ -800,7 +804,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
 
     # Spracherkennung und Sprachausgabe je Profil (Zugang.stt/tts) oder für alle (WAMO_STT_ANBIETER/WAMO_TTS_ANBIETER):
     # Soniox oder im Haus über LiteLLM, mit Rückfall auf Soniox (sprache_anbieter.py)
-    sprache = await sprach_wahl(zugang)
+    sprache = await sprach_wahl(zugang, labor=labor_sitzung is not None)  # Laborsitzung: immer Soniox (F4)
     # Ein Schlüssel im Gesagten wird vor allem anderen entfernt (schluessel_filter.py): Verlauf, Modell, Gedächtnis, Untertitel
     stt = absichern(haus_stt(sprache.stt, STT_TERMS) if sprache.stt.anbieter == "haus" else soniox_stt())
     tts = haus_tts(sprache.tts) if sprache.tts.anbieter == "haus" else soniox_tts()
@@ -1132,6 +1136,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         await send(betrieb_message(pc_anzeige(state["pc"], state["pc_gesperrt"]), state["pc_latenz_ms"],
                                    state["pc_steuerung"], entwicklung, llm=llm_wahl.anzeige, pc_name=state["pc_name"],
                                    pc_belegt=state["pc_belegt"], sprache=sprache.anzeige(SONIOX_VOICE),
+                                   sprache_grund=sprache.grund(),
                                    modell_modus=modus_wirksam(zugang), modell_quelle=zugang.quelle,
                                    modell_hinweis=llm_wahl.grund,
                                    entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund, mitglied=ent_mitglied),

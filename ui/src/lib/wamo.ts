@@ -687,6 +687,7 @@ export function applyServerMessage(msg: ServerMessage) {
         mail: msg.mail,
         onenote: msg.onenote,
         teams: msg.teams,
+        spracheGrund: msg.spracheGrund,
       };
       const vorher = wamo.get().betrieb;
       wamo.set((s) => ({

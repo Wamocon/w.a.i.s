@@ -24,8 +24,8 @@ export function modusErklaerung(modus: ModellModus, hatApiSchluessel: boolean): 
   if (modus === "nur_haus") {
     return (
       "Gespräch, Lernen, Bildschirm und Aufgaben laufen nur auf den Modellen im Haus. Es geht nichts an Anthropic, " +
-      "und Entwicklungsaufträge mit Claude Code sind aus. Hören und Stimme laufen vorerst weiter über Soniox, bis die " +
-      "Hausstimmen aktiv sind."
+      "und Entwicklungsaufträge mit Claude Code sind aus. Hören und Stimme stellst du darunter eigens ein, Standard " +
+      "ist Soniox."
     );
   }
   return hatApiSchluessel

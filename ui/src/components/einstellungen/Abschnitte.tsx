@@ -132,6 +132,7 @@ export const SpracheAbschnitt = memo(function SpracheAbschnitt({
   nurMikrofon?: boolean;
 }) {
   const modelle = useSelect(wamo, (s) => s.betrieb?.modelle ?? null);
+  const grund = useSelect(wamo, (s) => s.betrieb?.spracheGrund ?? null);
   if (nurMikrofon) {
     return (
       <Block titel="Eingabe">
@@ -160,7 +161,15 @@ export const SpracheAbschnitt = memo(function SpracheAbschnitt({
             Spracherkennung und Sprachausgabe deines Profils erscheinen hier, sobald ein Gespräch läuft.
           </p>
         )}
-        <p className="ez-klein">Nur zur Anzeige: Die Angaben stammen aus der Meldung des Kerns zu diesem Gespräch.</p>
+        {grund && (
+          <p className="ez-klein" data-rueckfall>
+            Hinweis zu dieser Sitzung: {grund.replace(/[.\s]+$/, "")}.
+          </p>
+        )}
+        <p className="ez-klein">
+          Die Angaben stammen aus der Meldung des Kerns zu diesem Gespräch. Umschalten zwischen Soniox und Im Haus kannst du unter
+          Modellzugang.
+        </p>
       </Block>
     </>
   );

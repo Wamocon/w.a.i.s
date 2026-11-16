@@ -1,10 +1,13 @@
 """Spracherkennung (STT) und Sprachausgabe (TTS) je Sitzung: Soniox (Standard) oder im Haus über LiteLLM (Phase P5).
 
 Wahl je Baustein, in dieser Reihenfolge:
+  0. Laborsitzung: immer Soniox, ohne Ausnahme (Entscheidung F4 in docs/hausmodelle-und-kikollege.md). Weder die Wahl im
+     Profil noch die Übersteuerung in der Umgebung gilt dort, das Gateway wird gar nicht gefragt.
   1. WAMO_STT_ANBIETER bzw. WAMO_TTS_ANBIETER (soniox | haus), wenn gesetzt: gilt für alle Sitzungen dieses Kerns,
      z. B. für Tests oder um bei einer Störung im Haus alle auf Soniox zu stellen.
   2. die Wahl des Profils (Modellzugang, Felder stt und tts). Soniox gilt für alle Profile, unabhängig vom Modellzugang
      (Entscheidung D3 in docs/ausrollen-neue-nutzer.md): auch ein Profil ohne Claude-Zugang hört und spricht über Soniox.
+     Die Person wählt selbst in der Oberfläche (modellzugang.stimme_setzen, Migration 0023), ein Admin über wamo_admin.py.
   3. sonst soniox.
 
 Im Haus geht alles über das LiteLLM-Gateway (LITELLM_BASE_URL, LITELLM_API_KEY), nie direkt an die Knoten:
@@ -15,13 +18,16 @@ Im Haus geht alles über das LiteLLM-Gateway (LITELLM_BASE_URL, LITELLM_API_KEY)
     Zeitgrenze in soft_interrupt.py, die Untertitel kommen satzweise.
 
 Rückfall: Fehlt Modell, Schlüssel oder Adresse, ist das Gateway nicht erreichbar oder bietet es das Modell nicht an,
-steht der Grund im Log und der Baustein nutzt Soniox. Die Oberfläche zeigt das am Namen ("Soniox (Rückfall)").
-Stand 21.10.2026: Das Gateway bietet noch kein Audiomodell an; "haus" fällt deshalb heute immer auf Soniox zurück.
+steht der Grund im Log und der Baustein nutzt Soniox. Die Oberfläche zeigt das am Namen ("Soniox (Rückfall)") und nennt den
+Grund in einem Satz für Menschen (SprachWahl.grund, Feld sprache_grund in betrieb), ohne Namen aus der Umgebung.
+Stand 16.11.2026: Das Gateway bietet noch kein Audiomodell an (Einträge vorbereitet, Messung M7 in
+docs/hausmodelle-und-kikollege.md); "haus" fällt deshalb heute immer auf Soniox zurück.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -33,10 +39,21 @@ from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
-from llm_anbieter import litellm_basis, litellm_problem
+from llm_anbieter import litellm_basis, litellm_problem, litellm_problem_statisch
 
 ANBIETER = ("soniox", "haus")
 HAUS_TIMEOUT_SECS = 20.0  # eine Äußerung bzw. ein Satz; danach Fehler statt Hänger
+
+# Gründe eines Rückfalls für die Oberfläche: kurze Sätze ohne Namen aus der Umgebung, ohne Adressen (anzeige_grund)
+GRUND_EINRICHTUNG = "im Kern noch nicht eingerichtet"
+GRUND_MODELL = "das Gateway bietet das Sprachmodell noch nicht an"
+GRUND_GATEWAY = "das Gateway ist gerade nicht erreichbar oder meldet einen Fehler"
+GRUND_SONST = "im Haus gerade nicht nutzbar"
+GRUND_BETRIEB_SONIOX = "vom Betrieb für alle auf Soniox gestellt"
+GRUND_BETRIEB_HAUS = "vom Betrieb für alle auf Im Haus gestellt"
+# Nur Aliase mit Hausnamen gelten als Modell im Haus: ein Alias des Gateways auf einen Cloud-Dienst bekäme sonst Audio und Text
+# unter dem Namen "Im Haus" (Sicherheitsreview 16.11.2026). Die Einträge heißen wamo-stt-haus und wamo-tts-haus.
+HAUS_MODELL_RE = re.compile(r"wamo-[a-z0-9][a-z0-9-]{0,40}")
 
 
 def _env(name: str) -> str:
@@ -54,12 +71,27 @@ def gewuenscht(baustein: str, profil_wert: str | None = None) -> str:
     return wert if wert in ANBIETER else "soniox"
 
 
+def anzeige_grund(problem: str | None) -> str | None:
+    """Grund eines Rückfalls als kurzer Satz für die Person. Der technische Grund (Namen aus der Umgebung, Modell) steht nur im Log."""
+    if not problem:
+        return None
+    if (problem.endswith("fehlt") or problem.startswith(("LITELLM_", "WAMO_")) or problem == "kein Modell gesetzt"
+            or "Schlüssel" in problem):
+        return GRUND_EINRICHTUNG
+    if "bietet das Modell" in problem:
+        return GRUND_MODELL
+    if "Gateway" in problem:
+        return GRUND_GATEWAY
+    return GRUND_SONST
+
+
 @dataclass(frozen=True)
 class Baustein:
     gewuenscht: str  # soniox | haus
     anbieter: str  # wirksam: soniox | haus
     modell: str | None = None
     problem: str | None = None  # Grund für den Rückfall
+    uebersteuert: bool = False  # WAMO_STT_ANBIETER bzw. WAMO_TTS_ANBIETER weicht von der Wahl des Profils ab
 
     @property
     def rueckfall(self) -> bool:
@@ -83,35 +115,90 @@ class SprachWahl:
     def im_haus(self) -> bool:
         return self.stt.anbieter == "haus" and self.tts.anbieter == "haus"
 
+    def grund(self) -> str | None:
+        """Warum die Sitzung trotz Wahl "haus" über Soniox hört oder spricht (Feld sprache_grund in betrieb), sonst None."""
+        def grund(b: Baustein) -> str | None:
+            if b.rueckfall:
+                return anzeige_grund(b.problem) or GRUND_SONST
+            if b.uebersteuert:
+                return GRUND_BETRIEB_HAUS if b.anbieter == "haus" else GRUND_BETRIEB_SONIOX
+            return None
+
+        gruende = {name: g for name, b in (("Spracherkennung", self.stt), ("Sprachausgabe", self.tts)) if (g := grund(b))}
+        if not gruende:
+            return None
+        if len(gruende) == 2 and len(set(gruende.values())) == 1:
+            return f"Spracherkennung und Sprachausgabe: {next(iter(gruende.values()))}"
+        return "; ".join(f"{name}: {grund}" for name, grund in gruende.items())
+
+
+def _problem_statisch(baustein: str, *, gateway: bool = True) -> str | None:
+    """Was ohne Netz schon feststeht: Modell gesetzt und mit Hausnamen, Stimme gesetzt (nur tts), mit gateway auch Adresse und
+    Schlüssel des Gateways (die prüft in der Sitzung litellm_problem selbst)."""
+    name = f"WAMO_{baustein.upper()}_HAUS_MODELL"
+    modell = _env(name)
+    if not modell:
+        return f"{name} fehlt"
+    if not HAUS_MODELL_RE.fullmatch(modell):
+        return f"{name} ist kein Hausmodell (wamo-...)"
+    if baustein == "tts" and not _env("WAMO_TTS_HAUS_STIMME"):
+        return "WAMO_TTS_HAUS_STIMME fehlt"
+    return litellm_problem_statisch(modell) if gateway else None
+
+
+def haus_problem_statisch() -> str | None:
+    """Erster Grund, warum Hören und Stimme im Haus in diesem Kern gar nicht gehen können (ohne Netz), sonst None. Für die Karte
+    Modellzugang (Feld stimme_haus), bevor eine Person "Im Haus" wählt."""
+    return _problem_statisch("stt") or _problem_statisch("tts")
+
 
 async def _baustein(baustein: str, profil_wert: str | None) -> Baustein:
     wunsch = gewuenscht(baustein, profil_wert)
+    profil = (profil_wert or "").strip().lower()
+    uebersteuert = _env(f"WAMO_{baustein.upper()}_ANBIETER").lower() in ANBIETER and wunsch != (profil if profil in ANBIETER else "soniox")
     if wunsch == "soniox":
-        return Baustein("soniox", "soniox")
+        return Baustein("soniox", "soniox", uebersteuert=uebersteuert)
     modell = _env(f"WAMO_{baustein.upper()}_HAUS_MODELL")
-    problem = None if modell else f"WAMO_{baustein.upper()}_HAUS_MODELL fehlt"
-    if not problem and baustein == "tts" and not _env("WAMO_TTS_HAUS_STIMME"):
-        problem = "WAMO_TTS_HAUS_STIMME fehlt"
+    problem = _problem_statisch(baustein, gateway=False)
     if not problem:
         problem = await litellm_problem(modell)
     if problem:
         logger.error("{} im Haus nicht nutzbar ({}), Rückfall auf Soniox", baustein.upper(), problem)
-        return Baustein("haus", "soniox", modell or None, problem)
+        return Baustein("haus", "soniox", modell or None, problem, uebersteuert=uebersteuert)
     logger.info("{} im Haus über LiteLLM: {}", baustein.upper(), modell)
-    return Baustein("haus", "haus", modell)
+    return Baustein("haus", "haus", modell, uebersteuert=uebersteuert)
 
 
-async def sprach_wahl(zugang: object | None = None) -> SprachWahl:
-    """Wahl für eine Sitzung. zugang: Modellzugang des Profils (Attribute stt und tts), fehlt er, gilt die Umgebung."""
+async def sprach_wahl(zugang: object | None = None, *, labor: bool = False) -> SprachWahl:
+    """Wahl für eine Sitzung. zugang: Modellzugang des Profils (Attribute stt und tts), fehlt er, gilt die Umgebung.
+    labor: Laborsitzung (bot.py, labor_sitzung); dann gilt immer Soniox, ohne Umgebung, Profil und Gateway (F4)."""
+    if labor:
+        return SprachWahl(stt=Baustein("soniox", "soniox"), tts=Baustein("soniox", "soniox"))
     return SprachWahl(
         stt=await _baustein("stt", getattr(zugang, "stt", None)),
         tts=await _baustein("tts", getattr(zugang, "tts", None)),
     )
 
 
-def haus_stt(b: Baustein, begriffe: list[str]) -> OpenAISTTService:
+class HausSTTService(OpenAISTTService):
+    """STT im Haus über LiteLLM (/audio/transcriptions). Schickt immer response_format json: Ohne Angabe fordert LiteLLM von sich
+    aus verbose_json an, und Qwen3-ASR lehnt das mit HTTP 400 ab (Befund über das Gateway vom 16.11.2026)."""
+
+    async def _transcribe(self, audio: bytes):
+        anfrage: dict = {
+            "file": ("audio.wav", audio, "audio/wav"),
+            "model": self._settings.model,
+            "language": self._settings.language,
+            "response_format": "json",
+        }
+        if self._settings.prompt:
+            anfrage["prompt"] = self._settings.prompt
+        return await self._client.audio.transcriptions.create(**anfrage)
+
+
+def haus_stt(b: Baustein, begriffe: list[str]) -> HausSTTService:
     """STT im Haus: OpenAI-kompatibel über LiteLLM; Fachbegriffe als Hinweis (prompt) wie bei Whisper."""
-    return OpenAISTTService(
+    return HausSTTService(
         api_key=_env("LITELLM_API_KEY"),
         base_url=litellm_basis(),
         settings=OpenAISTTService.Settings(

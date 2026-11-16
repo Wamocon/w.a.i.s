@@ -79,6 +79,36 @@ class WahlTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((w.tts.anbieter, w.tts.problem), ("soniox", "WAMO_TTS_HAUS_STIMME fehlt"))
 
 
+class HausSTTTest(unittest.IsolatedAsyncioTestCase):
+    """Über das Gateway fordert LiteLLM ohne Angabe verbose_json an, das Qwen3-ASR ablehnt (HTTP 400, Befund 16.11.2026):
+    die Spracherkennung im Haus schickt deshalb immer response_format json und die Sprache de."""
+
+    async def test_json_und_deutsch_an_das_gateway(self):
+        anfragen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            anfragen.append(request)
+            return httpx.Response(200, json={"text": "Wie heißt die Hauptstadt von Frankreich?"})
+
+        stt = sa.HausSTTService(
+            api_key="k", base_url="http://litellm.test.invalid:4000/v1",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            settings=sa.HausSTTService.Settings(model="wamo-stt-haus", language=sa.Language.DE, prompt="WAMO, Eschborn"),
+        )
+        antwort = await stt._transcribe(wav(16000))
+        self.assertEqual(antwort.text, "Wie heißt die Hauptstadt von Frankreich?")
+        self.assertEqual(anfragen[0].url.path, "/v1/audio/transcriptions")
+        teile = anfragen[0].content.decode("latin-1")
+        for name, wert in (("response_format", "json"), ("language", "de"), ("model", "wamo-stt-haus"), ("prompt", "WAMO, Eschborn")):
+            self.assertIn(f'name="{name}"\r\n\r\n{wert}\r\n', teile, name)
+        self.assertNotIn('name="include"', teile)
+
+    async def test_haus_stt_baut_diesen_dienst(self):
+        with mock.patch.dict("os.environ", UMGEBUNG):
+            stt = sa.haus_stt(sa.Baustein("haus", "haus", "wamo-stt-haus"), [])
+        self.assertIsInstance(stt, sa.HausSTTService)
+
+
 class HausTTSTest(unittest.IsolatedAsyncioTestCase):
     def dienst(self, handler) -> sa.HausTTSService:
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))

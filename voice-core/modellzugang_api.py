@@ -5,12 +5,17 @@ Gespräch starten. Die Oberfläche nutzt diese Routen, solange keine Sitzung lä
 eine läuft. Beide Wege rufen dieselbe Funktion (modellzugang.modellzugang_nachricht) und liefern dieselbe Antwort.
 
   GET  /wamo/api/modellzugang   Stand des eigenen Profils (nur "hinterlegt" und die letzten vier Zeichen)
-  POST /wamo/api/modellzugang   {"aktion": "hinterlegen" | "loeschen" | "modus" | "status",
-                                 "schluesselart": "api" | "code", "schluessel": ..., "workspace": ..., "modus": ...}
+  POST /wamo/api/modellzugang   {"aktion": "hinterlegen" | "loeschen" | "modus" | "stimme" | "status",
+                                 "schluesselart": "api" | "code", "schluessel": ..., "workspace": ..., "modus": ...,
+                                 "stt": "soniox" | "haus", "tts": "soniox" | "haus"}
 
 Sicherheit
   * Wie alle Routen unter /wamo/api: Token mit zweitem Faktor (aal2), Höchstalter der Anmeldung, aktives Profil
     (wamo_api.identitaet). Die Profil-ID kommt nur aus der geprüften Identität, nie aus dem Body.
+  * Nie für Laborprofile: Die Laborsperre der Middleware (labor.pfad_pruefen) lässt den Pfad nicht durch; die Route lehnt
+    zusätzlich selbst mit 403 und dem Code labor_pfad_gesperrt ab, bevor sie etwas liest oder schreibt.
+  * Die Wahl von Hören und Stimme (aktion stimme) schickt keine Daten an einen anderen Dienst; sie entscheidet nur, wohin die
+    nächste Sitzung Audio und Antworttext schickt (Soniox in der EU oder das Gateway im Haus).
   * Der Body (höchstens 8 KB) wird nie geloggt und nie zurückgegeben; Antworten enthalten weder Schlüssel noch Token.
     Fehler (Format, Anthropic lehnt ab, Datenbank) stehen als Text in "fehler" der Antwort, nicht als Ausnahme mit Inhalt.
   * Die Begrenzung der Testanfragen bei Anthropic (5 je 10 Minuten und Profil) gilt auch hier.
@@ -20,13 +25,21 @@ Sicherheit
 from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response
+from fastapi.responses import JSONResponse
 from loguru import logger
 
+import labor
 import modellzugang as mz
 from wamo_api import identitaet, lies_json
 
 router = APIRouter()
 MAX_BODY_BYTES = 8 * 1024  # ein Schlüssel ist unter 300 Zeichen lang
+
+
+def _labor_gesperrt() -> JSONResponse:
+    """Laborprofile nie (zweite Sperre hinter der Middleware, F4): 403 mit Code, wie die übrigen Laborpfade."""
+    return JSONResponse({"detail": "Für Laborprofile gesperrt", "code": labor.CODE_PFAD_GESPERRT}, status_code=403,
+                        headers={"Cache-Control": "no-store"})
 
 
 async def _ausfuehren(user_id: str, data: dict) -> dict:
@@ -43,16 +56,20 @@ async def _ausfuehren(user_id: str, data: dict) -> dict:
     return antworten[-1]
 
 
-@router.get("/modellzugang")
-async def stand(request: Request, response: Response) -> dict:
+@router.get("/modellzugang", response_model=None)
+async def stand(request: Request, response: Response) -> dict | JSONResponse:
     ich = await identitaet(request)
+    if labor.ist_labor(ich):
+        return _labor_gesperrt()
     response.headers["Cache-Control"] = "no-store"
     return await _ausfuehren(ich.user_id, {"aktion": "status"})
 
 
-@router.post("/modellzugang")
-async def aendern(request: Request, response: Response) -> dict:
+@router.post("/modellzugang", response_model=None)
+async def aendern(request: Request, response: Response) -> dict | JSONResponse:
     ich = await identitaet(request)
+    if labor.ist_labor(ich):
+        return _labor_gesperrt()
     response.headers["Cache-Control"] = "no-store"
     data = await lies_json(request, MAX_BODY_BYTES)
     return await _ausfuehren(ich.user_id, data)
