@@ -42,7 +42,7 @@ export type Betrieb = {
   modellQuelle?: ModellQuelle;
   /** warum der Boss nicht das beste Modell nehmen konnte (zu langsam, nicht erreichbar) */
   modellHinweis?: string;
-  /** warum Entwicklungsaufträge im Büro aus sind; der Kern schickt das Feld nur Admins, die Anzeige prüft die Rolle trotzdem */
+  /** warum Entwicklungsaufträge im Büro aus sind; Admins bekommen den ganzen Grund, Mitglieder nur ihre Sätze (entwicklung_betrieb.anzeige_grund) */
   entwicklungGrund?: string;
   /** Dateiformate, in denen das Canvas jetzt am PC gespeichert werden kann (nur Admins mit PC-Steuerung, voice-core/office_werkzeuge.py) */
   office?: OfficeFormat[];

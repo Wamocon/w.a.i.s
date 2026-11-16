@@ -73,9 +73,22 @@ sein. Der PC-Kanal darf Namen mit `kern-` nicht öffnen. Wertetabelle (beide Sei
 | Projekt `test-repo` aus dem Kern-Kanal | abgelehnt (`projekt`, Präfix fehlt) |
 | Projekt `kern-test-repo` aus dem PC-Kanal | abgelehnt |
 
+Seit Dispatcher 8 (Ausrollen P5, `docs/ausrollen-neue-nutzer.md` 4.6) trägt der Name die Kennung des Profils (`profil` der Kopfzeile, 8 Hexzeichen):
+`kern-<Kennung>-<Name>`, höchstens 50 Zeichen, also höchstens 36 Zeichen für den Namen. Die Tabelle oben gilt ohne Kennung weiter (beide Seiten testen sie
+weiter); mit Kennung kommen diese Zeilen dazu:
+
+| Eingabe (Kennung `aaaaaaaa`) | Ergebnis |
+| --- | --- |
+| ohne Repo, Wort `Marktstudie` | `kern-aaaaaaaa-marktstudie` |
+| Repo `Acme/Test-Repo` | `kern-aaaaaaaa-test-repo` |
+| Repo mit Name von 37 Zeichen oder mehr | abgelehnt (`projekt`, länger als 50) |
+| Kennung nicht genau 8 kleine Hexzeichen | abgelehnt (`projekt`) |
+| Projekt `kern-bbbbbbbb-marktstudie` mit Kennung `aaaaaaaa` | abgelehnt (`projekt`) |
+| Projekt `kern-marktstudie` mit Kennung | abgelehnt (`projekt`) |
+
 **I6 Ereignisse Dispatcher zum Kern.** Eine Zeile `{"type": "wamo", "ereignis": "kanal_gesperrt", "grund": "<Code>"}` (Format wie `wamo_event`, infra/sokrates2/wamo_job_dispatch.py:1776-1777), danach Exit 2
 (`EXIT_ABGEWIESEN`). Feste Liste der Grund-Codes: `notaus`, `konfig_ungueltig`, `kanal_zu`, `abgelaufen`, `befehl`, `fremd`, `art`, `repo`, `repo_fehlt`, `dienst`, `projekt`, `zugang`, `fork`, `herkunft_unklar`,
-`grenze_start`, `grenze_laufzeit`, `grenze_folgen`, `abstand`, `platz`. Der Dispatcher hält sie als Tupel `KANAL_GRUENDE` in `wamo_job_kernkanal.py`, der Kern als Schlüssel von `GRUND_SAETZE` in `entwicklung_betrieb.py`
+`grenze_start`, `grenze_laufzeit`, `grenze_folgen`, `abstand`, `platz`, seit Dispatcher 8 dazu `grenze_profil`. Der Dispatcher hält sie als Tupel `KANAL_GRUENDE` in `wamo_job_kernkanal.py`, der Kern als Schlüssel von `GRUND_SAETZE` in `entwicklung_betrieb.py`
 (je ein kurzer, sprechbarer deutscher Satz ohne Pfade und Werte). Der Kern bildet `kanal_gesperrt` in `REMOTE_EREIGNIS_STATUS` auf „nicht gestartet“ mit dem Satz ab.
 
 **I7 `ping`.** Neue Felder `kanal` (`lokal`, `pc` oder `kern`) und `kernkanal` als Objekt `{"strikt": bool, "offen": bool, "grund": <Code oder null>, "arten": [..], "repos": [..], "ablauf": "JJJJMMTT" oder null,

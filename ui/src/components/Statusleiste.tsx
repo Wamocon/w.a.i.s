@@ -138,9 +138,10 @@ export const StatusDetails = memo(function StatusDetails({ kompakt, stimme = fal
   const micOn = useSelect(wamo, (s) => s.micOn);
   const mikrofon = useSelect(wamo, (s) => s.mikrofon);
   const gewaehlt = useBetriebsart();
-  const istAdmin = useSelect(wamo, (s) => s.profil?.rolle === "admin");
-  // Warum Entwicklungsaufträge aus sind: nur Admins sehen den Grund (der Kern schickt ihn auch nur ihnen)
-  const entwicklungGrund = istAdmin ? betrieb?.entwicklungGrund : undefined;
+  const rolle = useSelect(wamo, (s) => s.profil?.rolle ?? null);
+  // Warum Entwicklungsaufträge aus sind: Admins sehen den ganzen Grund, Mitglieder nur die Sätze, die der Kern für sie freigibt
+  // (voice-core/entwicklung_betrieb.anzeige_grund, nie Namen von Einstellungen); ohne Profil nichts
+  const entwicklungGrund = rolle === "admin" || rolle === "mitglied" ? betrieb?.entwicklungGrund : undefined;
   const dt = kompakt ? "sr-only" : undefined;
   // Verbunden: was der Kern meldet. Sonst: die gewählte Betriebsart für das nächste Gespräch.
   const art = betrieb ? MODUS_ART[betrieb.modus] : gewaehlt;
