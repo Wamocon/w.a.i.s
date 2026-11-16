@@ -24,7 +24,9 @@ class Tor:
 
     async def authorize(self, tok):
         self.gefragt.append(tok)
-        return SimpleNamespace(identity=self.identity, status=401 if self.identity is None else 200, reason="x")
+        # erstanmeldung: ohne Stand gilt eine Entscheidung nie als frei (auth_gate.erstanmeldung_sperre)
+        return SimpleNamespace(identity=self.identity, status=401 if self.identity is None else 200, reason="x",
+                               erstanmeldung="erledigt")
 
 
 def ich(user=USER, admin=True):

@@ -57,6 +57,21 @@
 .gate-secret { font-size: 14px; color: var(--ink-soft); }
 .gate-secret code { display: block; margin-top: 6px; font: 13px/1.4 var(--hud); word-break: break-all; }
 .gate-link { justify-self: center; }
+/* Warnsatz auf dem Bildschirm, der den Code einer schon eingerichteten App abfragt (Erstanmeldung) */
+.gate-warnung { margin: 0; font-size: 13px; line-height: 1.4; color: var(--ink-soft); }
+/* Geführte Erstanmeldung (components/erstanmeldung): Leiste der Schritte, der Zustand steht nie nur in der Farbe (Nummer, Name, versteckter Text) */
+.ea { display: grid; gap: 16px; }
+.ea-leiste { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.ea-punkt { display: flex; align-items: center; gap: 6px; font: 500 10.5px/1.2 var(--hud); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+/* Ziffer 12 px fett in der Textfarbe (WMC-Rot als Schrift auf dunklem Grund hat zu wenig Kontrast); erledigt: Häkchen weiß auf Rot (Grafik, 3:1 genügt) */
+.ea-nr { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--kante); border-radius: 50%; font: 700 12px/1 var(--hud); letter-spacing: 0; }
+.ea-punkt[data-zustand="aktuell"] { color: var(--ink); }
+.ea-punkt[data-zustand="aktuell"] .ea-nr { border-color: var(--core); border-width: 2px; color: var(--ink); }
+.ea-punkt[data-zustand="erledigt"] .ea-nr { background: var(--core); border-color: var(--core); color: #ffffff; }
+.ea-titel { margin: 0; font-size: 18px; line-height: 1.2; color: var(--ink); }
+.ea-passwort { position: relative; display: grid; gap: 14px; }
+/* Leer bleibt die Live-Region im Baum (Hilfstechnik braucht sie vor dem ersten Satz), nimmt aber keinen Platz */
+.ea-status:empty { position: absolute; width: 1px; height: 1px; overflow: hidden; }
 .gate-dev { margin: 0; font-size: 13px; color: var(--ink-soft); }
 .gate-dev a { color: var(--ink); text-decoration-color: var(--core); text-underline-offset: 3px; }
 .gate-unsicher {

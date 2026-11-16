@@ -85,6 +85,11 @@ class DatabaseUnavailable(RuntimeError):
     """Datenbank nicht konfiguriert oder nicht erreichbar."""
 
 
+class ErstanmeldungFehlt(DatabaseUnavailable):
+    """Schema wamo_auth, eine seiner Funktionen oder das Recht darauf fehlt (falsche Reihenfolge beim Ausrollen). Unterklasse von
+    DatabaseUnavailable, damit jeder, der nur diese kennt, ebenfalls ablehnt. Die Meldung nennt nur den Fehlertyp."""
+
+
 class ProfileError(ValueError):
     """Profil kann nicht angelegt oder geändert werden (Meldung ist für Menschen gedacht)."""
 
@@ -715,6 +720,41 @@ class ProfileDirectory:
         except DB_ERRORS as e:
             raise DatabaseUnavailable(f"Profilabfrage fehlgeschlagen ({type(e).__name__})") from e
         return _profile(row) if row else None
+
+    # Erstanmeldung (Ausrollen P1b): Funktionen im globalen Schema wamo_auth, SECURITY DEFINER, wamo_core hat nur execute.
+    async def erstanmeldung_stand(self, user_id: str) -> object:
+        """Rohwert von wamo_auth.erstanmeldung_stand (keine, offen, abgelaufen, erledigt). Geprüft wird er in auth_gate.AccessGate.
+        Wirft ErstanmeldungFehlt, wenn Schema, Funktion oder Recht fehlen, sonst DatabaseUnavailable."""
+        return await self._wamo_auth(_SQL_ERSTANMELDUNG_STAND, user_id)
+
+    async def erstanmeldung_begonnen(self, user_id: str) -> bool:
+        """wamo_auth.erstanmeldung_begonnen: vermerkt den Beginn einmal (nur im Stand offen), True nur beim ersten Mal. Fehler wie oben."""
+        return await self._wamo_auth(_SQL_ERSTANMELDUNG_BEGONNEN, user_id) is True
+
+    async def _wamo_auth(self, sql: str, user_id: str) -> object:
+        uid = normalize_uuid(user_id)
+        if uid is None:
+            raise DatabaseUnavailable("Erstanmeldung: ungültige Profil-ID")
+        try:
+            return await self._db.fetchval(sql, uid)
+        except DatabaseUnavailable:
+            raise
+        except _WAMO_AUTH_FEHLT as e:
+            raise ErstanmeldungFehlt(type(e).__name__) from e
+        except DB_ERRORS as e:
+            raise DatabaseUnavailable(f"Erstanmeldung nicht lesbar ({type(e).__name__})") from e
+
+
+# Feste Abfragen auf das globale Schema wamo_auth (kein Schemaname aus der Umgebung, keine Teile von außen)
+_SQL_ERSTANMELDUNG_STAND = "select wamo_auth.erstanmeldung_stand($1::uuid)"
+_SQL_ERSTANMELDUNG_BEGONNEN = "select wamo_auth.erstanmeldung_begonnen($1::uuid)"
+
+# Schema wamo_auth fehlt, Funktion fehlt, kein Recht (usage oder execute): das Ausrollen lief in falscher Reihenfolge
+_WAMO_AUTH_FEHLT: tuple[type[BaseException], ...] = (
+    asyncpg.InvalidSchemaNameError,
+    asyncpg.UndefinedFunctionError,
+    asyncpg.InsufficientPrivilegeError,
+)
 
 
 # ---------- Verwaltung (wamo_admin, nur wamo_admin.py) ----------
