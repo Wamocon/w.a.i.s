@@ -1384,19 +1384,21 @@ class MitgliederZulassungTests(unittest.TestCase):
 
 
 class MitgliederKostenTests(unittest.TestCase):
-    def test_die_kleinere_grenze_gilt(self):
+    def test_mitglieder_haben_dieselben_grenzen_wie_admins(self):
+        # Entscheidung von Niko (16.11.2026): keine eigene Grenze von 2 USD für Mitglieder, es gelten die Werte aus dem Drop-in für alle
+        self.assertFalse(hasattr(eb, "MITGLIED_KOSTEN_AUFTRAG_MAX") or hasattr(eb, "MITGLIED_KOSTEN_TAG_MAX"))
         m, a = eb.BueroZulassung(MITGLIED, mitglied=True), eb.BueroZulassung(NIKO)
         with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="3", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="25"):
-            self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (2.0, 10.0))
+            self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (3.0, 25.0))
             self.assertEqual((eb.kosten_auftrag(a), eb.kosten_tag(a)), (3.0, 25.0))
             self.assertEqual((eb.kosten_auftrag(None), eb.kosten_tag(None)), (3.0, 25.0))
-            self.assertTrue(eb.auftragsgrenze_erreicht(2.0, m))
-            self.assertFalse(eb.auftragsgrenze_erreicht(1.99, m))
+            self.assertFalse(eb.auftragsgrenze_erreicht(2.5, m))
+            self.assertTrue(eb.auftragsgrenze_erreicht(3.0, m))
             self.assertFalse(eb.auftragsgrenze_erreicht(2.5, a))
-            self.assertEqual(eb.kosten_mit_untergrenze(0.5, m), 2.0)
+            self.assertEqual(eb.kosten_mit_untergrenze(0.5, m), 3.0)
             self.assertEqual(eb.kosten_mit_untergrenze(0.5, a), 3.0)
         with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="1.5", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="4"):
-            self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (1.5, 4.0))  # ein kleinerer Wert im Drop-in gilt
+            self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (1.5, 4.0))  # der Wert im Drop-in gilt für alle
         with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="x"):
             self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (None, None))  # fehlt die Grenze, bleibt es aus
             self.assertTrue(eb.auftragsgrenze_erreicht(0.0, m))
@@ -1415,17 +1417,20 @@ class MitgliederKostenTests(unittest.TestCase):
 
 
 class MitgliederTagesgrenzeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_die_tagesgrenze_des_mitglieds_ist_zehn_dollar(self):
+    async def test_die_tagesgrenze_des_mitglieds_ist_die_aus_dem_drop_in(self):
+        # Entscheidung von Niko (16.11.2026): keine eigene Grenze für Mitglieder, die Tagesgrenze aus dem Drop-in gilt für alle
         with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="3", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="25"):
-            for zulassung, vortag, erwartet in ((eb.BueroZulassung(MITGLIED, mitglied=True), 9.5, None),
-                                                (eb.BueroZulassung(MITGLIED, mitglied=True), 10.0, eb.SATZ_TAGESGRENZE),
+            for zulassung, vortag, erwartet in ((eb.BueroZulassung(MITGLIED, mitglied=True), 10.0, None),
+                                                (eb.BueroZulassung(MITGLIED, mitglied=True), 24.5, None),
+                                                (eb.BueroZulassung(MITGLIED, mitglied=True), 25.0, eb.SATZ_TAGESGRENZE),
+                                                (eb.BueroZulassung(NIKO), 25.0, eb.SATZ_TAGESGRENZE),
                                                 (eb.BueroZulassung(NIKO), 10.0, None)):
                 with self.subTest(mitglied=zulassung.mitglied, vortag=vortag):
                     memory = AuditMemory(user_id=zulassung.user_id)
                     memory.vortag_kosten = vortag
                     aktion, satz = await eb.AuftragsBuch(memory, zulassung).beginnen("ab12cd34ef56ab12", "recherche", "kern-x", None, False)
                     self.assertEqual(satz, erwartet)
-                    self.assertEqual(memory.veraltet_aufrufe[-1]["kosten_usd"], 2.0 if zulassung.mitglied else 3.0)
+                    self.assertEqual(memory.veraltet_aufrufe[-1]["kosten_usd"], 3.0)
 
 
 class KennungsKollisionTests(unittest.TestCase):

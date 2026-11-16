@@ -1421,10 +1421,11 @@ sie ändert. `PARALLEL_MAX = 1` bleibt; meldet der Dispatcher einen anderen lauf
 in ein paar Minuten noch einmal." (einfache Form der Warteschlange).
 
 **Mitglieder.** Aufträge nur mit `WAMO_ENTWICKLUNG_MITGLIEDER=an` im Drop-in und mit ihrer `user_id` in `WAMO_ENTWICKLUNG_PROFILE` (jede Kurzkennung nur einmal,
-höchstens 20 Profile), Laborprofile nie. Für sie gelten höchstens 2 USD je Auftrag und 10 USD je Tag (der kleinere Wert mit dem Drop-in), keine Repos bis
+höchstens 20 Profile), Laborprofile nie. Für sie gelten dieselben Kostengrenzen aus dem Drop-in wie für Admins (Entscheidung von Niko am 16.11.2026: keine
+eigene Grenze für Mitglieder), keine Repos bis
 Folgepaket 1, keine Befehlskriterien, dieselben Arten wie im Kanal freigegeben. Die Tagesgrenze wird vor jedem Start gegen die Kosten bis dahin geprüft: ein
-letzter Auftrag kann sie um höchstens seine eigene Grenze überschreiten (bis zu einem Lauf mehr). `MAX_BUDGET_USD` (Kosten je Lauf) darf dann höchstens 2.00
-sein: `schalter ... --mitglieder an` und `kanal` mit höherem Budget brechen mit Exit 3 ab.
+letzter Auftrag kann sie um höchstens seine eigene Grenze überschreiten (bis zu einem Lauf mehr). `MAX_BUDGET_USD` (Kosten je Lauf) gilt wie bisher für alle
+Läufe; eine eigene Pflicht für Mitglieder gibt es nicht mehr.
 
 **Versionspaar.** Kern `SCHRANKEN_VERSION = 2` gehört zu Dispatcher 8. Kern 2 mit Dispatcher 7 geht für Aufträge ohne Repo (Dispatcher 7 nimmt
 `kern-<Kennung>-<Name>` als gewöhnlichen Namen an, ohne Trennung und ohne Grenzen je Profil). Kern 1 mit Dispatcher 8 geht nicht: der alte Kern schickt
@@ -1437,7 +1438,7 @@ Rauchtest mit der Probe "Start mit fremder Kennung", schreibt die neuen Schlüss
 `wamo-job-kern-rauchtest --produktiv`. (3) Grenzen für mehrere Personen: `kanal --arten recherche --max-start-stunde 12 --max-start-tag 40 --max-laufzeit-tag-s 28800
 --max-versuch-stunde 60` (ein Aufruf ersetzt Arten, Repos und Dienste vollständig: was nicht genannt ist, ist danach nicht mehr erlaubt; Grenzen ohne Option
 bleiben). (4) `schalter an <release> --profil <niko>,<pilot> --kosten-auftrag 3 --kosten-tag 10 --mitglieder an --trocken`, dann ohne `--trocken` (verlangt
-`SCHRANKEN_VERSION` 2 im Zielrelease, Dispatcher 8 und `MAX_BUDGET_USD` bis 2.00; ohne `--mitglieder an` schreibt das Skript `aus` und sagt es).
+`SCHRANKEN_VERSION` 2 im Zielrelease und Dispatcher 8; ohne `--mitglieder an` schreibt das Skript `aus` und sagt es).
 
 **Rückweg.** Sofort: `wamo-job-kern-rueckweg.sh notaus`. Nur die Mitglieder: `schalter an <release> --profil <niko> --mitglieder aus`. Ganz zurück in dieser
 Reihenfolge: zuerst `notaus` (oder `kanal zu`), dann den Kern zurück (`rueckweg-kern`), dann Dispatcher 7 aus dem vorigen Stand mit `wamo-job-einrichten.sh`,
