@@ -199,6 +199,39 @@ PC_OFF = {"status": "rejected", "summary": "Die PC-Steuerung ist aus. Sie lässt
 GESPERRT_TEXT = "Der Bildschirm ist gesperrt. Entsperren kann nur die Person selbst, W.A.I.S. kann das nicht."
 
 
+def bildschirm_betrachter(
+    get_pc_client,
+    allowed: Callable[[], bool] = lambda: True,
+    on_foreign_content: Callable[[], None] = lambda: None,
+    *,
+    zugang: Zugang,
+) -> Callable[[dict], Awaitable[dict]]:
+    """bildschirm_ansehen als Funktion seiner Argumente: für das Werkzeug und für Mitglieder nach dem Ja auf der Karte der Einwilligung
+    (pc_freigaben.PcFreigaben, kern_ausfuehrer). summary trägt die Antwort, denn nach einer Karte bekommt das Modell nur status und summary."""
+
+    async def ansehen(arguments: dict) -> dict:
+        client = get_pc_client()
+        if not allowed():
+            return {"antwort": PC_OFF["summary"], "summary": PC_OFF["summary"]}
+        if client is None:
+            return {"antwort": "Kein Zugriff auf den PC.", "summary": "Kein Zugriff auf den PC."}
+        try:
+            antwort = await describe(client, str(arguments.get("frage", "Was ist zu sehen?"))[:500], zugang,
+                                     str(arguments.get("fenster") or "").strip()[:100])
+            on_foreign_content()
+        except BildschirmGesperrt:
+            return {"status": "locked", "antwort": GESPERRT_TEXT, "summary": GESPERRT_TEXT}
+        except FotoAbgelehnt as e:
+            return {"status": "rejected", "antwort": str(e), "summary": str(e)}
+        except Exception as e:  # Bildschirm ist optional; das Gespräch läuft weiter
+            logger.warning("bildschirm_ansehen: {}", type(e).__name__)
+            text = "Ich konnte den Bildschirm gerade nicht ansehen."
+            return {"status": "error", "antwort": text, "summary": text}
+        return {"status": "success", "antwort": antwort, "summary": antwort}
+
+    return ansehen
+
+
 def bildschirm_klicker(
     get_pc_client,
     allowed: Callable[[], bool] = lambda: True,
@@ -241,29 +274,12 @@ def register_screen_tools(
     Bildschirminhalte ins Gespräch kamen (kein sofort wirksames gemeinsames Wissen, kein Lernen).
     zugang: Modellzugang des Profils; das Bildmodell läuft mit dessen Schlüssel oder im Haus."""
 
+    ansehen = bildschirm_betrachter(get_pc_client, allowed, on_foreign_content, zugang=zugang)
+
     async def bildschirm_ansehen(params: FunctionCallParams):
-        client = get_pc_client()
-        if not allowed():
-            await params.result_callback({"antwort": PC_OFF["summary"]})
-            return
-        if client is None:
-            await params.result_callback({"antwort": "Kein Zugriff auf den PC."})
-            return
-        try:
-            antwort = await describe(client, str(params.arguments.get("frage", "Was ist zu sehen?"))[:500], zugang,
-                                     str(params.arguments.get("fenster") or "").strip()[:100])
-            on_foreign_content()
-        except BildschirmGesperrt:
-            await params.result_callback({"status": "locked", "antwort": GESPERRT_TEXT})
-            return
-        except FotoAbgelehnt as e:
-            await params.result_callback({"status": "rejected", "antwort": str(e)})
-            return
-        except Exception as e:  # Bildschirm ist optional; das Gespräch läuft weiter
-            logger.warning("bildschirm_ansehen: {}", type(e).__name__)
-            await params.result_callback({"status": "error", "antwort": "Ich konnte den Bildschirm gerade nicht ansehen."})
-            return
-        await params.result_callback({"status": "success", "antwort": antwort})
+        ergebnis = await ansehen(params.arguments if isinstance(params.arguments, dict) else {})
+        ergebnis.pop("summary", None)  # das Werkzeug selbst antwortet wie bisher (antwort, status)
+        await params.result_callback(ergebnis)
 
     klicken = bildschirm_klicker(get_pc_client, allowed, on_foreign_content, zugang=zugang)
 
