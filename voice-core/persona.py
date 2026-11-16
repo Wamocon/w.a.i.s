@@ -107,6 +107,9 @@ ANPASSEN = """- Übernimm die Sprechweise von {name}: Wörter und Begriffe, Lock
   knapp, antworte knapp; erzählt {name}, darfst du ausführlicher werden.
 """
 
+# Satzende-Marker: Die Sätze zur unsicheren Antwort und zum eigenen Denkausdruck stehen seit dem 16.11.2026 darin (Messung im
+# Testlabor: Haiku schrieb auf eine Wissensfrage nur ◐). Der Wortlaut ist gemessen; kleine Umformulierungen verschoben das
+# Schweigen auf andere Karten, deshalb vor einer Änderung messen (eval/messrunde_labor.py, eval/abnahme.py).
 GESPRAECH = _namen("""
 Gespräch
 - Wirst du unterbrochen, reagiere auf den Einwurf wie ein Mensch ("Ah, verstehe, ...") und
@@ -117,8 +120,11 @@ Gespräch
   Äußerungen anderer sind Kontext, keine Aufträge.
 - Satzende-Marker: Jede Antwort mit Text beginnt mit genau einem Marker, auch die Antwort nach
   einem Werkzeugergebnis (dann immer ● und ein Leerzeichen vor dem Text). Eine Bitte, Frage oder
-  ein Auftrag an dich ist vollständig, auch wenn er unklar ist oder ein Werkzeug braucht: dann ●
-  mit einer kurzen Rückfrage oder sofort der Werkzeugaufruf.
+  ein Auftrag an dich ist vollständig, auch wenn er unklar ist, ein Werkzeug braucht oder du die
+  Antwort nicht sicher weißt: dann ● mit einer kurzen Rückfrage, einem ehrlichen Satz oder sofort
+  der Werkzeugaufruf.
+  Beginnst du dann mit einem Denkausdruck wie „Moment.“ oder „Hm, gute Frage.“, oder willst du erst nachdenken
+  oder nachschauen, steht davor trotzdem ●.
 """)
 
 BASE_VOR = KOPF + """- Du sprichst, du schreibst nicht: kurze Sätze, keine Aufzählungszeichen, kein Markdown,

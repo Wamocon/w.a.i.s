@@ -107,11 +107,12 @@ class PersonaPaketATests(unittest.TestCase):
         # SHA-256 der Prompts vor Paket A (Stand a3e86b6), neu berechnet am 14.11.2026 mit dem neuen Namen: Der Prompt beginnt
         # mit "Du bist W.A.I.S.", die Namensregel (persona.NAMENSREGEL) ersetzt die alte Zeile zum Namen, die Anrede bei
         # mehreren Personen und das PC-Beispiel nennen die Kurzform, die PC-Meldungen W.A.I.S. Sonst ist der Prompt unverändert
-        # (Abschnitte, Reihenfolge, Schalter).
+        # (Abschnitte, Reihenfolge, Schalter). Neu berechnet am 16.11.2026: Die Marker-Regel im Gesprächsteil nennt die unsichere
+        # Antwort und den eigenen Denkausdruck (SatzendeMarkerTests).
         self.assertEqual(hashlib.sha256(voll.encode()).hexdigest(),
-                         "068dbb6c89a069643471a16ea0ea990d0753f5397cd81cb4c3ecfa261af53316")
+                         "7eda643bdcc9e4403ed2602773f52878d43f0e8f770379d2d8e68dc71e0883db")
         self.assertEqual(hashlib.sha256(kurz.encode()).hexdigest(),
-                         "4778123d39a554e61fddbb4523e0c76c71b54adc82403a1403a1a105a8d09a9c")
+                         "7d4acf6a04dff39b415165edea81674edc79361d0908f7f1dda777dbf79fbb99")
 
     def test_schalter_aus_der_umgebung(self):
         from persona import persona_pc_ordner_an, persona_rueckfragen_an
@@ -449,6 +450,66 @@ class PersonaNatuerlichTests(unittest.TestCase):
         aus = build_labor_prompt("Gast", "du", natuerlich=False)
         self.assertIn("Reagiere sofort hörbar", an)
         self.assertIn("höchstens etwa fünfzehn", aus)
+
+
+class SatzendeMarkerTests(unittest.TestCase):
+    """Messung 16.11.2026 (Testlabor, Haiku, 10 Läufe): Seit dem Namen W.A.I.S. (14.11.) antwortete das Modell auf eine
+    Wissensfrage, die es nicht sicher beantworten kann, nur mit dem Wartemarker ◐ (W2 0 von 10, am 13.11. 7 von 10). Die
+    Marker-Regel sagt jetzt, dass auch so eine Frage vollständig ist und dass ein eigener Denkausdruck oder eigenes Nachschauen
+    kein Grund zum Warten ist. Sie steht im gemeinsamen Gesprächsteil und gilt damit für Büro und Labor in beiden Sprechweisen."""
+
+    UNSICHER = ("Eine Bitte, Frage oder ein Auftrag an dich ist vollständig, auch wenn er unklar ist, ein Werkzeug braucht oder "
+                "du die Antwort nicht sicher weißt: dann ● mit einer kurzen Rückfrage, einem ehrlichen Satz oder sofort der "
+                "Werkzeugaufruf.")
+    # "dann" bezieht den Satz auf die Bitte, Frage oder den Auftrag davor (gemessen: ohne "dann" antwortete das Modell im Büro
+    # auch auf eine bloße Reaktion wie "Puh, das ist schwierig." sofort, statt zu warten)
+    DENKEN = ("Beginnst du dann mit einem Denkausdruck wie „Moment.“ oder „Hm, gute Frage.“, oder willst du erst nachdenken "
+              "oder nachschauen, steht davor trotzdem ●.")
+
+    @staticmethod
+    def _flach(text: str) -> str:
+        return " ".join(text.split())
+
+    def test_buero_in_beiden_sprechweisen(self):
+        for natuerlich in (True, False):
+            with self.subTest(natuerlich=natuerlich):
+                p = self._flach(build_system_prompt("Erika", "du", natuerlich=natuerlich, pc_werkzeuge=True))
+                self.assertIn(self.UNSICHER, p)
+                self.assertIn(self.DENKEN, p)
+
+    def test_labor_in_beiden_sprechweisen(self):
+        from labor_prompt import build_labor_prompt
+
+        for natuerlich in (True, False):
+            with self.subTest(natuerlich=natuerlich):
+                p = self._flach(build_labor_prompt("Gast", "du", natuerlich=natuerlich))
+                self.assertIn(self.UNSICHER, p)
+                self.assertIn(self.DENKEN, p)
+
+    def test_regel_steht_im_gemeinsamen_gespraechsteil(self):
+        import persona
+
+        g = self._flach(persona.GESPRAECH)
+        self.assertIn(self.UNSICHER, g)
+        self.assertIn(self.DENKEN, g)
+        self.assertLess(g.index("Satzende-Marker"), g.index(self.DENKEN))
+
+    def test_die_genannten_denkausdruecke_bietet_die_persona_an(self):
+        """Die Regel nennt Ausdrücke, mit denen die Persona selbst Antworten beginnen lässt; beide Sprechweisen bieten sie an."""
+        import persona
+
+        for name in ("BASE_VOR", "BASE_VOR_NATUERLICH"):
+            with self.subTest(sprechweise=name):
+                text = getattr(persona, name).replace(persona.GESPRAECH, "")
+                self.assertIn("Moment", text)
+                self.assertIn("Hm, gute Frage.", text)
+
+    def test_regel_nennt_die_wartemarker_nicht(self):
+        """Gemessen: eine Fassung, die ○ und ◐ beim Namen nannte, ließ W2, A2 und M3 öfter mit ○ schweigen."""
+        import persona
+
+        self.assertNotIn("○", persona.GESPRAECH)
+        self.assertNotIn("◐", persona.GESPRAECH)
 
 
 class NamensregelTests(unittest.TestCase):
