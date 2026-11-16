@@ -149,6 +149,10 @@ export type FormularProps = {
   /** der Wert gehört in das andere Feld: dort hinterlegen (der Wert wandert nie durch Meldungen) */
   onUmleiten: (art: SchluesselArt, wert: string) => boolean;
   onLoeschen: () => void;
+  /** id des Formulars, damit ein Knopf außerhalb es absenden kann (Rückfrage im Schritt beim Ausrollen) */
+  formId?: string;
+  /** meldet nur, ob im Feld etwas steht, nie den Wert (Schritt beim Ausrollen: Überspringen fragt dann nach) */
+  onGefuellt?: (gefuellt: boolean) => void;
 };
 
 type FeldTexte = Pick<FormularProps, "ueberschrift" | "zweck" | "anleitung" | "beschriftung" | "platzhalter">;
@@ -195,6 +199,12 @@ export function SchluesselFormular(p: FormularProps) {
     else if (warFrage.current) loeschenRef.current?.focus();
     warFrage.current = loeschenFragen;
   }, [loeschenFragen]);
+  // Nur "steht etwas im Feld" geht nach oben, nie der Wert
+  const gefuellt = wert.trim() !== "";
+  const meldeGefuellt = p.onGefuellt;
+  useEffect(() => {
+    meldeGefuellt?.(gefuellt);
+  }, [gefuellt, meldeGefuellt]);
   // Steht ein Wert im falschen Feld (sk-ant-oat… im API-Feld oder umgekehrt), sagt die Karte klar, wohin er gehört
   const falsch = falschesFeld(p.art, wert);
   // "Fertig, eintragen": Anleitung einklappen und ins Feld springen
@@ -255,6 +265,7 @@ export function SchluesselFormular(p: FormularProps) {
         </button>
       </details>
       <form
+        id={p.formId}
         className="mz-form"
         autoComplete="off"
         onSubmit={(e) => {
