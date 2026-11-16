@@ -24,14 +24,21 @@ Füllwörter und Sprechweise (fuellwoerter.py, persona.py, Entscheidung vom 14.1
                                WAMO_FUELLWORT_SECS: Zahl, Standard 0,4
   WAMO_MHM                     Rückmeldelaut "Mhm", wenn das Modell den Satz der Person für unfertig hält (Standard aus)
 Stimmabdruck (stimme_gate.py, stimme_modell.py, seit 14.11.2026; wirkt nur für Profile mit eingelerntem Abdruck, nie für Laborprofile):
-  WAMO_STIMME_PRUEFUNG         aus | beobachten | streng (Standard streng): beobachten misst und meldet nur, streng lässt eine sicher fremde
+  WAMO_STIMME_PRUEFUNG         aus | beobachten | streng (Standard streng): beobachten misst und meldet nur, streng lässt eine fremde
                                Äußerung nicht ans Modell und sperrt Werkzeuge außer Uhrzeit, Websuche und Canvas
   WAMO_STIMME_EIGEN_MIN        Zahl, Standard 0,5: ab diesem Wert (Kosinus, 0,35 bis 0,95) gilt die Äußerung als die eigene Stimme
   WAMO_STIMME_FREMD_MAX        Zahl, Standard 0,3: bis zu diesem Wert (0 bis 0,8) gilt sie als fremd; muss unter EIGEN_MIN liegen
-  WAMO_STIMME_MIN_SECS         Zahl, Standard 1: so viel reine Sprache braucht eine Äußerung, damit sie als eigen oder fremd zählt (0,3 bis 10)
+  WAMO_STIMME_MIN_SECS         Zahl, Standard 1: so viel reine Sprache braucht eine Äußerung, damit sie als eigen zählt (kürzere mit hohem
+                               Wert: kurz; 0,3 bis 10); fürs Verwerfen gilt WAMO_STIMME_VERWERFEN_MIN_SECS
   WAMO_STIMME_VERTRAUEN_SECS   Zahl, Standard 120: so lange gilt "eigen" für kurze Folgesätze und Werkzeuge (10 bis 3600)
   WAMO_STIMME_KURZ_VERTRAUEN_SECS  Zahl, Standard 15: so lange läuft das Vertrauen höchstens weiter, wenn seit der letzten sicheren
                                Erkennung nur kurze Äußerungen kamen (1 bis 120)
+  WAMO_STIMME_VERWERFEN_MAX    Zahl, Standard 0,4: im Modus streng verwirft der Wächter auch unklare Äußerungen unter diesem Wert
+                               (an den Bereich FREMD_MAX bis EIGEN_MIN gesetzt; 0 oder FREMD_MAX schaltet das ab); fremde verwirft er
+                               immer (stimme_waechter.py)
+  WAMO_STIMME_VERWERFEN_MIN_SECS  Zahl, Standard 0: so viel reine Sprache braucht eine Äußerung mindestens, damit der Wächter sie
+                               verwirft (0 bis 10). Erster Regler, wenn kurze eigene Sätze überhört werden: 0,5 bis 1. Ganz wie vor dem
+                               16.11.2026: VERWERFEN_MAX=0 und VERWERFEN_MIN_SECS gleich MIN_SECS
   WAMO_STIMME_MODELL           Pfad der Modelldatei (Standard: Cache-Ordner des Dienstes XDG_CACHE_HOME/wamo/sprecher/, sonst voice-core/.cache/sprecher/)
 Innehalten statt Abbrechen (wiedergabe.py, soft_interrupt.py, Entscheidung vom 14.11.2026, Messung steht aus):
   WAMO_INNEHALTEN              ein einzelnes echtes Wort der Person ("Danke", "Du"), während WAMO spricht, lässt WAMO an der nächsten

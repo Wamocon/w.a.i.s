@@ -31,7 +31,8 @@ Nachrichten an die Oberfläche (RTVI-Servernachrichten, zusätzlich zu canvas, a
   {"type": "stimme", "status": "aus"|"fehlt"|"laedt"|"kaputt"|"bereit", "modus"}
   {"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert", "modus", "ignoriert"?}
                                                                    Stimmprüfung (stimme_*.py): Stand und Ergebnis je Äußerung;
-                                                                   "ignoriert": eine sicher fremde Äußerung ging nicht ans Modell
+                                                                   "ignoriert": eine fremde oder unklare Äußerung ging nicht ans
+                                                                   Modell (Regel in stimme_waechter.py)
   {"type": "stimmabdruck", "status": "start"|"aufnahme"|"rechnet"|"fertig"|"fehler"|"abgebrochen"|"geloescht",
    "sekunden"?, "ziel"?, "text"?}                                  Einlernen des Stimmabdrucks (nie in Laborsitzungen)
   {"type": "stimmabdruck_einwilligung", "version", "text"}         Text der Einwilligung beim Verbinden (stimme_einwilligung.py)
@@ -1067,7 +1068,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             stt,
             SchluesselFilter(),  # zweite Stufe: auch Text, der nicht aus der Spracherkennung kommt
             SpeakerTracker(),  # wer spricht -> Farbe von Kern und Stimmlinie
-            *([stimme.waechter] if stimme else []),  # sicher fremde Äußerungen gehen nicht ans Modell (stimme_waechter.py)
+            *([stimme.waechter] if stimme else []),  # fremde Äußerungen gehen nicht ans Modell (Regel in stimme_waechter.py)
             user_agg,
             soft_gate,
             # Ja auf Rückfrage: ausführen (WAMO_JA_WAECHTER); gefärbt auch, wenn das Ja nicht sicher die Stimme der Person war
@@ -1637,7 +1638,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     @user_agg.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(_agg, _strategy, message):
         if not message.content.strip():
-            return  # leer, etwa eine sicher fremde Stimme (stimme_waechter.py): kein Zug, kein Eintrag im Verlauf und im Gedächtnis
+            return  # leer, etwa eine verworfene fremde Stimme (stimme_waechter.py): kein Zug, kein Eintrag im Verlauf und im Gedächtnis
         # Eine Äußerung, die nicht sicher von der Person stammt (Profil mit Abdruck, Stimme nicht sicher erkannt), färbt den Zug wie
         # Fremdinhalte: kein Lernen daraus, kein Hinweis des Ja-Wächters, im Protokoll mit Markierung (stimme_gate.nicht_sicher_eigen).
         unsicher = stimme is not None and stimme.nicht_sicher_eigen()

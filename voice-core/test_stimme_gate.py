@@ -416,6 +416,61 @@ class SchalterTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"WAMO_STIMME_VERTRAUEN_SECS": "0"}, clear=True):
             self.assertEqual(schwellen_aus_env().vertrauen_secs, 120.0)
 
+    def test_verwerfen_standard(self):
+        """Strenger Wächter (16.11.2026): unklare Äußerungen bis 0,4 verwerfen, ohne Mindestlänge."""
+        with mock.patch.dict("os.environ", {}, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.verwerfen_max, s.verwerfen_min_secs), (0.4, 0.0))
+        self.assertEqual((Schwellen().verwerfen_max, Schwellen().verwerfen_min_secs), (0.4, 0.0))
+
+    def test_verwerfen_aus_der_umgebung(self):
+        umgebung = {"WAMO_STIMME_VERWERFEN_MAX": "0,45", "WAMO_STIMME_VERWERFEN_MIN_SECS": "0.5"}
+        with mock.patch.dict("os.environ", umgebung, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.verwerfen_max, s.verwerfen_min_secs), (0.45, 0.5))
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_VERWERFEN_MIN_SECS": "0"}, clear=True):
+            self.assertEqual(schwellen_aus_env().verwerfen_min_secs, 0.0)  # 0 ist ein gültiger Wert, kein "leer"
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_VERWERFEN_MIN_SECS": "10"}, clear=True):
+            self.assertEqual(schwellen_aus_env().verwerfen_min_secs, 10.0)  # die Obergrenze gilt noch
+
+    def test_verwerfen_max_liegt_zwischen_fremd_und_eigen(self):
+        """Beide Ränder sind erlaubt: FREMD_MAX schaltet das Verwerfen unklarer Äußerungen ab, EIGEN_MIN verwirft jede unklare. Zahlen
+        außerhalb werden an den Rand gesetzt ("0" heißt also: nur fremde verwerfen), keine Zahl heißt Standard."""
+        for roh, soll in (("0.3", 0.3), ("0.5", 0.5), ("0.29", 0.3), ("0", 0.3), ("0.51", 0.5), ("0.9", 0.5), ("x", 0.4), ("nan", 0.4),
+                          ("-1", 0.4)):
+            with mock.patch.dict("os.environ", {"WAMO_STIMME_VERWERFEN_MAX": roh}, clear=True):
+                self.assertEqual(schwellen_aus_env().verwerfen_max, soll, roh)
+
+    def test_verwerfen_max_ausserhalb_wird_einmal_gewarnt(self):
+        stimme_gate._GEWARNT.clear()
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_VERWERFEN_MAX": "0.1"}, clear=True), \
+                mock.patch.object(stimme_gate.logger, "warning") as warnung:
+            schwellen_aus_env()
+            schwellen_aus_env()
+        self.assertEqual(warnung.call_count, 1)
+
+    def test_verwerfen_max_folgt_geaenderten_schwellen(self):
+        """Der Standard 0,4 rückt in den Bereich von FREMD_MAX bis EIGEN_MIN, wenn diese verschoben sind."""
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_FREMD_MAX": "0.45", "WAMO_STIMME_EIGEN_MIN": "0.6"}, clear=True):
+            self.assertEqual(schwellen_aus_env().verwerfen_max, 0.45)
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_FREMD_MAX": "0.1", "WAMO_STIMME_EIGEN_MIN": "0.35"}, clear=True):
+            self.assertEqual(schwellen_aus_env().verwerfen_max, 0.35)
+        umgebung = {"WAMO_STIMME_FREMD_MAX": "0.45", "WAMO_STIMME_EIGEN_MIN": "0.6", "WAMO_STIMME_VERWERFEN_MAX": "0.4"}
+        with mock.patch.dict("os.environ", umgebung, clear=True):
+            self.assertEqual(schwellen_aus_env().verwerfen_max, 0.45)  # unter FREMD_MAX: Standard im neuen Bereich
+
+    def test_verwerfen_bleibt_wenn_fremd_und_eigen_nicht_zusammenpassen(self):
+        umgebung = {"WAMO_STIMME_EIGEN_MIN": "0.4", "WAMO_STIMME_FREMD_MAX": "0.45", "WAMO_STIMME_VERWERFEN_MAX": "0.42",
+                    "WAMO_STIMME_VERWERFEN_MIN_SECS": "0.5"}
+        with mock.patch.dict("os.environ", umgebung, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.eigen_min, s.fremd_max, s.verwerfen_max, s.verwerfen_min_secs), (0.5, 0.3, 0.42, 0.5))
+
+    def test_verwerfen_min_secs_unbrauchbar_heisst_standard(self):
+        for roh in ("-1", "x", "nan", "11"):
+            with mock.patch.dict("os.environ", {"WAMO_STIMME_VERWERFEN_MIN_SECS": roh}, clear=True):
+                self.assertEqual(schwellen_aus_env().verwerfen_min_secs, 0.0, roh)
+
 
 class WerkzeugTests(unittest.IsolatedAsyncioTestCase):
     async def test_gesperrt_ruft_den_handler_nicht_auf(self):

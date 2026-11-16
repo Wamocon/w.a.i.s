@@ -69,11 +69,15 @@ export type Approval = {
   ablauf?: number;
 };
 
+/** Ein endgültiger Teil des Nutzerbeitrags aus der Spracherkennung, mit deren Zeitstempel (siehe nutzerTranskript). */
+export type NutzerTeil = { zeit: string; text: string };
+
 /** Live-Untertitel: Nutzerzeile und der aktuelle WAMO-Zug (Karaoke über spoken). */
 export type Caption = {
   userDone: string; // endgültige Teile des aktuellen Nutzerbeitrags
   userLive: string; // Zwischenergebnis (kursiv grau)
   userLogged: boolean; // schon in den Verlauf übernommen
+  userTeile: NutzerTeil[]; // die gesprochenen Teile am Ende von userDone, damit der Kern einen verworfenen zurücknehmen kann
   text: string; // WAMO-Zug, gesprochene und noch kommende Wörter
   spoken: number; // Anzahl schon gesprochener Wörter
   turnEnd: boolean;
@@ -200,6 +204,7 @@ export const leereCaption: Caption = {
   userDone: "",
   userLive: "",
   userLogged: false,
+  userTeile: [],
   ...ZUG_LEER,
 };
 
@@ -314,8 +319,81 @@ export function beginneNutzerZug(s: WamoState): WamoState {
   let caption = s.caption;
   if (s.presence === "speaking") caption = { ...caption, interrupted: true };
   else if (caption.turnEnd) caption = { ...caption, ...ZUG_LEER };
-  if (caption.userLogged) caption = { ...caption, userDone: "", userLive: "", userLogged: false };
+  if (caption.userLogged) caption = { ...caption, userDone: "", userLive: "", userLogged: false, userTeile: [] };
   return { ...s, presence: "listening", caption, turn: s.turn + 1 };
+}
+
+/** So viele gesprochene Teile merkt sich ein Nutzerbeitrag zum Zurücknehmen; ältere bleiben nur als Text stehen. */
+const MAX_TEILE = 40;
+
+/**
+ * Transkript der Person aus der Spracherkennung (RTVI user-transcription, useWamo.ts) in den Untertitel übernehmen: ein Zwischenstand
+ * ersetzt die kursive Vorschau, ein endgültiger Teil kommt mit seinem Zeitstempel dazu. Ein schon in den Verlauf übernommener Beitrag
+ * beginnt neu.
+ *
+ * Zurücknehmen: Im strengen Modus verwirft der Kern eine fremde Äußerung erst nach dem Urteil der Stimmprüfung
+ * (voice-core/stimme_waechter.py). Pipecat meldet jedes Transkript aber schon, wenn es die Spracherkennung verlässt, der Text steht also
+ * bereits hier. Danach schickt der Kern dasselbe Transkript ohne Text (nur Leerzeichen) mit dem Zeitstempel des Originals. Passt es zu
+ * einem gemerkten Teil, verschwindet genau dieser Teil aus dem Untertitel und, falls W.A.I.S. inzwischen zu sprechen begann, aus dem
+ * Eintrag im Verlauf. Eigene Sätze desselben Zugs und getippter Text bleiben.
+ */
+export function nutzerTranskript(s: WamoState, d: { text: string; final: boolean; timestamp?: string }): WamoState {
+  const c = s.caption;
+  if (!d.text.trim()) {
+    // Ohne Text gibt es nichts zu zeigen. Passt es zu keinem gemerkten Teil (der Beitrag begann inzwischen neu), bleibt alles stehen
+    const i = d.final && d.timestamp ? letzterIndex(c.userTeile, (t) => t.zeit === d.timestamp) : -1;
+    return i >= 0 ? teilZuruecknehmen(s, i) : s;
+  }
+  const base = c.userLogged ? { ...c, userDone: "", userLive: "", userLogged: false, userTeile: [] } : c;
+  if (!d.final) return { ...s, caption: { ...base, userLive: d.text } };
+  const text = norm(d.text);
+  // jeder Teil kommt in die Liste, auch ohne Zeitstempel (zeit leer, nie zurückzunehmen): sonst stimmte "die Teile stehen am Ende" nicht
+  const userTeile = [...base.userTeile, { zeit: d.timestamp ?? "", text }].slice(-MAX_TEILE);
+  return { ...s, caption: { ...base, userDone: anhaengen(base.userDone, text), userLive: "", userTeile } };
+}
+
+/** Text mit einem Leerzeichen anhängen; der Text davor (etwa getippt, mit Zeilenumbrüchen) bleibt unverändert. */
+const anhaengen = (vorne: string, text: string) => [vorne.trimEnd(), text].filter(Boolean).join(" ");
+
+/** Liest die Nutzerzeile des Untertitels als leer (nichts endgültig, kein Zwischenstand)? */
+export const nutzerZeileLeer = (c: Pick<Caption, "userDone" | "userLive">) => !`${c.userDone} ${c.userLive}`.trim();
+
+/**
+ * Die Person hat aufgehört zu sprechen (RTVI user-stopped-speaking): W.A.I.S. denkt nach. Ist die Nutzerzeile leer, weil der Kern die
+ * Äußerung verworfen hat, endet der Zug ohne Aufruf des Modells; dann wartet W.A.I.S. wieder, statt endlos nachzudenken.
+ */
+export function nutzerHoertAuf(s: WamoState): WamoState {
+  const presence: Presence = nutzerZeileLeer(s.caption) && s.presence === "listening" ? "idle" : "thinking";
+  return s.presence === presence ? s : { ...s, presence };
+}
+
+function letzterIndex<T>(liste: readonly T[], passt: (x: T) => boolean): number {
+  for (let i = liste.length - 1; i >= 0; i -= 1) if (passt(liste[i])) return i;
+  return -1;
+}
+
+/** Den Teil i aus dem Untertitel nehmen (und aus dem Verlauf, wenn der Beitrag schon dort steht). */
+function teilZuruecknehmen(s: WamoState, i: number): WamoState {
+  const c = s.caption;
+  const userTeile = c.userTeile.filter((_, j) => j !== i);
+  // Die Teile stehen in ihrer Reihenfolge am Ende von userDone; davor nur, was nicht gesprochen ist (getippter Text) oder schon aus der
+  // Liste gefallen ist. Neu zusammensetzen statt nach dem Text zu suchen: gleichlautende Teile bleiben so in ihrer Reihenfolge.
+  const alle = c.userTeile.map((t) => t.text).join(" ");
+  if (!c.userDone.endsWith(alle)) return { ...s, caption: { ...c, userTeile } }; // nicht mehr zuzuordnen: lieber nichts streichen
+  const vorne = c.userDone.slice(0, c.userDone.length - alle.length);
+  const userDone = anhaengen(vorne, userTeile.map((t) => t.text).join(" "));
+  const caption = { ...c, userDone, userTeile };
+  // Nichts mehr übrig, während W.A.I.S. auf das Ende des Zugs wartet: der Zug endet leer, ohne Antwort (siehe nutzerHoertAuf)
+  const presence: Presence = nutzerZeileLeer(caption) && s.presence === "thinking" && !c.userLogged ? "idle" : s.presence;
+  if (!c.userLogged) return { ...s, presence, caption };
+  // Schon im Verlauf (onBotStartedSpeaking in useWamo.ts übernimmt userDone und userLive): seither kam kein neues Transkript, sonst
+  // hätte der Beitrag neu begonnen und der Teil stünde nicht mehr in der Liste. Nur den Eintrag mit genau diesem Text ändern.
+  const vorher = `${c.userDone} ${c.userLive}`.trim();
+  const k = letzterIndex(s.log, (e) => e.wer === "nutzer");
+  if (k < 0 || s.log[k].text !== vorher) return { ...s, caption };
+  const nachher = `${userDone} ${c.userLive}`.trim();
+  const log = nachher ? s.log.map((e, j) => (j === k ? { ...e, text: nachher } : e)) : s.log.filter((_, j) => j !== k);
+  return { ...s, log, caption };
 }
 
 /**
@@ -325,7 +403,7 @@ export function beginneNutzerZug(s: WamoState): WamoState {
  */
 export function nimmeTextAuf(s: WamoState, text: string): WamoState {
   const n = beginneNutzerZug(s);
-  return { ...n, presence: "thinking", caption: { ...n.caption, userDone: text, userLive: "", userLogged: false } };
+  return { ...n, presence: "thinking", caption: { ...n.caption, userDone: text, userLive: "", userLogged: false, userTeile: [] } };
 }
 
 /** Rückfall für Kerne ohne bot-output (nur LLM-Text): alles gilt sofort als gesprochen. */

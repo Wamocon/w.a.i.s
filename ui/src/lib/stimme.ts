@@ -15,7 +15,8 @@ export type StimmeStand = {
   ergebnis: StimmeErgebnis | null;
   /** Ähnlichkeit mit dem Abdruck, 0 bis 1 */
   wert: number | null;
-  /** Die letzte Äußerung war sicher fremd und der Kern hat sie verworfen (strenger Modus): sie erreichte das Sprachmodell nicht. */
+  /** Der Kern hat die letzte Äußerung verworfen (strenger Modus, fremd oder unklar mit niedrigem Wert, voice-core/stimme_waechter.py):
+   *  sie erreichte das Sprachmodell nicht. */
   ignoriert: boolean;
   /** Wie oft der Kern seit dem Laden eine Äußerung verworfen hat: jede neue verworfene Äußerung zählt, auch zwei gleiche hintereinander
    *  (der kurze Hinweis in der Oberfläche hängt daran, components/kommando/StimmeIgnoriert.tsx). */
@@ -40,8 +41,8 @@ export function stimmeErgebnisAnwenden(
   s: StimmeStand,
   m: { ergebnis: StimmeErgebnis; wert: number | null; modus: StimmeModus | null; ignoriert?: boolean },
 ): StimmeStand {
-  // verworfen werden kann nur eine sicher fremde Äußerung; ein ignoriert bei einem anderen Ergebnis ist Unsinn und zählt nicht
-  const ignoriert = m.ignoriert === true && m.ergebnis === "fremd";
+  // verworfen werden kann eine fremde oder unklare Äußerung, nie die eigene; ein ignoriert bei "eigen" ist Unsinn und zählt nicht
+  const ignoriert = m.ignoriert === true && (m.ergebnis === "fremd" || m.ergebnis === "unklar");
   return {
     ...s,
     ergebnis: m.ergebnis,
@@ -80,6 +81,13 @@ export function stimmeModul(s: StimmeStand): StimmeModul | null {
   if (s.ergebnis === "fremd" && s.ignoriert) {
     return { an: "warn", text: "Fremd · ignoriert", titel: `Fremde Stimme${wert}: ignoriert, die Äußerung hat das Sprachmodell nicht erreicht` };
   }
+  if (s.ergebnis === "unklar" && s.ignoriert) {
+    return {
+      an: "warn",
+      text: "Unklar · ignoriert",
+      titel: `Stimme nicht sicher erkannt${wert}: ignoriert, die Äußerung hat das Sprachmodell nicht erreicht`,
+    };
+  }
   if (s.ergebnis === "fremd") return { an: "warn", text: `Fremd${wert}`, titel };
   if (s.ergebnis === "unklar") return { an: "aus", text: `Unklar${wert}`, titel };
   return { an: "aus", text: "Bereit", titel };
@@ -104,6 +112,10 @@ const MODUS_ZEILE: Record<StimmeModus, string> = {
 
 /** Zeile "Betriebsart" in den Einstellungen. */
 export const modusText = (m: StimmeModus | null): string => (m ? MODUS_ZEILE[m] : "unbekannt");
+
+/** Kurzer Hinweis, wenn der Kern eine Äußerung verworfen hat (components/kommando/StimmeIgnoriert.tsx). */
+export const ignoriertHinweis = (ergebnis: StimmeErgebnis | null): string =>
+  ergebnis === "unklar" ? "Stimme nicht sicher erkannt, ignoriert" : "Fremde Stimme ignoriert";
 
 /** Zeile "Letzte Äußerung" in den Einstellungen. */
 export function ergebnisText(s: StimmeStand): string {

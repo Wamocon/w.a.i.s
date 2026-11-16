@@ -299,7 +299,8 @@ export type ServerMessage =
   /** Stimmerkennung, Stand (auf dem Draht {type:"stimme", status, modus}); modus fehlt bei einem Kern, der ihn nicht mitschickt */
   | { type: "stimme_status"; status: StimmeStatus; modus: StimmeModus | null }
   /** Stimmerkennung, Ergebnis der letzten Äußerung (auf dem Draht {type:"stimme", ergebnis, wert, modus}); wert 0 bis 1 oder leer.
-   *  ignoriert (freiwillig): im strengen Modus hat der Kern eine sicher fremde Äußerung verworfen, sie erreicht das Sprachmodell nicht. */
+   *  ignoriert (freiwillig): im strengen Modus hat der Kern eine fremde oder unklare Äußerung verworfen, sie erreicht das Sprachmodell
+   *  nicht (voice-core/stimme_waechter.py). */
   | { type: "stimme_ergebnis"; ergebnis: StimmeErgebnis; wert: number | null; modus: StimmeModus | null; ignoriert?: boolean }
   /** Einlernen des Stimmabdrucks: Zustand, aufgenommene Sekunden reiner Sprache, Ziel in Sekunden, bei fehler ein Satz dazu */
   | { type: "stimmabdruck"; status: AbdruckStatus; sekunden?: number; ziel?: number; text?: string }

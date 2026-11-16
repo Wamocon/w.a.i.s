@@ -97,6 +97,8 @@ import {
   logEintrag,
   nachrichtAbgelehnt,
   nimmeTextAuf,
+  nutzerHoertAuf,
+  nutzerTranskript,
   reduceBotOutput,
   reduceBotTranscript,
   resetWamo,
@@ -107,7 +109,6 @@ import {
   type Caption,
   type Fehler,
   type Memo,
-  type Presence,
 } from "@/lib/wamo";
 
 export type { Activity, Betrieb, Gemerkt, Profil } from "@/lib/nachrichten";
@@ -297,10 +298,6 @@ function stimmeLeiser(audio: HTMLAudioElement | null, an: boolean, state: SoftSt
   }, DAEMPFEN_MAX_MS);
 }
 
-function setPresence(p: Presence) {
-  wamo.set((s) => (s.presence === p ? s : { ...s, presence: p }));
-}
-
 function setCaption(update: (c: Caption) => Caption) {
   wamo.set((s) => {
     const caption = update(s.caption);
@@ -320,13 +317,9 @@ function planeSchnitt(timer: { current: ReturnType<typeof setTimeout> | null }) 
   }, 2000);
 }
 
-/** Nutzertext einarbeiten (endgültig oder Zwischenstand); ein schon geloggter Beitrag beginnt neu. */
-function userText(text: string, final: boolean) {
-  setCaption((c) => {
-    const base = c.userLogged ? { ...c, userDone: "", userLive: "", userLogged: false } : c;
-    if (!final) return { ...base, userLive: text };
-    return { ...base, userDone: `${base.userDone} ${text}`.trim(), userLive: "" };
-  });
+/** Nutzertext einarbeiten (endgültig oder Zwischenstand, ein verworfener Teil wird zurückgenommen): lib/wamo.ts, nutzerTranskript. */
+function userText(d: { text: string; final: boolean; timestamp?: string }) {
+  wamo.set((s) => nutzerTranskript(s, d));
 }
 
 /** Der Kern verlangt eine neue Anmeldung (zu alt): lokal abmelden, die Anmeldemaske zeigt den Grund. */
@@ -893,7 +886,7 @@ export function useWamo(): WamoAktionen {
             wamo.set(beginneNutzerZug);
           },
           onUserStoppedSpeaking: () => {
-            if (aktuell()) setPresence("thinking");
+            if (aktuell()) wamo.set(nutzerHoertAuf); // denkt nach, außer der Kern hat die Äußerung verworfen (Zeile leer)
           },
           onBotStartedSpeaking: () => {
             if (!aktuell()) return;
@@ -930,11 +923,12 @@ export function useWamo(): WamoAktionen {
             // "mhm" nicht anzeigen. Getippten Text (chat) zeigt textSenden selbst, schon von Schlüsseln befreit: ein Echo
             // des Kerns würde ihn doppelt zeigen.
             if (d.input_type === "backchannel" || d.input_type === "chat" || !d.text) return;
-            userText(d.text, d.final);
+            userText(d);
           },
           onUserTranscript: (d) => {
+            // Ein endgültiges Transkript ohne Text mit dem Zeitstempel eines früheren nimmt dieses zurück (verworfen im strengen Modus)
             if (!aktuell() || seen.current.userInput) return;
-            if (d.text) userText(d.text, d.final);
+            userText(d);
           },
           onBotOutput: (d) => {
             if (!aktuell()) return;
