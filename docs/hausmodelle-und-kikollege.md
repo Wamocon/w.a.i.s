@@ -145,7 +145,7 @@ MoE, 0,65 bei dichten Modellen). Hauszahlen (H) aus der Modellkarte.
 | Boss (unklare Aufgaben) | Claude Haiku | unklare Aufträge laufen über die Klasse Gespräch (`voice-core/boss.py:682`), also über das Gesprächsmodell des Hauses | Router wie Ministral-3-3B (Apache 2.0) \[26\] | kein neues Modell und keine Codeänderung; der Boss fragt selten |
 | Entwicklungsaufträge | Claude Code (Token Sonnet, sonst Haiku) | `wamo-coder` 7/8 in 7,2 s; `qwen3.6-35b` 7/8 in 3,6 s (H) | `Qwen/Qwen3.6-35B-A3B` FP8: SWE-bench Verified 73,4, Terminal-Bench 2.0 51,5, M 54 bis 86 Token/s \[1\]\[8\]\[40\]; Coder-Next ist überholt (SWE-V 70,6) und 84 GB groß \[41\] | Spike H6: Agent (Claude Code über Gateway oder OpenCode) mit `qwen3.6-35b` |
 | STT | Soniox (EU) | `qwen3-asr` 1.7B: p50 280 ms, p95 573 ms je ganzer Äußerung, Wortfehlerrate 1,2 %, ohne Zwischenergebnisse (M7, 2.5) | `mistralai/Voxtral-Mini-4B-Realtime-2602`, Apache 2.0, echtes Streaming, WER Deutsch FLEURS 6,19 % bei 480 ms \[43\]; `nvidia/parakeet-tdt-0.6b-v3` (CC-BY-4.0, WER 5,04 %, nur gepuffert) \[45\] | Soniox bleibt Standard; Option Haus zuerst mit Qwen3-ASR, später Voxtral Realtime |
-| TTS | Soniox (EU) | `qwen3-tts`: kein Streaming, erstes Audio 1,4 bis 2,1 s je Satz, nur eine Anfrage zugleich (M7, 2.5); `piper-de` 0,1 bis 0,2 s (H) | Qwen3-TTS bleibt die beste freie Wahl (Apache 2.0, Streaming über vLLM-Omni) \[49\]\[50\]; Voxtral-4B-TTS ist nicht kommerziell (CC BY-NC) \[55\] | Soniox bleibt Standard; Option Haus mit Qwen3-TTS, Piper als schneller Rückfall (Lizenz der Stimme prüfen) |
+| TTS | Soniox (EU) | `qwen3-tts`: erst ohne Streaming 1,4 bis 2,1 s je Satz (M7, 2.5); eigene Instanz gestreamt erstes Audio p50 0,14 s, p95 0,16 s, über das Gateway nur mit Durchreiche (2.6); nur eine Anfrage zugleich; `piper-de` 0,1 bis 0,2 s (H) | Qwen3-TTS bleibt die beste freie Wahl (Apache 2.0, Streaming über vLLM-Omni) \[49\]\[50\]; Voxtral-4B-TTS ist nicht kommerziell (CC BY-NC) \[55\] | Soniox bleibt Standard; Option Haus mit Qwen3-TTS, Piper als schneller Rückfall (Lizenz der Stimme prüfen) |
 
 ### 2.3 Betrieb der neuen Modelle
 
@@ -263,6 +263,70 @@ oben); die Messung über das Gateway entscheidet. Der Schlüssel des Kerns sieht
 Rückweg: die Sicherung `litellm_config.yaml.vor-wamo-stimme.20261116-182624` zurückkopieren (oder die beiden Blöcke löschen) und
 `docker restart uaol-litellm`. Ohne die Einträge fällt der Kern von selbst auf Soniox zurück und nennt den Grund.
 Der Neustart unterbricht das Gateway für alle Nutzer kurz; deshalb außerhalb von Gesprächen und Läufen.
+
+### 2.6 Gestreamte Sprachausgabe im Haus (16.11.2026, abends)
+
+Wunsch von Niko: die Stimme im Haus nah an Soniox bringen (erstes Audio p50 0,17 s, p95 0,38 s). Seit 16.11. nutzt das Gateway eine
+eigene Instanz `wamo-qwen3-tts` (Port 172.17.0.1:8104, Quelle und Rückweg in `infra/sokrates1/wamo-tts-haus/`).
+
+**Befunde.**
+
+1. Das Modell ist für Streaming gebaut: faster-qwen3-tts 0.4.0 liefert Codec-Frames einzeln (12,5 je Sekunde, 80 ms Audio je Frame),
+   ein Frame kostet auf dem GB10 rund 48 ms. Der Dienst gibt jetzt mit `"stream": true` den ersten Block nach 2 Frames aus und lässt die
+   Blöcke danach im Anlauf wachsen (2, 1, 1, 2, 3, 4, 6 Frames), damit nach dem ersten Ton keine Lücke entsteht.
+2. Der Modellweg des Gateways puffert: LiteLLM 1.92.0 reicht bei `/audio/speech` nur `response_format`, `speed` und `instructions`
+   weiter (nie `stream`) und holt die Antwort mit `openai_client.audio.speech.create` ohne Streaming, also ganz (`litellm/llms/openai/openai.py`,
+   `async_audio_speech`); erst danach gibt der Proxy sie in Stücken zu 8192 Byte weiter. Gemessen: erstes Audio gleich Gesamtdauer.
+3. Eine Durchreiche (`pass_through_endpoints`) streamt: Steht `"stream": true` im Körper, holt LiteLLM die Antwort mit `stream=True`
+   und gibt jedes Stück sofort weiter (`pass_through_endpoints.py`, `streaming_handler.py`). Mit `auth: true` prüft sie den Schlüssel;
+   ein Schlüssel ohne Admin-Rolle braucht dazu `allowed_passthrough_routes` in seinen Metadaten. Der Schlüssel des Dienstes geht nicht
+   mit (`forward_headers` aus).
+4. Ein Abbruch (Unterbrechung im Gespräch) beendet die Erzeugung direkt und über die Durchreiche nach rund 0,18 s; der nächste Satz
+   bekommt sein erstes Audio nach 0,14 s. Ohne Streaming hielt ein abgebrochener langer Satz den Dienst bis zum Ende fest.
+
+**Messung** (Sätze: kurz "Gerne.", "Alles klar.", "Erledigt.", "Moment, ich schaue nach.", "Fertig."; normal drei Sätze mit 67 bis 77
+Zeichen; Stimme `sohee`; erstes Audio = erste Bytes nach dem WAV-Kopf). Gateway gemessen an einer Probe-Instanz derselben LiteLLM 1.92.0
+(gleiches Abbild, nur auf Loopback, eigener Wegwerf-Schlüssel, danach entfernt); das zentrale Gateway blieb unberührt.
+
+| Weg | kurz p50 / p95 | normal p50 / p95 | n |
+| --- | --- | --- | --- |
+| vorher: Dienst direkt, ganze Datei | 0,63 / 1,27 s | 2,84 / 3,27 s | je 12 |
+| Gateway, Modellweg `/v1/audio/speech` (mit `stream`) | 0,53 / 1,26 s | 2,68 / 3,26 s | je 12 |
+| Dienst direkt, gestreamt | 0,13 / 0,14 s | 0,13 / 0,14 s | je 20 |
+| Gateway, Durchreiche, gestreamt | 0,14 / 0,16 s | 0,14 / 0,14 s | je 20 |
+| Kern (`HausTTSService`, SSH-Tunnel vom Laptop), Durchreiche | 0,14 / 0,15 s gemischt | | 12 |
+| Kern, Modellweg | 2,25 / 3,57 s gemischt | | 12 |
+
+Pufferreserve beim Abspielen (Wiedergabe ab dem ersten Block): meist mindestens 0,1 s; in 1 von 30 Läufen kurz knapp unter null, als
+andere Last auf derselben GPU (Ollama, vLLM) die Erzeugung um rund 40 % bremste. Mit `TTS_STREAM_ERSTER_BLOCK=3` kommt der erste Ton
+nach 0,18 s, die Reserve steigt um rund 80 ms. Erster Block 1 Frame: 0,086 s, Reserve nur rund 25 ms (nicht empfohlen).
+
+**Nicht umgesetzt.** Satzteile früher schicken: Mit Streaming hängt das erste Audio nicht mehr an der Satzlänge; der Rest ist die Zeit
+des Sprachmodells bis zum ersten Satzende. Vorab erzeugen, während der vorige Satz spielt: geschieht schon, denn Pipecat holt den nächsten
+Satz, sobald der vorige erzeugt ist, und der Dienst ist rund 1,6-mal schneller als Echtzeit. Piper als schneller Rückfall für kurze
+Sätze: nicht nötig und eine zweite Stimme mitten in der Antwort. Kleineres Modell (0,6B) liegt nicht vor.
+
+**Vorschlag für das Gateway (nur mit Nikos Ja, Neustart von `uaol-litellm` nötig).** Unter `general_settings` der Konfiguration:
+
+```yaml
+general_settings:
+  # (vorhandene Einträge bleiben)
+  # W.A.I.S.: gestreamte Sprachausgabe im Haus. Der Modellweg /v1/audio/speech puffert die ganze Datei; diese Durchreiche gibt
+  # den Strom der eigenen Instanz wamo-qwen3-tts Stück für Stück weiter. auth: true prüft den Schlüssel; Schlüssel ohne
+  # Admin-Rolle brauchen allowed_passthrough_routes ["/wamo-tts-haus"] in den Metadaten.
+  pass_through_endpoints:
+    - path: "/wamo-tts-haus/v1/audio/speech"
+      target: "http://host.docker.internal:8104/v1/audio/speech"
+      auth: true
+```
+
+Danach am Schlüssel des Kerns die Metadaten ergänzen (Admin-API `POST /key/update` mit dem Hauptschlüssel, `metadata` bleibt sonst
+gleich): `"allowed_passthrough_routes": ["/wamo-tts-haus"]`. Probe des Koordinators mit dem Schlüssel des Kerns: `POST
+/wamo-tts-haus/v1/audio/speech` mit `{"model": "wamo-tts-haus", "input": "Gerne.", "voice": "sohee", "response_format": "wav",
+"stream": true}` muss 200 mit `X-Stream: 1` liefern, die ersten Bytes nach rund 0,15 s; ein Schlüssel ohne den Eintrag bekommt 403.
+Dann `WAMO_TTS_HAUS_STREAM=an` über `wamo-core-env` und ein Kern-Release. Rückweg: Block löschen und Neustart; der Kern fällt bei
+404, 401 oder 403 der Durchreiche von selbst für 5 Minuten auf den Modellweg zurück (`DURCHREICHE_PAUSE_SECS`), `WAMO_TTS_HAUS_STREAM=aus`
+schaltet sie ganz ab.
 
 ## 3. Entwurf "Alles über Sokrates"
 

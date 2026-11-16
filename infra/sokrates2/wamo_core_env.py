@@ -84,7 +84,10 @@ ERLAUBT = set(PFLICHT) | {
     # Sprachausgabe, die Stimme des Hausmodells und die Übersteuerung für alle Sitzungen (soniox oder haus; leer heißt die Wahl
     # des Profils, Standard Soniox). Laborsitzungen hören immer über Soniox. Kommen nur vom Server, nie aus der .env des PCs (nicht
     # in AUS_ENV von scripts/wamo_kern_sokrates2.py): ein Testwert "haus" am PC darf nie alle Sitzungen umstellen.
+    # WAMO_TTS_HAUS_STREAM (an oder aus, Standard aus): Sprachausgabe gestreamt über die Durchreiche /<modell>/v1/audio/speech
+    # des Gateways; erst setzen, wenn die Durchreiche dort eingerichtet und für den Schlüssel des Kerns frei ist.
     "WAMO_STT_ANBIETER", "WAMO_TTS_ANBIETER", "WAMO_STT_HAUS_MODELL", "WAMO_TTS_HAUS_MODELL", "WAMO_TTS_HAUS_STIMME",
+    "WAMO_TTS_HAUS_STREAM",
     # Eine Sitzung je Profil und Höchstalter der Anmeldung (bot.py, auth_gate.py)
     "WAMO_SITZUNG_EINZELN", "WAMO_ANMELDUNG_MAX_STUNDEN",
     # Fernzugriff ohne frischen Code je Start (voice-core/rd_api.py, KP-2): Höchstalter des Codes der Anmeldung nur für den Fernzugriff

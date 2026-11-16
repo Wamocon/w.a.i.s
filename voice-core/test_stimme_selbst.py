@@ -25,7 +25,8 @@ from schluessel import kek_erzeugen
 from test_modellwahl import NIKO, FakeDb, _zeile
 
 WURZEL = Path(__file__).resolve().parent.parent
-NAMEN = ("WAMO_STT_ANBIETER", "WAMO_TTS_ANBIETER", "WAMO_STT_HAUS_MODELL", "WAMO_TTS_HAUS_MODELL", "WAMO_TTS_HAUS_STIMME")
+NAMEN = ("WAMO_STT_ANBIETER", "WAMO_TTS_ANBIETER", "WAMO_STT_HAUS_MODELL", "WAMO_TTS_HAUS_MODELL", "WAMO_TTS_HAUS_STIMME",
+          "WAMO_TTS_HAUS_STREAM")
 
 
 @pytest.fixture(autouse=True)

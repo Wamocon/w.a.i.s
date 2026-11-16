@@ -15,7 +15,8 @@ Im Haus geht alles über das LiteLLM-Gateway (LITELLM_BASE_URL, LITELLM_API_KEY)
     keine Zwischenergebnisse, keine Sprechertrennung, keine Wortzeitstempel).
   * TTS: /v1/audio/speech mit WAMO_TTS_HAUS_MODELL und WAMO_TTS_HAUS_STIMME, Antwort als WAV (Abtastrate aus dem Kopf,
     wird auf die Ausgaberate umgerechnet). Ohne Wortzeitstempel: Die weiche Unterbrechung greift dann über die
-    Zeitgrenze in soft_interrupt.py, die Untertitel kommen satzweise.
+    Zeitgrenze in soft_interrupt.py, die Untertitel kommen satzweise. Mit WAMO_TTS_HAUS_STREAM=an gestreamt über die
+    Durchreiche /<modell>/v1/audio/speech des Gateways (HausTTSService), sonst ganze Datei je Satz.
 
 Rückfall: Fehlt Modell, Schlüssel oder Adresse, ist das Gateway nicht erreichbar oder bietet es das Modell nicht an,
 steht der Grund im Log und der Baustein nutzt Soniox. Die Oberfläche zeigt das am Namen ("Soniox (Rückfall)") und nennt den
@@ -28,7 +29,10 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from collections.abc import AsyncIterator
+from contextlib import aclosing
+from urllib.parse import quote
 from dataclasses import dataclass
 
 import httpx
@@ -43,6 +47,11 @@ from llm_anbieter import litellm_basis, litellm_problem, litellm_problem_statisc
 
 ANBIETER = ("soniox", "haus")
 HAUS_TIMEOUT_SECS = 20.0  # eine Äußerung bzw. ein Satz; danach Fehler statt Hänger
+WAV_KOPF_BYTES = 44
+# Antworten des Gateways, die heißen "Durchreiche nicht eingerichtet oder für diesen Schlüssel nicht frei": dann der Modellweg
+DURCHREICHE_ABGELEHNT = frozenset({401, 403, 404})
+DURCHREICHE_PAUSE_SECS = 300.0
+_uhr = time.monotonic  # Zeitquelle der Pause, in Tests ersetzbar (asyncio nutzt time.monotonic selbst)
 
 # Gründe eines Rückfalls für die Oberfläche: kurze Sätze ohne Namen aus der Umgebung, ohne Adressen (anzeige_grund)
 GRUND_EINRICHTUNG = "im Kern noch nicht eingerichtet"
@@ -209,17 +218,56 @@ def haus_stt(b: Baustein, begriffe: list[str]) -> HausSTTService:
     )
 
 
+def tts_stream_an() -> bool:
+    """WAMO_TTS_HAUS_STREAM=an: Sprachausgabe gestreamt über die Durchreiche des Gateways (Standard aus)."""
+    return _env("WAMO_TTS_HAUS_STREAM").lower() == "an"
+
+
+def litellm_wurzel(basis: str) -> str:
+    """Adresse des Gateways ohne /v1: Durchreichen (pass_through_endpoints) liegen an der Wurzel, nicht unter /v1."""
+    basis = basis.rstrip("/")
+    return basis[: -len("/v1")] if basis.endswith("/v1") else basis
+
+
+async def _mit_ganzem_kopf(stuecke: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    """Hält die ersten Bytes zurück, bis der 44-Byte-Kopf einer WAV vollständig ist. Pipecat liest die Abtastrate nur aus einem
+    ersten Stück mit mindestens 44 Byte; über das Netz kann ein gestreamter Kopf zerteilt ankommen."""
+    anfang: bytes | None = b""
+    async for stueck in stuecke:
+        if anfang is None:
+            yield stueck
+            continue
+        anfang += stueck
+        if len(anfang) >= WAV_KOPF_BYTES:
+            yield anfang
+            anfang = None
+    if anfang:
+        yield anfang
+
+
 class HausTTSService(TTSService):
-    """TTS im Haus über LiteLLM (/v1/audio/speech, WAV). Satzweise, ohne Wortzeitstempel."""
+    """TTS im Haus über LiteLLM (WAV, satzweise, ohne Wortzeitstempel).
+
+    Zwei Wege, beide über das Gateway (Hausregel):
+      * Modellweg /v1/audio/speech: LiteLLM 1.92.0 holt dort die ganze Datei, bevor es das erste Byte weitergibt (das Feld stream
+        reicht es nicht durch). Erstes Audio = Gesamtdauer des Satzes.
+      * Durchreiche /<modell>/v1/audio/speech mit "stream": true (WAMO_TTS_HAUS_STREAM=an): ein pass_through_endpoint des Gateways
+        mit auth, der den Strom des Dienstes Stück für Stück weitergibt. Erstes Audio nach rund 0,14 s, unabhängig von der Satzlänge;
+        bricht die Sitzung ab (Unterbrechung), endet die Erzeugung im Dienst sofort und gibt ihn für den nächsten Satz frei.
+    Lehnt das Gateway die Durchreiche ab (404 nicht eingerichtet, 401 oder 403 Schlüssel ohne allowed_passthrough_routes), geht
+    derselbe Satz über den Modellweg, und für DURCHREICHE_PAUSE_SECS nutzen alle Sitzungen dieses Kerns nur den Modellweg."""
+
+    durchreiche_pause_bis: float = 0.0  # time.monotonic(); gemeinsam für alle Sitzungen dieses Kerns
 
     def __init__(self, *, modell: str, stimme: str, basis: str | None = None, schluessel: str | None = None,
-                 client: httpx.AsyncClient | None = None, **kwargs):
+                 client: httpx.AsyncClient | None = None, stream: bool | None = None, **kwargs):
         super().__init__(push_text_frames=True, push_start_frame=True, push_stop_frames=True, **kwargs)
         self._modell = modell
         self._stimme = stimme
         self._basis = (basis or litellm_basis()).rstrip("/")
         self._schluessel = schluessel if schluessel is not None else _env("LITELLM_API_KEY")
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(HAUS_TIMEOUT_SECS, connect=3.0))
+        self.stream = tts_stream_an() if stream is None else stream
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -228,22 +276,41 @@ class HausTTSService(TTSService):
         await super().cleanup()
         await self._client.aclose()
 
+    def _wege(self, anfrage: dict) -> list[tuple[str, dict]]:
+        """Adresse und Körper je Versuch: erst die Durchreiche (wenn an und nicht pausiert), dann der Modellweg."""
+        wege = []
+        if self.stream and _uhr() >= HausTTSService.durchreiche_pause_bis:
+            pfad = quote(self._modell, safe="")
+            wege.append((f"{litellm_wurzel(self._basis)}/{pfad}/v1/audio/speech", {**anfrage, "stream": True}))
+        wege.append((f"{self._basis}/audio/speech", anfrage))
+        return wege
+
     async def run_tts(self, text: str, context_id: str) -> AsyncIterator[Frame | None]:
         anfrage = {"model": self._modell, "input": text, "voice": self._stimme, "response_format": "wav"}
         kopf = {"Authorization": f"Bearer {self._schluessel}"}
+        wege = self._wege(anfrage)
         try:
-            async with self._client.stream("POST", f"{self._basis}/audio/speech", json=anfrage, headers=kopf) as r:
-                if r.status_code != 200:
-                    await r.aread()
-                    logger.error("{}: Sprachausgabe im Haus fehlgeschlagen (HTTP {})", self, r.status_code)
-                    yield ErrorFrame(error=f"Sprachausgabe im Haus: HTTP {r.status_code}")
+            for nr, (adresse, koerper) in enumerate(wege, start=1):
+                async with self._client.stream("POST", adresse, json=koerper, headers=kopf) as r:
+                    if r.status_code in DURCHREICHE_ABGELEHNT and nr < len(wege):
+                        await r.aread()
+                        HausTTSService.durchreiche_pause_bis = _uhr() + DURCHREICHE_PAUSE_SECS
+                        logger.error("{}: Durchreiche für gestreamte Sprachausgabe abgelehnt (HTTP {}), {} s nur über den Modellweg",
+                                     self, r.status_code, int(DURCHREICHE_PAUSE_SECS))
+                        continue
+                    if r.status_code != 200:
+                        await r.aread()
+                        logger.error("{}: Sprachausgabe im Haus fehlgeschlagen (HTTP {})", self, r.status_code)
+                        yield ErrorFrame(error=f"Sprachausgabe im Haus: HTTP {r.status_code}")
+                        return
+                    await self.start_tts_usage_metrics(text)
+                    async with aclosing(_mit_ganzem_kopf(r.aiter_bytes())) as stuecke, aclosing(
+                        self._stream_audio_frames_from_iterator(stuecke, strip_wav_header=True, context_id=context_id)
+                    ) as frames:
+                        async for frame in frames:
+                            await self.stop_ttfb_metrics()
+                            yield frame
                     return
-                await self.start_tts_usage_metrics(text)
-                async for frame in self._stream_audio_frames_from_iterator(
-                    r.aiter_bytes(), strip_wav_header=True, context_id=context_id
-                ):
-                    await self.stop_ttfb_metrics()
-                    yield frame
         except httpx.HTTPError as e:
             logger.error("{}: Sprachausgabe im Haus nicht erreichbar ({})", self, type(e).__name__)
             yield ErrorFrame(error=f"Sprachausgabe im Haus nicht erreichbar ({type(e).__name__})")
