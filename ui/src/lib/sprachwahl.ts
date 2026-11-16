@@ -88,21 +88,25 @@ export function stimmeWirksamText(betrieb: Betrieb | null): string {
   return "Die Wahl gilt ab der nächsten Sitzung.";
 }
 
-/** Auswahl der Stimme im Haus: zuerst der Standard des Kerns, dann die Stimmen, die der Kern meldet. Leer bei einem älteren Kern. */
+/**
+ * Auswahl der Stimme im Haus: genau die Stimmen, die der Kern als freigegeben meldet (voice-core/sprache_anbieter.py, HAUS_STIMMEN, eine
+ * Konstante; Entscheidung von Niko vom 16.11.2026: sohee als Standard, uncle_fu, ono_anna), in seiner Reihenfolge; die Standardstimme trägt
+ * den Zusatz "(Standard)". Leer bei einem älteren Kern.
+ */
 export function stimmenAuswahl(z: Modellzugang | null): HausStimme[] {
   if (!z?.hausStimmen?.length) return [];
-  const standard = z.hausStimmen.find((s) => s.id === z.hausStimmeStandard)?.name;
-  return [{ id: STANDARD_STIMME, name: standard ? `Standard des Kerns (${standard})` : "Standard des Kerns" }, ...z.hausStimmen];
+  return z.hausStimmen.map((s) => (s.id === z.hausStimmeStandard ? { ...s, name: `${s.name} (Standard)` } : s));
 }
 
+/** Gewählte Stimme: die Wahl der Person, sonst der Standard des Kerns (die Person hat dann keine eigene gespeichert). */
 export function gewaehlteHausStimme(z: Modellzugang | null): string {
-  return z?.hausStimme ?? STANDARD_STIMME;
+  return z?.hausStimme ?? z?.hausStimmeStandard ?? STANDARD_STIMME;
 }
 
 /** Hinweis zur Stimme: immer, dass keine nativ deutsch ist, dazu die Messung zur gewählten Stimme (falls es eine gibt). */
 export function stimmeHinweis(z: Modellzugang | null, id: string): string {
-  const grund = z?.hausStimmenHinweis ?? "Keine der neun Stimmen ist nativ deutsch; sie sprechen Deutsch mit Akzent.";
-  const stimme = z?.hausStimmen?.find((s) => s.id === (id === STANDARD_STIMME ? z?.hausStimmeStandard : id));
+  const grund = z?.hausStimmenHinweis ?? "Keine der Stimmen ist nativ deutsch; sie sprechen Deutsch mit Akzent.";
+  const stimme = z?.hausStimmen?.find((s) => s.id === id);
   const zusatz = stimme?.hinweis ? ` ${stimme.name}: ${ohnePunkt(stimme.hinweis)}.` : "";
   const nurHaus = z?.tts === "haus" ? "" : " Die Stimme gilt, sobald die Sprachausgabe im Haus läuft.";
   return `${grund}${zusatz}${nurHaus}`;

@@ -85,33 +85,33 @@ test("wirksam ab der nächsten Sitzung, eine Abweichung der Sitzung nennt ihren 
   assert.doesNotMatch(stimmeWirksamText({ ...BETRIEB, spracheGrund: "vom Betrieb für alle auf Soniox gestellt." }), /\.\./);
 });
 
-test("Stimme im Haus: Standard des Kerns zuerst, Hinweis immer mit nicht nativ deutsch", () => {
+test("Stimme im Haus: nur die Liste des Kerns in seiner Reihenfolge, Standard markiert, Hinweis immer mit nicht nativ deutsch", () => {
   const z: Modellzugang = {
     ...STAND,
     tts: "haus",
     hausStimmeStandard: "sohee",
     hausStimmen: [
-      { id: "sohee", name: "Sohee", hinweis: "Vorschlag: am schnellsten gemessen" },
-      { id: "aiden", name: "Aiden", hinweis: "nicht empfohlen" },
-      { id: "ryan", name: "Ryan" },
+      { id: "sohee", name: "Sohee", hinweis: "am schnellsten gemessen" },
+      { id: "uncle_fu", name: "Uncle Fu" },
+      { id: "ono_anna", name: "Ono Anna" },
     ],
-    hausStimmenHinweis: "Keine der neun Stimmen ist nativ deutsch; sie sprechen Deutsch mit Akzent.",
+    hausStimmenHinweis: "Keine der Stimmen ist nativ deutsch; sie sprechen Deutsch mit Akzent.",
   };
   assert.deepEqual(
     stimmenAuswahl(z).map((s) => [s.id, s.name]),
     [
-      [STANDARD_STIMME, "Standard des Kerns (Sohee)"],
-      ["sohee", "Sohee"],
-      ["aiden", "Aiden"],
-      ["ryan", "Ryan"],
+      ["sohee", "Sohee (Standard)"],
+      ["uncle_fu", "Uncle Fu"],
+      ["ono_anna", "Ono Anna"],
     ],
   );
   assert.deepEqual(stimmenAuswahl(STAND), []); // älterer Kern: keine Auswahl
-  assert.equal(gewaehlteHausStimme(z), STANDARD_STIMME);
-  assert.equal(gewaehlteHausStimme({ ...z, hausStimme: "ryan" }), "ryan");
-  assert.match(stimmeHinweis(z, STANDARD_STIMME), /nativ deutsch.*Sohee: Vorschlag/);
-  assert.match(stimmeHinweis(z, "aiden"), /Aiden: nicht empfohlen\.$/);
-  assert.match(stimmeHinweis({ ...z, tts: "soniox" }, "ryan"), /sobald die Sprachausgabe im Haus läuft/);
+  assert.equal(gewaehlteHausStimme(z), "sohee"); // ohne eigene Wahl: der Standard des Kerns
+  assert.equal(gewaehlteHausStimme({ ...z, hausStimme: "ono_anna" }), "ono_anna");
+  assert.equal(gewaehlteHausStimme(STAND), STANDARD_STIMME);
+  assert.match(stimmeHinweis(z, "sohee"), /nativ deutsch.*Sohee: am schnellsten gemessen\.$/);
+  assert.match(stimmeHinweis(z, "uncle_fu"), /Akzent\.$/);
+  assert.match(stimmeHinweis({ ...z, tts: "soniox" }, "ono_anna"), /sobald die Sprachausgabe im Haus läuft/);
   assert.match(stimmeHinweis(null, STANDARD_STIMME), /nativ deutsch/);
 });
 

@@ -2,7 +2,7 @@
 
 Je Profil wählbar: Gesprächsmodell, Modell für Bildschirm und Bilder, Modell für Lernen und Zusammenfassung (je "automatisch" oder
 ein Modell aus der festen Liste der Modellkarte), Spracherkennung und Sprachausgabe getrennt (Soniox oder im Haus) und die Stimme im
-Haus (eine der neun Stimmen des Dienstes). Regeln: ein Hausprofil sieht keine Claude-Modelle, ohne Claude-Zugang keine Claude-Wahl,
+Haus (eine der freigegebenen Stimmen, sprache_anbieter.HAUS_STIMMEN). Regeln: ein Hausprofil sieht keine Claude-Modelle, ohne Claude-Zugang keine Claude-Wahl,
 ein vom Admin festgelegtes Profil ist für die Modellwahl gesperrt (die Stimme bleibt wählbar), ein vom Admin gesetztes Claude-Modell
 ist das einzige Claude-Modell. Der Kern prüft jede Wahl selbst, schreibt eine Zeile in actions, und die Wahl gilt ab der nächsten
 Sitzung. Laborprofile erreichen nichts davon. Datenbank, Gateway und Anthropic sind Attrappen."""
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -32,6 +33,8 @@ from auth_gate import Identity
 from llm_anbieter import Zugang
 from schluessel import SCHLUESSEL, Tresor, kek_erzeugen
 from test_modellwahl import API, NIKO, FakeDb as FakeDb0023, _zeile
+
+WURZEL = Path(__file__).resolve().parent.parent
 
 SONNET = "claude-sonnet-5-5"
 HAIKU = "claude-haiku-5-5"
@@ -174,13 +177,13 @@ def test_claude_nur_mit_claude_zugang():
 
 async def test_wahl_der_person_reist_im_zugang(tresor):
     db = FakeDb()
-    db.zeilen[NIKO] = _claude_zeile(tresor, modell_gespraech="gemma4-31b", modell_bilder=SONNET, tts_stimme="ryan")
+    db.zeilen[NIKO] = _claude_zeile(tresor, modell_gespraech="gemma4-31b", modell_bilder=SONNET, tts_stimme="uncle_fu")
     z = await mz.zugang_laden(NIKO, db=db, tresor=tresor)
     assert (z.art, z.quelle) == ("claude", "profil")
     assert la.person_wunsch("gespraech", z) == ("litellm", "gemma4-31b")
     assert la.person_wunsch("vision", z) == ("claude", SONNET)
     assert la.person_wunsch("lernen", z) is None and la.person_wunsch("boss_code", z) is None
-    assert z.tts_stimme == "ryan"
+    assert z.tts_stimme == "uncle_fu"
     assert API not in repr(z)
 
 
@@ -198,6 +201,18 @@ async def test_unbekannte_werte_aus_der_datenbank_gelten_nicht(tresor):
     db.zeilen[NIKO] = _zeile(modell_gespraech="sokrates-steuer", modell_bilder="claude-haiku-5-5", tts_stimme="hedda")
     z = await mz.zugang_laden(NIKO, db=db, tresor=tresor)
     assert z.modell_wahl == () and z.tts_stimme is None
+
+
+async def test_vom_admin_festgelegt_gilt_auch_eine_alte_wahl_nicht(tresor):
+    """Eine Wahl von vor der Sperre wirkt nicht weiter; die Stimme im Haus bleibt (D3), der Stand nennt den Grund."""
+    db = FakeDb()
+    db.zeilen[NIKO] = _zeile(nur_haus=True, modell_gespraech="qwen3.6-35b", tts_stimme="ono_anna")
+    z = await mz.zugang_laden(NIKO, db=db, tresor=tresor)
+    assert (z.quelle, z.modell_wahl, z.tts_stimme) == ("festgelegt", (), "ono_anna")
+    assert la.person_wunsch("gespraech", z) is None
+    n = (await mz.stand_laden(NIKO, db=db)).nachricht()
+    assert n["modelle"]["gespraech"]["wahl"] == mw.AUTOMATISCH
+    assert "Admin" in n["modelle"]["gespraech"]["hinweis"] and n["haus_stimme"] == "ono_anna"
 
 
 async def test_admin_modell_geht_vor(tresor):
@@ -336,25 +351,42 @@ async def test_ohne_datenbank_und_mit_falschem_profil(tresor):
 # --- Stimme im Haus: haus_stimme_setzen -----------------------------------------------------------------------------
 
 
-def test_neun_stimmen_keine_nativ_deutsch():
-    assert sa.HAUS_STIMMEN_IDS == ("sohee", "serena", "vivian", "ono_anna", "aiden", "ryan", "eric", "dylan", "uncle_fu")
-    assert len({s["name"] for s in sa.haus_stimmen()}) == 9
+def test_nur_die_freigegebenen_stimmen_in_dieser_reihenfolge():
+    """Entscheidung von Niko vom 16.11.2026 nach den Hörproben: sohee (Standard), uncle_fu, ono_anna; an genau einer Stelle im Kern."""
+    assert sa.HAUS_STIMMEN_IDS == ("sohee", "uncle_fu", "ono_anna")
+    assert [s["id"] for s in sa.haus_stimmen()] == list(sa.HAUS_STIMMEN_IDS)
+    assert len({s["name"] for s in sa.haus_stimmen()}) == len(sa.HAUS_STIMMEN_IDS)
+    assert "nativ deutsch" in sa.STIMMEN_HINWEIS
+    quellen = [d for d in (WURZEL / "voice-core").glob("*.py") if not d.name.startswith("test_")]
+    for name in ("serena", "vivian", "aiden", "ryan", "eric", "dylan"):  # nicht freigegeben: nirgends im Kern als Wert
+        assert not [d.name for d in quellen if f'"{name}"' in d.read_text(encoding="utf-8")], name
+
+
+def test_standard_ist_die_erste_freigegebene_oder_die_des_kerns(monkeypatch):
+    monkeypatch.setenv("WAMO_TTS_HAUS_STIMME", "Uncle_Fu ")
+    assert sa.haus_stimme_standard() == "uncle_fu"
+    monkeypatch.setenv("WAMO_TTS_HAUS_STIMME", "aiden")  # nicht freigegeben: gesprochen wird trotzdem nur aus der Liste
+    assert sa.haus_stimme_standard() == "sohee"
+    assert sa.haus_tts(sa.Baustein("haus", "haus", "wamo-tts-haus", stimme="ryan"))._stimme == "sohee"
 
 
 async def test_stimme_im_haus_waehlen_und_zuruecksetzen():
     db = FakeDb()
     db.zeilen[NIKO] = _zeile(nur_haus=True)  # der Zwang des Admins sperrt die Stimme nicht (D3)
-    stand = await mz.haus_stimme_setzen(NIKO, "ryan", db=db)
-    assert db.zeilen[NIKO]["tts_stimme"] == "ryan" and stand.nachricht()["haus_stimme"] == "ryan"
+    stand = await mz.haus_stimme_setzen(NIKO, "uncle_fu", db=db)
+    assert db.zeilen[NIKO]["tts_stimme"] == "uncle_fu" and stand.nachricht()["haus_stimme"] == "uncle_fu"
     stand = await mz.haus_stimme_setzen(NIKO, "standard", db=db)
     assert db.zeilen[NIKO]["tts_stimme"] is None and stand.nachricht()["haus_stimme"] is None
-    assert [json.loads(a[2]) for a in db.aktionen] == [{"haus_stimme": "ryan", "vorher": None},
-                                                        {"haus_stimme": None, "vorher": "ryan"}]
+    assert [json.loads(a[2]) for a in db.aktionen] == [{"haus_stimme": "uncle_fu", "vorher": None},
+                                                        {"haus_stimme": None, "vorher": "uncle_fu"}]
     assert {a[1] for a in db.aktionen} == {mz.STIMME_WERKZEUG}
+    # die Standardstimme selbst zu wählen heißt Standard: nichts zu schreiben
+    await mz.haus_stimme_setzen(NIKO, sa.haus_stimme_standard(), db=db)
+    assert len(db.aktionen) == 2 and db.zeilen[NIKO]["tts_stimme"] is None
 
 
-@pytest.mark.parametrize("wert", ["hedda", "RYAN", None, ["ryan"], "ryan; drop", ""])
-async def test_nur_eine_der_neun_stimmen(wert):
+@pytest.mark.parametrize("wert", ["hedda", "ryan", "aiden", "serena", "SOHEE", None, ["sohee"], "sohee; drop", ""])
+async def test_werte_ausserhalb_der_liste_lehnt_der_kern_ab(wert):
     db = FakeDb()
     with pytest.raises(mz.ZugangFehler, match="Stimme"):
         await mz.haus_stimme_setzen(NIKO, wert, db=db)
@@ -363,7 +395,7 @@ async def test_nur_eine_der_neun_stimmen(wert):
 
 async def test_stimme_ohne_migration_0024():
     with pytest.raises(mz.ZugangFehler, match="noch nicht freigeschaltet"):
-        await mz.haus_stimme_setzen(NIKO, "sohee", db=FakeDb(ohne_rechte=True))
+        await mz.haus_stimme_setzen(NIKO, "uncle_fu", db=FakeDb(ohne_rechte=True))
 
 
 # --- Stand für die Oberfläche --------------------------------------------------------------------------------------
@@ -405,8 +437,10 @@ async def test_nachricht_der_sitzung_kennt_modell_und_haus_stimme(tresor):
     await mz.modellzugang_nachricht(NIKO, {"aktion": "modell", "bereich": "bilder", "modell": "gemma4-31b"}, senden, db=db,
                                     tresor=tresor)
     assert gesendet[-1]["aktion"] == "modell" and gesendet[-1]["modelle"]["bilder"]["wahl"] == "gemma4-31b"
-    await mz.modellzugang_nachricht(NIKO, {"aktion": "haus_stimme", "stimme": "eric"}, senden, db=db)
-    assert gesendet[-1]["aktion"] == "haus_stimme" and gesendet[-1]["haus_stimme"] == "eric"
+    await mz.modellzugang_nachricht(NIKO, {"aktion": "haus_stimme", "stimme": "ono_anna"}, senden, db=db)
+    assert gesendet[-1]["aktion"] == "haus_stimme" and gesendet[-1]["haus_stimme"] == "ono_anna"
+    await mz.modellzugang_nachricht(NIKO, {"aktion": "haus_stimme", "stimme": "ryan"}, senden, db=db)
+    assert "Unbekannte Stimme" in gesendet[-1]["fehler"] and gesendet[-1]["haus_stimme"] == "ono_anna"
     await mz.modellzugang_nachricht(NIKO, {"aktion": "modell", "bereich": "gespraech", "modell": SONNET}, senden, db=db,
                                     tresor=tresor)
     assert gesendet[-1]["aktion"] == "modell" and "nicht wählbar" in gesendet[-1]["fehler"]
@@ -481,10 +515,39 @@ async def test_vorgabe_des_betriebs_geht_vor_mit_grund(monkeypatch, boss_frei):
     assert w.anbieter == "claude" and la.BETRIEB_VOR_WAHL in (w.grund or "")
 
 
-async def test_zusammenfassung_bekommt_eigenen_dienst_wenn_das_gespraech_im_haus_laeuft(boss_frei):
-    z = _cz(modell_wahl=(("gespraech", "gemma4-31b"),))
-    assert la.konfiguration("gespraech", z)[0] == "litellm"
-    assert la.konfiguration("gespraech", _cz())[0] == "claude"
+async def test_zusammenfassung_folgt_der_wahl_fuer_lernen_und_zusammenfassung(boss_frei, monkeypatch):
+    """Pipecat fasst nur dann mit dem Gesprächsmodell zusammen, wenn beides dasselbe Claude-Modell ist; sonst ein eigener Dienst."""
+    async def kein_problem(_zugang):
+        return None
+
+    monkeypatch.setattr(la, "claude_problem", kein_problem)
+    assert await la.zusammenfassung_llm(_cz()) is None  # beides Haiku: wie bisher
+    for z, modell in ((_cz(modell_wahl=(("hintergrund", "claude-opus-5-5"),)), "claude-opus-5-5"),
+                      (_cz(modell_wahl=(("gespraech", "claude-opus-5-5"),)), HAIKU),
+                      (_cz(modell_wahl=(("gespraech", "gemma4-31b"),)), HAIKU),
+                      (_cz(modell_wahl=(("hintergrund", "gemma4-31b"),)), "gemma4-31b")):
+        dienst = await la.zusammenfassung_llm(z)
+        assert dienst is not None and dienst._settings.model == modell, (z.modell_wahl, modell)
+
+
+async def test_betrieb_legt_nur_den_anbieter_fest_die_wahl_fuellt_das_modell(monkeypatch, boss_frei):
+    monkeypatch.setenv("WAMO_LLM_ANBIETER", "litellm")
+    w = await la.waehlen("gespraech", _cz(modell_wahl=(("gespraech", "qwen3.6-35b"),)))
+    assert (w.anbieter, w.modell, w.grund) == ("litellm", "qwen3.6-35b", None)
+    assert (await la.waehlen("gespraech", _cz())).modell == boss.hausstandard("gespraech")
+
+
+async def test_boss_aufgaben_folgen_keiner_wahl(boss_frei):
+    z = _cz(modell_wahl=(("bilder", "claude-opus-5-5"), ("gespraech", "claude-opus-5-5")))
+    w = await boss.waehlen("vision", z, baustein="boss_bild", probe=False)
+    assert w.modell != "claude-opus-5-5"
+    w = await boss.waehlen("gespraech", z, baustein="boss_einordnen", probe=False)
+    assert w.modell == HAIKU
+
+
+async def test_nur_spalten_aus_der_festen_liste():
+    with pytest.raises(ValueError):
+        await mz._spalte_schreiben(FakeDb(), NIKO, "nur_haus", "true")
 
 
 # --- Stimme im Haus in der Sitzung -----------------------------------------------------------------------------------
@@ -495,12 +558,12 @@ async def test_sitzung_spricht_mit_der_gewaehlten_stimme(monkeypatch):
            "WAMO_TTS_HAUS_STIMME": "sohee", "WAMO_STT_HAUS_MODELL": "wamo-stt-haus",
            "LITELLM_BASE_URL": "http://gateway.test.invalid:4000/v1", "LITELLM_API_KEY": "k"}
     with mock.patch.dict("os.environ", env), mock.patch.object(sa, "litellm_problem", mock.AsyncMock(return_value=None)):
-        w = await sa.sprach_wahl(SimpleNamespace(stt="soniox", tts="haus", tts_stimme="ryan"))
-        assert (w.stt.anbieter, w.tts.anbieter, w.tts.stimme) == ("soniox", "haus", "ryan")
-        assert sa.haus_tts(w.tts)._stimme == "ryan"
-        w = await sa.sprach_wahl(SimpleNamespace(stt="haus", tts="haus", tts_stimme="hedda"))  # unbekannt: Standard des Kerns
+        w = await sa.sprach_wahl(SimpleNamespace(stt="soniox", tts="haus", tts_stimme="uncle_fu"))
+        assert (w.stt.anbieter, w.tts.anbieter, w.tts.stimme) == ("soniox", "haus", "uncle_fu")
+        assert sa.haus_tts(w.tts)._stimme == "uncle_fu"
+        w = await sa.sprach_wahl(SimpleNamespace(stt="haus", tts="haus", tts_stimme="ryan"))  # nicht freigegeben: Standard des Kerns
         assert (w.stt.anbieter, w.tts.stimme) == ("haus", "sohee")
-        w = await sa.sprach_wahl(SimpleNamespace(stt="haus", tts="haus", tts_stimme="ryan"), labor=True)
+        w = await sa.sprach_wahl(SimpleNamespace(stt="haus", tts="haus", tts_stimme="uncle_fu"), labor=True)
         assert (w.stt.anbieter, w.tts.anbieter, w.tts.stimme) == ("soniox", "soniox", None)
 
 
@@ -532,8 +595,8 @@ def test_route_setzt_modell_und_stimme_nur_fuer_das_eigene_profil(http_db, monke
     assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
     assert r.json()["modelle"]["gespraech"]["wahl"] == "gemma4-31b"
     assert list(http_db.zeilen) == [NIKO]  # die Profil-ID kommt nur aus der Identität
-    r = c.post("/wamo/api/modellzugang", json={"aktion": "haus_stimme", "stimme": "sohee"})
-    assert r.json()["haus_stimme"] == "sohee"
+    r = c.post("/wamo/api/modellzugang", json={"aktion": "haus_stimme", "stimme": "uncle_fu"})
+    assert r.json()["haus_stimme"] == "uncle_fu"
 
 
 @pytest.mark.parametrize("art", ["platz", "schaufenster"])

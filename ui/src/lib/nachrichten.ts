@@ -83,10 +83,15 @@ export type ModellOption = { id: string; name: string; art: "haus" | "claude"; z
 /** Je Bereich: gültige Wahl ("automatisch" oder eine Kennung aus optionen), Angebot und ein Hinweis, wenn eine gespeicherte Wahl
  *  mit dem Zugang gerade nicht gilt */
 export type ModellBereichStand = { wahl: string; optionen: ModellOption[]; hinweis?: string };
-/** Eine der Stimmen im Haus (voice-core/sprache_anbieter.py, HAUS_STIMMEN) */
+/** Eine der freigegebenen Stimmen im Haus (voice-core/sprache_anbieter.py, HAUS_STIMMEN: die Liste kommt allein vom Kern) */
 export type HausStimme = { id: string; name: string; hinweis?: string };
+/** Wahl "kein bestimmtes Modell": der Boss wählt (Standard) */
+export const AUTOMATISCH = "automatisch";
+// Form der Kennungen wie die Prüfungen der Datenbank (Migration 0024); voice-core/test_migration_0024.py hält beide gleich
 const MODELL_ID = /^[a-z0-9][a-z0-9.-]{1,62}$/;
 const STIMME_ID = /^[a-z][a-z0-9_]{1,31}$/;
+const MAX_MODELLE = 12;
+const MAX_STIMMEN = 20;
 
 /**
  * Modellzugang des Profils (voice-core/modellzugang.py): eigener Claude-Schlüssel oder nur Hausmodelle.
@@ -132,37 +137,48 @@ export type Modellzugang = {
   fehler?: string;
 };
 
-/** Modellwahl aus der Meldung des Kerns: nur bekannte Bereiche, Kennungen in der Form der Datenbank, höchstens 12 Modelle je Bereich. */
+const istObjekt = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** Ohne doppelte Kennungen (die erste gilt), damit Auswahl und React-Schlüssel eindeutig bleiben. */
+function eindeutig<T extends { id: string }>(liste: T[]): T[] {
+  const gesehen = new Set<string>();
+  return liste.filter((x) => !gesehen.has(x.id) && gesehen.add(x.id));
+}
+
+/** Modellwahl aus der Meldung des Kerns: nur bekannte Bereiche, Kennungen in der Form der Datenbank, erst prüfen, dann höchstens
+ *  MAX_MODELLE je Bereich, ohne doppelte Kennungen. Eine Wahl, die nicht im Angebot steht, gilt als automatisch. */
 function modelleAus(roh: unknown): Partial<Record<ModellBereich, ModellBereichStand>> | undefined {
-  if (!roh || typeof roh !== "object" || Array.isArray(roh)) return undefined;
+  if (!istObjekt(roh)) return undefined;
   const ergebnis: Partial<Record<ModellBereich, ModellBereichStand>> = {};
   for (const bereich of MODELL_BEREICHE) {
-    const e = (roh as Record<string, unknown>)[bereich];
-    if (!e || typeof e !== "object") continue;
-    const { wahl, optionen, hinweis } = e as Record<string, unknown>;
-    const liste: ModellOption[] = (Array.isArray(optionen) ? optionen : [])
-      .slice(0, 12)
-      .flatMap((o): ModellOption[] => {
-        if (!o || typeof o !== "object") return [];
-        const { id, name, art, zeile: z } = o as Record<string, unknown>;
-        if (!isStr(id) || !MODELL_ID.test(id) || !oneOf(art, ["haus", "claude"] as const)) return [];
-        return [{ id, name: zeile(name, 60) ?? id, art, zeile: zeile(z, 160) ?? "" }];
-      });
-    const gilt = wahl === "automatisch" || (isStr(wahl) && liste.some((o) => o.id === wahl));
-    ergebnis[bereich] = { wahl: gilt ? (wahl as string) : "automatisch", optionen: liste, hinweis: zeile(hinweis, 200) };
+    const e = roh[bereich];
+    if (!istObjekt(e)) continue;
+    const geprueft = (Array.isArray(e.optionen) ? e.optionen : []).slice(0, 100).flatMap((o): ModellOption[] => {
+      if (!istObjekt(o)) return [];
+      const { id, name, art } = o;
+      if (!isStr(id) || id === AUTOMATISCH || !MODELL_ID.test(id) || !oneOf(art, ["haus", "claude"] as const)) return [];
+      return [{ id, name: zeile(name, 60) ?? id, art, zeile: zeile(o.zeile, 160) ?? "" }];
+    });
+    const liste = eindeutig(geprueft).slice(0, MAX_MODELLE);
+    const wahl = isStr(e.wahl) && liste.some((o) => o.id === e.wahl) ? e.wahl : AUTOMATISCH;
+    ergebnis[bereich] = { wahl, optionen: liste, hinweis: zeile(e.hinweis, 200) };
   }
   return Object.keys(ergebnis).length > 0 ? ergebnis : undefined;
 }
 
 function hausStimmenAus(roh: unknown): HausStimme[] | undefined {
   if (!Array.isArray(roh)) return undefined;
-  const liste = roh.slice(0, 20).flatMap((s): HausStimme[] => {
-    if (!s || typeof s !== "object") return [];
-    const { id, name, hinweis } = s as Record<string, unknown>;
-    if (!isStr(id) || !STIMME_ID.test(id)) return [];
-    return [{ id, name: zeile(name, 40) ?? id, hinweis: zeile(hinweis, 120) }];
+  const geprueft = roh.slice(0, 100).flatMap((s): HausStimme[] => {
+    if (!istObjekt(s) || !isStr(s.id) || !STIMME_ID.test(s.id)) return [];
+    return [{ id: s.id, name: zeile(s.name, 40) ?? s.id, hinweis: zeile(s.hinweis, 120) }];
   });
+  const liste = eindeutig(geprueft).slice(0, MAX_STIMMEN);
   return liste.length > 0 ? liste : undefined;
+}
+
+/** Eine Stimme nur, wenn sie in der Liste des Kerns steht (sonst hätte die Auswahl keinen passenden Eintrag). */
+function stimmeAus(roh: unknown, liste: HausStimme[] | undefined): string | undefined {
+  return isStr(roh) && liste?.some((s) => s.id === roh) ? roh : undefined;
 }
 
 /**
@@ -861,8 +877,8 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         stimmeHaus: zeile(m.stimme_haus, 160),
         modelle: modelleAus(m.modelle),
         modellSperre: zeile(m.modell_sperre, 200),
-        hausStimme: isStr(m.haus_stimme) && STIMME_ID.test(m.haus_stimme) ? m.haus_stimme : undefined,
-        hausStimmeStandard: isStr(m.haus_stimme_standard) && STIMME_ID.test(m.haus_stimme_standard) ? m.haus_stimme_standard : undefined,
+        hausStimme: stimmeAus(m.haus_stimme, hausStimmenAus(m.haus_stimmen)),
+        hausStimmeStandard: stimmeAus(m.haus_stimme_standard, hausStimmenAus(m.haus_stimmen)),
         hausStimmen: hausStimmenAus(m.haus_stimmen),
         hausStimmenHinweis: zeile(m.haus_stimmen_hinweis, 200),
         wirksam: isStr(m.wirksam) ? sauber(m.wirksam, 60, false) : undefined,

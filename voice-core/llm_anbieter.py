@@ -312,12 +312,12 @@ def person_wunsch(baustein: str, zugang: Zugang | None) -> tuple[Anbieter, str] 
     return "litellm", wert
 
 
-def claude_standardmodell(baustein: str, zugang: Zugang | None = None) -> str:
-    """Modell des Profils (vom Admin festgelegt), sonst das Claude-Modell, das die Person für den Bereich gewählt hat, sonst
-    VISION_MODEL bzw. CLAUDE_MODEL_FAST, sonst Haiku."""
+def claude_standardmodell(baustein: str, zugang: Zugang | None = None, *, wahl: bool = True) -> str:
+    """Modell des Profils (vom Admin festgelegt), sonst das Claude-Modell, das die Person für den Bereich gewählt hat (nur mit wahl, der
+    Boss setzt es für seine eigenen Aufgaben auf False), sonst VISION_MODEL bzw. CLAUDE_MODEL_FAST, sonst Haiku."""
     if zugang is not None and zugang.claude_modell:
         return zugang.claude_modell
-    if (wunsch := person_wunsch(baustein, zugang)) is not None and wunsch[0] == "claude":
+    if wahl and (wunsch := person_wunsch(baustein, zugang)) is not None and wunsch[0] == "claude":
         return wunsch[1]
     if baustein == "vision":
         return _env("VISION_MODEL") or _env("CLAUDE_MODEL_FAST") or STANDARD_CLAUDE
@@ -365,7 +365,7 @@ def konfiguration(baustein: str, zugang: Zugang | None = None) -> tuple[Anbieter
     wunsch = person_wunsch(baustein, zugang)
     if anbieter is None:  # der Betrieb legt nichts fest: Wahl der Person, sonst Modellkarte
         if wunsch is not None:
-            return wunsch[0], wunsch[1] if wunsch[0] == "litellm" else None
+            return (wunsch[0], wunsch[1]) if wunsch[0] == "litellm" else ("claude", None)
         liste = boss.rangliste(klasse, claude_erlaubt=zugang is None or zugang.art == "claude")
         if liste and liste[0].anbieter == "litellm":
             return "litellm", liste[0].alias
@@ -597,8 +597,9 @@ async def _haus_wahl(baustein: str, zugang: Zugang, gewuenscht: Anbieter, grund:
                      wunsch: tuple[Anbieter, str] | None = None) -> Wahl:
     """Bestes nutzbares Hausmodell für den Baustein (Boss): zuerst die Vorgabe des Betriebs, sonst das Hausmodell, das die Person
     gewählt hat (wunsch), dann die Modellkarte der Reihe nach; für das Gespräch zusätzlich mit Probe, ob das Modell jetzt schnell
-    genug antwortet. Ist die Wahl der Person nicht nutzbar, nennt Wahl.grund warum. LLMNichtVerfuegbar, wenn keines nutzbar ist
-    (nie ein Ersatz durch Claude)."""
+    genug antwortet. Ist die Wahl der Person nicht nutzbar, nennt Wahl.grund warum. Gibt der Betrieb ein Modell vor, steht es allein
+    vor der Rangliste (die Wahl der Person zählt dann nicht, auch wenn die Vorgabe ausfällt). LLMNichtVerfuegbar, wenn keines nutzbar
+    ist (nie ein Ersatz durch Claude)."""
     import boss
 
     _anbieter, vorgabe_modell = vorgabe(baustein, Zugang.haus(zugang.user_id))
@@ -798,7 +799,10 @@ async def zusammenfassung_llm(zugang: Zugang) -> LLMService | None:
     ein Hausmodell, gibt es immer einen eigenen Dienst mit längerer Zeitgrenze (Hausmodelle schreiben langsamer,
     und die Zusammenfassung wartet auf die ganze Antwort)."""
     wahl = await _claude_oder_haus("zusammenfassung", await waehlen("zusammenfassung", zugang), zugang)
-    nur_claude = wahl.anbieter == "claude" and konfiguration("gespraech", zugang)[0] == "claude"
+    # Nur wenn das Gespräch mit genau diesem Claude-Modell läuft, darf Pipecat mit dem Gesprächsmodell zusammenfassen; sonst liefe die
+    # Zusammenfassung auf einem anderen Modell, als die Person für Lernen und Zusammenfassung gewählt hat (oder teurer als gewählt)
+    nur_claude = (wahl.anbieter == "claude" and konfiguration("gespraech", zugang)[0] == "claude"
+                  and wahl.modell == claude_standardmodell("gespraech", zugang))
     if nur_claude and not _env("WAMO_LLM_ZUSAMMENFASSUNG"):
         return None
     logger.info("Zusammenfassung für Profil {}: {} über {}", zugang.kennung, wahl.modell, wahl.anbieter)

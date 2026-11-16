@@ -122,5 +122,4 @@ def gueltig(bereich: object, wert: object, *, claude: bool, claude_fest: str | N
 
 def anzeige(wert: str) -> str:
     """Lesbarer Name eines Modells für Hinweise ("Claude Sonnet 5.5", "Gemma 4 31B")."""
-    m = karte.modell(wert)
-    return m.anzeige if m else lesbarer_modellname(wert)
+    return boss.lesbar(wert)

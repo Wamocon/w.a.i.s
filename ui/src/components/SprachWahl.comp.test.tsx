@@ -3,9 +3,9 @@
 // Antwort, ein Rückfall nennt den Grund, ein Fehler bleibt sichtbar.
 // Dazu: die Laborsicht kennt weder die Karte Modellzugang noch den Hinweis zum Umschalten.
 // Ausführen im Ordner ui/:  npm run test:komponenten
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpracheAbschnitt } from "@/components/einstellungen/Abschnitte";
 import { SprachWahl } from "@/components/SprachWahl";
 import { abschnitteFuer } from "@/lib/einstellungenAbschnitte";
@@ -29,10 +29,11 @@ const radio = (name: RegExp, inGruppe = "Spracherkennung") => within(gruppe(inGr
 const STIMMEN_STAND = {
   hausStimmeStandard: "sohee",
   hausStimmen: [
-    { id: "sohee", name: "Sohee", hinweis: "Vorschlag: am schnellsten gemessen" },
-    { id: "ryan", name: "Ryan", hinweis: "am langsamsten gemessen" },
+    { id: "sohee", name: "Sohee", hinweis: "am schnellsten gemessen, fehlerfrei zurückgelesen" },
+    { id: "uncle_fu", name: "Uncle Fu" },
+    { id: "ono_anna", name: "Ono Anna" },
   ],
-  hausStimmenHinweis: "Keine der neun Stimmen ist nativ deutsch; sie sprechen Deutsch mit Akzent.",
+  hausStimmenHinweis: "Keine der Stimmen ist nativ deutsch; sie sprechen Deutsch mit Akzent.",
 };
 
 describe("Umschalter Hören und Sprechen", () => {
@@ -176,22 +177,53 @@ describe("Umschalter Hören und Sprechen", () => {
     expect(screen.getByRole("status").textContent).toMatch(/weicht von der Wahl ab: Spracherkennung und Sprachausgabe: das Gateway/);
   });
 
-  it("Stimme im Haus: Auswahl mit Standard des Kerns, Hinweis nicht nativ deutsch, Wahl geht an den Kern", async () => {
+  it("Stimme im Haus: nur die Stimmen des Kerns in seiner Reihenfolge, Standard markiert, Hinweis nicht nativ deutsch", async () => {
     const senden = vi.fn();
     wamo.set((s) => ({ ...s, modellzugang: { ...STAND, tts: "haus", ...STIMMEN_STAND } }));
     render(<SprachWahl senden={senden} />);
     const auswahl = screen.getByLabelText("Stimme im Haus") as HTMLSelectElement;
-    expect(auswahl.value).toBe("standard");
-    expect([...auswahl.options].map((o) => o.textContent)).toEqual(["Standard des Kerns (Sohee)", "Sohee", "Ryan"]);
-    expect(screen.getByText(/nativ deutsch/).textContent).toMatch(/Sohee: Vorschlag/);
-    await userEvent.selectOptions(auswahl, "ryan");
-    expect(senden).toHaveBeenCalledWith({ aktion: "haus_stimme", stimme: "ryan" });
+    expect(auswahl.value).toBe("sohee");
+    expect([...auswahl.options].map((o) => o.textContent)).toEqual(["Sohee (Standard)", "Uncle Fu", "Ono Anna"]);
+    expect(screen.getByText(/nativ deutsch/).textContent).toMatch(/Sohee: am schnellsten gemessen/);
+    await userEvent.selectOptions(auswahl, "uncle_fu");
+    expect(senden).toHaveBeenCalledWith({ aktion: "haus_stimme", stimme: "uncle_fu" });
     expect(screen.getByText("Wird gespeichert …")).toBeTruthy();
+    expect(auswahl.disabled).toBe(false); // Fokus bleibt während des Wartens
     act(() => {
-      applyServerMessage({ type: "modellzugang", ...STAND, tts: "haus", ...STIMMEN_STAND, aktion: "haus_stimme", hausStimme: "ryan" });
+      applyServerMessage({ type: "modellzugang", ...STAND, tts: "haus", ...STIMMEN_STAND, aktion: "haus_stimme", hausStimme: "uncle_fu" });
     });
-    expect((screen.getByLabelText("Stimme im Haus") as HTMLSelectElement).value).toBe("ryan");
+    expect((screen.getByLabelText("Stimme im Haus") as HTMLSelectElement).value).toBe("uncle_fu");
     expect(screen.queryByText("Wird gespeichert …")).toBeNull();
+  });
+
+  it("während des Wartens schickt eine zweite Wahl nichts", async () => {
+    const senden = vi.fn();
+    render(<SprachWahl senden={senden} />);
+    await userEvent.click(radio(/Im Haus/));
+    await userEvent.click(radio(/Im Haus/, "Sprachausgabe"));
+    expect(senden).toHaveBeenCalledTimes(1);
+  });
+
+  describe("Zeitgrenze", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("ohne Antwort nach 25 s ein Satz und der Stand wird neu geholt, damit keine Wahl einen alten Wert mitschickt", () => {
+      const senden = vi.fn();
+      render(<SprachWahl senden={senden} />);
+      fireEvent.click(radio(/Im Haus/));
+      act(() => {
+        vi.advanceTimersByTime(25_000);
+      });
+      expect(senden).toHaveBeenLastCalledWith({ aktion: "status" });
+      expect(screen.getByRole("alert").textContent).toMatch(/Keine Antwort vom Kern/);
+      act(() => {
+        applyServerMessage({ type: "modellzugang", ...STAND, aktion: "status", stt: "haus", tts: "soniox" });
+      });
+      expect(radio(/Im Haus/).getAttribute("aria-checked")).toBe("true");
+      fireEvent.click(radio(/Im Haus/, "Sprachausgabe"));
+      expect(senden).toHaveBeenLastCalledWith({ aktion: "stimme", stt: "haus", tts: "haus" });
+    });
   });
 
   it("ein älterer Kern ohne Stimmenliste zeigt keine Stimmauswahl", () => {

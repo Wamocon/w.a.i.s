@@ -32,16 +32,20 @@ export const ModellAuswahl = memo(function ModellAuswahl({ senden }: { senden: (
   const [fehler, setFehler] = useState<{ bereich: ModellBereich; text: string } | null>(null);
   const uhr = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Antwort des Kerns auf die eigene Wahl beendet das Warten (abgeleiteter Zustand wie in ModellWahl); nur die Antwort, die die gewartete
-  // Wahl meldet, oder ein Fehler zählt.
+  // Antwort des Kerns auf die eigene Wahl beendet das Warten (abgeleiteter Zustand wie in ModellWahl). Erfolg zählt bei jeder Meldung,
+  // deren Stand die gewartete Wahl zeigt (auch ein Status); ein Fehler nur aus der Antwort auf eine Modellwahl. Kommt nach einer
+  // Zeitüberschreitung doch noch ein Erfolg, verschwindet der Satz "Keine Antwort".
   const [gesehen, setGesehen] = useState(zugang);
   if (zugang !== gesehen) {
     setGesehen(zugang);
-    if (zugang?.aktion === "modell" && wartet !== null) {
-      if (zugang.fehler || zugang.modelle?.[wartet.bereich]?.wahl === wartet.wert) {
-        setFehler(zugang.fehler ? { bereich: wartet.bereich, text: zugang.fehler } : null);
+    if (zugang && wartet !== null) {
+      const fertig = !zugang.fehler && zugang.modelle?.[wartet.bereich]?.wahl === wartet.wert;
+      if (fertig || (zugang.aktion === "modell" && zugang.fehler)) {
+        setFehler(zugang.aktion === "modell" && zugang.fehler ? { bereich: wartet.bereich, text: zugang.fehler } : null);
         setWartet(null);
       }
+    } else if (zugang?.aktion === "modell" && !zugang.fehler) {
+      setFehler(null);
     }
   }
 
@@ -57,10 +61,12 @@ export const ModellAuswahl = memo(function ModellAuswahl({ senden }: { senden: (
   }, []);
 
   const sperre = auswahlSperre(zugang);
-  const bedienbar = zugang?.art !== undefined && sperre === null && wartet === null;
+  // Gesperrt (disabled) nur, was dauerhaft nicht geht; während des Wartens fängt waehle ab, damit der Fokus in der Auswahl bleibt
+  const bedienbar = zugang?.art !== undefined && sperre === null;
+  const claude = zugang?.art === "claude";
 
   const waehle = (bereich: ModellBereich, wert: string) => {
-    if (!bedienbar || wert === bereichStand(zugang, bereich)?.wahl) return;
+    if (!bedienbar || wartet !== null || wert === bereichStand(zugang, bereich)?.wahl) return;
     setFehler(null);
     setWartet({ bereich, wert });
     if (uhr.current) clearTimeout(uhr.current);
@@ -86,7 +92,7 @@ export const ModellAuswahl = memo(function ModellAuswahl({ senden }: { senden: (
               id={`${id}-${b.id}`}
               value={wert}
               disabled={!bedienbar || !stand}
-              aria-describedby={`${id}-${b.id}-zweck ${id}-${b.id}-text`}
+              aria-describedby={`${id}-${b.id}-zweck ${id}-${b.id}-text${stand?.hinweis ? ` ${id}-${b.id}-hinweis` : ""}`}
               onChange={(e) => waehle(b.id, e.target.value)}
             >
               <option value={AUTOMATISCH}>Automatisch (Standard)</option>
@@ -104,9 +110,13 @@ export const ModellAuswahl = memo(function ModellAuswahl({ senden }: { senden: (
               {b.zweck}
             </p>
             <p id={`${id}-${b.id}-text`} className="mz-klein">
-              {erklaerung(stand, wert)}
+              {erklaerung(stand, wert, claude)}
             </p>
-            {stand?.hinweis && <p className="mz-klein">{stand.hinweis}</p>}
+            {stand?.hinweis && (
+              <p id={`${id}-${b.id}-hinweis`} className="mz-klein">
+                {stand.hinweis}
+              </p>
+            )}
             {fehler?.bereich === b.id && (
               <p className="mz-meldung" role="alert" data-fehler>
                 {fehler.text}

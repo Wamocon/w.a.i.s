@@ -101,20 +101,23 @@ export const SprachWahl = memo(function SprachWahl({ senden }: { senden: (anfrag
   const uhr = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Antwort des Kerns auf die eigene Wahl beendet das Warten, ein Fehler steht danach sichtbar da (abgeleiteter Zustand wie in
-  // ModellWahl). Erfolg zählt nur, wenn der gemeldete Stand die gewartete Wahl ist: eine späte Antwort auf eine frühere Wahl beendet
-  // das Warten nicht. Kommt nach einer Zeitüberschreitung doch noch ein Erfolg, verschwindet der Satz "Keine Antwort".
+  // ModellWahl). Erfolg zählt bei jeder Meldung, deren Stand die gewartete Wahl zeigt (auch ein Status); ein Fehler nur aus der Antwort auf
+  // dieselbe Aktion. Eine späte Antwort auf eine frühere Wahl beendet das Warten nicht. Kommt nach einer Zeitüberschreitung doch noch
+  // ein Erfolg, verschwindet der Satz "Keine Antwort".
   const [gesehen, setGesehen] = useState(zugang);
   if (zugang !== gesehen) {
     setGesehen(zugang);
-    if (zugang?.aktion === "stimme" && wartet !== null) {
-      if (zugang.fehler || (zugang.stt === wartet.stt && zugang.tts === wartet.tts)) {
+    if (zugang && wartet !== null) {
+      const fertig = !zugang.fehler && zugang.stt === wartet.stt && zugang.tts === wartet.tts;
+      if (fertig || (zugang.aktion === "stimme" && zugang.fehler)) {
         setWartet(null);
-        setFehler(zugang.fehler ?? "");
+        setFehler(zugang.aktion === "stimme" ? (zugang.fehler ?? "") : "");
       }
-    } else if (zugang?.aktion === "haus_stimme" && wartetStimme !== null) {
-      if (zugang.fehler || gewaehlteHausStimme(zugang) === wartetStimme) {
+    } else if (zugang && wartetStimme !== null) {
+      const fertig = !zugang.fehler && zugang.hausStimmen !== undefined && gewaehlteHausStimme(zugang) === wartetStimme;
+      if (fertig || (zugang.aktion === "haus_stimme" && zugang.fehler)) {
         setWartetStimme(null);
-        setFehler(zugang.fehler ?? "");
+        setFehler(zugang.aktion === "haus_stimme" ? (zugang.fehler ?? "") : "");
       }
     } else if (zugang && (zugang.aktion === "stimme" || zugang.aktion === "haus_stimme") && !zugang.fehler) {
       setFehler("");
@@ -134,7 +137,8 @@ export const SprachWahl = memo(function SprachWahl({ senden }: { senden: (anfrag
   }, []);
 
   const waehlbar = stimmeWaehlbar(zugang);
-  const gesperrt = (wert: SprachAnbieter) => !waehlbar || beschaeftigt || (wert === "haus" && !hausBereit(zugang));
+  // Gesperrt (disabled) nur, was dauerhaft nicht geht; während des Wartens fängt der Handler ab, damit der Fokus nicht verloren geht
+  const gesperrt = (wert: SprachAnbieter) => !waehlbar || (wert === "haus" && !hausBereit(zugang));
   const sperre = sperrText(zugang);
   const angezeigt = (b: SprachBaustein) => wartet?.[b] ?? gewaehlt(zugang, b);
 
@@ -145,13 +149,15 @@ export const SprachWahl = memo(function SprachWahl({ senden }: { senden: (anfrag
       setWartet(null);
       setWartetStimme(null);
       setFehler("Keine Antwort vom Kern. Bitte später noch einmal versuchen.");
+      // Den Stand neu holen: Hat der Kern die Wahl doch gespeichert, schickte die nächste Wahl sonst den alten Wert der anderen Richtung
+      senden({ aktion: "status" });
     }, ANTWORT_MS);
   };
 
   const waehle = (baustein: SprachBaustein, wert: SprachAnbieter): boolean => {
     const stt = gewaehlt(zugang, "stt");
     const tts = gewaehlt(zugang, "tts");
-    if (gesperrt(wert) || !stt || !tts || wert === (baustein === "stt" ? stt : tts)) return false;
+    if (beschaeftigt || gesperrt(wert) || !stt || !tts || wert === (baustein === "stt" ? stt : tts)) return false;
     const neu: Paar = { stt, tts, [baustein]: wert };
     setWartet(neu);
     warten();
@@ -194,7 +200,7 @@ export const SprachWahl = memo(function SprachWahl({ senden }: { senden: (anfrag
           <select
             id={`${id}-stimme`}
             value={stimme}
-            disabled={!waehlbar || beschaeftigt}
+            disabled={!waehlbar}
             aria-describedby={`${id}-stimme-text`}
             onChange={(e) => waehleStimme(e.target.value)}
           >

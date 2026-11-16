@@ -309,8 +309,10 @@ auch für Laborprofile, denn er ist für den Fall gedacht, dass gar nichts mehr 
     Claude-Modelle, ein vom Admin festgelegtes Profil sieht die Modellwahl gesperrt mit Grund, ein vom Admin gesetztes Claude-Modell ist das
     einzige Claude-Modell. Reihenfolge in der Sitzung: Vorgabe des Betriebs (`WAMO_LLM_*`), dann die Wahl der Person, dann der Boss; ist
     das gewählte Modell nicht nutzbar, übernimmt das nächstbeste, und die Statusleiste nennt den Grund.
-  - Spracherkennung und Sprachausgabe getrennt (Soniox oder im Haus), dazu die Stimme im Haus (eine der neun Stimmen, Hinweis "keine nativ
-    deutsch", Hinweise aus M7 bei `sohee`, `aiden` und `ryan`).
+  - Spracherkennung und Sprachausgabe getrennt (Soniox oder im Haus), dazu die Stimme im Haus. Wählbar sind nach den Hörproben nur
+    `sohee` (Standard), `uncle_fu` und `ono_anna` (Entscheidung von Niko vom 16.11.2026, genau diese drei), festgelegt an einer
+    Stelle (`HAUS_STIMMEN` in `voice-core/sprache_anbieter.py`, eine weitere Stimme ist eine Zeile); die Oberfläche bekommt die Liste vom
+    Kern, mit dem Hinweis, dass keine nativ deutsch ist.
   - Laborprofile: nichts davon sichtbar, alle Wege 403, beim Laden gilt für sie keine Wahl.
 
 ### 3.4 Was im Kern fehlt

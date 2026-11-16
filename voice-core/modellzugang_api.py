@@ -18,7 +18,10 @@ Sicherheit
     nächste Sitzung Audio und Antworttext schickt (Soniox in der EU oder das Gateway im Haus).
   * Der Body (höchstens 8 KB) wird nie geloggt und nie zurückgegeben; Antworten enthalten weder Schlüssel noch Token.
     Fehler (Format, Anthropic lehnt ab, Datenbank) stehen als Text in "fehler" der Antwort, nicht als Ausnahme mit Inhalt.
-  * Die Begrenzung der Testanfragen bei Anthropic (5 je 10 Minuten und Profil) gilt auch hier.
+  * Die Begrenzungen gelten auch hier (je Profil und Prozess): Testanfragen beim Hinterlegen 5 je 10 Minuten, Modellwahl (aktion
+    modell, mit einer Testanfrage je Claude-Modell) 10 je 10 Minuten, Hören, Stimme und Stimme im Haus zusammen 10 je 10 Minuten.
+  * Aktionen modell ({"bereich", "modell"}) und haus_stimme ({"stimme"}): nur Werte aus festen Listen des Kerns (modellwahl.py,
+    sprache_anbieter.HAUS_STIMMEN); alles andere wird mit einem Satz abgelehnt.
   * Cache-Control: no-store.
 """
 

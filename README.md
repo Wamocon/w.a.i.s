@@ -1432,8 +1432,10 @@ Jedes Profil hat genau eine von zwei Arten (`voice-core/modellzugang.py`, Tabell
   Verbrauch steht als Tokenzahlen je Profil im Log (`Verbrauch profil=… anbieter=… modell=… ein=… aus=…`), ohne Inhalt.
 - **Stimme:** Jedes Profil trägt `stt` und `tts` (`soniox` oder `haus`). Soniox bleibt Standard. Seit Paket H5 (Migration 0023)
   wählt die Person selbst in der Karte Modellzugang „Soniox (Standard)“ oder „Im Haus (Datenschutz)“, seit Migration 0024 getrennt
-  für Spracherkennung und Sprachausgabe und dazu die Stimme im Haus (eine der neun Stimmen des Dienstes, keine nativ deutsch; ohne
-  Wahl gilt `WAMO_TTS_HAUS_STIMME`), ab der nächsten Sitzung, mit einer Zeile in `actions` (Werkzeug `stimme_wahl`); ein Admin setzt
+  für Spracherkennung und Sprachausgabe und dazu die Stimme im Haus (nur die freigegebenen Stimmen aus der einen Konstante
+  `HAUS_STIMMEN` in `voice-core/sprache_anbieter.py`, Entscheidung von Niko vom 16.11.2026: `sohee` als Standard, `uncle_fu`,
+  `ono_anna`; keine ist nativ deutsch; ohne Wahl gilt `WAMO_TTS_HAUS_STIMME`, wenn sie freigegeben ist, sonst `sohee`; andere Werte
+  lehnt der Kern ab), ab der nächsten Sitzung, mit einer Zeile in `actions` (Werkzeug `stimme_wahl`); ein Admin setzt
   `stt` und `tts` weiter mit `modellzugang-setzen --stt haus --tts haus`. Laborsitzungen hören immer über Soniox. Im Haus braucht der Kern `WAMO_STT_HAUS_MODELL`, `WAMO_TTS_HAUS_MODELL`
   und `WAMO_TTS_HAUS_STIMME` sowie die Einträge im Gateway; sonst Rückfall auf Soniox mit Grund in der Oberfläche
   (Messung M7 und Einrichtung in `docs/hausmodelle-und-kikollege.md`).

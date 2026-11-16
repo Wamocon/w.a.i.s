@@ -103,9 +103,19 @@ def test_sql_test_rollt_zurueck_und_nie_in_prod():
 
 def test_kern_schreibt_nur_spalten_aus_der_festen_liste():
     quelle = Path(modellzugang.__file__).read_text(encoding="utf-8")
-    assert "if spalte not in (*mw.SPALTEN.values(), \"tts_stimme\"):" in quelle
     assert "(user_id, {spalte}) values ($1::uuid, $2)" in quelle
     assert set(mw.SPALTEN.values()) | {"tts_stimme"} == set(SPALTEN)
+
+
+def test_oberflaeche_prueft_dieselbe_form_wie_die_datenbank():
+    """Die Oberfläche verwirft Kennungen, die nicht in die Form der Datenbank passen (ui/src/lib/nachrichten.ts): beide Muster gleich."""
+    ui = (WURZEL.parent / "ui" / "src" / "lib" / "nachrichten.ts").read_text(encoding="utf-8")
+    modell = re.search(r"const MODELL_ID = /(.+?)/;", ui)
+    stimme = re.search(r"const STIMME_ID = /(.+?)/;", ui)
+    assert modell and stimme
+    for spalte in ("modell_gespraech", "modell_bilder", "modell_hintergrund"):
+        assert _regel(spalte).pattern == modell.group(1)
+    assert _regel("tts_stimme").pattern == stimme.group(1)
 
 
 def test_keine_gedankenstriche():

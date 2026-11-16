@@ -1,4 +1,4 @@
-import type { Betrieb, ModellBereich, ModellBereichStand, ModellOption, Modellzugang } from "./nachrichten.ts";
+import { AUTOMATISCH, type Betrieb, type ModellBereich, type ModellBereichStand, type ModellOption, type Modellzugang } from "./nachrichten.ts";
 
 /**
  * Modellwahl je Person (Wunsch von Niko vom 16.11.2026, voice-core/modellwahl.py, Migration 0024): je Bereich "Automatisch" (der Boss
@@ -7,7 +7,7 @@ import type { Betrieb, ModellBereich, ModellBereichStand, ModellOption, Modellzu
  * prüfen tut allein der Kern. Reine Funktionen, getestet in modellauswahl.test.ts.
  */
 
-export const AUTOMATISCH = "automatisch";
+export { AUTOMATISCH };
 
 export const BEREICHE: readonly { id: ModellBereich; name: string; zweck: string }[] = [
   { id: "gespraech", name: "Gesprächsmodell", zweck: "Mit welchem Modell W.A.I.S. mit dir spricht." },
@@ -49,17 +49,20 @@ export function wahlName(stand: ModellBereichStand | null, wahl: string): string
   return stand?.optionen.find((o) => o.id === wahl)?.name ?? wahl;
 }
 
-/** Was die Wahl bedeutet, in einem Satz. */
-export function erklaerung(stand: ModellBereichStand | null, wahl: string): string {
+/**
+ * Was die Wahl bedeutet, in einem Satz. claude: der Zugang hat Claude (dann kann der Rückfall hinter einem Hausmodell auch Claude in der
+ * Cloud sein; das steht dabei, damit "Im Haus" nicht nach mehr Datenschutz klingt, als es ist).
+ */
+export function erklaerung(stand: ModellBereichStand | null, wahl: string, claude = false): string {
   if (wahl === AUTOMATISCH) {
     return "W.A.I.S. wählt selbst das beste erlaubte Modell nach der Modellkarte. Das ist der Standard.";
   }
   const o = stand?.optionen.find((x) => x.id === wahl);
   if (!o) return "Dieses Modell bietet der Kern gerade nicht an; W.A.I.S. wählt automatisch.";
   const text = `${o.name}: ${o.zeile || "keine Messwerte"}.`;
-  return o.art === "claude"
-    ? `${text} Läuft über deinen Claude-Schlüssel in der Cloud und geht von deinem Guthaben ab.`
-    : `${text} Ist es gerade nicht erreichbar oder zu langsam, übernimmt das nächstbeste Modell, und die Statusleiste nennt den Grund.`;
+  if (o.art === "claude") return `${text} Läuft über deinen Claude-Schlüssel in der Cloud und geht von deinem Guthaben ab.`;
+  const ersatz = claude ? "das nächstbeste Modell, auch Claude in der Cloud," : "das nächstbeste Modell im Haus";
+  return `${text} Ist es gerade nicht erreichbar oder zu langsam, übernimmt ${ersatz} und die Statusleiste nennt den Grund.`;
 }
 
 /** Satz unter der Auswahl: gilt ab der nächsten Sitzung; beim Gespräch dazu der Grund, wenn die laufende Sitzung abweicht. */

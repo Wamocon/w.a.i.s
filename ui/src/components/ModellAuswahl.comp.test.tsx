@@ -2,9 +2,9 @@
 // Auswahl zeigt nur, was der Kern für diesen Zugang anbietet (Claude nur mit Claude-Zugang), ein vom Admin festgelegtes Profil ist gesperrt
 // mit Grund, die Wahl geht an den Kern und der Zustand kommt nur aus seiner Antwort; die Laborsicht kennt die Karte nicht.
 // Ausführen im Ordner ui/:  npm run test:komponenten
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModellAuswahl } from "@/components/ModellAuswahl";
 import { abschnitteFuer } from "@/lib/einstellungenAbschnitte";
 import type { ModellBereichStand, Modellzugang } from "@/lib/nachrichten";
@@ -55,12 +55,15 @@ describe("Modelle je Aufgabe", () => {
     expect(screen.getAllByText(/Das ist der Standard/).length).toBe(3);
   });
 
-  it("ein Claude-Profil sieht die Claude-Modelle in eigener Gruppe, mit Hinweis auf die Kosten", async () => {
-    wamo.set((s) => ({ ...s, modellzugang: CLAUDEPROFIL }));
+  it("ein Claude-Profil sieht die Claude-Modelle in eigener Gruppe, mit Hinweis auf die Kosten und den Rückfall", () => {
+    const modelle = { ...CLAUDEPROFIL.modelle, gespraech: stand([...CLAUDE, ...HAUS], "claude-sonnet-5-5"), bilder: stand([...CLAUDE, ...HAUS], "gemma4-31b") };
+    wamo.set((s) => ({ ...s, modellzugang: { ...CLAUDEPROFIL, modelle } }));
     render(<ModellAuswahl senden={vi.fn()} />);
     const gruppen = [...auswahl("Gesprächsmodell").querySelectorAll("optgroup")].map((g) => g.label);
     expect(gruppen).toEqual(["Claude (Cloud, über deinen Schlüssel)", "Im Haus"]);
     expect(texte(auswahl("Gesprächsmodell"))).toContain("claude-sonnet-5-5");
+    expect(screen.getByText(/Claude Sonnet 5.5: .*geht von deinem Guthaben ab/)).toBeTruthy();
+    expect(screen.getByText(/Gemma 4 31B: .*auch Claude in der Cloud/)).toBeTruthy();
   });
 
   it("eine Wahl geht an den Kern; der Zustand kommt erst aus der Antwort", async () => {
@@ -69,7 +72,12 @@ describe("Modelle je Aufgabe", () => {
     await userEvent.selectOptions(auswahl("Gesprächsmodell"), "qwen3.6-35b");
     expect(senden).toHaveBeenCalledWith({ aktion: "modell", bereich: "gespraech", modell: "qwen3.6-35b" });
     expect(screen.getByText("Wird gespeichert …")).toBeTruthy();
-    expect(auswahl("Bildschirm und Bilder").disabled).toBe(true); // während des Wartens keine zweite Wahl
+    // während des Wartens bleibt die Auswahl bedienbar (Fokus bleibt), eine zweite Wahl geht aber nicht weg
+    expect(auswahl("Gesprächsmodell").disabled).toBe(false);
+    await userEvent.selectOptions(auswahl("Bildschirm und Bilder"), "gemma4-31b");
+    expect(senden).toHaveBeenCalledTimes(1);
+    expect(auswahl("Bildschirm und Bilder").value).toBe("automatisch");
+    expect(screen.getByText(/Qwen 3.6 35B: .*nächstbeste Modell im Haus/)).toBeTruthy();
     act(() => {
       applyServerMessage({
         type: "modellzugang",
@@ -89,8 +97,40 @@ describe("Modelle je Aufgabe", () => {
     act(() => {
       applyServerMessage({ type: "modellzugang", ...HAUSPROFIL, aktion: "modell", fehler: "Zu viele Wechsel, bitte in zehn Minuten noch einmal" });
     });
-    expect(screen.getByRole("alert").textContent).toMatch(/Zu viele Wechsel/);
+    const bereich = auswahl("Lernen und Zusammenfassung").closest(".mz-modell") as HTMLElement;
+    expect(within(bereich).getByRole("alert").textContent).toMatch(/Zu viele Wechsel/);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(auswahl("Lernen und Zusammenfassung").value).toBe("automatisch");
+  });
+
+  describe("Zeitgrenze", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("ohne Antwort nach 25 s ein Satz; ein später Erfolg nimmt ihn zurück; ein Status mit der Wahl beendet das Warten", () => {
+      const senden = vi.fn();
+      render(<ModellAuswahl senden={senden} />);
+      fireEvent.change(auswahl("Gesprächsmodell"), { target: { value: "gemma4-31b" } });
+      act(() => {
+        vi.advanceTimersByTime(25_000);
+      });
+      expect(screen.getByRole("alert").textContent).toMatch(/Keine Antwort vom Kern/);
+      act(() => {
+        applyServerMessage({ type: "modellzugang", ...HAUSPROFIL, aktion: "modell", modelle: { ...HAUSPROFIL.modelle, gespraech: stand(HAUS, "gemma4-31b") } });
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+      fireEvent.change(auswahl("Bildschirm und Bilder"), { target: { value: "qwen3.6-35b" } });
+      expect(screen.getByText("Wird gespeichert …")).toBeTruthy();
+      act(() => {
+        applyServerMessage({
+          type: "modellzugang",
+          ...HAUSPROFIL,
+          aktion: "status",
+          modelle: { ...HAUSPROFIL.modelle, gespraech: stand(HAUS, "gemma4-31b"), bilder: stand(HAUS, "qwen3.6-35b") },
+        });
+      });
+      expect(screen.queryByText("Wird gespeichert …")).toBeNull();
+    });
   });
 
   it("vom Admin festgelegt: alles gesperrt, mit Grund", async () => {

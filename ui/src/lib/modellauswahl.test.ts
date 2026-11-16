@@ -60,7 +60,8 @@ test("Claude-Gruppe nur, wenn der Kern Claude anbietet; Hausmodelle in der Reihe
 test("Erklärung: Automatisch ist der Standard, Claude kostet, Hausmodelle haben einen Rückfall", () => {
   assert.match(erklaerung(GESPRAECH, AUTOMATISCH), /Standard/);
   assert.match(erklaerung(GESPRAECH, "claude-haiku-5-5"), /Guthaben/);
-  assert.match(erklaerung(GESPRAECH, "gemma4-31b"), /Statusleiste nennt den Grund/);
+  assert.match(erklaerung(GESPRAECH, "gemma4-31b"), /nächstbeste Modell im Haus und die Statusleiste nennt den Grund/);
+  assert.match(erklaerung(GESPRAECH, "gemma4-31b", true), /auch Claude in der Cloud/);
   assert.match(erklaerung(GESPRAECH, "gibt-es-nicht"), /automatisch/);
   assert.equal(wahlName(GESPRAECH, "gemma4-31b"), "Gemma 4 31B");
   assert.equal(wahlName(GESPRAECH, AUTOMATISCH), "Automatisch");
@@ -131,4 +132,30 @@ test("Kern-Nachricht: Modelle, Sperre und Stimmen werden geprüft übernommen, F
   assert.equal(alt.hausStimme, undefined);
   assert.equal(alt.hausStimmen, undefined);
   assert.equal(parseServerMessage({ type: "modellzugang", aktion: "loeschen_alles" }), null);
+});
+
+test("Parser: erst prüfen, dann kürzen; keine doppelten Kennungen; Arrays und automatisch als Kennung verworfen", () => {
+  const gut = Array.from({ length: 14 }, (_, i) => ({ id: `modell-${i}`, name: `M${i}`, art: "haus", zeile: "" }));
+  const m = parseServerMessage({
+    type: "modellzugang",
+    aktion: "status",
+    modelle: {
+      gespraech: { wahl: "modell-11", optionen: [{ id: "FALSCH", art: "haus" }, { id: "automatisch", art: "haus" }, ...gut, gut[0]] },
+      bilder: [{ wahl: "x" }],
+      hintergrund: { wahl: "modell-0", optionen: [gut[0], gut[0], gut[1]] },
+    },
+    haus_stimme: "ryan",
+    haus_stimme_standard: "sohee",
+    haus_stimmen: [{ id: "sohee", name: "Sohee" }, { id: "sohee", name: "Doppelt" }, { id: "uncle_fu", name: "Uncle Fu" }],
+  });
+  assert.ok(m && m.type === "modellzugang");
+  const g = m.modelle?.gespraech;
+  assert.equal(g?.optionen.length, 12);
+  assert.equal(g?.optionen[0].id, "modell-0"); // die falschen Einträge davor kosten keinen Platz
+  assert.equal(g?.wahl, "modell-11");
+  assert.equal(m.modelle?.bilder, undefined);
+  assert.deepEqual(m.modelle?.hintergrund?.optionen.map((o) => o.id), ["modell-0", "modell-1"]);
+  assert.deepEqual(m.hausStimmen?.map((s) => s.name), ["Sohee", "Uncle Fu"]);
+  assert.equal(m.hausStimme, undefined); // nicht in der Liste des Kerns
+  assert.equal(m.hausStimmeStandard, "sohee");
 });
