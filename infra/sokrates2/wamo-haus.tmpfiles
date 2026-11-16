@@ -1,0 +1,4 @@
+# Ordner für die Tokendateien der Entwicklungsaufträge mit Hausmodellen (Paket P6a). Installiert als /etc/tmpfiles.d/wamo-haus.conf.
+# Der Dispatcher (Benutzer wamo) schreibt /run/wamo-haus/<job>.json (0640, nur der SHA-256 des Auftragstokens), der Proxy
+# wamo-haus-proxy liest sie über die Gruppe (setgid: jede neue Datei bekommt die Gruppe wamo-haus-proxy). Sonst niemand.
+d /run/wamo-haus 2750 wamo wamo-haus-proxy - -
