@@ -1430,8 +1430,12 @@ Jedes Profil hat genau eine von zwei Arten (`voice-core/modellzugang.py`, Tabell
   --user-id <uuid>` zu hinterlegen und die Variable zu entfernen.
 - **Je Sitzung ein eigener Client:** Es gibt keinen Anthropic-Client und keinen Schlüssel, der Profile teilt. Der
   Verbrauch steht als Tokenzahlen je Profil im Log (`Verbrauch profil=… anbieter=… modell=… ein=… aus=…`), ohne Inhalt.
-- **Stimme:** Jedes Profil trägt `stt` und `tts` (`soniox` oder `haus`) als Schnittstelle für Phase P5; ein Admin setzt
-  sie mit `modellzugang-setzen --stt haus --tts haus`.
+- **Stimme:** Jedes Profil trägt `stt` und `tts` (`soniox` oder `haus`). Soniox bleibt Standard. Seit Paket H5 (Migration 0023)
+  wählt die Person selbst in der Karte Modellzugang „Soniox (Standard)“ oder „Im Haus (Datenschutz)“, ab der nächsten Sitzung,
+  mit einer Zeile in `actions` (Werkzeug `stimme_wahl`); ein Admin setzt die Werte weiter mit `modellzugang-setzen --stt haus
+  --tts haus`. Laborsitzungen hören immer über Soniox. Im Haus braucht der Kern `WAMO_STT_HAUS_MODELL`, `WAMO_TTS_HAUS_MODELL`
+  und `WAMO_TTS_HAUS_STIMME` sowie die Einträge im Gateway; sonst Rückfall auf Soniox mit Grund in der Oberfläche
+  (Messung M7 und Einrichtung in `docs/hausmodelle-und-kikollege.md`).
 - **Modus je Profil** (Migration 0011, Spalte `modell_modus`): „Automatisch“ oder „Nur Hausmodelle“, gewählt in der Karte
   Modellzugang und gültig ab der nächsten Sitzung. Der Zwang eines Admins (`nur_haus`) bleibt stärker. Im Modus Nur
   Hausmodelle geht nichts an Anthropic, auch nicht als Rückfall, und Claude-Code-Aufträge sind aus.

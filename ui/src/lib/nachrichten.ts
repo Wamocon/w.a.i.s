@@ -52,7 +52,14 @@ export type Betrieb = {
   onenote?: boolean;
   /** Teams-Nachrichten am PC gehen jetzt (nur mit PC-Steuerung, voice-core/teams_werkzeuge.py): Knopf "Als Teams-Nachricht" */
   teams?: boolean;
+  /** warum diese Sitzung trotz Wahl "Im Haus" über Soniox hört oder spricht (voice-core/sprache_anbieter.py, SprachWahl.grund);
+   *  oder warum der Betrieb sie für alle festgelegt hat; fehlt, wenn die Sitzung der Wahl folgt */
+  spracheGrund?: string;
 };
+
+/** Hören und Stimme je Profil (voice-core/sprache_anbieter.py): Soniox (Standard) oder im Haus über das Gateway */
+const SPRACH_ANBIETER = ["soniox", "haus"] as const;
+export type SprachAnbieter = (typeof SPRACH_ANBIETER)[number];
 
 /** Modellwahl je Profil: Automatisch (der Boss wählt) oder Nur Hausmodelle */
 export type ModellModus = "automatisch" | "nur_haus";
@@ -73,7 +80,7 @@ export type Gemerkt = {
  * Enthält nie den Schlüssel, nur ob einer hinterlegt ist und seine letzten vier Zeichen.
  */
 export type Modellzugang = {
-  aktion: "status" | "hinterlegen" | "loeschen" | "modus";
+  aktion: "status" | "hinterlegen" | "loeschen" | "modus" | "stimme";
   /** fehlt, wenn der Kern den Stand gerade nicht lesen konnte (dann steht nur fehler da) */
   art?: "claude" | "haus";
   /** profil: eigener Schlüssel, zuordnung: Schlüssel des Kerns für genau dieses Profil, festgelegt: vom Admin,
@@ -92,6 +99,13 @@ export type Modellzugang = {
   codeHinterlegt: boolean;
   codeEnde?: string;
   codeGesetzt?: string;
+  /** Hören (Spracherkennung) und Stimme (Sprachausgabe) des Profils, gewählt von der Person oder vom Admin; gilt ab der nächsten
+   *  Sitzung. Fehlt, wenn der Kern sie nicht gemeldet hat. */
+  stt?: SprachAnbieter;
+  tts?: SprachAnbieter;
+  /** "bereit" oder ein Satz, warum Hören und Stimme im Haus in diesem Kern gerade nicht gehen; fehlt bei einem Kern, der die Wahl
+   *  noch nicht kennt */
+  stimmeHaus?: string;
   wirksam?: string;
   fehler?: string;
 };
@@ -682,6 +696,7 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         mail: m.mail === true ? true : undefined,
         onenote: m.onenote === true ? true : undefined,
         teams: m.teams === true ? true : undefined,
+        spracheGrund: zeile(m.sprache_grund, 160),
       };
     }
     case "onenote":
@@ -762,7 +777,7 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         anmelden: m.anmelden === true ? true : undefined,
       };
     case "modellzugang": {
-      if (!oneOf(m.aktion, ["status", "hinterlegen", "loeschen", "modus"] as const)) return null;
+      if (!oneOf(m.aktion, ["status", "hinterlegen", "loeschen", "modus", "stimme"] as const)) return null;
       // Minutengenau, mit Zeitzone (der Kern liefert UTC mit +00:00): ohne sie läse der Browser den Wert als Ortszeit
       const zeit = (v: unknown) => {
         const t = isStr(v) ? /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:\d{2})?/.exec(v) : null;
@@ -786,6 +801,9 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         codeHinterlegt: m.code_hinterlegt === true,
         codeEnde: vier(m.code_ende),
         codeGesetzt: zeit(m.code_gesetzt),
+        stt: oneOf(m.stt, SPRACH_ANBIETER) ? m.stt : undefined,
+        tts: oneOf(m.tts, SPRACH_ANBIETER) ? m.tts : undefined,
+        stimmeHaus: zeile(m.stimme_haus, 160),
         wirksam: isStr(m.wirksam) ? sauber(m.wirksam, 60, false) : undefined,
         // Absicherung: auch wenn der Kern je einen Schlüssel in einen Fehlertext schriebe, zeigt die Oberfläche ihn nicht
         fehler:

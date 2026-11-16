@@ -22,7 +22,9 @@ beim Kern). Sie werden nie geloggt, nie an die Oberfläche zurückgegeben (nur "
 in actions, turns oder im Gedächtnis gespeichert. Eine Änderung gilt ab der nächsten Sitzung.
 
 Für Phase P5 trägt jedes Profil stt und tts (soniox oder haus). Der Strang "Stimme" liest sie aus dem Zugang der
-Sitzung (Zugang.stt, Zugang.tts) und baut danach Spracherkennung und Sprachausgabe.
+Sitzung (Zugang.stt, Zugang.tts) und baut danach Spracherkennung und Sprachausgabe (sprache_anbieter.py). Seit Paket H5
+wählt die Person beides selbst (stimme_setzen, Aktion "stimme", Migration 0023), Soniox bleibt Standard; jede Wahl steht
+als Zeile in actions (Werkzeug stimme_wahl, nur die Werte). Laborprofile erreichen die Wahl nie und hören immer über Soniox.
 
 Kommandozeile für den Betrieb (im Ordner voice-core/, mit der Umgebung des Kerns):
   uv run python modellzugang.py kek-erzeugen          # neuer Hauptschlüssel für WAMO_SCHLUESSEL_KEK
@@ -36,6 +38,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import json
 import os
 import re
 import sys
@@ -58,6 +61,10 @@ VERSUCHE_JE_FENSTER = 5  # Testanfragen je Profil und Zeitfenster (Schutz vor Du
 VERSUCHE_FENSTER_SECS = 600.0
 MODI = ("automatisch", "nur_haus")
 SCHLUESSELARTEN = ("api", "code")
+STIMMEN = ("soniox", "haus")  # Werte für stt und tts (wie sprache_anbieter.ANBIETER und der check in Migration 0010)
+STIMME_WERKZEUG = "stimme_wahl"  # Zeile in actions, wenn die Person Hören und Stimme wählt
+STIMME_JE_FENSTER = 10  # Wechsel von Hören und Stimme je Profil und Zeitfenster (schützt actions vor Fluten)
+AKTIONEN = ("hinterlegen", "loeschen", "status", "modus", "stimme")
 _WORKSPACE = re.compile(r"wrkspc_[A-Za-z0-9]{6,60}")
 _SPALTEN_ALT = ("nur_haus, claude_schluessel, claude_schluessel_ende, claude_workspace, claude_modell, "
                 "claude_geprueft_at, stt, tts")
@@ -65,6 +72,7 @@ _SPALTEN_ALT = ("nur_haus, claude_schluessel, claude_schluessel_ende, claude_wor
 # claude_code_zugang_fuer, nie diese Abfrage)
 _SPALTEN = _SPALTEN_ALT + ", modell_modus, claude_code_token_ende, claude_code_token_at"
 _versuche: dict[str, list[float]] = {}
+_stimme_versuche: dict[str, list[float]] = {}
 
 
 class ZugangFehler(Exception):
@@ -88,13 +96,14 @@ class Stand:
     code_hinterlegt: bool = False  # Claude-Code-Token für Entwicklungsaufträge
     code_ende: str | None = None
     code_gesetzt: str | None = None
+    stimme_haus: str = "bereit"  # "bereit" oder ein Satz, warum Hören und Stimme im Haus in diesem Kern nicht gehen
 
     def nachricht(self, *, fehler: str | None = None, aktion: str = "status") -> dict:
         n = {"type": "modellzugang", "aktion": aktion, "art": self.art, "quelle": self.quelle,
              "hinterlegt": self.hinterlegt, "ende": self.ende, "geprueft": self.geprueft,
              "festgelegt": self.festgelegt, "modell": self.modell, "stt": self.stt, "tts": self.tts,
              "modus": self.modus, "code_hinterlegt": self.code_hinterlegt, "code_ende": self.code_ende,
-             "code_gesetzt": self.code_gesetzt, "wirksam": "ab der nächsten Sitzung"}
+             "code_gesetzt": self.code_gesetzt, "stimme_haus": self.stimme_haus, "wirksam": "ab der nächsten Sitzung"}
         if fehler:
             n["fehler"] = fehler
         return n
@@ -210,6 +219,8 @@ async def stand_laden(user_id: str, *, db: Database | None = None) -> Stand:
     geprueft = zeitpunkt.isoformat(timespec="minutes") if zeitpunkt else None
     code = _hat_code_token(zeile)
     code_zeit = zeile.get("claude_code_token_at") if zeile else None
+    from sprache_anbieter import anzeige_grund, haus_problem_statisch  # spät: zieht Pipecat nach, die Kommandozeile braucht es nicht
+
     return Stand(
         art=art,
         quelle=("festgelegt" if festgelegt else "wahl" if wahl_haus else "profil" if hinterlegt
@@ -219,6 +230,7 @@ async def stand_laden(user_id: str, *, db: Database | None = None) -> Stand:
         stt=zeile["stt"] if zeile else "soniox", tts=zeile["tts"] if zeile else "soniox",
         modus=modus, code_hinterlegt=code, code_ende=zeile["claude_code_token_ende"] if code else None,
         code_gesetzt=code_zeit.isoformat(timespec="minutes") if code and code_zeit else None,
+        stimme_haus=anzeige_grund(haus_problem_statisch()) or "bereit",
     )
 
 
@@ -247,6 +259,16 @@ async def schluessel_testen(schluessel: str, workspace: str | None = None) -> st
         return f"Anthropic-Fehler ({type(e).__name__})"
     finally:
         await client.close()
+
+
+def _stimme_erlaubt(uid: str, jetzt: float | None = None) -> bool:
+    jetzt = time.monotonic() if jetzt is None else jetzt
+    liste = [t for t in _stimme_versuche.get(uid, []) if jetzt - t < VERSUCHE_FENSTER_SECS]
+    if len(liste) >= STIMME_JE_FENSTER:
+        _stimme_versuche[uid] = liste
+        return False
+    _stimme_versuche[uid] = [*liste, jetzt]
+    return True
 
 
 def _versuch_erlaubt(uid: str, jetzt: float | None = None) -> bool:
@@ -405,6 +427,60 @@ async def modus_setzen(user_id: str, modus_roh: object, *, db: Database | None =
     return await stand_laden(uid, db=db)
 
 
+async def stimme_setzen(user_id: str, stt_roh: object, tts_roh: object, *, db: Database | None = None) -> Stand:
+    """Die Person wählt Spracherkennung (stt) und Sprachausgabe (tts): soniox (Standard) oder haus. Gilt ab der nächsten
+    Sitzung. Der Zwang des Admins auf Hausmodelle (nur_haus) betrifft nur die Sprachmodelle, nicht die Stimme (D3): Beides
+    bleibt wählbar. Laborprofile erreichen diese Funktion nie (labor.py sperrt Pfad und Nachricht, modellzugang_api.py lehnt
+    zusätzlich ab), und eine Laborsitzung hört immer über Soniox (sprache_anbieter.sprach_wahl). Schreibrecht des Kerns auf stt
+    und tts erst ab Migration 0023; davor ein klarer Satz statt "Datenbank nicht erreichbar"."""
+    uid = normalize_uuid(user_id)
+    if uid is None:
+        raise ZugangFehler("Profil ungültig")
+    if not (isinstance(stt_roh, str) and stt_roh in STIMMEN and isinstance(tts_roh, str) and tts_roh in STIMMEN):
+        raise ZugangFehler("Unbekannte Wahl für Hören und Stimme (soniox oder haus)")
+    db = db or shared_database()
+    if not db.configured:
+        raise ZugangFehler("Keine Datenbank: die Wahl kann nicht gespeichert werden")
+    vorher = await _zeile(db, uid)
+    bisher = (vorher["stt"], vorher["tts"]) if vorher else ("soniox", "soniox")
+    if bisher == (stt_roh, tts_roh):
+        return await stand_laden(uid, db=db)  # nichts geändert: kein Schreiben, keine Zeile in actions
+    if not _stimme_erlaubt(uid):
+        raise ZugangFehler("Zu viele Wechsel, bitte in zehn Minuten noch einmal")
+    try:
+        await db.execute(
+            f"insert into {db.t('model_access')} (user_id, stt, tts) values ($1::uuid, $2, $3) "
+            "on conflict (user_id) do update set stt = excluded.stt, tts = excluded.tts",
+            uid, stt_roh, tts_roh,
+        )
+    except asyncpg.InsufficientPrivilegeError:
+        logger.error("Hören und Stimme für Profil {}: kein Schreibrecht auf stt und tts (Migration 0023 fehlt?)", uid[:8])
+        raise ZugangFehler("Die eigene Wahl von Hören und Stimme ist in dieser Datenbank noch nicht freigeschaltet; "
+                           "bitte an den Admin wenden") from None
+    except asyncpg.CheckViolationError:
+        raise ZugangFehler("Die Datenbank hat die Wahl abgelehnt (soniox oder haus)") from None
+    logger.info("Hören und Stimme für Profil {}: Spracherkennung {}, Sprachausgabe {}", uid[:8], stt_roh, tts_roh)
+    await _stimme_protokollieren(db, uid, stt_roh, tts_roh, vorher)
+    return await stand_laden(uid, db=db)
+
+
+async def _stimme_protokollieren(db: Database, uid: str, stt: str, tts: str, vorher: asyncpg.Record | dict | None) -> None:
+    """Zeile in actions (Werkzeug stimme_wahl, Risiko change, Status done), nur mit den Werten. Wirft nie: Der Eintrag ist Protokoll,
+    keine Freigabe; die Wahl ist dann schon gespeichert."""
+    params: dict[str, object] = {"stt": stt, "tts": tts}
+    if vorher:
+        params["vorher"] = {"stt": vorher["stt"], "tts": vorher["tts"]}
+    try:
+        await db.execute(
+            f"insert into {db.t('actions')} (user_id, tool, params, reason, risk, status, result, finished_at) "
+            f"values ($1::uuid, $2, $3::text::jsonb, $4, 'change'::{db.t('risk_class')}, 'done'::{db.t('action_status')}, "
+            "'{}'::jsonb, now())",
+            uid, STIMME_WERKZEUG, json.dumps(params), "Hören und Stimme selbst gewählt, gilt ab der nächsten Sitzung",
+        )
+    except (DatabaseUnavailable, *DB_ERRORS) as e:
+        logger.warning("Wahl von Hören und Stimme für Profil {} nicht protokolliert ({})", uid[:8], type(e).__name__)
+
+
 async def claude_code_zugang_fuer(user_id: str, *, db: Database | None = None,
                                   tresor: Tresor | None = None) -> dict[str, str] | None:
     """Der Zugang des Profils für GENAU EINEN Lauf eines Entwicklungsauftrags mit Claude Code, entschlüsselt:
@@ -456,13 +532,15 @@ async def modellzugang_nachricht(user_id: str, data: dict, senden: Callable[[dic
                                  db: Database | None = None, tresor: Tresor | None = None,
                                  testen: Pruefer = schluessel_testen) -> None:
     """Klick aus der Oberfläche (RTVI-Nachricht "modellzugang"). Aktionen: status, modus (Wahl der Person),
-    hinterlegen und loeschen (mit schluesselart api oder code). Die Antwort enthält nie einen Schlüssel oder Token;
-    der Inhalt der Nachricht wird nie geloggt."""
-    aktion = data.get("aktion") if data.get("aktion") in ("hinterlegen", "loeschen", "status", "modus") else "status"
+    stimme (Hören und Stimme der Person, Felder stt und tts), hinterlegen und loeschen (mit schluesselart api oder code).
+    Die Antwort enthält nie einen Schlüssel oder Token; der Inhalt der Nachricht wird nie geloggt."""
+    aktion = data.get("aktion") if data.get("aktion") in AKTIONEN else "status"
     art = data.get("schluesselart") if data.get("schluesselart") in SCHLUESSELARTEN else "api"
     try:
         if aktion == "modus":
             stand = await modus_setzen(user_id, data.get("modus"), db=db)
+        elif aktion == "stimme":
+            stand = await stimme_setzen(user_id, data.get("stt"), data.get("tts"), db=db)
         elif aktion == "hinterlegen" and art == "code":
             stand = await code_token_hinterlegen(user_id, data.get("schluessel"), db=db, tresor=tresor)
         elif aktion == "hinterlegen":

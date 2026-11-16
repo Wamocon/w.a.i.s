@@ -32,7 +32,7 @@ import {
 import { istOfficeFormat, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
 import { formularFehler, type MailAktionen } from "@/lib/mail";
 import { teamsFehler, type TeamsAktionen } from "@/lib/teams";
-import { parseServerMessage, type Auftrag, type Markierung, type ModellModus } from "@/lib/nachrichten";
+import { parseServerMessage, type Auftrag, type Markierung, type ModellModus, type SprachAnbieter } from "@/lib/nachrichten";
 import type { SchluesselArt } from "@/lib/schluesselhilfe";
 import { abdruckGestartet, abdruckLaeuft, kannEinlernen, kannLoeschen, STIMME_LEER } from "@/lib/stimme";
 import { HAENGT_HINWEIS, HAENGT_NACH_MS, textAbschicken, unterstuetztText } from "@/lib/textEingabe";
@@ -222,7 +222,8 @@ export type ModellzugangAnfrage =
   | { aktion: "status" }
   | { aktion: "loeschen"; schluesselart?: SchluesselArt }
   | { aktion: "hinterlegen"; schluessel: string; workspace?: string; schluesselart?: SchluesselArt }
-  | { aktion: "modus"; modus: ModellModus };
+  | { aktion: "modus"; modus: ModellModus }
+  | { aktion: "stimme"; stt: SprachAnbieter; tts: SprachAnbieter };
 
 /** Nachrichten an den Voice-Core: feste Liste statt freier Typen. */
 type ClientMessage =
