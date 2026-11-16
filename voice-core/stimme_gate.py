@@ -20,7 +20,9 @@ lesbar) Modell oder Abdruck nicht geladen sind oder die Prüfung länger als WAR
 Schwellen (alle als Schalter in der Umgebung, siehe schwellen_aus_env): WAMO_STIMME_EIGEN_MIN (ab hier die eigene Stimme, 0,5),
 WAMO_STIMME_FREMD_MAX (bis hier fremd, 0,3), WAMO_STIMME_MIN_SECS (kürzere Äußerungen reichen nicht für "eigen", 1 s),
 WAMO_STIMME_VERTRAUEN_SECS (so lange gilt "eigen" für Folgesätze, 120 s), WAMO_STIMME_KURZ_VERTRAUEN_SECS (so lange darf das Vertrauen nur aus
-kurzen Äußerungen weiterlaufen, 15 s nach der letzten sicheren Erkennung).
+kurzen Äußerungen weiterlaufen, 15 s nach der letzten sicheren Erkennung). Nur für das Verwerfen im Modus streng (stimme_waechter.py):
+WAMO_STIMME_VERWERFEN_MAX (unklare Äußerungen unter diesem Wert verwerfen, 0,4, an den Bereich FREMD_MAX bis EIGEN_MIN gesetzt) und
+WAMO_STIMME_VERWERFEN_MIN_SECS (so viel Sprache braucht eine Äußerung mindestens, damit sie verworfen wird, 0 s).
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ STANDARD_MODUS = "streng"
 OFFENE_WERKZEUGE = frozenset({"aktuelle_zeit", "websuche", "canvas_zeigen"})
 WARTEN_WERKZEUG_SECS = 2.0  # so lange wartet ein Werkzeug höchstens auf die laufende Prüfung
 MARKE = "_wamo_stimme_gate"  # am eingepackten Handler: welches Gate ihn schon prüft
-_GEWARNT: set[str] = set()
+_GEWARNT: set[object] = set()  # was schon einmal gewarnt wurde (unbekannter Modus, VERWERFEN_MAX außerhalb des Bereichs)
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,10 @@ class Schwellen:
     min_secs: float = 1.0
     vertrauen_secs: float = 120.0
     kurz_vertrauen_secs: float = 15.0
+    # nur für den Wächter (stimme_waechter.verwerfen, Modus streng): unklare Äußerungen unter diesem Wert verwerfen (zwischen fremd_max
+    # und eigen_min), und nur Äußerungen mit mindestens so viel Sprache
+    verwerfen_max: float = 0.4
+    verwerfen_min_secs: float = 0.0
 
 
 def stand_nachricht(modus: str, status: str) -> dict:
@@ -80,22 +86,40 @@ def pruefmodus(wert: str | None = None) -> str:
 
 def schwellen_aus_env() -> Schwellen:
     """Schwellen aus der Umgebung. Unbrauchbares (keine Zahl, außerhalb der Grenzen) heißt Standard, und fremd_max muss unter eigen_min
-    liegen, sonst gelten beide Standardwerte."""
+    liegen, sonst gelten beide Standardwerte. verwerfen_max liegt von fremd_max bis eigen_min (beide Ränder erlaubt), siehe
+    _verwerfen_max."""
     standard = Schwellen()
     eigen = zahl_im_bereich("WAMO_STIMME_EIGEN_MIN", 0.35, 0.95)
     fremd = zahl_im_bereich("WAMO_STIMME_FREMD_MAX", 0.0, 0.8)
-    s = Schwellen(
-        eigen_min=standard.eigen_min if eigen is None else eigen,
-        fremd_max=standard.fremd_max if fremd is None else fremd,
+    eigen_min = standard.eigen_min if eigen is None else eigen
+    fremd_max = standard.fremd_max if fremd is None else fremd
+    if fremd_max >= eigen_min:
+        logger.warning("WAMO_STIMME_FREMD_MAX ({}) muss unter WAMO_STIMME_EIGEN_MIN ({}) liegen: es gelten die Standardwerte",
+                       fremd_max, eigen_min)
+        eigen_min, fremd_max = standard.eigen_min, standard.fremd_max
+    verwerfen_min_secs = zahl_im_bereich("WAMO_STIMME_VERWERFEN_MIN_SECS", 0.0, 10.0)  # 0 ist gültig: nicht mit "or" abkürzen
+    return Schwellen(
+        eigen_min=eigen_min,
+        fremd_max=fremd_max,
         min_secs=zahl_im_bereich("WAMO_STIMME_MIN_SECS", 0.3, 10.0) or standard.min_secs,
         vertrauen_secs=zahl_im_bereich("WAMO_STIMME_VERTRAUEN_SECS", 10.0, 3600.0) or standard.vertrauen_secs,
         kurz_vertrauen_secs=zahl_im_bereich("WAMO_STIMME_KURZ_VERTRAUEN_SECS", 1.0, 120.0) or standard.kurz_vertrauen_secs,
+        verwerfen_max=_verwerfen_max(fremd_max, eigen_min, standard.verwerfen_max),
+        verwerfen_min_secs=standard.verwerfen_min_secs if verwerfen_min_secs is None else verwerfen_min_secs,
     )
-    if s.fremd_max >= s.eigen_min:
-        logger.warning("WAMO_STIMME_FREMD_MAX ({}) muss unter WAMO_STIMME_EIGEN_MIN ({}) liegen: es gelten die Standardwerte",
-                       s.fremd_max, s.eigen_min)
-        return Schwellen(min_secs=s.min_secs, vertrauen_secs=s.vertrauen_secs, kurz_vertrauen_secs=s.kurz_vertrauen_secs)
-    return s
+
+
+def _verwerfen_max(fremd_max: float, eigen_min: float, standard: float) -> float:
+    """WAMO_STIMME_VERWERFEN_MAX, an den Bereich fremd_max bis eigen_min gesetzt: darunter heißt fremd_max (nur fremde verwerfen, so ist
+    "0" gemeint), darüber eigen_min (jede unklare verwerfen), beides mit einer Warnung je Wert. Leer oder keine Zahl: der Standard 0,4,
+    ebenso in diesen Bereich gerückt."""
+    wert = zahl_im_bereich("WAMO_STIMME_VERWERFEN_MAX", 0.0, 0.95)
+    gesetzt = min(max(standard if wert is None else wert, fremd_max), eigen_min)
+    if wert is not None and gesetzt != wert and ("VERWERFEN_MAX", wert, fremd_max, eigen_min) not in _GEWARNT:
+        _GEWARNT.add(("VERWERFEN_MAX", wert, fremd_max, eigen_min))
+        logger.warning("WAMO_STIMME_VERWERFEN_MAX ({}) liegt außerhalb von WAMO_STIMME_FREMD_MAX ({}) bis WAMO_STIMME_EIGEN_MIN ({}): es gilt {}",
+                       wert, fremd_max, eigen_min, gesetzt)
+    return gesetzt
 
 
 @dataclass

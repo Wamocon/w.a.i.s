@@ -1,4 +1,5 @@
-"""Nur diese Stimme hören: eine sicher fremde Äußerung erreicht das Sprachmodell nicht (Modus streng, nur mit eingelerntem Abdruck).
+"""Nur diese Stimme hören: eine fremde Äußerung (fremd oder unklar mit niedrigem Wert) erreicht das Sprachmodell nicht (Modus streng, nur mit
+eingelerntem Abdruck).
 
 Der Wächter sitzt hinter der Spracherkennung und vor dem Aggregator des Nutzers. Er hält ausschließlich das endgültige Transkript einer
 Äußerung (TranscriptionFrame) an, bis das Urteil des Prüfers (stimme_pruefer.py) zu genau dieser Äußerung da ist (aeusserung_zuordnen),
@@ -13,20 +14,36 @@ einen Zug aus zwei Äußerungen mit dem Text der ersten, während die zweite noc
 Haltezeit auf diese Angabe auf. Kosten: Nur wenn zu einer Äußerung gar kein Transkript kommt, endet der Zug um WARTEN_SECS später; ein
 endgültiges Transkript beendet ihn wie bisher sofort. WARTEN_SECS bleibt deshalb kurz: Die Prüfung von 8 s Sprache dauert rund 250 ms.
 
-Verworfen wird nur, wenn alles zutrifft: Modus streng, Abdruck und Modell bereit, das Urteil ist fremd (Wert unter der Fremd-Schwelle), die
-Äußerung hatte genug Sprache (min_secs) und WAMO sprach nicht gleichzeitig (sonst ist das Urteil unklar, siehe StimmGate.einstufen). Alles
-andere geht durch: unklar, kurz, kein Urteil in der Frist (Zeitüberschreitung gilt als unklar), beobachten, aus, kein Abdruck. Werkzeuge bleiben
+Regel (verwerfen, verschärft am 16.11.2026 nach dem Journal einer Sitzung im Büro): Verworfen wird nur im Modus streng mit bereitem Abdruck
+und Modell, und nur, wenn WAMO nicht gleichzeitig sprach (dann ist ein niedriger Wert nur unklar, Echo; siehe StimmGate.einstufen und
+Urteil.ueberlappung). Dann gilt:
+- fremd (Wert bis WAMO_STIMME_FREMD_MAX, 0,3): verworfen, unabhängig von der Länge. Bis dahin brauchte auch fremd mindestens min_secs
+  (1 s) Sprache, deshalb gingen kurze fremde Einwürfe ("0,15 bei 0,4 s") durch.
+- unklar mit Wert unter WAMO_STIMME_VERWERFEN_MAX (0,4, liegt von FREMD_MAX bis EIGEN_MIN): verworfen, ebenso unabhängig von der Länge
+  ("0,31 bei 1,1 s"). Ein unklares Urteil mit höherem Wert geht durch, ebenso jedes unklare ohne Wert (Prüfung fehlgeschlagen).
+- eigen und kurz (Wert ab EIGEN_MIN, 0,5) gehen immer durch: ein kurzes "Ja" der Person ("0,62 bei 0,8 s") wird nie überhört.
+- WAMO_STIMME_VERWERFEN_MIN_SECS (Standard 0) verlangt mindestens so viel Sprache für jedes Verwerfen; 1 stellt für kurze Äußerungen das
+  Verhalten vor dem 16.11.2026 wieder her, ohne Release.
+Alles andere geht durch: kein Urteil in der Frist (Zeitüberschreitung gilt als unklar), beobachten, aus, kein Abdruck. Werkzeuge bleiben
 dann trotzdem gesperrt, wenn die Stimme nicht sicher erkannt ist (StimmGate.pruefen).
 Eine Äußerung, die so durchgeht, aber nicht sicher die Stimme der Person war, färbt in bot.py den Zug wie Fremdinhalte
 (StimmGate.nicht_sicher_eigen): kein Lernen, kein Hinweis des Ja-Wächters, Markierung im Protokoll.
 
-Verwerfen heißt: Das Transkript wird durch ein Leerzeichen ersetzt. Der Zug des Nutzers endet dann leer: kein Satz im Verlauf, nichts für
-das Gedächtnis, kein Aufruf des Modells. bot.py kehrt in on_user_turn_stopped bei leerem Inhalt zurück (eine Markierung des Wächters
-bräuchte es dafür nicht, sie hinge auch an keinem Zug, denn der Behandler läuft als eigene Aufgabe). Dazu geht
-eine Meldung an die Oberfläche: {"type": "stimme", "ergebnis": "fremd", "wert", "modus", "ignoriert": true}, einmal je Urteil.
+Verwerfen heißt: Das Transkript wird durch ein Leerzeichen ersetzt (ein neues Frame mit demselben Zeitstempel). Der Zug des Nutzers endet
+dann leer: kein Satz im Verlauf, nichts für das Gedächtnis, kein Aufruf des Modells. bot.py kehrt in on_user_turn_stopped bei leerem Inhalt
+zurück (eine Markierung des Wächters bräuchte es dafür nicht, sie hinge auch an keinem Zug, denn der Behandler läuft als eigene Aufgabe).
+Dazu geht eine Meldung an die Oberfläche: {"type": "stimme", "ergebnis": "fremd" | "unklar", "wert", "modus", "ignoriert": true}, einmal je
+Urteil; im Log steht "Stimme: fremde (oder unklare) Äußerung ignoriert (Wert bei Sekunden)".
 
-Grenzen: Die Untertitel der Oberfläche können den Satz noch zeigen (sie entstehen schon bei der Spracherkennung). Spricht jemand Fremdes
-dazwischen, während WAMO redet, ist das Urteil unklar und der Satz geht durch (nur Werkzeuge bleiben gesperrt).
+Untertitel: Pipecat meldet jedes Transkript an die Oberfläche, sobald es die Spracherkennung verlässt (RTVIObserver, user-transcription,
+nur beim ersten Push eines Frames), also vor dem Urteil. Zwischenstände und das endgültige Transkript stehen deshalb kurz im Untertitel.
+Das Ersatztranskript ist ein neues Frame und wird ebenso gemeldet: endgültig, ohne Text, mit dem Zeitstempel des Originals. Die
+Oberfläche nimmt damit genau diesen Teil wieder aus dem Untertitel und, falls er schon dort stand, aus dem Verlauf (ui/src/lib/wamo.ts,
+nutzerTranskript). Den Zeitstempel deshalb beim Ersetzen nie ändern.
+
+Grenzen: Spricht jemand Fremdes dazwischen, während WAMO redet, ist das Urteil unklar und der Satz geht durch (nur Werkzeuge bleiben
+gesperrt). Eine eigene Äußerung mit niedrigem Wert (Erkältung, Lärm, weit vom Mikrofon, sehr kurz) wird verworfen; die Oberfläche zeigt
+dann den Hinweis, getippter Text geht immer.
 
 Abbruch durch Zwischenstände (nur_endgueltig): Schon ein Zwischenstand startet in der Startstrategie den Zug, und spricht WAMO nicht,
 bricht das SoftInterruptGate sofort hart ab, bevor ein Urteil da ist. Eine fremde Stimme hätte so eine laufende Antwort oder ein Werkzeug
@@ -44,6 +61,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -51,14 +69,28 @@ from pipecat.frames.frames import Frame, STTMetadataFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 
-from stimme_gate import FREMD, StimmGate
+from stimme_gate import FREMD, UNKLAR, Schwellen, StimmGate
+
+if TYPE_CHECKING:
+    from stimme_pruefer import Urteil
 
 WARTEN_SECS = 1.0  # so lange hält das endgültige Transkript höchstens auf das Urteil (geht in die Frist der Stop-Strategie ein)
 SATZZEICHEN = (".", "!", "?", "…")  # so endet ein fertiger Satz im Transkript
+_LOG_ART = {FREMD: "fremde", UNKLAR: "unklare"}
 
 
 def _satz_fertig(text: str) -> bool:
     return text.rstrip().endswith(SATZZEICHEN)
+
+
+def verwerfen(urteil: Urteil | None, schwellen: Schwellen) -> bool:
+    """Soll der Wächter das Transkript zu diesem Urteil verwerfen (Regel oben)? Fragt nur nach dem Urteil; Modus und Abdruck prüft der
+    Wächter vorher (aktiv). None (keine Antwort in der Frist), kein Wert (Prüfung fehlgeschlagen) und Überlappung mit WAMO: nie."""
+    if urteil is None or urteil.wert is None or urteil.ueberlappung or urteil.secs < schwellen.verwerfen_min_secs:
+        return False
+    if urteil.urteil == FREMD:
+        return True
+    return urteil.urteil == UNKLAR and urteil.wert < schwellen.verwerfen_max
 
 
 def nur_endgueltig(waechter: StimmWaechter, *beschaeftigt: Callable[[], bool]) -> Callable[[], bool]:
@@ -104,13 +136,15 @@ class StimmWaechter(FrameProcessor):
         frame.interruptible = False
         nr = self._pruefer.aeusserung_zuordnen()  # die Äußerung zu diesem Transkript, nicht die jüngste
         urteil = await self._pruefer.urteil_abwarten(self._warten, nr)  # None: Frist abgelaufen oder nichts geprüft, gilt als unklar
-        if urteil is None or urteil.urteil != FREMD or urteil.wert is None or urteil.secs < self._gate.schwellen.min_secs:
+        if urteil is None or urteil.wert is None or not verwerfen(urteil, self._gate.schwellen):
             return frame
         if urteil.nr != self._gemeldet_nr:
             self._gemeldet_nr = urteil.nr
-            logger.info("Stimme: fremde Äußerung ignoriert ({:.2f} bei {:.1f} s)", urteil.wert, urteil.secs)
+            wert = float(urteil.wert)
+            logger.info("Stimme: {} Äußerung ignoriert ({:.2f} bei {:.1f} s)", _LOG_ART.get(urteil.urteil, urteil.urteil), wert, urteil.secs)
             await self.push_frame(RTVIServerMessageFrame(data={
-                "type": "stimme", "ergebnis": FREMD, "wert": round(float(urteil.wert), 2), "modus": self._gate.modus,
-                "ignoriert": True,
+                "type": "stimme", "ergebnis": urteil.urteil, "wert": round(wert, 2), "modus": self._gate.modus, "ignoriert": True,
             }))
-        return replace(frame, text=" ", result=None)  # ein neues Frame: Beobachter der Pipeline halten das Original
+        # Ein neues Frame: Beobachter der Pipeline halten das Original. Der Zeitstempel bleibt, die Oberfläche nimmt damit den schon
+        # gezeigten Untertitel zurück (siehe oben)
+        return replace(frame, text=" ", result=None)

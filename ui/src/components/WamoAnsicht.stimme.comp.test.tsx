@@ -8,7 +8,7 @@ import { WamoAnsicht } from "@/components/WamoAnsicht";
 import { geraeteAnzeige } from "@/lib/geraeteAnzeige";
 import { KernFehler } from "@/lib/kernApi";
 import type { WamoAktionen } from "@/lib/useWamo";
-import { abdruckAnsichtOeffnen, applyServerMessage, resetWamo, wamo } from "@/lib/wamo";
+import { abdruckAnsichtOeffnen, applyServerMessage, nutzerTranskript, resetWamo, wamo } from "@/lib/wamo";
 
 const attrappe = vi.hoisted(() => ({ kernJson: vi.fn(), getSupabase: vi.fn() }));
 vi.mock("@/lib/kernApi", async (original) => ({ ...(await original<typeof import("@/lib/kernApi")>()), kernJson: attrappe.kernJson }));
@@ -124,6 +124,29 @@ describe("Fremde Stimme ignoriert (strenger Modus)", () => {
     ignoriert();
     expect(container.querySelector(".hinweis-toast")?.textContent).toBe("Fremde Stimme ignoriert");
     expect(erster).not.toBeNull();
+  });
+
+  it("nennt bei einer verworfenen unklaren Äußerung, dass die Stimme nicht sicher erkannt wurde", async () => {
+    const { container } = zeige(ADMIN);
+    sitzungMitStimme();
+    await ruhe();
+    act(() => applyServerMessage({ type: "stimme_ergebnis", ergebnis: "unklar", wert: 0.31, modus: "streng", ignoriert: true }));
+    expect(container.querySelector(".hinweis-toast")?.textContent).toBe("Stimme nicht sicher erkannt, ignoriert");
+    expect(container.querySelector('.topbar .status-items [data-feld="stimme"] dd')?.textContent).toBe("Unklar · ignoriert");
+  });
+
+  it("nimmt den Untertitel einer verworfenen Äußerung wieder heraus, eigene Sätze bleiben", async () => {
+    const { container } = zeige(ADMIN);
+    sitzungMitStimme();
+    await ruhe();
+    const nutzerzeile = () => container.querySelector(".caption-user")?.textContent ?? "";
+    act(() => wamo.set((s) => nutzerTranskript(s, { text: "Mach die Heizung an", final: true, timestamp: "2026-11-16T10:00:01.000Z" })));
+    act(() => wamo.set((s) => nutzerTranskript(s, { text: "Schließ die Tür", final: true, timestamp: "2026-11-16T10:00:02.000Z" })));
+    expect(nutzerzeile()).toContain("Schließ die Tür");
+    ignoriert();
+    act(() => wamo.set((s) => nutzerTranskript(s, { text: " ", final: true, timestamp: "2026-11-16T10:00:02.000Z" })));
+    expect(nutzerzeile()).toContain("Mach die Heizung an");
+    expect(nutzerzeile()).not.toContain("Schließ die Tür");
   });
 
   it("zeigt einer Äußerung, die nicht ignoriert wurde, keinen Hinweis", async () => {

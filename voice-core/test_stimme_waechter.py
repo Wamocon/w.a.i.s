@@ -1,4 +1,4 @@
-"""Tests für stimme_waechter.py: eine sicher fremde Äußerung erreicht das Sprachmodell nicht (Modus streng).
+"""Tests für stimme_waechter.py: eine fremde Äußerung (fremd oder unklar mit niedrigem Wert) erreicht das Sprachmodell nicht (Modus streng).
 
 Ausführen:  python -m pytest -q test_stimme_waechter.py   (im Ordner voice-core/)
 """
@@ -17,10 +17,10 @@ from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 
 import stimme_waechter
-from stimme_gate import EIGEN, FREMD, KURZ, UNKLAR, StimmGate
+from stimme_gate import EIGEN, FREMD, KURZ, UNKLAR, Schwellen, StimmGate
 from stimme_modell import DIM
 from stimme_pruefer import Stimmpruefer, Urteil
-from stimme_waechter import WARTEN_SECS, StimmWaechter
+from stimme_waechter import WARTEN_SECS, StimmWaechter, verwerfen
 
 RATE = 16000
 EIGENER = np.eye(DIM, dtype=np.float32)[0]
@@ -42,8 +42,73 @@ def bereites_gate(modus="streng", uhr=None) -> StimmGate:
     return gate
 
 
-def urteil(art: str, secs: float = 2.0, wert: float = 0.12, nr: int = 1) -> Urteil:
-    return Urteil(nr=nr, urteil=art, wert=wert, secs=secs, ueberlappung=False, um=1000.0)
+def urteil(art: str, secs: float = 2.0, wert: float | None = 0.12, nr: int = 1, ueberlappung: bool = False) -> Urteil:
+    return Urteil(nr=nr, urteil=art, wert=wert, secs=secs, ueberlappung=ueberlappung, um=1000.0)
+
+
+def eingestuft(wert: float, secs: float, ueberlappung: bool = False, schwellen: Schwellen | None = None) -> Urteil:
+    """Ein Urteil, wie der Prüfer es fällt (StimmGate.einstufen mit den Standardschwellen oder den übergebenen)."""
+    gate = StimmGate(schwellen=schwellen or Schwellen())
+    return urteil(gate.einstufen(wert, secs, ueberlappung), secs=secs, wert=wert, ueberlappung=ueberlappung)
+
+
+class RegelTests(unittest.TestCase):
+    """Die Regel des Wächters (verwerfen), mit den Werten aus dem Journal des Kerns vom 16.11.2026 (Modus streng, Abdruck bereit)."""
+
+    def test_befund_vom_16_11(self):
+        faelle = (
+            # (Wert, Sprache in s, Urteil des Prüfers, verwerfen?)
+            (0.30, 3.3, FREMD, True), (0.27, 1.7, FREMD, True), (0.15, 1.1, FREMD, True),  # schon bisher verworfen
+            (0.29, 0.96, FREMD, True), (0.15, 0.4, FREMD, True), (0.23, 0.3, FREMD, True),  # fremd und kurz: neu verworfen
+            (0.31, 1.1, UNKLAR, True),  # unklar mit niedrigem Wert: neu verworfen
+            (0.73, 1.6, EIGEN, False), (0.62, 0.8, KURZ, False),  # die eigene Stimme, auch ein kurzes "Ja"
+        )
+        for wert, secs, art, soll in faelle:
+            u = eingestuft(wert, secs)
+            self.assertEqual(u.urteil, art, (wert, secs))
+            self.assertEqual(verwerfen(u, Schwellen()), soll, (wert, secs, art))
+
+    def test_unklar_mit_hohem_wert_geht_durch_auch_kurz(self):
+        for wert, secs in ((0.4, 1.5), (0.45, 1.5), (0.49, 0.5), (0.4, 0.3)):
+            u = eingestuft(wert, secs)
+            self.assertEqual(u.urteil, UNKLAR, (wert, secs))
+            self.assertFalse(verwerfen(u, Schwellen()), (wert, secs))  # ab VERWERFEN_MAX (0,4) nicht verworfen
+
+    def test_spricht_wamo_gleichzeitig_geht_alles_durch(self):
+        """Echo oder Überlappung: der Prüfer urteilt unklar, der Wächter verwirft nicht (wie bisher), auch bei sehr niedrigem Wert."""
+        for wert, secs in ((0.05, 3.0), (0.2, 0.4), (0.35, 1.2)):
+            u = eingestuft(wert, secs, ueberlappung=True)
+            self.assertEqual(u.urteil, UNKLAR)
+            self.assertFalse(verwerfen(u, Schwellen()), (wert, secs))
+
+    def test_unmoegliche_kombinationen_bleiben_sicher(self):
+        """Der Prüfer liefert sie nicht, die Regel bleibt trotzdem eindeutig: Überlappung verwirft nie, eigen und kurz nie."""
+        self.assertFalse(verwerfen(urteil(FREMD, wert=0.1, ueberlappung=True), Schwellen()))
+        self.assertFalse(verwerfen(urteil(EIGEN, wert=0.1), Schwellen()))
+        self.assertFalse(verwerfen(urteil(KURZ, wert=0.1, secs=0.4), Schwellen()))
+
+    def test_ohne_urteil_oder_wert_geht_alles_durch(self):
+        self.assertFalse(verwerfen(None, Schwellen()))  # Frist abgelaufen
+        self.assertFalse(verwerfen(urteil(UNKLAR, wert=None), Schwellen()))  # Prüfung fehlgeschlagen
+        self.assertFalse(verwerfen(urteil(FREMD, wert=None), Schwellen()))
+
+    def test_verwerfen_max_gleich_fremd_max_schaltet_das_verwerfen_unklarer_ab(self):
+        s = Schwellen(verwerfen_max=0.3)
+        self.assertFalse(verwerfen(eingestuft(0.31, 1.1, schwellen=s), s))
+        self.assertTrue(verwerfen(eingestuft(0.3, 1.1, schwellen=s), s))  # fremd bleibt verworfen
+
+    def test_verwerfen_max_gleich_eigen_min_verwirft_jede_unklare(self):
+        s = Schwellen(verwerfen_max=0.5)
+        self.assertTrue(verwerfen(eingestuft(0.49, 1.1, schwellen=s), s))
+        self.assertFalse(verwerfen(eingestuft(0.5, 0.6, schwellen=s), s))  # kurz, klingt nach der Person
+
+    def test_mindestdauer_zum_verwerfen(self):
+        """WAMO_STIMME_VERWERFEN_MIN_SECS: mit 1 s verhält sich der Wächter für kurze Äußerungen wie vor dem 16.11.2026."""
+        s = Schwellen(verwerfen_min_secs=1.0)
+        self.assertFalse(verwerfen(eingestuft(0.15, 0.4, schwellen=s), s))
+        self.assertFalse(verwerfen(eingestuft(0.31, 0.9, schwellen=s), s))
+        self.assertTrue(verwerfen(eingestuft(0.15, 1.1, schwellen=s), s))
+        self.assertTrue(verwerfen(eingestuft(0.31, 1.0, schwellen=s), s))
 
 
 class AttrappePruefer:
@@ -102,12 +167,30 @@ class VerwerfenTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(texte[0].finalized)  # ... damit der Zug normal endet
         self.assertEqual(meldungen, [{"type": "stimme", "ergebnis": "fremd", "wert": 0.12, "modus": "streng", "ignoriert": True}])
 
-    async def test_eigen_unklar_und_kurz_gehen_unveraendert_durch(self):
-        for art in (EIGEN, UNKLAR, KURZ):
-            waechter = StimmWaechter(bereites_gate(), AttrappePruefer(urteil(art)))
+    async def test_das_ersatztranskript_traegt_den_zeitstempel_des_originals(self):
+        """Die Oberfläche hat den Text schon (Pipecat meldet das Transkript beim Verlassen der Spracherkennung). Das Ersatztranskript ohne Text
+        mit demselben Zeitstempel nimmt ihn dort wieder aus dem Untertitel (ui/src/lib/wamo.ts, nutzerTranskript)."""
+        original = final("Schließ die Tür")
+        texte, _ = await durchlassen(StimmWaechter(bereites_gate(), AttrappePruefer(urteil(FREMD))), [original])
+        self.assertEqual((texte[0].text, texte[0].timestamp, texte[0].user_id), (" ", original.timestamp, original.user_id))
+        self.assertIsNot(texte[0], original)
+
+    async def test_unklar_mit_niedrigem_wert_wird_verworfen_und_als_unklar_gemeldet(self):
+        waechter = StimmWaechter(bereites_gate(), AttrappePruefer(urteil(UNKLAR, secs=1.1, wert=0.31)))
+        with mock.patch.object(stimme_waechter.logger, "info") as info:
+            texte, meldungen = await durchlassen(waechter, [final("Was gibt es heute in der Kantine")])
+        self.assertEqual(info.call_args.args[1:], ("unklare", 0.31, 1.1))  # nie ein Inhalt im Log
+        self.assertNotIn("Kantine", repr(info.call_args))
+        self.assertEqual(texte[0].text.strip(), "")
+        self.assertEqual(meldungen, [{"type": "stimme", "ergebnis": "unklar", "wert": 0.31, "modus": "streng", "ignoriert": True}])
+
+    async def test_eigen_kurz_und_unsicheres_gehen_unveraendert_durch(self):
+        for u in (urteil(EIGEN, secs=1.6, wert=0.73), urteil(KURZ, secs=0.8, wert=0.62), urteil(UNKLAR, secs=1.5, wert=0.45),
+                  urteil(UNKLAR, secs=2.0, wert=0.12, ueberlappung=True), urteil(UNKLAR, wert=None)):
+            waechter = StimmWaechter(bereites_gate(), AttrappePruefer(u))
             texte, meldungen = await durchlassen(waechter, [final("Hallo WAMO")])
-            self.assertEqual([t.text for t in texte], ["Hallo WAMO"], art)
-            self.assertEqual(meldungen, [], art)
+            self.assertEqual([t.text for t in texte], ["Hallo WAMO"], u)
+            self.assertEqual(meldungen, [], u)
 
     async def test_endgueltiges_transkript_mit_satzzeichen_meldet_das_satzende(self):
         for text, erwartet in (("Mach die Heizung an.", 1), ("Wie spät ist es?", 1), ("Stopp!", 1), ("Mach die Heizung", 0),
@@ -124,10 +207,12 @@ class VerwerfenTests(unittest.IsolatedAsyncioTestCase):
         await durchlassen(StimmWaechter(bereites_gate(), pruefer), [final("Mach die Heizung an.")])
         self.assertEqual(pruefer.satzenden, 1)  # auch ein verworfener Satz ist zu Ende
 
-    async def test_fremd_aber_zu_wenig_sprache_geht_durch(self):
-        waechter = StimmWaechter(bereites_gate(), AttrappePruefer(urteil(FREMD, secs=0.6)))
-        texte, _ = await durchlassen(waechter, [final("Ja")])
-        self.assertEqual([t.text for t in texte], ["Ja"])
+    async def test_fremd_und_kurz_wird_verworfen(self):
+        """Seit 16.11.2026: auch wenig Sprache reicht, wenn der Wert klar fremd ist (Journal: 0,15 bei 0,4 s ging bisher durch)."""
+        waechter = StimmWaechter(bereites_gate(), AttrappePruefer(urteil(FREMD, secs=0.4, wert=0.15)))
+        texte, meldungen = await durchlassen(waechter, [final("Ja")])
+        self.assertEqual(texte[0].text.strip(), "")
+        self.assertEqual(meldungen[0]["ignoriert"], True)
 
     async def test_keine_antwort_in_der_frist_gilt_als_unklar_und_geht_durch(self):
         pruefer = AttrappePruefer(urteil(FREMD), dauer=5.0)
@@ -199,33 +284,43 @@ class VerwerfenTests(unittest.IsolatedAsyncioTestCase):
 class ModusTests(unittest.IsolatedAsyncioTestCase):
     async def test_beobachten_und_aus_verwerfen_nie_und_warten_nie(self):
         for modus in ("beobachten", "aus"):
-            pruefer = AttrappePruefer(urteil(FREMD))
-            waechter = StimmWaechter(bereites_gate(modus), pruefer)
-            texte, meldungen = await durchlassen(waechter, [final("Hallo")])
-            self.assertEqual([t.text for t in texte], ["Hallo"], modus)
-            self.assertEqual((meldungen, pruefer.fragen), ([], []), modus)
+            for u in (urteil(FREMD), urteil(FREMD, secs=0.4), urteil(UNKLAR, wert=0.31)):  # auch nicht nach der strengeren Regel
+                pruefer = AttrappePruefer(u)
+                waechter = StimmWaechter(bereites_gate(modus), pruefer)
+                texte, meldungen = await durchlassen(waechter, [final("Hallo")])
+                self.assertEqual([t.text for t in texte], ["Hallo"], (modus, u))
+                self.assertEqual((meldungen, pruefer.fragen), ([], []), (modus, u))
 
     async def test_ohne_abdruck_wird_nichts_verworfen_und_nicht_gewartet(self):
-        gate = bereites_gate()
-        gate.setze_abdruck(None)
-        pruefer = AttrappePruefer(urteil(FREMD))
-        texte, _ = await durchlassen(StimmWaechter(gate, pruefer), [final("Hallo")])
-        self.assertEqual([t.text for t in texte], ["Hallo"])
-        self.assertEqual(pruefer.fragen, [])
+        for u in (urteil(FREMD), urteil(UNKLAR, wert=0.31)):
+            gate = bereites_gate()
+            gate.setze_abdruck(None)
+            pruefer = AttrappePruefer(u)
+            texte, _ = await durchlassen(StimmWaechter(gate, pruefer), [final("Hallo")])
+            self.assertEqual([t.text for t in texte], ["Hallo"], u)
+            self.assertEqual(pruefer.fragen, [], u)
 
     async def test_ist_das_modell_nicht_bereit_geht_alles_durch(self):
-        gate = bereites_gate()
-        gate.modell_ok = False
-        pruefer = AttrappePruefer(urteil(FREMD))
-        texte, _ = await durchlassen(StimmWaechter(gate, pruefer), [final("Hallo")])
-        self.assertEqual([t.text for t in texte], ["Hallo"])
+        for u in (urteil(FREMD), urteil(UNKLAR, wert=0.31)):
+            gate = bereites_gate()
+            gate.modell_ok = False
+            pruefer = AttrappePruefer(u)
+            texte, _ = await durchlassen(StimmWaechter(gate, pruefer), [final("Hallo")])
+            self.assertEqual([t.text for t in texte], ["Hallo"], u)
 
     async def test_eigene_schwellen_gelten_fuer_die_mindestdauer(self):
         gate = bereites_gate()
-        gate.schwellen = type(gate.schwellen)(min_secs=3.0)
+        gate.schwellen = Schwellen(verwerfen_min_secs=3.0)
         waechter = StimmWaechter(gate, AttrappePruefer(urteil(FREMD, secs=2.0)))
         texte, _ = await durchlassen(waechter, [final("Hallo")])
         self.assertEqual([t.text for t in texte], ["Hallo"])
+
+    async def test_die_mindestdauer_fuer_eigen_zaehlt_nicht_mehr_fuer_das_verwerfen(self):
+        gate = bereites_gate()
+        gate.schwellen = Schwellen(min_secs=3.0)
+        waechter = StimmWaechter(gate, AttrappePruefer(urteil(FREMD, secs=2.0)))
+        texte, _ = await durchlassen(waechter, [final("Hallo")])
+        self.assertEqual(texte[0].text.strip(), "")
 
 
 class MitEchtemPrueferTests(unittest.IsolatedAsyncioTestCase):
@@ -262,6 +357,25 @@ class MitEchtemPrueferTests(unittest.IsolatedAsyncioTestCase):
         await self.sprechen(8000, 2.0)  # danach die Person
         texte, meldungen = await durchlassen(self.waechter, [final("Mach die Heizung an")])
         self.assertEqual([t.text for t in texte], ["Mach die Heizung an"])
+        self.assertEqual(meldungen, [])
+
+    async def test_kurze_fremde_aeusserung_wird_verworfen_ein_kurzes_eigenes_ja_nicht(self):
+        await self.sprechen(-8000, 0.4)  # ein Gast, kurz
+        texte, meldungen = await durchlassen(self.waechter, [final("Ja.")])
+        self.assertEqual(texte[0].text.strip(), "")
+        self.assertTrue(meldungen[0]["ignoriert"])
+        self.pruefer.on_turn_end()
+        await self.sprechen(8000, 0.4)  # die Person, ebenso kurz: Urteil kurz, geht durch
+        texte, meldungen = await durchlassen(self.waechter, [final("Ja.")])
+        self.assertEqual([t.text for t in texte], ["Ja."])
+        self.assertEqual(meldungen, [])
+
+    async def test_fremde_stimme_waehrend_wamo_spricht_geht_durch(self):
+        """Echo oder Überlappung: unklar, der Satz geht durch wie bisher (nur Werkzeuge bleiben gesperrt)."""
+        self.pruefer.on_bot_speaking(True)
+        await self.sprechen(-8000, 2.0)
+        texte, meldungen = await durchlassen(self.waechter, [final("Schließ die Tür")])
+        self.assertEqual([t.text for t in texte], ["Schließ die Tür"])
         self.assertEqual(meldungen, [])
 
     async def test_spaetes_transkript_bekommt_das_urteil_seiner_aeusserung(self):

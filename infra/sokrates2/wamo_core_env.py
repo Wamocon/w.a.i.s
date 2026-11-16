@@ -66,6 +66,8 @@ ERLAUBT = set(PFLICHT) | {
     # (Standard /var/cache/wamo-core/wamo/sprecher/nemo_en_titanet_large.onnx). Keine Geheimnisse.
     "WAMO_STIMME_PRUEFUNG", "WAMO_STIMME_EIGEN_MIN", "WAMO_STIMME_FREMD_MAX", "WAMO_STIMME_MIN_SECS", "WAMO_STIMME_VERTRAUEN_SECS",
     "WAMO_STIMME_KURZ_VERTRAUEN_SECS",
+    # Verwerfen im Modus streng (voice-core/stimme_waechter.py): unklare Äußerungen unter diesem Wert (Standard 0,4), Mindestsprache (Standard 0)
+    "WAMO_STIMME_VERWERFEN_MAX", "WAMO_STIMME_VERWERFEN_MIN_SECS",
     "WAMO_STIMME_MODELL",
     # Sprachpakete A und B (voice-core/soniox_tts.py, persona.py, bot.py, learning.py, soft_interrupt.py, ja_waechter.py):
     # Tempo und Pausen der Stimme, Leerzeichen am Satzende, Persona, Pausen-Texte, Lernen, Rückmeldelaut bei Werkzeug, Ja-Wächter

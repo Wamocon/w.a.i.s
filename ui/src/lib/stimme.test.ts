@@ -13,6 +13,7 @@ import {
   abdruckProzent,
   abdruckStatusText,
   ergebnisText,
+  ignoriertHinweis,
   kannEinlernen,
   kannLoeschen,
   modusText,
@@ -203,8 +204,9 @@ test("der Vorlesetext ist Der Nordwind und die Sonne mit echten Umlauten", () =>
 
 const fremdIgnoriert = (s = bereit, wert: number | null = 0.12) =>
   stimmeErgebnisAnwenden(s, { ergebnis: "fremd", wert, modus: "streng", ignoriert: true });
+const unklarIgnoriert = (s = bereit) => stimmeErgebnisAnwenden(s, { ergebnis: "unklar", wert: 0.31, modus: "streng", ignoriert: true });
 
-test("ignoriert gilt nur für ein fremdes Ergebnis und zählt jede verworfene Äußerung", () => {
+test("ignoriert gilt für ein fremdes (und ein unklares) Ergebnis, nie für ein eigenes, und zählt jede verworfene Äußerung", () => {
   const eins = fremdIgnoriert();
   assert.equal(eins.ignoriert, true);
   assert.equal(eins.ignoriertZaehler, 1);
@@ -238,4 +240,29 @@ test("Modul in der Kopfzeile: Fremd · ignoriert, gelb, der title nennt den Wert
 
 test("Zeile Letzte Äußerung in den Einstellungen nennt das Ignorieren", () => {
   assert.equal(ergebnisText(fremdIgnoriert()), "Fremde Stimme 0,12, ignoriert");
+  assert.equal(ergebnisText(unklarIgnoriert()), "Unklar 0,31, ignoriert");
+});
+
+// ---------- unklare Stimme ignoriert (strenger Wächter seit 16.11.2026, voice-core/stimme_waechter.py) ----------
+
+test("ein verworfenes unklares Ergebnis zählt wie ein fremdes", () => {
+  const eins = unklarIgnoriert();
+  assert.equal(eins.ignoriert, true);
+  assert.equal(eins.ignoriertZaehler, 1);
+  assert.equal(fremdIgnoriert(eins).ignoriertZaehler, 2);
+});
+
+test("Modul in der Kopfzeile: Unklar · ignoriert, gelb, mit Wert im title", () => {
+  const modul = stimmeModul(unklarIgnoriert());
+  assert.equal(modul?.text, "Unklar · ignoriert");
+  assert.equal(modul?.an, "warn");
+  assert.match(modul?.titel ?? "", /0,31/);
+  assert.match(modul?.titel ?? "", /Sprachmodell nicht erreicht/);
+  assert.equal(stimmeModul(stimmeErgebnisAnwenden(bereit, { ergebnis: "unklar", wert: 0.45, modus: "streng" }))?.text, "Unklar 0,45");
+});
+
+test("der kurze Hinweis nennt, warum ignoriert wurde", () => {
+  assert.equal(ignoriertHinweis("fremd"), "Fremde Stimme ignoriert");
+  assert.equal(ignoriertHinweis("unklar"), "Stimme nicht sicher erkannt, ignoriert");
+  assert.equal(ignoriertHinweis(null), "Fremde Stimme ignoriert");
 });
