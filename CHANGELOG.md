@@ -6,6 +6,24 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.5.0] - 2026-11-16
+
+### Hinzugefügt
+
+- Stimmwächter verwirft auch kurze fremde und unklare Äußerungen, Untertitel nehmen sie zurück
+- Hören und Stimme im Haus wählbar machen, Soniox bleibt Standard (H5, Messung M7)
+- Modelle und Sprache je Person umschaltbar (Migration 0024)
+- Stimme im Haus gestreamt, erstes Audio 0,14 statt 0,6 bis 2,8 s (Durchreiche des Gateways, Test zuerst)
+
+### Behoben
+
+- Rauchtest-Attrappe für Claude Code darf auf Platz 9 wieder laufen
+- Lasttest findet die cgroup der Kern-Slots im Slice system-wamo\x2dcore.slice
+- Satzende-Marker: unsichere Antwort und eigener Denkausdruck sind kein Grund zu warten (W2 schwieg mit ◐, Test zuerst)
+- Review-Befunde und freigegebene Stimmen im Haus (sohee, uncle_fu, ono_anna)
+- TTS-Dienst nimmt nur bekannte Formate (CodeQL Pfad aus Nutzerwert) und hält den Puffer auch unter GPU-Last
+- Dateiendung des TTS-Dienstes nur aus der Formattabelle (CodeQL py/path-injection)
+
 ## [0.4.1] - 2026-11-16
 
 ### Behoben
@@ -816,7 +834,8 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.1...HEAD
+[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.2.0...v0.3.0
