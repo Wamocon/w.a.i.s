@@ -586,8 +586,8 @@ Sitzungen), so meldet `zuruecksetzen` nie fälschlich "abgeschlossen".
 Einstellung in GoTrue wirkt in frischen Sitzungen nicht (Nr. 1). Der Browser kann `updateUser` deshalb nicht direkt aufrufen. Weg in P1b: eine Route des Kerns
 `POST /wamo/api/erstanmeldung/passwort`, nur im Stand `offen`, nie für Laborprofile, mit aal2 und Ratengrenze; der Kern reicht das Passwort mit dem eigenen
 Token der Person über Loopback an GoTrue weiter (Envoy `127.0.0.1:55321`, wie `wamo_nutzer.py`), ohne Service-Schlüssel und ohne Log des Inhalts. Die Sperre in Caddy
-bleibt unverändert, das Labor ist weiter geschützt. Ein kompromittierter Kern gewinnt damit nichts Neues (er sieht die Bearer-Tokens ohnehin und erreicht Loopback,
-S4). Spätere Möglichkeit ohne Passwort im Kern: `forward_auth` in Caddy auf eine Prüfroute des Kerns (Änderung am Caddy, nur bei Bedarf).
+bleibt unverändert, das Labor ist weiter geschützt. Bedingung dafür: Envoy 55321 ist aus dem Büro-LAN nicht erreichbar (Firewall Stufe 2, `WAMO_FW_HTTP_NUR_INTERN=ja`, `infra/sokrates2/wamo-firewall.sh`); am 16.11.2026 geprüft, die Kette `WAMO-FW-HTTP` lässt nur Loopback und das Caddy-Netz durch. Ein Rückfall auf Stufe 1 öffnet den Passwortwechsel für jedes aal2-Token aus dem LAN, auch für Laborgäste. Ein kompromittierter Kern gewinnt damit nichts Neues (er sieht die Bearer-Tokens ohnehin und erreicht Loopback,
+S4). Umgesetzt in P1b: Sperre zentral in `auth_gate.erstanmeldung_sperre`, Ausnahme nur mit `identitaet(request, weg_frei=True)` in den beiden Routen der Erstanmeldung. Spätere Möglichkeit ohne Passwort im Kern: `forward_auth` in Caddy auf eine Prüfroute des Kerns (Änderung am Caddy, nur bei Bedarf).
 
 **Befund für das Labor (an Niko).** Die Einstellung `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` schützt frische Laborsitzungen nicht. Geschützt sind
 die Laborplätze durch die Sperre in Caddy, die seit dem 12.11. aktiv ist. Bis zum Labortag nichts ändern, die Sperre in Caddy darf nicht fallen.

@@ -2,6 +2,7 @@
 
 import { merkeAbmeldeGrund } from "@/lib/anmeldung";
 import { betriebsartAktuell, kernUrl } from "@/lib/betriebsart";
+import { sperrSatzAus } from "@/lib/erstanmeldung";
 import { accessToken, getSupabase } from "@/lib/supabase";
 import { dateiPruefen } from "@/lib/teilenHilfe";
 
@@ -13,7 +14,8 @@ export * from "@/lib/teilenHilfe";
  * dem Token der Sitzung. Das Token geht nur an https oder an Loopback. Keine Cookies, kein Cache, keine Umleitungen.
  * Die Zeitgrenze gilt einschließlich Lesen der Antwort. Bei 401 einmal das Token erneuern; lässt es sich nicht
  * erneuern oder meldet der Kern eine zu alte Anmeldung, wird wie bei "sitzung_beendet" lokal abgemeldet (die
- * Anmeldemaske zeigt den Grund). Fehler kommen als KernFehler mit dem Text des Kerns (ohne interne Details).
+ * Anmeldemaske zeigt den Grund). Dasselbe gilt für 403 mit den Codes der Erstanmeldung (passwort_wechsel_noetig, startpasswort_abgelaufen,
+ * lib/erstanmeldung.ts): Der Satz sagt, dass die Person sich neu anmelden soll; die Tür führt dann zum Passwortwechsel. Fehler kommen als KernFehler mit dem Text des Kerns (ohne interne Details).
  */
 
 export class KernFehler extends Error {
@@ -78,6 +80,12 @@ async function fehlerAus(antwort: Response): Promise<KernFehler> {
     if (typeof kennung === "string" && /^[a-z0-9_]{1,40}$/.test(kennung)) code = kennung;
   } catch {
     // kein JSON: Standardtext
+  }
+  // Der Kern sperrt wegen der Erstanmeldung: statt des Profilsatzes ein Satz mit Hinweis auf neues Anmelden, und abmelden
+  const sperre = sperrSatzAus(antwort.status, code);
+  if (sperre) {
+    abmelden(sperre);
+    return new KernFehler(antwort.status, sperre, code);
   }
   return new KernFehler(antwort.status, text, code);
 }

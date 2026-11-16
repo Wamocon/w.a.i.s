@@ -11,6 +11,10 @@ Prüfung je HTTP-Anfrage an den Pipecat-Runner (/start, /api/offer, /sessions/..
      ebenfalls abgelehnt (fail-closed). Der eigene WAMO-Stack hat eine geschlossene Registrierung
      (Konten legt nur der Admin an); trotzdem gibt allein ein aktives WAMO-Profil Zugang. Eine
      laufende Sitzung prüft das Profil zusätzlich jede Minute neu (bot.py, SessionGuard).
+  2a. Erstanmeldung (Ausrollen P1b): Für Profile ohne labor_art liest das Gate den Stand aus wamo_auth.erstanmeldung_stand (Cache: offen
+     und abgelaufen 10 s, keine und erledigt wie das Profil). Bei offen und abgelaufen sind nur GET /wamo/api/erstanmeldung und
+     POST /wamo/api/erstanmeldung/passwort erlaubt (exakt über raw_path), alles andere 403 mit Code passwort_wechsel_noetig oder startpasswort_abgelaufen. Fehlen Schema, Funktion
+     oder Recht oder kommt ein unbekannter Wert: 503 (fail-closed) und eine Logzeile. Für Laborprofile wird der Stand nie gelesen.
   Statuscodes (so wertet sie die Oberfläche aus): 401 = Token fehlt, ist ungültig oder abgelaufen
   ("Anmeldung abgelehnt"); 403 = Token gültig, aber zweiter Faktor fehlt (aal1) oder kein aktives
   Profil ("kein aktives WAMO-Profil oder zweiter Faktor fehlt"); 503 = Anmeldedienst (JWKS, GoTrue)
@@ -54,7 +58,7 @@ import os
 import ssl
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -65,7 +69,16 @@ from loguru import logger
 import labor
 import labor_durchlauf
 import labor_limit
-from memory import ANREDEN, ROLLEN, DatabaseUnavailable, Profile, ProfileDirectory, normalize_uuid, shared_database
+from memory import (
+    ANREDEN,
+    ROLLEN,
+    DatabaseUnavailable,
+    ErstanmeldungFehlt,
+    Profile,
+    ProfileDirectory,
+    normalize_uuid,
+    shared_database,
+)
 from wamo_tls import https_context
 
 TOKEN_CACHE_SECS = 60  # geprüfte Tokens so lange merken: ICE-Updates kommen im Sekundentakt
@@ -78,6 +91,22 @@ MAX_NAME_CHARS = 60
 ANMELDUNG_MAX_STUNDEN = 168.0  # Standard: 7 Tage ab Passwort und Code
 ANMELDUNG_MAX_STUNDEN_GRENZE = 720.0  # mehr als 30 Tage lässt sich nicht einstellen
 CODE_ZU_ALT = "anmeldung_zu_alt"
+
+# Erstanmeldung (Ausrollen P1b, Zweig A): Stand aus wamo_auth.erstanmeldung_stand, nur für Profile ohne labor_art
+ERSTANMELDUNG_STAENDE = ("keine", "offen", "abgelaufen", "erledigt")
+ERSTANMELDUNG_FREI = ("keine", "erledigt")
+CODE_PASSWORT_WECHSEL = "passwort_wechsel_noetig"
+CODE_STARTPASSWORT_ABGELAUFEN = "startpasswort_abgelaufen"
+ERSTANMELDUNG_SPERRE: dict[str, tuple[str, str]] = {  # Stand -> (Code, Satz für die Person)
+    "offen": (CODE_PASSWORT_WECHSEL, "Bitte ändere zuerst dein Startpasswort."),
+    "abgelaufen": (CODE_STARTPASSWORT_ABGELAUFEN, "Dein Startpasswort ist abgelaufen. Bitte melde dich bei Niko."),
+}
+ERSTANMELDUNG_GESPERRT_SECS = 10.0  # offen und abgelaufen: der Wechsel soll schnell wirken; keine und erledigt wie das Profil
+ERSTANMELDUNG_PFAD = "/wamo/api/erstanmeldung"
+ERSTANMELDUNG_PASSWORT_PFAD = "/wamo/api/erstanmeldung/passwort"
+ERSTANMELDUNG_WEGE = (("GET", ERSTANMELDUNG_PFAD), ("POST", ERSTANMELDUNG_PASSWORT_PFAD))  # im Stand offen und abgelaufen nur diese
+HINWEIS_WAMO_AUTH = "wamo_auth fehlt: zuerst wamo-auth-einrichten.sh"
+GRUND_ERSTANMELDUNG = "Anmeldeprüfung nicht möglich"
 
 
 def anmeldung_max_secs() -> float:
@@ -134,6 +163,9 @@ class Identity:
     labor_art: str | None = None
     labor_platz: int | None = None
     labor_aktiv: bool = False
+    # Stand der Erstanmeldung, wie ihn das Gate gelesen hat (None bei Laborprofilen und ohne Prüfung); zählt nicht beim Vergleich,
+    # reist nicht im Body. Die Prüfliste (einrichtung_api.erstanmeldung_stand) liest ihn hier.
+    erstanmeldung: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labor_art", labor.art_normalisieren(self.labor_art))
@@ -185,10 +217,64 @@ class Decision:
     status: int = 200
     reason: str = ""
     code: str | None = None  # maschinenlesbar für die Oberfläche, z. B. anmeldung_zu_alt
+    erstanmeldung: str | None = None  # Stand der Erstanmeldung (ERSTANMELDUNG_STAENDE); None bei Laborprofilen und ohne Profil
 
 
 class ProfileLookup(Protocol):
     async def get(self, user_id: str) -> Profile | None: ...
+
+    async def erstanmeldung_stand(self, user_id: str) -> object: ...
+
+    async def erstanmeldung_begonnen(self, user_id: str) -> bool: ...
+
+
+# Logzeile zu fehlendem wamo_auth höchstens einmal je HINWEIS_ABSTAND_SECS je Prozess (die Antwort bleibt immer 503)
+HINWEIS_ABSTAND_SECS = 10.0
+_hinweis_um: float | None = None
+_uhr_hinweis: Callable[[], float] = time.monotonic  # nur Tests ersetzen sie
+
+
+def _hinweis_wamo_auth(grund: str) -> None:
+    global _hinweis_um
+    jetzt = _uhr_hinweis()
+    if _hinweis_um is not None and jetzt - _hinweis_um < HINWEIS_ABSTAND_SECS:
+        return
+    _hinweis_um = jetzt
+    logger.error("Zugangskontrolle: {} ({})", HINWEIS_WAMO_AUTH, grund)
+
+
+def erstanmeldung_pfad(methode: object, pfad: object, raw_path: object = None, query_string: object = b"") -> bool:
+    """Ist die Anfrage genau einer der Wege der Erstanmeldung (ERSTANMELDUNG_WEGE: GET /wamo/api/erstanmeldung, POST
+    /wamo/api/erstanmeldung/passwort)? Nur sie sind im Stand offen und abgelaufen erlaubt. Exakt wie labor.pfad_pruefen: kein Präfix, kein
+    Schrägstrich am Ende, keine Großschreibung; raw_path (ASGI, wie empfangen) muss Byte für Byte der Pfad sein (keine Prozentcodierung,
+    kein //, keine Punktsegmente). Dazu keine Query: die Routen kennen keine Parameter."""
+    if not isinstance(methode, str) or not isinstance(pfad, str) or (methode, pfad) not in ERSTANMELDUNG_WEGE:
+        return False
+    if not isinstance(query_string, (bytes, bytearray)) or query_string:
+        return False
+    if raw_path is None:  # Server ohne raw_path: der dekodierte Pfad allein entscheidet
+        return True
+    return isinstance(raw_path, (bytes, bytearray)) and bytes(raw_path) == pfad.encode("ascii")
+
+
+def erstanmeldung_sperre(entscheidung: object, *, weg_frei: bool = False) -> Decision | None:
+    """Abgelehnte Entscheidung, wenn der Stand der Erstanmeldung den Zugang sperrt, sonst None. Für jeden Aufrufer von authorize gleich
+    (AccessGate.authorize, Middleware, wamo_api.identitaet, bild_fern.py); nur die Wege der Erstanmeldung setzen weg_frei=True.
+    Liest Identität und Stand über getattr, damit auch eine fremde Entscheidung geprüft wird. Frei sind nur: eine schon abgelehnte
+    Entscheidung, ein Laborprofil (es hat keinen Stand) und die Stände keine und erledigt. Ein fehlender oder unbekannter Stand bei
+    einer Identität ohne Laborart sperrt mit 503 (fail-closed), offen und abgelaufen mit 403 und Code."""
+    if weg_frei:
+        return None
+    identitaet = getattr(entscheidung, "identity", None)
+    if identitaet is None or labor.ist_labor(identitaet):
+        return None
+    stand = getattr(entscheidung, "erstanmeldung", None)
+    if isinstance(stand, str) and stand in ERSTANMELDUNG_FREI:
+        return None
+    if isinstance(stand, str) and stand in ERSTANMELDUNG_SPERRE:
+        code, satz = ERSTANMELDUNG_SPERRE[stand]
+        return Decision(None, 403, satz, code=code, erstanmeldung=stand)
+    return Decision(None, 503, GRUND_ERSTANMELDUNG)
 
 
 @dataclass(frozen=True)
@@ -351,7 +437,7 @@ class TokenVerifier:
 
 
 class AccessGate:
-    """Token plus aktives Profil. Jede Unsicherheit führt zur Ablehnung."""
+    """Token plus aktives Profil plus Stand der Erstanmeldung. Jede Unsicherheit führt zur Ablehnung."""
 
     def __init__(
         self,
@@ -364,8 +450,13 @@ class AccessGate:
         self.profiles = profiles
         self._clock = clock
         self._cache: dict[str, tuple[float, Profile | None]] = {}
+        self._staende: dict[str, tuple[float, str]] = {}  # user_id -> (gültig bis, Stand der Erstanmeldung)
+        # user_id -> Epoche: stand_vergessen zählt hoch; ein Leser, der vor seinem await eine ältere Epoche sah, schreibt nicht in den Cache
+        self._epochen: dict[str, int] = {}
 
-    async def authorize(self, token: str) -> Decision:
+    async def authorize(self, token: str, *, weg_frei: bool = False) -> Decision:
+        """Entscheidung für eine Anfrage. weg_frei=True nur für die Wege der Erstanmeldung: dann gibt es die Identität auch in den
+        Ständen offen und abgelaufen (die Entscheidung trägt den Stand mit), sonst 403 mit Code (erstanmeldung_sperre)."""
         result = await self.verifier.check(token)
         user_id = result.user_id
         if user_id is None:
@@ -399,7 +490,51 @@ class AccessGate:
             labor_platz=profile.labor_platz if art is not None else None,
             labor_aktiv=art is not None,
         )
-        return Decision(identity)
+        if art is not None:  # Laborprofil: den Stand nie abfragen (eine fehlende Funktion darf das Labor nie auf 503 setzen)
+            return Decision(identity)
+        try:
+            stand = await self.erstanmeldung_stand(profile.user_id)
+        except DatabaseUnavailable:  # auch ErstanmeldungFehlt (Schema, Funktion, Recht oder Wert): fail-closed
+            return Decision(None, 503, GRUND_ERSTANMELDUNG)
+        except Exception:  # fail-closed: unbekannte Fehler dürfen nie Zugang geben
+            logger.exception("Zugangskontrolle: Erstanmeldung nicht lesbar")
+            return Decision(None, 503, GRUND_ERSTANMELDUNG)
+        entscheidung = Decision(replace(identity, erstanmeldung=stand), erstanmeldung=stand)
+        return erstanmeldung_sperre(entscheidung, weg_frei=weg_frei) or entscheidung
+
+    async def erstanmeldung_stand(self, user_id: str) -> str:
+        """Stand der Erstanmeldung eines Profils (nie für Laborprofile aufrufen), mit Cache: offen und abgelaufen
+        ERSTANMELDUNG_GESPERRT_SECS, keine und erledigt PROFILE_HIT_SECS. Fehler werden nie gecacht. Fehlen Schema, Funktion oder Recht
+        oder kommt ein unbekannter Wert: ErstanmeldungFehlt (fail-closed, 503) und die Logzeile HINWEIS_WAMO_AUTH (gedrosselt).
+        Hat stand_vergessen den Stand während des Lesens verworfen, bekommt dieser Aufrufer seinen Wert, der Cache aber nicht."""
+        now = self._clock()
+        cached = self._staende.get(user_id)
+        if cached and cached[0] > now:
+            return cached[1]
+        epoche = self._epochen.get(user_id, 0)
+        try:
+            stand = await self.profiles.erstanmeldung_stand(user_id)
+        except ErstanmeldungFehlt as e:
+            _hinweis_wamo_auth(str(e))
+            raise
+        if not isinstance(stand, str) or stand not in ERSTANMELDUNG_STAENDE:
+            _hinweis_wamo_auth("unbekannter Stand der Erstanmeldung")
+            raise ErstanmeldungFehlt("unbekannter Stand")
+        if self._epochen.get(user_id, 0) == epoche:  # sonst ist der Wert älter als ein neuerer Leser (Wettlauf)
+            ttl = ERSTANMELDUNG_GESPERRT_SECS if stand in ERSTANMELDUNG_SPERRE else PROFILE_HIT_SECS
+            self._staende = {k: v for k, v in self._staende.items() if v[0] > now}
+            self._staende[user_id] = (now + ttl, stand)
+        return stand
+
+    def stand_vergessen(self, user_id: str) -> None:
+        """Vergisst den gecachten Stand der Erstanmeldung dieses Profils (die Routen der Erstanmeldung lesen ihn danach neu) und macht
+        jeden noch laufenden älteren Leser ungültig, damit er keinen veralteten Stand in den Cache schreibt."""
+        self._staende.pop(user_id, None)
+        self._epochen[user_id] = self._epochen.get(user_id, 0) + 1
+
+    async def begonnen(self, user_id: str) -> bool:
+        """Beginn der Erstanmeldung vermerken (wamo_auth.erstanmeldung_begonnen; nie für Laborprofile). Fehler gehen an den Aufrufer."""
+        return await self.profiles.erstanmeldung_begonnen(user_id) is True
 
     async def _profile(self, user_id: str) -> Profile | None:
         now = self._clock()
@@ -531,7 +666,10 @@ class AccessMiddleware:
 
         auth = next((v.decode("latin-1") for k, v in scope["headers"] if k == b"authorization"), "")
         token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
-        decision = await self.gate.authorize(token)
+        # Erstanmeldung offen oder abgelaufen: nur die Wege der Erstanmeldung (exakt, raw_path); alles andere 403, auch Start und Offer
+        frei = erstanmeldung_pfad(scope["method"], scope["path"], scope.get("raw_path"), scope.get("query_string", b""))
+        decision = await self.gate.authorize(token, weg_frei=frei)
+        decision = erstanmeldung_sperre(decision, weg_frei=frei) or decision
         if decision.identity is None:
             logger.warning("Zugang abgelehnt: {} {} ({})", scope["method"], scope["path"], decision.reason)
             await _reject(send, decision.status, decision.reason, decision.code)
@@ -565,7 +703,7 @@ async def _reject(send, status: int, reason: str, code: str | None = None) -> No
     if code:
         daten["code"] = code
     body = json.dumps(daten, ensure_ascii=False).encode("utf-8")
-    headers = [(b"content-type", b"application/json; charset=utf-8")]
+    headers = [(b"content-type", b"application/json; charset=utf-8"), (b"cache-control", b"no-store")]  # Ablehnungen nie zwischenspeichern
     if status == 401:
         headers.append((b"www-authenticate", b"Bearer"))
     await send({"type": "http.response.start", "status": status, "headers": headers})

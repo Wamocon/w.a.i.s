@@ -291,6 +291,9 @@ class SessionGuardTests(unittest.IsolatedAsyncioTestCase):
                 raise self.error
             return self.profile
 
+        async def erstanmeldung_stand(self, user_id):  # test_erstanmeldung.py prüft die anderen Stände
+            return "erledigt"
+
     def profile(self, aktiv=True, rolle="admin"):
         from memory import Profile
         return Profile(user_id=USER, name="Erika", rolle=rolle, aktiv=aktiv, anrede="du")

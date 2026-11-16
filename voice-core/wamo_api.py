@@ -29,12 +29,12 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 
-from auth_gate import AccessGate, Identity
+from auth_gate import AccessGate, Identity, erstanmeldung_sperre
 
 PRAEFIX = "/wamo/api"
 ROUTEN_MODULE = ("geraet_api", "hinweise_api", "teilen_api", "geraete_api", "einwilligung_api", "modellzugang_api",
                  "geraete_admin_api", "rd_api", "release_api", "buero_api", "vorgaenge_api", "gedaechtnis_api",
-                 "einrichtung_api", "mitglieder_admin_api", "verteilung_api")
+                 "einrichtung_api", "mitglieder_admin_api", "verteilung_api", "erstanmeldung_api")
 MAX_JSON_BYTES = 64 * 1024
 
 _gate: AccessGate | None = None
@@ -57,13 +57,25 @@ def bearer(request: Request) -> str:
     return werte[0][7:].strip()
 
 
-async def identitaet(request: Request) -> Identity:
-    """Geprüfte Identität der Anfrage (wie in der Middleware). Wirft HTTPException mit 401, 403 oder 503."""
+class Abgelehnt(HTTPException):
+    """Ablehnung durch die Zugangskontrolle: HTTPException mit dem Code der Entscheidung (z. B. passwort_wechsel_noetig oder None)
+    und immer Cache-Control: no-store."""
+
+    def __init__(self, status: int, detail: str, code: str | None = None):
+        super().__init__(status, detail, headers={"Cache-Control": "no-store"})
+        self.code = code
+
+
+async def identitaet(request: Request, *, weg_frei: bool = False) -> Identity:
+    """Geprüfte Identität der Anfrage (wie in der Middleware). Wirft Abgelehnt (HTTPException) mit 401, 403 oder 503.
+    Im Stand offen oder abgelaufen der Erstanmeldung 403, außer weg_frei=True (nur die Wege der Erstanmeldung, erstanmeldung_api.py).
+    Die Sperre gilt hier zusätzlich zur Middleware, auch wenn das Tor sie selbst nicht setzt."""
     if _gate is None:
-        raise HTTPException(503, "Zugangskontrolle nicht eingerichtet")
-    entscheidung = await _gate.authorize(bearer(request))
+        raise Abgelehnt(503, "Zugangskontrolle nicht eingerichtet")
+    entscheidung = await _gate.authorize(bearer(request), weg_frei=weg_frei)
+    entscheidung = erstanmeldung_sperre(entscheidung, weg_frei=weg_frei) or entscheidung
     if entscheidung.identity is None:
-        raise HTTPException(entscheidung.status, entscheidung.reason or "nicht berechtigt")
+        raise Abgelehnt(entscheidung.status, entscheidung.reason or "nicht berechtigt", entscheidung.code)
     return entscheidung.identity
 
 

@@ -145,7 +145,15 @@ from activity import ActivityReporter
 from ausgaben_kuerzen import Ausgaben, AusgabenKuerzer, register_nachladen
 from audio_monitor import AudioInputMonitor, SpeakerTracker
 import aussprache
-from auth_gate import Identity, anmeldung_max_secs, identity_from_body, install_access_gate, stunden_text
+from auth_gate import (
+    ERSTANMELDUNG_SPERRE,
+    ERSTANMELDUNG_STAENDE,
+    Identity,
+    anmeldung_max_secs,
+    identity_from_body,
+    install_access_gate,
+    stunden_text,
+)
 import entwicklung_betrieb
 from dev_agent import DevAgent, abnahme_befehle_im_betrieb, entwicklung_enabled, entwicklung_problem
 from geraete_werkzeuge import JOB as GERAETE_JOB, Buerogeraete
@@ -536,7 +544,8 @@ def gate_pc_tools(
 
 class SessionGuard:
     """Prüft eine laufende Sitzung regelmäßig (M5): Anmeldung nicht zu alt (WAMO_ANMELDUNG_MAX_STUNDEN, ab Passwort und
-    Code), Profil noch aktiv, Rolle unverändert, maximale Dauer nicht überschritten. Datenbankfehler werden einige Male
+    Code), Profil noch aktiv, Rolle unverändert, maximale Dauer nicht überschritten, Erstanmeldung nicht offen oder abgelaufen
+    (nur Profile ohne labor_art; Fall: der Admin hat zuruecksetzen ausgeführt). Datenbankfehler werden einige Male
     toleriert, dann endet die Sitzung. neu_anmelden: das Ende verlangt eine neue Anmeldung (die Oberfläche meldet ab)."""
 
     def __init__(
@@ -578,17 +587,35 @@ class SessionGuard:
         try:
             profile: Profile | None = await self.lookup.get(self.identity.user_id)
         except Exception as e:  # Datenbank kurz weg: einige Male tolerieren
-            self._failures += 1
-            logger.warning("Profil-Neuprüfung fehlgeschlagen ({}), Versuch {}", type(e).__name__, self._failures)
-            return "Das Profil lässt sich nicht mehr prüfen." if self._failures >= self.max_failures else None
-        self._failures = 0
+            return self._fehler("Profil-Neuprüfung", e)
         if profile is None or not labor.profil_aktiv(profile):  # Laborprofil: nur über labor_aktiv (labor.py)
             return "Das W.A.I.S.-Profil ist nicht mehr aktiv."
         if grund := labor.aenderung(self.identity, profile):  # Art, Freischaltung oder Platz eines Laborprofils geändert
             return grund
         if profile.rolle != self.identity.rolle:
             return "Die Rolle des Profils hat sich geändert."
+        if labor.ist_labor(self.identity):  # Laborprofil: den Stand der Erstanmeldung nie abfragen
+            self._failures = 0
+            return None
+        try:
+            stand = await self.lookup.erstanmeldung_stand(self.identity.user_id)
+        except Exception as e:  # wie bei der Profilprüfung: einige Male tolerieren
+            return self._fehler("Erstanmeldung-Neuprüfung", e)
+        if not isinstance(stand, str) or stand not in ERSTANMELDUNG_STAENDE:
+            return self._fehler("Erstanmeldung-Neuprüfung", ValueError("unbekannter Stand"))
+        self._failures = 0
+        if stand in ERSTANMELDUNG_SPERRE:  # der Admin hat zuruecksetzen ausgeführt oder die Frist ist vorbei
+            self.neu_anmelden = True
+            return ERSTANMELDUNG_SPERRE[stand][1]
         return None
+
+    def _fehler(self, was: str, e: Exception) -> str | None:
+        """Zählt einen Fehler der Neuprüfung (Profil oder Stand der Erstanmeldung nicht lesbar, auch ein unbekannter Stand) und loggt nur
+        den Fehlertyp. Ab max_failures Fehlern ohne vollständig guten Lauf dazwischen endet die Sitzung; zurückgesetzt wird der Zähler
+        nicht hier, sondern in check(), wenn Profil und Stand gelesen und in Ordnung sind."""
+        self._failures += 1
+        logger.warning("{} fehlgeschlagen ({}), Versuch {}", was, type(e).__name__, self._failures)
+        return "Das Profil lässt sich nicht mehr prüfen." if self._failures >= self.max_failures else None
 
     async def run(self, on_end: Callable[[str], Awaitable[None]]) -> None:
         while True:

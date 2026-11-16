@@ -63,6 +63,9 @@ class FakeProfiles:
             raise self.error
         return self.profiles.get(user_id)
 
+    async def erstanmeldung_stand(self, user_id):  # Erstanmeldung erledigt oder nie verlangt (test_erstanmeldung.py prüft den Rest)
+        return "keine"
+
 
 def profile(user_id=USER, aktiv=True, rolle="admin", anrede="du", name="Erika Muster"):
     return Profile(user_id=user_id, name=name, rolle=rolle, aktiv=aktiv, anrede=anrede)

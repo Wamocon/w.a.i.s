@@ -140,7 +140,8 @@ _laufend: dict[tuple[str, str], asyncio.Future[StandAntwort]] = {}
 
 # ---------- Quellen (Tests ersetzen sie) ----------
 def erstanmeldung_stand(identity: Identity) -> object:
-    """Stand der Erstanmeldung (Paket P1b: erledigt, keine, offen, ...). Bis P1b ihn an die Identität hängt, fehlt er: None."""
+    """Stand der Erstanmeldung, den das Gate an die Identität hängt (Paket P1b: keine, offen, abgelaufen, erledigt; None bei
+    Laborprofilen). Im Stand offen und abgelaufen erreicht niemand diese Route (Sperre im Gate), hier steht also keine oder erledigt."""
     return getattr(identity, "erstanmeldung", None)
 
 

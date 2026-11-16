@@ -2,7 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
+import { Erstanmeldung } from "@/components/erstanmeldung/Erstanmeldung";
+import type { ErstanmeldungKontext } from "@/components/erstanmeldung/typen";
 import { WmcLogo } from "@/components/WmcLogo";
 import { Wortmarke } from "@/components/Wortmarke";
 import {
@@ -16,7 +18,20 @@ import {
   nimmAbmeldeGrund,
   setzeAngemeldetBleiben,
 } from "@/lib/anmeldung";
-import { LANGFORM, LANGFORM_DEUTSCH } from "@/lib/anzeigename";
+import { ANZEIGENAME, LANGFORM, LANGFORM_DEUTSCH } from "@/lib/anzeigename";
+import { betriebsartFuerStart } from "@/lib/betriebsart";
+import {
+  SATZ_ABGELAUFEN,
+  WARNSATZ_CODE,
+  ablaufMerkerAlleLoeschen,
+  ablaufMerkerGesetzt,
+  passwortSetzen,
+  standLaden,
+  tuerEntscheidung,
+  type ErstanmeldungStand,
+} from "@/lib/erstanmeldung";
+import { kernBasis } from "@/lib/kernApi";
+import { istLaborKonto } from "@/lib/stillStart";
 import { getSupabase } from "@/lib/supabase";
 import { unverschluesselteDienste } from "@/lib/umgebung";
 
@@ -25,6 +40,11 @@ import { unverschluesselteDienste } from "@/lib/umgebung";
  * Beim ersten Mal richtet jedes Profil den zweiten Faktor per QR-Code ein. Ob das Konto ein aktives
  * WAMO-Profil hat, prüft der Voice-Core mit demselben Token selbst (voice-core/auth_gate.py);
  * die Oberfläche ist nur die Tür.
+ *
+ * Nach dem zweiten Faktor fragt die Tür den Stand der Erstanmeldung beim Kern (lib/erstanmeldung.ts): "offen" zeigt den geführten
+ * Ablauf (Passwortwechsel und weitere Schritte, components/erstanmeldung), "abgelaufen" nur den Satz zum abgelaufenen Startpasswort.
+ * Alles andere (auch 403 eines Laborprofils, 404 eines alten Kerns, Netzfehler) heißt: weiter wie bisher; der Kern setzt die Sperre
+ * selbst durch. Laborkonten fragen gar nicht erst.
  *
  * "Angemeldet bleiben" (in der Desktop-App vorausgewählt): ohne Haken liegt die Sitzung nur im sessionStorage. Beim
  * Laden und jede Minute prüft die Tür das Alter der Anmeldung (ab Passwort und Code, lib/anmeldung.ts) und meldet ab:
@@ -47,6 +67,8 @@ type Step =
   | { kind: "anmelden" }
   | { kind: "einrichten"; factorId: string; qr: string; secret: string }
   | { kind: "code"; factorId: string }
+  | { kind: "ablauf"; userId: string; email: string | null; stand: ErstanmeldungStand; basis: string }
+  | { kind: "abgelaufen" }
   | { kind: "fertig"; email: string | null };
 
 /**
@@ -81,6 +103,31 @@ async function abmeldenWennZuAlt(): Promise<boolean> {
   }
   await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
   return true;
+}
+
+/**
+ * Zähler der Läufe der Tür (es gibt eine Tür je Seite): Jeder Lauf von nextStep und zumCode zählt hoch, ebenso die Abmeldung
+ * (SIGNED_OUT). Nach jedem await gilt ein Lauf nur noch, wenn er der neueste ist; sonst wirkt seine Antwort nicht mehr (kein "fertig"
+ * oder "ablauf" nach dem Abmelden, kein Überschreiben durch einen älteren Lauf). Bewusst kein useRef: Der Zähler wird nur in
+ * asynchronen Rückrufen gelesen, nie beim Zeichnen.
+ */
+let laufZaehler = 0;
+
+/** Ursprung des Kerns für die Abfrage der Erstanmeldung ("" ohne sicheren Kern); in der Desktop-App erst nach der Antwort des Hauptprogramms. */
+async function kernBasisFuerTuer(): Promise<string> {
+  try {
+    await betriebsartFuerStart();
+    return kernBasis();
+  } catch {
+    return "";
+  }
+}
+
+/** Stand der Erstanmeldung nach dem zweiten Faktor. Laborkonten (Testlabor) fragen nie: dort bleibt alles wie bisher. */
+async function erstanmeldungStand(token: string, email: string | null): Promise<{ stand: ErstanmeldungStand; basis: string }> {
+  if (istLaborKonto(email)) return { stand: "keine", basis: "" };
+  const basis = await kernBasisFuerTuer();
+  return { stand: await standLaden(basis, token), basis };
 }
 
 function CodeField() {
@@ -120,22 +167,39 @@ export function LoginGate({
 
   // Welcher Schritt ist dran? Ohne Sitzung anmelden, mit aal1 Code abfragen oder einrichten.
   const nextStep = useCallback(async () => {
+    const lauf = ++laufZaehler;
+    const aktuell = () => laufZaehler === lauf;
     const supabase = getSupabase();
     if (!supabase) return setStep({ kind: "fehlt" });
     const { data: sessionData } = await supabase.auth.getSession();
+    if (!aktuell()) return;
     if (!sessionData.session) return setStep({ kind: "anmelden" });
     if (await abmeldenWennZuAlt()) return setStep({ kind: "anmelden" }); // Grund zeigt der SIGNED_OUT-Zweig
+    if (!aktuell()) return;
 
     const { data: aal, error: aalError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (!aktuell()) return;
     if (aalError) {
       setError(aalError.message);
       return setStep({ kind: "anmelden" });
     }
     if (aal.currentLevel === "aal2") {
-      return setStep({ kind: "fertig", email: sessionData.session.user.email ?? null });
+      const { user, access_token: token } = sessionData.session;
+      const email = user.email ?? null;
+      const { stand, basis } = await erstanmeldungStand(token, email);
+      if (!aktuell()) return;
+      // Die Abfrage beim Kern kann dauern: Gehört die Sitzung inzwischen niemandem oder einer anderen Person, öffnet nichts
+      const { data: jetzt } = await supabase.auth.getSession();
+      if (!aktuell()) return;
+      if (jetzt.session?.user.id !== user.id) return setStep({ kind: "anmelden" });
+      const tuer = tuerEntscheidung(stand, ablaufMerkerGesetzt(user.id));
+      if (tuer === "abgelaufen") return setStep({ kind: "abgelaufen" });
+      if (tuer === "ablauf") return setStep({ kind: "ablauf", userId: user.id, email, stand, basis });
+      return setStep({ kind: "fertig", email });
     }
 
     const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
+    if (!aktuell()) return;
     if (listError) {
       setError(listError.message);
       return setStep({ kind: "anmelden" });
@@ -149,11 +213,13 @@ export function LoginGate({
         await supabase.auth.mfa.unenroll({ factorId: f.id });
       }
     }
+    if (!aktuell()) return;
     const { data: enrolled, error: enrollError } = await supabase.auth.mfa.enroll({
       factorType: "totp",
       issuer: "WAMO",
       friendlyName: "WAMO",
     });
+    if (!aktuell()) return;
     if (enrollError) {
       setError(enrollError.message);
       return setStep({ kind: "anmelden" });
@@ -166,12 +232,30 @@ export function LoginGate({
     });
   }, []);
 
+  // Zurück zur Abfrage des Codes (zum Beispiel wenn GoTrue für den Passwortwechsel einen frischen Faktor verlangt)
+  const zumCode = useCallback(
+    async (hinweis?: string) => {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const lauf = ++laufZaehler;
+      const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
+      if (laufZaehler !== lauf) return;
+      const verified = listError ? undefined : factors.totp[0];
+      if (!verified) return nextStep();
+      setStep({ kind: "code", factorId: verified.id });
+      setError(hinweis ?? null);
+    },
+    [nextStep],
+  );
+
   useEffect(() => {
     if (vorschau) return;
     const supabase = getSupabase();
     if (!supabase) return;
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT") {
+        laufZaehler += 1; // laufende Läufe von nextStep verlieren ihre Wirkung
+        ablaufMerkerAlleLoeschen(); // ein begonnener Ablauf gehört zur Sitzung, die jetzt endet
         setStep({ kind: "anmelden" });
         const grund = nimmAbmeldeGrund(); // automatisch abgemeldet (zu alt, vom Voice-Core verlangt)
         if (grund) setError(grund);
@@ -259,8 +343,43 @@ export function LoginGate({
   const signOut = useCallback(() => {
     const supabase = getSupabase();
     if (!supabase) return;
+    ablaufMerkerAlleLoeschen();
     supabase.auth.signOut({ scope: "local" }).catch(() => setStep({ kind: "anmelden" }));
   }, []);
+
+  // Was die Schritte der Erstanmeldung vom Tor bekommen (nur im Ablauf)
+  const kontext = useMemo<ErstanmeldungKontext | null>(() => {
+    if (step.kind !== "ablauf") return null;
+    const supabase = getSupabase();
+    if (!supabase) return null;
+    const zugriffstoken = async () => (await supabase.auth.getSession()).data.session?.access_token ?? null;
+    const nichtErreichbar = () => {
+      setError("Anmeldeserver nicht erreichbar. Bist du im Büronetz oder per WireGuard verbunden?");
+      setStep({ kind: "anmelden" });
+    };
+    return {
+      supabase,
+      zugriffstoken,
+      kernBasis: step.basis,
+      anzeigename: ANZEIGENAME,
+      userId: step.userId,
+      email: step.email,
+      standStart: step.stand,
+      stand: async () => {
+        const token = await zugriffstoken();
+        return token ? standLaden(step.basis, token) : "keine";
+      },
+      passwortSetzen: async (passwort) => {
+        const token = await zugriffstoken();
+        return passwortSetzen(step.basis, token ?? "", passwort);
+      },
+      neuPruefen: (optionen) => {
+        const lauf = optionen?.code ? zumCode(optionen.hinweis) : nextStep();
+        lauf.catch(nichtErreichbar);
+      },
+      abmelden: signOut,
+    };
+  }, [step, nextStep, zumCode, signOut]);
 
   if (step.kind === "fertig") return <>{children({ signOut, email: step.email })}</>;
 
@@ -366,7 +485,22 @@ export function LoginGate({
               <button className="btn-primary btn-block" disabled={busy}>
                 {busy ? "Prüfe …" : "Weiter"}
               </button>
+              <p className="gate-warnung">{WARNSATZ_CODE}</p>
             </form>
+          )}
+
+          {step.kind === "ablauf" && kontext && (
+            <Erstanmeldung
+              key={step.stand}
+              kontext={kontext}
+              fertig={() => setStep({ kind: "fertig", email: step.email })}
+            />
+          )}
+
+          {step.kind === "abgelaufen" && (
+            <p className="notice" role="alert">
+              {SATZ_ABGELAUFEN}
+            </p>
           )}
 
           {error && (
@@ -375,7 +509,7 @@ export function LoginGate({
             </p>
           )}
 
-          {(step.kind === "einrichten" || step.kind === "code") && (
+          {(step.kind === "einrichten" || step.kind === "code" || step.kind === "ablauf" || step.kind === "abgelaufen") && (
             <button type="button" className="gate-link" onClick={signOut}>
               Abmelden
             </button>

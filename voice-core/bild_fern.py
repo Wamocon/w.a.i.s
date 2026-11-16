@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+from auth_gate import erstanmeldung_sperre
 from geraete_admin_api import aal2_frisch, aal2_zeit
 
 TOKEN_MAX = 8192
@@ -34,7 +35,9 @@ def pruefer(user_id: str, gate: Callable[[], object | None]) -> Callable[[object
         tor = gate()
         if tor is None:
             return "Die Zugangskontrolle ist gerade nicht erreichbar."
-        entscheidung = await tor.authorize(token)
+        entscheidung = await tor.authorize(token)  # sperrt bei offener oder abgelaufener Erstanmeldung selbst
+        if erstanmeldung_sperre(entscheidung) is not None:  # zweite Sicherung, auch bei einem fremden Tor
+            return TEXT_FALSCH
         ich = getattr(entscheidung, "identity", None)
         if ich is None or ich.user_id != user_id or not ich.is_admin:
             return TEXT_FALSCH

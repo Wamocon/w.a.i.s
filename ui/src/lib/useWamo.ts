@@ -40,6 +40,7 @@ import { vorgaengeBeenden } from "@/lib/vorgaenge";
 import { aufgabeBeenden } from "@/lib/aufgabenanzeige";
 import { erstelleFrist, fristMeldung, sollVerlaengern } from "@/lib/verbindungsfrist";
 import { anmeldungAbgelaufen, maxStundenHier, merkeAbmeldeGrund } from "@/lib/anmeldung";
+import { sperrSatzAus } from "@/lib/erstanmeldung";
 import {
   anzeigePegel,
   fehlerName,
@@ -1099,14 +1100,17 @@ export function useWamo(): WamoAktionen {
         const { status, detail, name, code } = await startFehler(e);
         if (!aktuell()) return;
         // Der Kern meldet code anmeldung_zu_alt; client-js reicht beim Start nur den Text (detail) weiter
-        if (status === 401 && (code === "anmeldung_zu_alt" || /Anmeldung älter als/.test(detail ?? ""))) {
+        const zuAlt = status === 401 && (code === "anmeldung_zu_alt" || /Anmeldung älter als/.test(detail ?? ""));
+        // Erstanmeldung offen oder Startpasswort abgelaufen (403): Die Tür führt nach dem Anmelden zum Wechsel oder zum Satz
+        const abmeldeGrund = zuAlt ? "Deine Anmeldung ist zu alt. Bitte neu anmelden." : sperrSatzAus(status, code, detail);
+        if (abmeldeGrund) {
           // Erneuern hilft nicht (gemessen ab Passwort und Code): abmelden statt erneut versuchen
           clientRef.current = null;
           authHeaders.current = null;
           tokenAblauf.current = null;
           void client.disconnect().catch(() => undefined);
           wamo.set((s) => ({ ...s, presence: "offline", stillStart: STILL_AUS, micOn: true }));
-          neuAnmelden("Deine Anmeldung ist zu alt. Bitte neu anmelden.");
+          neuAnmelden(abmeldeGrund);
           return;
         }
         if (status === 409 && !erneut) {
