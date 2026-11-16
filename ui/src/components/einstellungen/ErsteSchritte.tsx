@@ -238,8 +238,8 @@ export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
   return (
     <>
       <EinrichtungsAblauf schritte={MODELL_SCHRITTE} />
-      <section className="ea" aria-labelledby={id}>
-        <h4 id={id} className="ea-titel">
+      <section className="ea-ablauf" aria-labelledby={id}>
+        <h4 id={id} className="ea-ueberschrift">
           {SCHRITT_TITEL.installer}
         </h4>
         <InstallerDownload />
