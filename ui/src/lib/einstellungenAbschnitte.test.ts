@@ -33,6 +33,17 @@ test("Admin sieht alle Abschnitte, Mitglied und unbekannte Rolle nicht den Verbr
   }
 });
 
+test("Verbrauch: auch für Mitglieder mit eigenem Claude-Code-Token, nie in der Laborsicht", () => {
+  const mitToken = (rolle: "admin" | "mitglied" | null) => abschnitteFuer({ rolle, token: true }).map((a) => a.id);
+  assert.ok(mitToken("mitglied").includes("verbrauch"));
+  assert.ok(mitToken(null).includes("verbrauch"));
+  assert.ok(mitToken("admin").includes("verbrauch"));
+  assert.ok(!abschnitteFuer({ rolle: "mitglied", token: false }).map((a) => a.id).includes("verbrauch"));
+  for (const id of ["gedaechtnis", "fernzugriff", "aenderungen"] as const) assert.ok(!mitToken("mitglied").includes(id), id);
+  assert.ok(!abschnitteFuer({ rolle: "mitglied", token: true, labor: true }).map((a) => a.id).includes("verbrauch"));
+  assert.equal(wirksamerAbschnitt({ offen: true, abschnitt: "verbrauch" }, abschnitteFuer({ rolle: "mitglied", token: true }), true), "verbrauch");
+});
+
 test("Fernzugriff: eigener Abschnitt und Block nur für Admins", () => {
   assert.ok(ids("admin").includes("fernzugriff"));
   for (const rolle of ["mitglied", null] as const) {

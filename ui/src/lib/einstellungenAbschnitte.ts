@@ -37,6 +37,8 @@ export type Abschnitt = {
   kurz: string;
   /** nur für Profile mit der Rolle admin (die Rolle kommt vom Kern, der Kern prüft sie noch einmal) */
   nurAdmin?: boolean;
+  /** trotz nurAdmin für jedes Profil mit eigenem Claude-Code-Token (Verbrauch, Ausrollen P5); der Kern liefert ohnehin nur den eigenen Stand */
+  auchMitToken?: boolean;
   /** gilt in der Laborsicht (Laborkonten, lib/laborPlatz.ts): dort gibt es nur die Abschnitte mit diesem Zeichen */
   laborSicht?: boolean;
   /** Kurzzeile in der Laborsicht, wenn dort weniger zu finden ist als sonst (sonst gilt kurz) */
@@ -48,7 +50,7 @@ export const ABSCHNITTE: readonly Abschnitt[] = [
   // Prüfliste der Einrichtung und Updates der App (lib/einrichtung.ts); Kennung "start", weil es "einrichtung" schon als Block in "Geräte und PC" gibt
   { id: "start", titel: "Erste Schritte", kurz: "Prüfliste und Updates" },
   { id: "modellzugang", titel: "Modellzugang", kurz: "API-Schlüssel, Token und Modus" },
-  { id: "verbrauch", titel: "Verbrauch", kurz: "Kontingent deines Claude-Abos", nurAdmin: true },
+  { id: "verbrauch", titel: "Verbrauch", kurz: "Kontingent deines Claude-Abos", nurAdmin: true, auchMitToken: true },
   { id: "sprache", titel: "Sprache und Ton", kurz: "Mikrofon, Hören und Stimme", laborSicht: true, laborKurz: "Mikrofon wählen" },
   { id: "stimme", titel: "Stimme", kurz: "Eigene Stimme erkennen und einlernen" },
   { id: "gedaechtnis", titel: "Gedächtnis", kurz: "Vorschläge für alle prüfen", nurAdmin: true },
@@ -74,11 +76,12 @@ export const ABSCHNITTE: readonly Abschnitt[] = [
 /**
  * Abschnitte, die diese Rolle sieht. Eine unbekannte Rolle (noch kein Profil vom Kern) zählt wie mitglied. In der Laborsicht
  * (labor: Laborkonto, lib/laborPlatz.ts) gibt es nur die Abschnitte mit laborSicht, die Rolle spielt dort keine Rolle, und ihre
- * Kurzzeile ist laborKurz, wo es eine gibt (die Liste ABSCHNITTE selbst bleibt unverändert).
+ * Kurzzeile ist laborKurz, wo es eine gibt (die Liste ABSCHNITTE selbst bleibt unverändert). token: das Profil hat einen eigenen
+ * Claude-Code-Token (Modellzugang.codeHinterlegt); dann sehen auch Mitglieder die Abschnitte mit auchMitToken.
  */
-export function abschnitteFuer({ rolle, labor = false }: { rolle: Rolle | null; labor?: boolean }): readonly Abschnitt[] {
+export function abschnitteFuer({ rolle, labor = false, token = false }: { rolle: Rolle | null; labor?: boolean; token?: boolean }): readonly Abschnitt[] {
   if (labor) return ABSCHNITTE.filter((a) => a.laborSicht).map((a) => ({ ...a, kurz: a.laborKurz ?? a.kurz }));
-  return ABSCHNITTE.filter((a) => !a.nurAdmin || rolle === "admin");
+  return ABSCHNITTE.filter((a) => !a.nurAdmin || rolle === "admin" || (token && a.auchMitToken === true));
 }
 
 export const abschnittTitel = (id: AbschnittId): string => ABSCHNITTE.find((a) => a.id === id)?.titel ?? "";

@@ -51,6 +51,9 @@ BEFEHLE_GESCHLOSSEN = ("ping", "status", "pending", "cancel")  # wie wamo_job_ke
 BEFEHLE_NOTAUS = ("ping", "status")  # und bei gesetzter Notaus-Datei (ein Test vergleicht beide Listen mit dem Modul)
 ART_RE = re.compile(r"[a-z][a-z_]{1,29}")
 KOPF_START = {"auftrag": "Rauchtest, darf nie laufen", "system": "", "zugang": "folgt", "profil": "00000000"}
+# Projekt mit der Kennung aus KOPF_START (Dispatcher 8: kern-<Kennung>-<Name>), damit die Proben die Regel erreichen, die sie prüfen
+PROJEKT_RAUCH = f"kern-{KOPF_START['profil']}-rauchtest"
+PROJEKT_FREMDE_KENNUNG = "kern-11111111-rauchtest"
 UEBERGAENGE = ("Absturz-Neustart am freien Slot (systemctl kill, dann warte_auf_slot)", "Rückweg auf ein älteres Release (Entwicklung aus)",
                "PC und Kern gleichzeitig (belegt in beide Richtungen)", "ein PC über WireGuard landet nie im Kern-Kanal",
                "Notaus mit laufendem Kern-Auftrag")
@@ -142,12 +145,13 @@ def proben() -> list[Probe]:
         Probe("Start mit Projekt wamo", f"{start} wamo {{art}}", kopf=KOPF_START,
               erwartet=(("kanal", "projekt"), ("abgewiesen", "Das WAMO-Repo selbst ist f"))),
         Probe("Start ohne Präfix kern-", f"{start} rauchtest {{art}}", kopf=KOPF_START, erwartet=(("kanal", "projekt"),)),
-        Probe("Start ohne Feld zugang", f"{start} kern-rauchtest {{art}}", kopf={k: v for k, v in KOPF_START.items() if k not in ("zugang", "profil")},
+        Probe("Start mit fremder Kennung", f"{start} {PROJEKT_FREMDE_KENNUNG} {{art}}", kopf=KOPF_START, erwartet=(("kanal", "projekt"),)),
+        Probe("Start ohne Feld zugang", f"{start} {PROJEKT_RAUCH} {{art}}", kopf={k: v for k, v in KOPF_START.items() if k not in ("zugang", "profil")},
               erwartet=(("kanal", "zugang"),)),
-        Probe("Start mit zugang=server", f"{start} kern-rauchtest {{art}}", kopf={**KOPF_START, "zugang": "server"}, erwartet=(("kanal", "zugang"),)),
+        Probe("Start mit zugang=server", f"{start} {PROJEKT_RAUCH} {{art}}", kopf={**KOPF_START, "zugang": "server"}, erwartet=(("kanal", "zugang"),)),
         Probe("fremde Auftrags-ID (status)", f"status {JOB_FREMD}", erwartet=(("kanal", "fremd"),)),
         Probe("fremde Auftrags-ID (cancel)", f"cancel {JOB_FREMD}", erwartet=(("kanal", "fremd"),)),
-        Probe("Start bei geschlossenem Kanal", f"{start} kern-rauchtest {{art}}", kopf=KOPF_START, nur_geschlossen=True, erwartet=(("zustand",),)),
+        Probe("Start bei geschlossenem Kanal", f"{start} {PROJEKT_RAUCH} {{art}}", kopf=KOPF_START, nur_geschlossen=True, erwartet=(("zustand",),)),
     ]
 
 
@@ -227,7 +231,7 @@ def urteil(probe: Probe, returncode: int | None, stdout: str, stderr: str = "", 
     if probe.ja:
         try:
             antwort = json.loads(stdout.strip().splitlines()[-1])
-            ok = (returncode == 0 and antwort.get("ok") is True and antwort.get("kanal") == "kern" and int(str(antwort.get("version"))) >= 7)
+            ok = (returncode == 0 and antwort.get("ok") is True and antwort.get("kanal") == "kern" and int(str(antwort.get("version"))) >= 8)
         except (ValueError, IndexError, AttributeError, TypeError):
             ok = False
         return ok, f"Exit {returncode}"
