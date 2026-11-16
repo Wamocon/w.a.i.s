@@ -34,7 +34,7 @@ Enwicklungsaufträge benutzt!" Dazu: "SONIOX läuft bei allen Usern!" und der An
    Faktor binden (A, 2.1). Empfehlung: die sieben Konten jetzt in GoTrue sperren (`ban_duration` über die Admin-Schnittstelle am Server) und ihre Startpasswörter als
    verbraucht ansehen (Entscheidung N4). Das berührt weder Kern noch Migration noch Oberfläche.
 3. **Passwortwechsel: zuerst messen.** GoTrue ist mit `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` eingerichtet (B). Ob GoTrue dann auch in einer
-   frischen Sitzung einen Bestätigungscode verlangt, ist offen (B, der Token-Test nennt es selbst offen). Paket P0 misst das zuerst auf einem Wegwerf-Stack. Zweig A:
+   frischen Sitzung einen Bestätigungscode verlangt, ist offen (B, der Token-Test nennt es selbst offen). **Ergebnis P0 (15.11.): Zweig A, mit Weg über den Kern, siehe 6.2.** Paket P0 misst das zuerst auf einem Wegwerf-Stack. Zweig A:
    Wechsel ohne Code möglich, dann ruft die Oberfläche GoTrue direkt auf (einfach), und die Laborhärtung ist für frische Sitzungen wirkungslos (eigener Befund für das
    Labor). Zweig B: Code nötig, dann fängt ein Hook in der Datenbank den Code, und der Kern gibt ihn nur in der Erstanmeldung nach einem frischen Code aus der
    Authenticator-App heraus (4.1). In beiden Zweigen gibt es keinen Service-Schlüssel im Kern oder in `ui/`.
@@ -550,6 +550,48 @@ Server mit Attrappe statt LiteLLM, danach ein echter Auftrag `recherche`.
 
 **P7 Übersicht und Codesignatur.** Tests zuerst: Übersicht nur für Admins und ohne Geheimnisse, eigene Funktion mit genau den nötigen Spalten. REA wie in 4.3.
 
+### 6.2 P0-Ergebnis (15.11.2026)
+
+**Aufbau.** Wegwerf-Stack auf Sokrates-2, Compose-Projekt `wamo-p0` (Container `wamo-p0-db` und `wamo-p0-auth`), nur Datenbank und Auth, dieselben Images
+wie `supabase-wamo` (`supabase/postgres:17.6.1.136`, `supabase/gotrue:v2.196.0`) und dieselben Auth-Einstellungen wie im Betrieb (Sitzungsgrenzen,
+`GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true`), eigene Geheimnisse, Auth nur auf `127.0.0.1:59991`, ohne Verbindung zum Betrieb. Gemessen mit
+Wegwerf-Konten (Anmeldung, TOTP mit selbst berechnetem Code, Admin-Schnittstelle mit eigenem Dienst-Token). Danach dort `wamo_auth`, die Migrationen 0001 bis 0021
+im Schema `wamo_test`, alle SQL-Tests und ein Durchlauf von `scripts/wamo_nutzer.py` gegen echtes GoTrue. Der Stack ist danach vollständig entfernt.
+
+| Nr | Frage | Ergebnis |
+| --- | --- | --- |
+| 1 | Passwortwechsel (`PUT /user`) in frischer aal2-Sitzung ohne Code | **HTTP 200, Hash geändert.** GoTrue verlangt den Code nur bei Sitzungen über 24 Stunden |
+| 2 | Wechsel in einer aal1-Sitzung eines Kontos mit bestätigtem Faktor | HTTP 401 `insufficient_aal`, Hash unverändert |
+| 3 | Wechsel auf dasselbe Passwort | HTTP 422 `same_password` |
+| 4 | `GOTRUE_PASSWORD_MIN_LENGTH=12`, Wechsel mit 11 Zeichen | HTTP 422 `weak_password`; die Admin-Schnittstelle legt trotzdem Konten mit 11 Zeichen an (prüft die Länge nicht) |
+| 5 | Ändert Anmelden den Hash | nein (zwei Anmeldungen, Hash gleich) |
+| 6 | Andere Sitzungen nach dem Wechsel durch die Person | beendet (`refresh_token_not_found`), die eigene bleibt |
+| 7 | Sitzungen nach einem Wechsel über die Admin-Schnittstelle | alle beendet |
+| 8 | Sitzungen per SQL löschen (`delete from auth.sessions`) | Refresh-Tokens weg; ein altes Access-Token bekommt bei GoTrue `session_not_found` (am Kern gilt es bis zum Ablauf, lokale Prüfung) |
+| 9 | `ban_duration` `876000h`, danach `none` | Anmeldung `user_banned`, danach wieder möglich |
+| 10 | Faktor über die Admin-Schnittstelle löschen | gelöscht |
+| 11 | `GET /reauthenticate` ohne Mailweg | HTTP 500 (der Code ließe sich nur über Mail oder Hook zustellen) |
+| 12 | Trigger `after update of encrypted_password` auf `auth.users` als `postgres` | anlegbar (`postgres` ist kein Superuser, Besitzer ist `supabase_auth_admin`); feuert beim Wechsel durch die Person und durch die Admin-Schnittstelle, nie beim Anmelden |
+| 13 | Ende zu Ende mit `wamo_auth`, 0021 und `wamo_nutzer.py` | anlegen (gesperrt, inaktiv), Aktivieren ohne Merker scheitert, freischalten, Wechsel durch die Person setzt `erledigt`, freischalten mit fremdem Faktor bricht ab und lässt das Konto gesperrt, zuruecksetzen (Faktoren und Sitzungen weg, Stand `offen`), `sperren --offene`, umbenennen, Option Ü, austreten |
+
+Nicht gemessen, weil nicht mehr nötig oder nicht Teil von Strang 1: Send-Email-Hook über `pg-functions` und `GOTRUE_MAILER_OTP_EXP` (Zweig B entfällt), Sitzungen
+über 24 Stunden (erwartet `reauthentication_needed`, die Oberfläche bittet dann um eine neue Anmeldung), Download von 117 MB (P2), Tunnel über WireGuard (am Gerät).
+
+**Entscheidung: Zweig A.** Kein Hook, keine Tabelle `bestaetigungscodes`, keine Route `/code`. Der Trigger auf `auth.users` trägt (Ersatz über den Hash-Vergleich
+entfällt). Ein Wechsel, während das Konto in GoTrue gesperrt ist, zählt nicht als erledigt: Das ist immer das Admin-Skript (es sperrt zuerst und löscht alle
+Sitzungen), so meldet `zuruecksetzen` nie fälschlich "abgeschlossen".
+
+**Neuer Befund, der den Weg ändert.** Caddy auf 55443 weist seit dem Token-Test vom 12.11.2026 jedes `PUT` und `PATCH` auf `.../auth/.../user` ab
+(`infra/sokrates2/wamo-caddy/Caddyfile:40` bis `:51`, Test `voice-core/test_caddy_passwortwechsel.py`). Das ist der eigentliche Schutz der Laborplätze, denn die
+Einstellung in GoTrue wirkt in frischen Sitzungen nicht (Nr. 1). Der Browser kann `updateUser` deshalb nicht direkt aufrufen. Weg in P1b: eine Route des Kerns
+`POST /wamo/api/erstanmeldung/passwort`, nur im Stand `offen`, nie für Laborprofile, mit aal2 und Ratengrenze; der Kern reicht das Passwort mit dem eigenen
+Token der Person über Loopback an GoTrue weiter (Envoy `127.0.0.1:55321`, wie `wamo_nutzer.py`), ohne Service-Schlüssel und ohne Log des Inhalts. Die Sperre in Caddy
+bleibt unverändert, das Labor ist weiter geschützt. Ein kompromittierter Kern gewinnt damit nichts Neues (er sieht die Bearer-Tokens ohnehin und erreicht Loopback,
+S4). Spätere Möglichkeit ohne Passwort im Kern: `forward_auth` in Caddy auf eine Prüfroute des Kerns (Änderung am Caddy, nur bei Bedarf).
+
+**Befund für das Labor (an Niko).** Die Einstellung `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` schützt frische Laborsitzungen nicht. Geschützt sind
+die Laborplätze durch die Sperre in Caddy, die seit dem 12.11. aktiv ist. Bis zum Labortag nichts ändern, die Sperre in Caddy darf nicht fallen.
+
 ## 7. Tests (Rot zuerst), Übersicht
 
 | Teil | Tests |
@@ -674,11 +716,11 @@ Zwei unabhängige Reviews des Entwurfs vom 15.11.2026 (Agent `security-reviewer`
 
 | Bereich | Name |
 | --- | --- |
-| Konto-Ebene | Schema `wamo_auth` (eigenes SQL mit Rückweg und Test unter `infra/sokrates2/supabase-wamo/`, Skript `wamo-auth-einrichten.sh`), Tabellen `wamo_auth.erstanmeldungen` und `wamo_auth.bestaetigungscodes` (nur Zweig B), Funktionen `wamo_auth.erstanmeldung_stand(uuid)`, `wamo_auth.erstanmeldung_begonnen(uuid)`, `wamo_auth.erstanmeldung_code(uuid)` (nur Zweig B), Trigger auf `auth.users` für das Passwort, Hook-Funktion `mail_hook` (nur Zweig B) |
+| Konto-Ebene | Schema `wamo_auth` (eigenes SQL mit Rückweg und Test unter `infra/sokrates2/supabase-wamo/`, Skript `wamo-auth-einrichten.sh`), Tabellen `wamo_auth.erstanmeldungen` und `wamo_auth.bestaetigungscodes` (nur Zweig B), Funktionen `wamo_auth.erstanmeldung_stand(uuid)`, `wamo_auth.erstanmeldung_begonnen(uuid)`, `wamo_auth.erstanmeldung_code(uuid)` (nur Zweig B), Trigger auf `auth.users` für das Passwort, Hook-Funktion `mail_hook` (nur Zweig B). Gebaut (P1a, Zweig A): Tabelle `wamo_auth.erstanmeldungen`, Funktionen `erstanmeldung_stand`, `erstanmeldung_begonnen`, `erstanmeldung_anlegen`, `erstanmeldung_uebersicht`, `hinweis_senden`, `hash_von`, Trigger `wamo_auth_passwort_geaendert` mit Funktion `passwort_geaendert` |
 | Datenbank je Schema | Migration `0021_profil_freischaltung` (Trigger auf `<schema>.profiles`, mit `.down.sql`, Test `supabase/tests/0021_profil_freischaltung_test.sql`) |
 | GoTrue | `GOTRUE_PASSWORD_MIN_LENGTH=12`, `GOTRUE_MAILER_OTP_EXP=300` und Send-Email-Hook (nur Zweig B) in `infra/sokrates2/supabase-wamo/docker-compose.wamo-sitzungen.yml` |
 | Kern, Module | `voice-core/erstanmeldung_api.py`, `voice-core/verteilung_api.py`, `voice-core/einrichtung_api.py`, `voice-core/rechte.py` |
-| Kern, Routen | `GET /wamo/api/erstanmeldung`, `POST /wamo/api/erstanmeldung/code` (nur Zweig B), `GET /wamo/api/installer`, `GET /wamo/api/installer/datei`, `GET /wamo/api/einrichtung/stand` |
+| Kern, Routen | `GET /wamo/api/erstanmeldung`, `POST /wamo/api/erstanmeldung/passwort` (Zweig A mit Sperre in Caddy, 6.2), `GET /wamo/api/installer`, `GET /wamo/api/installer/datei`, `GET /wamo/api/einrichtung/stand` |
 | Kern, Codes | `passwort_wechsel_noetig`, `startpasswort_abgelaufen`; Aktion `installer_download` in `actions`; Quelle `haus` in `entwicklung_quelle` |
 | Kern, Umgebung | `WAMO_PC_MITGLIEDER_PROFILE` (neu in der Erlaubnisliste von `wamo-core-env`, ersetzt `WAMO_PC_MITGLIEDER`), im Drop-in `WAMO_ENTWICKLUNG_MITGLIEDER` und `WAMO_ENTWICKLUNG_HAUS`; Liste `LLM_TOOLS_MITGLIED` in `voice-core/pc_host.py`; `SCHRANKEN_VERSION = 2` |
 | Server | Ablage `/var/lib/wamo-verteilung` (`aktuell.json`, `aktuell.json.sig`), Skript `wamo-verteilung-einrichten.sh`, Proxy `wamo-haus-proxy` (eigener Benutzer, Dienst, TCP-Port auf Loopback), Projektnamen `kern-<kennung>-<Name>` |

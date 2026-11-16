@@ -16,8 +16,9 @@ Werkzeugparameter, keine Liste, keine Bindung in der Umgebung, kein Ausweichen a
 Sperre gilt dann je Gerät. Ohne den Schalter (Standard) bleibt der alte Weg unverändert.
 
 Risikoklassen und Freigaben prüft der Host selbst. Im alten Weg bekommen nur Profile mit der Rolle admin die
-PC-Werkzeuge, im Tunnel je Gerät auch Mitglieder, sobald WAMO_PC_MITGLIEDER=an gesetzt ist. WAMO_PC_HOST=off schaltet
-sie ganz ab.
+PC-Werkzeuge, im Tunnel je Gerät auch Mitglieder mit ihrer user_id in WAMO_PC_MITGLIEDER_PROFILE (rechte.pc_stufe), und zwar
+nur die engere Liste LLM_TOOLS_MITGLIED (ohne PowerShell, Git und GitHub; Bildschirm, Live-Bild und Office ruft ohnehin nur der
+Kern auf und nur für Admins). WAMO_PC_HOST=off schaltet sie ganz ab.
 
 Freigaben kritischer PC-Aktionen (Host: status=needs_approval): Nur pc_freigabe_entscheiden ruft nach einem Klick in
 der Oberfläche das Host-Werkzeug freigabe_entscheiden auf. Es steht nicht in LLM_TOOLS (das Sprachmodell sieht es
@@ -64,6 +65,17 @@ LLM_TOOLS = [
     "ordner_anlegen", "elemente_auflisten", "element_klicken", "element_text_setzen", "element_lesen", "browser_lesen",
     "git_klonen", "github_repo_anlegen",
 ]
+# Mitglieder (Plan docs/ausrollen-neue-nutzer.md 4.5, Entscheidung N10): dieselbe Liste ohne PowerShell, Git und GitHub
+LLM_TOOLS_MITGLIED = [w for w in LLM_TOOLS if w not in ("powershell_lesen", "git_klonen", "github_repo_anlegen")]
+
+
+def werkzeuge_fuer(stufe: str | None) -> list[str]:
+    """Werkzeuge des Hosts, die das Sprachmodell einer Stufe (rechte.pc_stufe) sieht; für alles andere keine."""
+    if stufe == "admin":
+        return list(LLM_TOOLS)
+    if stufe == "mitglied":
+        return list(LLM_TOOLS_MITGLIED)
+    return []
 
 
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
@@ -209,7 +221,12 @@ def host_client(zugang: PcZugang | None = None) -> MCPClient | TunnelHost | None
     if zugang is not None:
         # Tunnel je Gerät: nur der Socket dieses Geräts, Gegenstelle per SO_PEERCRED geprüft, Kennung und Profil in jeder
         # Anfrage, Token wird nach einem 401 neu gelesen. bildschirmfoto, maus_klicken usw. ruft nur der Kern auf.
-        tunnel = TunnelHost(zugang.socket, zugang.geheimnisse.token, tools_filter=LLM_TOOLS, erwartete_uid=zugang.uid,
+        # Die Werkzeugliste folgt der Stufe des Zugangs (rechte.pc_stufe); ein Zugang ohne Stufe bekommt keinen Client.
+        werkzeuge = werkzeuge_fuer(zugang.stufe)
+        if not werkzeuge:
+            logger.warning("WAMO-GERAET Zugang ohne gültige Stufe: kein Host-Client")
+            return None
+        tunnel = TunnelHost(zugang.socket, zugang.geheimnisse.token, tools_filter=werkzeuge, erwartete_uid=zugang.uid,
                             geraet=zugang.geraet.kennung, profil=zugang.user_id, nachladen=zugang.nachladen,
                             max_antwort_bytes=MAX_ANTWORT_BYTES_GERAET, aufrufe_je_minute=AUFRUFE_JE_MINUTE_GERAET)
         _FREIGABE_SCHLUESSEL[tunnel] = zugang.geheimnisse

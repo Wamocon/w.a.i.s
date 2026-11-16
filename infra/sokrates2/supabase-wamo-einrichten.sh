@@ -17,6 +17,7 @@
 # WAMO_ANMELDUNG_MAX_STUNDEN im Voice-Core) und Inaktivitaet SITZUNG_INAKTIV (Standard 72h) als SESSIONS_TIMEBOX und
 # SESSIONS_INACTIVITY_TIMEOUT in der .env, an den Auth-Container ueber supabase-wamo/docker-compose.wamo-sitzungen.yml
 # (GOTRUE_SESSIONS_TIMEBOX, GOTRUE_SESSIONS_INACTIVITY_TIMEOUT; Namen geprueft gegen gotrue v2.196.0).
+# Dieselbe Ergaenzung setzt die Mindestlaenge des Passworts (GOTRUE_PASSWORD_MIN_LENGTH=12, Paket P1a des Ausrollens).
 # Nur diese Grenzen fuer einen laufenden Stack setzen (ohne SRC; erstellt nur den Auth-Container neu):
 #   NUR_SITZUNGSGRENZEN=1 bash supabase-wamo-einrichten.sh
 set -euo pipefail
@@ -120,7 +121,7 @@ if [ "$NUR_SITZUNGSGRENZEN" = 1 ]; then
   echo "  Auth: ${zustand:-unbekannt}"
   # Nur Namen, nie Werte: sind beide Grenzen im Container angekommen?
   docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' wamo-supabase-auth | cut -d= -f1 \
-    | grep -E '^GOTRUE_(SESSIONS_(TIMEBOX|INACTIVITY_TIMEOUT)|SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION)$' | sed 's/^/  gesetzt: /'
+    | grep -E '^GOTRUE_(SESSIONS_(TIMEBOX|INACTIVITY_TIMEOUT)|SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION|PASSWORD_MIN_LENGTH)$' | sed 's/^/  gesetzt: /'
   exit 0
 fi
 

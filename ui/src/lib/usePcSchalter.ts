@@ -35,9 +35,10 @@ export function usePcSchalter(): { admin: boolean; anzeige: SchalterAnzeige; fer
   // nur die zwei Felder, die der Schalter braucht: kein Neuzeichnen bei jeder Latenzmeldung
   const pc = useSelect(wamo, (s) => s.betrieb?.pc ?? null);
   const pcSteuerung = useSelect(wamo, (s) => s.betrieb?.pcSteuerung ?? "aus");
+  const pcStufeKern = useSelect(wamo, (s) => s.betrieb?.pcStufe ?? null);
   const fern = usePcFern();
   const { erlaubt: stillErlaubt } = useStillStartErlaubt();
-  const admin = pcAdmin({ rolleKern, rolleGemerkt, laborKonto: istLaborKonto(nutzer.email) });
+  const admin = pcAdmin({ rolleKern, rolleGemerkt, laborKonto: istLaborKonto(nutzer.email), pcStufeKern });
   const betrieb = pc ? { pc, pcSteuerung } : null;
   return { admin, anzeige: schalterAnzeige({ admin, presence, stillErlaubt, wartet, betrieb }), fern };
 }
