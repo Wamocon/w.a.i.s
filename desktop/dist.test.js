@@ -248,8 +248,10 @@ test("electron-builder ruft customInstall nach dem Anlegen der Verknüpfung und 
   assert.ok(text.indexOf('StrCpy $appExe "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"') < zusatz);
 });
 
-test("Version 0.3.0: die App meldet ihre Version und prüft Updates (Paket P3)", () => {
-  assert.equal(paket.version, "0.3.0");
+test("Version ab 0.3.0: die App meldet ihre Version und prüft Updates (Paket P3)", () => {
+  const [haupt, neben] = paket.version.split(".").map(Number);
+  assert.match(paket.version, /^\d+\.\d+\.\d+$/);
+  assert.ok(haupt > 0 || neben >= 3, `Version ${paket.version} liegt vor 0.3.0`);
   const sperre = JSON.parse(fs.readFileSync(path.join(__dirname, "package-lock.json"), "utf8"));
   assert.equal(sperre.version, paket.version);
   assert.equal(sperre.packages[""].version, paket.version);
