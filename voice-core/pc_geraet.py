@@ -12,8 +12,9 @@ Regeln (Bauplan 5.2):
   * Die Gegenstelle des Sockets prüft pc_tunnel.GegenstellenPruefung per SO_PEERCRED vor dem ersten Byte.
   * Jede Ablehnung steht mit dem Präfix WAMO-GERAET im Journal (ohne Geheimnisse); für die Sitzung heißt sie: keine
     PC-Werkzeuge.
-  * Mitglieder bekommen PC-Werkzeuge nur mit WAMO_PC_MITGLIEDER=an (Standard aus, bis die Rechte auf dem eigenen
-    Laptop abgenommen sind).
+  * Wer PC-Werkzeuge bekommt, entscheidet rechte.pc_stufe: Admins, Mitglieder nur mit ihrer user_id in WAMO_PC_MITGLIEDER_PROFILE
+    (Standard leer), Laborprofile nie. Die Stufe reist im Zugang mit (PcZugang.stufe) und bestimmt die Werkzeugliste des
+    Host-Clients (pc_host.werkzeuge_fuer).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+import rechte
 from geraete_register import Geraet, GeraeteRegister, RegisterFehler
 from memory import shared_database
 
@@ -56,10 +58,6 @@ def register_modus() -> bool:
     """Ordnet dieser Büro-Kern das Gerät über das Register zu? (WAMO_PC_REGISTER, fest in der Unit; Standard aus.)"""
     return (os.getenv("WAMO_BETRIEB") or "").strip().lower() == "buero" and \
         (os.getenv("WAMO_PC_REGISTER") or "aus").strip().lower() in AN
-
-
-def mitglieder_erlaubt() -> bool:
-    return (os.getenv("WAMO_PC_MITGLIEDER") or "aus").strip().lower() in AN
 
 
 def socket_wurzel() -> str:
@@ -163,7 +161,8 @@ def _lies_geheimnisse(geraet: Geraet, wurzel: str, *, uid: int | None, wurzel_ui
 
 @dataclass(eq=False)
 class PcZugang:
-    """Alles, was eine Sitzung für den Zugriff auf IHREN Laptop braucht. Entsteht nur über pc_zugang_fuer."""
+    """Alles, was eine Sitzung für den Zugriff auf IHREN Laptop braucht. Entsteht nur über pc_zugang_fuer. stufe: rechte.pc_stufe der
+    Identität beim Entstehen ("admin" oder "mitglied"); ohne Stufe gibt es keinen Host-Client (pc_host.host_client)."""
 
     geraet: Geraet
     user_id: str
@@ -172,6 +171,7 @@ class PcZugang:
     wurzel: str
     geheimnisse: Geheimnisse
     register: GeraeteRegister
+    stufe: str | None = None
 
     async def nachladen(self) -> str:
         """Token und Freigabe-Schlüssel neu lesen (der Host erzeugt sie bei jedem Start neu). Liefert das Token."""
@@ -191,8 +191,9 @@ def rechnername_passt(geraet: Geraet, gemeldet: str | None) -> bool:
 
 async def pc_zugang_fuer(identity, register: GeraeteRegister | None = None, wurzel: str | None = None) -> PcZugang | None:
     """Zugang dieser Sitzung zu IHREM Laptop oder None (dann keine PC-Werkzeuge). Wirft nie."""
-    if not (identity.is_admin or mitglieder_erlaubt()):
-        logger.info("WAMO-GERAET PC-Werkzeuge aus: Profil ist Mitglied und WAMO_PC_MITGLIEDER ist aus")
+    stufe = rechte.pc_stufe(identity)
+    if stufe is None:
+        logger.info("WAMO-GERAET PC-Werkzeuge aus: Profil ist weder Admin noch freigeschaltetes Mitglied (WAMO_PC_MITGLIEDER_PROFILE)")
         return None
     try:
         wurzel = wurzel or socket_wurzel()
@@ -211,7 +212,7 @@ async def pc_zugang_fuer(identity, register: GeraeteRegister | None = None, wurz
         logger.warning("WAMO-GERAET PC-Werkzeuge aus für Gerät {}: {}", geraet.kennung, e)
         return None
     return PcZugang(geraet=geraet, user_id=identity.user_id, socket=f"{wurzel}/{geraet.ordner}/pc.sock", uid=uid,
-                    wurzel=wurzel, geheimnisse=geheimnisse, register=register)
+                    wurzel=wurzel, geheimnisse=geheimnisse, register=register, stufe=stufe)
 
 
 async def geraet_erwartet(identity, register: GeraeteRegister | None = None) -> bool:

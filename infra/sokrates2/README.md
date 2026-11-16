@@ -627,7 +627,8 @@ Ein Update des Kerns ist `verteilen` und erneut `wamo-core-einrichten.sh` (erset
 | --- | --- | --- |
 | Freigabe-Schlüssel | PC `%LOCALAPPDATA%\WAMO\host-freigabe`, Kern `WAMO_PC_HOST_FREIGABE` in `/etc/wamo/core.env` | zweites Geheimnis neben dem Host-Token; nur damit führt der Host eine freigegebene kritische Aktion aus (`freigabe_entscheiden`, nie für das Sprachmodell). Fehlt er, startet der Host trotzdem, gibt aber nichts frei |
 | Kern-Einstellungen | `/etc/wamo/core.env` | `WAMO_SITZUNG_EINZELN` (eine Sitzung je Profil, Standard an), `WAMO_ANMELDUNG_MAX_STUNDEN` (Standard 168); `wamo-core-env` kennt die neuen Namen erst nach `wamo-core-einrichten.sh` |
-| GoTrue | `/home/wamocon/supabase-wamo/.env` und `docker-compose.wamo-sitzungen.yml` | `GOTRUE_SESSIONS_TIMEBOX` (168h), `GOTRUE_SESSIONS_INACTIVITY_TIMEOUT` (72h) und `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` (true, Passwortwechsel nur mit erneuter Anmeldung, Befund des Token-Tests vom 12.11.2026), geprüft gegen gotrue v2.196.0; erstellt nur den Auth-Container neu |
+| GoTrue | `/home/wamocon/supabase-wamo/.env` und `docker-compose.wamo-sitzungen.yml` | `GOTRUE_SESSIONS_TIMEBOX` (168h), `GOTRUE_SESSIONS_INACTIVITY_TIMEOUT` (72h) und `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` (true, Passwortwechsel nur mit erneuter Anmeldung, Befund des Token-Tests vom 12.11.2026), geprüft gegen gotrue v2.196.0; erstellt nur den Auth-Container neu; dazu `GOTRUE_PASSWORD_MIN_LENGTH` (12, P1a des Ausrollens). Der Code der erneuten Anmeldung gilt laut P0 nur für Sitzungen über 24 Stunden, frische Sitzungen schützt die Sperre in Caddy |
+| Erstanmeldung (Konto-Ebene) | Schema `wamo_auth` in der Datenbank des WAMO-Supabase, `wamo-auth-einrichten.sh` | Merker "Startpasswort noch nicht gewechselt" je Konto, Trigger auf `auth.users`, Stand für den Kern; Migration 0021 sperrt das Aktivieren ohne Merker (Planpapier `docs/ausrollen-neue-nutzer.md`, 4.1 und 6.2) |
 
 ```bash
 # PC: Freigabe-Schlüssel anlegen (Token bleibt), Überwacher dabei neu starten
@@ -638,6 +639,8 @@ ssh sokrates2 "sudo bash ~/wamo-infra/wamo-core-einrichten.sh"
 python scripts/wamo_kern_sokrates2.py token --neustart
 # GoTrue: Sitzungsgrenzen (Werte anpassbar mit SITZUNG_ZEITBOX=168h SITZUNG_INAKTIV=72h)
 ssh sokrates2 "NUR_SITZUNGSGRENZEN=1 bash ~/wamo-infra/supabase-wamo-einrichten.sh"
+# Erstanmeldung je Konto (als wamocon, ohne sudo): Trockenlauf, Einrichten mit SQL-Test, Stand; Rückweg: rueckweg
+ssh sokrates2 "bash ~/wamo-infra/wamo-auth-einrichten.sh einrichten --trocken && bash ~/wamo-infra/wamo-auth-einrichten.sh einrichten"
 python scripts/wamo_kern_sokrates2.py status                     # WAMO_PC_HOST_FREIGABE: gesetzt
 ```
 
@@ -910,8 +913,15 @@ ssh sokrates2 "cd ~/wamo-infra && sudo PYTHONDONTWRITEBYTECODE=1 WAMO_INFRA=\$HO
    lauscht, bevor ein Byte gesendet wird. Jede Anfrage trägt `X-WAMO-Geraet` und `X-WAMO-Profil` (der Host prüft sie gegen
    `geraet.json`). Der Rechnername des Hosts muss zum Register passen, sonst keine Werkzeuge. Alle 60 s (erste Prüfung nach
    15 s) prüft eine Wache, ob das Gerät noch aktiv ist; gesperrt, widerrufen oder drei Ausfälle des Registers beenden die
-   PC-Steuerung der Sitzung. Mitglieder bekommen Werkzeuge nur mit `WAMO_PC_MITGLIEDER=an` (Standard aus; vor der
-   Einwilligung für Bildschirmfotos und den Rechten auf dem eigenen Laptop nicht setzen). Ablehnungen stehen mit Präfix
+   PC-Steuerung der Sitzung. Mitglieder bekommen Werkzeuge nur mit ihrer `user_id` in `WAMO_PC_MITGLIEDER_PROFILE`
+   (Freischaltung je Person, durch Komma getrennt, Standard leer; `voice-core/rechte.py`, Paket P4 aus
+   `docs/ausrollen-neue-nutzer.md`), und zwar nur `LLM_TOOLS_MITGLIED` (ohne PowerShell, Git, GitHub, Bildschirm, Live-Bild und
+   Office), gesprochene Befehle nur mit eingelerntem Stimmabdruck (sonst nur getippt) und nach Fremdinhalt im Zug auch für
+   ändernde Werkzeuge mit Freigabekarte (`voice-core/pc_mitglied.py`). Laborprofile nie. Setzen nur über
+   `printf 'WAMO_PC_MITGLIEDER_PROFILE=%s\n' '<user_id>[,<user_id>]' | sudo /usr/local/sbin/wamo-core-env setzen` (Werte nur über
+   stdin), wirksam mit dem nächsten Kern-Release; Notaus je Person: Gerät in der Geräteverwaltung sperren, dann die Liste ohne die
+   Person setzen (oder `sudo /usr/local/sbin/wamo-core-env loeschen WAMO_PC_MITGLIEDER_PROFILE` für alle) und Kern-Release. Der frühere kernweite Schalter
+   `WAMO_PC_MITGLIEDER` wirkt nicht mehr. Ablehnungen stehen mit Präfix
    `WAMO-GERAET` im Journal. Umstellen: erst Rauchtest, dann in der Unit `WAMO_PC_REGISTER=an`, `daemon-reload`, Neustart
    des Kerns (nur wenn laut Journal keine Sitzung läuft); zurück mit `aus`.
 
