@@ -20,6 +20,7 @@ export const ABSCHNITT_IDS = [
   "sprache",
   "stimme",
   "gedaechtnis",
+  "mitglieder",
   "darstellung",
   "geraete",
   "fernzugriff",
@@ -53,6 +54,7 @@ export const ABSCHNITTE: readonly Abschnitt[] = [
   { id: "sprache", titel: "Sprache und Ton", kurz: "Mikrofon, Hören und Stimme", laborSicht: true, laborKurz: "Mikrofon wählen" },
   { id: "stimme", titel: "Stimme", kurz: "Eigene Stimme erkennen und einlernen" },
   { id: "gedaechtnis", titel: "Gedächtnis", kurz: "Vorschläge für alle prüfen", nurAdmin: true },
+  { id: "mitglieder", titel: "Neue Mitglieder", kurz: "Wie weit die Einrichtung je Person ist", nurAdmin: true },
   { id: "darstellung", titel: "Darstellung", kurz: "Normal, Fokus, Zentrale und Nacht" },
   { id: "geraete", titel: "Geräte und PC", kurz: "Verbindungen, Geräteverwaltung, PC-Steuerung und Betriebsart" },
   {

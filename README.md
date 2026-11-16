@@ -361,12 +361,17 @@ keine `.env`.
   Pfad der `WAMO.exe`; er bleibt gültig, solange Ordner und Programmname gleich bleiben. Die Deinstallation
   beendet und entfernt die geplante Aufgabe „WAMO Tunnel“ (`wamo-tunnel-entfernen.ps1`); Schlüssel und Token unter
   `%LOCALAPPDATA%\WAMO` und `%USERPROFILE%\.ssh` bleiben stehen, ein Admin widerruft das Gerät im Register.
-- **Signierung (offen)**: Es gibt noch kein Codesignatur-Zertifikat. Der Installer und `WAMO.exe` sind unsigniert, Windows
-  SmartScreen zeigt beim ersten Start eine Warnung („Weitere Informationen“, „Trotzdem ausführen“), und bei der Installation pro
-  Benutzer könnte ein Prozess des Benutzers die `WAMO.exe` austauschen (die asar-Integrität schützt nur die asar). Später
-  signieren: Zertifikat besorgen (OV oder besser EV, oder Azure Trusted Signing), Variablen `CSC_LINK` und `CSC_KEY_PASSWORD` (bzw.
-  die Signierwerte von electron-builder) nur in der Umgebung des Baus setzen, nie committen; `npm run dist` signiert dann
-  `WAMO.exe`, `uv.exe` und den Installer von selbst. Bis dahin die SHA-256 des Installers getrennt weitergeben.
+- **Codesignatur (Weg eingebaut, Zertifikat folgt; Entscheidung N8)**: Ohne Zertifikat baut `npm run dist` wie bisher unsigniert,
+  Windows SmartScreen warnt beim ersten Start („Weitere Informationen“, „Trotzdem ausführen“), und bei der Installation pro Benutzer
+  könnte ein Prozess des Benutzers die `WAMO.exe` austauschen (die asar-Integrität schützt nur die asar). So geht der Installer
+  höchstens an die sieben Pilotkollegen, mit der SHA-256 auf dem Willkommensblatt und dem signierten Manifest. Vor jeder größeren
+  Ausgabe gilt: Zertifikat (OV, besser EV, oder ein Signaturdienst wie Azure Trusted Signing) nur in der Umgebung des Baus, nie im
+  Repo. Mit einer Zertifikatsdatei `CSC_LINK=<Pfad zur .pfx>` und `CSC_KEY_PASSWORD` in der Sitzung setzen; ein EV-Zertifikat auf
+  einem Token über den Zertifikatsspeicher von Windows (`--config.win.signtoolOptions.certificateSubjectName="WAMOCON GmbH"`); den
+  Signaturdienst über `--config.win.azureSignOptions.*` mit `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` und `AZURE_CLIENT_SECRET` nur in
+  der Sitzung. Dann `npm run dist:signiert` (bricht ohne gültige Signatur ab, `forceCodeSigning`) und danach
+  `npm run dist:codesign -- --pflicht` (`scripts/wamo-dist-codesign.cjs`: Authenticode von Installer und `WAMO.exe` gültig und vom
+  Herausgeber „WAMOCON GmbH“, sonst Exit 1). Ohne `--pflicht` meldet das Skript nur den Stand. Tests in `desktop/codesign.test.js`.
 - **Aktualisierung (offen)**: Die Version steht in `desktop/package.json`; ein neuer Installer über die alte Installation
   aktualisiert (feste GUID). Er liest den bisherigen Ordner aus `HKCU\Software\<GUID>` (`InstallLocation`), ruft den alten
   Deinstaller mit `--updated` und `--keep-shortcuts` auf und benennt die Verknüpfung im Startmenü um (aus „WAMO“ wird
@@ -506,6 +511,17 @@ Ohne die Tabelle (zum Beispiel in einem neuen Schema) speichert der Kern nichts 
 bleibt leer; die Anzeige der laufenden Sitzung funktioniert auch ohne. In der Entwicklung zeigt `/?vorschau=1&vorgaenge=1` fünf Beispielvorgänge (nur
 `next dev` mit `NEXT_PUBLIC_WAMO_VORSCHAU=1`). Nicht an einem echten Lauf geprüft: Die Schritte aus dem Stream von Claude Code
 sind nur mit aufgezeichneten Streams getestet (`voice-core/testdaten/vorgang_stream.jsonl`).
+
+### Neue Mitglieder (Admin-Übersicht, Paket P7)
+
+Admins sehen in den Einstellungen unter „Neue Mitglieder“ je Profil der letzten 90 Tage (ohne Laborprofile, Daten nur als Datum, nie als Uhrzeit), wie weit die Einrichtung ist: angemeldet,
+zweiter Faktor, Passwort gewechselt (sobald Paket P1a das Schema `wamo_auth` eingerichtet hat, vorher „noch nicht prüfbar“), Laptop
+eingerichtet, Stimmabdruck, dazu der Modellzugang als Art (eigener Token, eigener Schlüssel, Hausmodelle) und ein Satz zum nächsten
+Schritt. Die Daten kommen allein aus der Funktion `<schema>.neue_mitglieder(p_admin)` (Migration `0022_neue_mitglieder`, SECURITY
+DEFINER, nur für `wamo_core`, prüft selbst einen aktiven Admin ohne Laborkennung). Sie liefert nur Stände, nie E-Mail, Schlüssel,
+Token oder den Stimmvektor. Kern: `GET /wamo/api/admin/neue-mitglieder` (`voice-core/mitglieder_admin_api.py`, nur Admin, 30 Abrufe
+je Minute). Oberfläche: `ui/src/lib/mitgliederUebersicht.ts`, `ui/src/components/einstellungen/NeueMitglieder.tsx`. Test der
+Migration: `supabase/tests/0022_neue_mitglieder_test.sql` (auf `wamo_test`).
 
 ### Geräte, Tunnel je Gerät und Geräteverwaltung
 
