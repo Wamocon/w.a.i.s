@@ -9,7 +9,8 @@ Im Text heißt der Assistent W.A.I.S., technisch bleibt alles `wamo` (`CLAUDE.md
 
 **Nachtrag 16.11.2026 (Paket H5, Zweig `feat/stimme-im-haus`).** Entscheidung von Niko: "Jetzt messen und einbauen, aber nicht umstellen
 sondern in der Oberfläche umschaltbar machen". Messung M7 steht in Abschnitt 2.5, der Stand von H5 in Abschnitt 5. Soniox bleibt Standard,
-Laborprofile hören immer über Soniox (F4). Am Gateway ist noch nichts eingetragen; das braucht Nikos ausdrückliches Ja.
+Laborprofile hören immer über Soniox (F4). Die zwei Einträge im Gateway (2.5) sind seit 16.11.2026, 18:27 Uhr aktiv (Nikos Ja,
+eingetragen vom Koordinator); Migration 0023 und `core.env` folgen nach demselben Ja.
 
 Das Testlabor am 28.11.2026 hat Vorrang. Der Freeze für Kern, Migration, Oberfläche und Dienste am Server gilt seit So 15.11.2026 (`docs/testlabor-wamo.md:34`,
 Entscheidung E14, vorher Fr 20.11. nach E5), der Daten-Freeze am Fr 27.11. Jedes Paket dieses Papiers beginnt deshalb frühestens am Mo 30.11.2026.
@@ -208,6 +209,12 @@ Standard des Dienstes `aiden`. Die Sprache nimmt der Dienst aus `language`, sons
 | TTS, Stimmenwahl Deutsch (2 Sätze, Rückweg über die Spracherkennung) | Wortfehlerrate 0 % bei acht Stimmen, 7 % bei `aiden` ("Gerne" als "Kenne"); Dauer 2,5 s (`sohee`) bis 4,1 s (`ryan`) | |
 | TTS, Sprache ohne Feld `language` (so kommt die Anfrage über das Gateway an) | 6 von 8 kurzen deutschen Antworten als Englisch gesprochen ("Alles klar.", "Erledigt.", "Moment.", "Gerne.", "Fertig.", "Guten Morgen!") | Deutsch fest eingestellt |
 
+**Über das Gateway (erste Proben des Koordinators nach dem Eintrag, Schlüssel des Kerns, Stimme `sohee`).** Spracherkennung ohne
+`response_format` lehnt das Gateway mit HTTP 400 ab (LiteLLM verlangt von sich aus verbose_json, das Qwen3-ASR nicht kann); mit `json`
+geht es, der Kern schickt es seitdem immer (`HausSTTService`). Sprachausgabe 0,56 bis 1,47 s je Satz. Beim Rücklesen kamen 3 von 4 kurzen
+Sätzen deutsch an, "Erledigt." nicht; zwei der drei guten waren auch direkt ohne Sprachangabe deutsch. Die volle Wiederholung von M7 über
+das Gateway (Skript mit eingebetteten Sprechproben, nur Messwerte in der Ausgabe) steht aus.
+
 **Bewertung.**
 
 1. **Spracherkennung im Haus taugt.** Gleiche Güte wie Soniox bei klarer Sprache, dafür rund 0,3 bis 0,5 s später (Ende der Sprachaktivität
@@ -223,8 +230,12 @@ Standard des Dienstes `aiden`. Die Sprache nimmt der Dienst aus `language`, sons
 5. **Folge für die Oberfläche:** "Im Haus" ist ein Datenschutzmodus mit spürbarer Wartezeit, kein Ersatz für Soniox. Der Satz unter dem
    Schalter nennt die Folgen. Für echtes Streaming der Stimme bleibt Qwen3-TTS über vLLM-Omni \[50\] (neues Paket, Messung wie hier).
 
-**Einträge im Gateway (vorbereitet, nicht eingetragen).** Unter `model_list` der Konfiguration des zentralen Gateways (`/app/config.yaml` im
-Container `uaol-litellm`, Bindung an eine Datei im Home von `wamocon` auf Sokrates-1), neben `wamo-haus-coder`:
+**Einträge im Gateway (seit 16.11.2026, 18:27 Uhr aktiv).** Unter `model_list` der Konfiguration des zentralen Gateways (`/app/config.yaml`
+im Container `uaol-litellm`, Bindung an eine Datei im Home von `wamocon` auf Sokrates-1), neben `wamo-haus-coder`. Eingetragen ist es mit
+`api_base` auf `192.168.178.75` (gleichwertig zu `host.docker.internal`, beide aus dem Container geprüft) und bei `wamo-tts-haus` zusätzlich
+`extra_body: {language: German}`. Nach dem Quelltext von LiteLLM 1.92.0 erreicht `extra_body` den Dienst bei Speech nicht (siehe Punkt 3
+oben); die Messung über das Gateway entscheidet. Der Schlüssel des Kerns sieht beide Modelle in `/v1/models`. Sicherung der Datei:
+`litellm_config.yaml.vor-wamo-stimme.20261116-182624`. Vorlage:
 
 ```yaml
   # W.A.I.S.: Hören und Stimme im Haus (Paket H5). Beide Dienste prüfen keinen Schlüssel; "none" ist ein Platzhalter und verhindert,
@@ -249,7 +260,8 @@ Container `uaol-litellm`, Bindung an eine Datei im Home von `wamocon` auf Sokrat
       mode: audio_speech
 ```
 
-Rückweg: die Sicherung der Datei von vor dem Eintrag zurückkopieren (oder die beiden Blöcke löschen) und `docker restart uaol-litellm`.
+Rückweg: die Sicherung `litellm_config.yaml.vor-wamo-stimme.20261116-182624` zurückkopieren (oder die beiden Blöcke löschen) und
+`docker restart uaol-litellm`. Ohne die Einträge fällt der Kern von selbst auf Soniox zurück und nennt den Grund.
 Der Neustart unterbricht das Gateway für alle Nutzer kurz; deshalb außerhalb von Gesprächen und Läufen.
 
 ## 3. Entwurf "Alles über Sokrates"
