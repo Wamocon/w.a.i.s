@@ -128,7 +128,7 @@ def test_texte_ohne_gedankenstriche_und_ohne_geheimnisse():
 
 
 class TestManifest:
-    def test_erzeugt_das_vereinbarte_format(self, tmp_path, server):
+    def test_erzeugt_das_vereinbarte_format(self, tmp_path, server, ohne_schluesselliste):
         exe = tmp_path / "dist" / "WAIS-Setup-0.2.0.exe"
         exe.parent.mkdir()
         inhalt = b"MZ" + bytes(4096)
@@ -383,3 +383,14 @@ def test_zeitgrenzen_fuer_ssh_und_scp(monkeypatch, tmp_path):
     with pytest.raises(w.Abbruch):
         w.scp(tmp_path / "x", "ziel")
     assert gesehen == [w.SSH_ZEIT, w.SCP_ZEIT]
+
+
+def test_unsigniert_nur_ausdruecklich_wenn_die_schluesselliste_liegt(tmp_path, server, capsys):
+    exe, _ = bauen(tmp_path)
+    assert w.SCHLUESSEL_DATEI.exists(), "desktop/update-schluessel.json liegt im Repo"
+    assert w.main(["pruefen", str(exe)]) == 1
+    assert "--unsigniert" in capsys.readouterr().err
+    assert w.main(["pruefen", str(exe), "--unsigniert"]) == 0
+    assert "WARNUNG" in capsys.readouterr().err
+    assert w.main(["verteilen", str(exe), "--trocken", "--unsigniert"]) == 0
+    assert any(" einsetzen " in a[-1] and a[-1].endswith(" --trocken") for a in server.aufrufe if a[0] == "ssh")

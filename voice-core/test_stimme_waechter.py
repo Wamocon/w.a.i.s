@@ -529,5 +529,29 @@ class NurEndgueltigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((ergebnis.name, self.ausgeloest), ("STOP", [True]))
 
 
+class PflichtstufeTests(unittest.IsolatedAsyncioTestCase):
+    """Paket P4: Ein endgültiges Transkript zählt für die Pflichtstufe der Mitglieder als gesprochen, in jedem Modus und ohne Abdruck."""
+
+    async def test_transkript_beendet_das_vertrauen_aus_dem_tippen(self):
+        for modus in ("aus", "beobachten", "streng"):
+            uhr = Uhr()
+            gate = StimmGate(modus=modus, uhr=uhr)
+            gate.setze_abdruck(None)  # kein Abdruck: nur getippt
+            gate.getippt()
+            self.assertIsNone(gate.pflicht_grund(), modus)
+            uhr.t += 1
+            await durchlassen(StimmWaechter(gate, AttrappePruefer(None)), [final("Öffne den Editor")])
+            self.assertIsNotNone(gate.pflicht_grund(), modus)
+
+    async def test_leeres_transkript_zaehlt_nicht(self):
+        uhr = Uhr()
+        gate = StimmGate(modus="aus", uhr=uhr)
+        gate.setze_abdruck(None)
+        gate.getippt()
+        uhr.t += 1
+        await durchlassen(StimmWaechter(gate, AttrappePruefer(None)), [final("  ")])
+        self.assertIsNone(gate.pflicht_grund())
+
+
 if __name__ == "__main__":
     unittest.main()

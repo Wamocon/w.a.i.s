@@ -39,8 +39,9 @@ Nachrichten von der Oberfläche:
                                           löschen (stimme_sitzung.py; nie für Laborprofile)
   {"type": "vergessen", "data": {"id"}}   eigenen Eintrag deaktivieren (memory.forget)
   {"type": "freigabe", "data": {"job": "pc", "id", "entscheidung"}}
-                                          Freigabe einer kritischen PC-Aktion (pc_freigaben.py; nur admin, PC-Steuerung
-                                          an, Sitzung hält die PC-Sperre), geprüft vor den Entwicklungsaufträgen
+                                          Freigabe einer kritischen PC-Aktion (pc_freigaben.py; Admin oder freigeschaltetes
+                                          Mitglied am eigenen Laptop, PC-Steuerung an, Sitzung hält die PC-Sperre), geprüft
+                                          vor den Entwicklungsaufträgen
   {"type": "freigabe", "data": {"job": "labor", "id", "entscheidung"}}
                                           Freigabe einer schreibenden Labor-Aktion (labor_freigaben.py; nur Laborprofile)
   {"type": "bildstrom", "data": {"aktion", ...}}
@@ -187,6 +188,7 @@ from pc_host import (
     pc_zugang,
     register_modus,
     sperre_aus_ergebnis,
+    werkzeuge_fuer,
 )
 import bild_fern
 from bildstrom import NICHT_ERLAUBT as BILD_NICHT_ERLAUBT, Bildstrom
@@ -198,6 +200,8 @@ import outlook_werkzeuge
 import teams_werkzeuge
 from pc_freigaben import PcFreigaben
 import pc_nachverbinden
+import rechte
+from pc_mitglied import AENDERN_MITGLIED, NACHWIRKUNG_ZUEGE, MitgliedSchutz
 from pc_nachverbinden import PcNachholer, nachholen_moeglich
 from persona import NAME_ANZEIGE, NAME_FRUEHER, NAME_KURZ, build_system_prompt
 from screen import PC_OFF, foto as screen_foto, register_screen_tools
@@ -391,7 +395,7 @@ def betrieb_message(
     llm: str | None = None, pc_name: str | None = None, pc_belegt: bool = False, sprache: dict[str, str] | None = None,
     modell_modus: str | None = None, modell_quelle: str | None = None, modell_hinweis: str | None = None,
     entwicklung_grund: str | None = None, office: list[str] | None = None, mail: bool = False,
-    onenote: bool = False, teams: bool = False,
+    onenote: bool = False, teams: bool = False, pc_stufe: str | None = None,
 ) -> dict:
     """pc: verbindet | verbunden | gesperrt | getrennt | aus (gesperrt: Bildschirm am PC gesperrt, pc_anzeige).
     pc_steuerung: ob die PC-Werkzeuge in dieser Sitzung eingeschaltet sind (Standard aus).
@@ -403,12 +407,14 @@ def betrieb_message(
     modell_modus: wirksamer Modus dieser Sitzung (automatisch | nur_haus, boss.modus_wirksam), modell_quelle: warum
     (festgelegt: Admin, wahl: Person, keiner: kein eigener Schlüssel), modell_hinweis: warum der Boss nicht das beste
     Modell nehmen konnte (zu langsam, nicht erreichbar), für die Anzeige in der Statusleiste.
-    entwicklung_grund: warum Entwicklungsaufträge im Büro aus sind (höchstens 120 Zeichen); der Aufrufer reicht ihn nur für
-    Admins durch (entwicklung_betrieb.anzeige_grund), nie für Mitglieder.
+    entwicklung_grund: warum Entwicklungsaufträge im Büro aus sind (höchstens 120 Zeichen); der Aufrufer reicht ihn für Admins
+    ganz durch, für Mitglieder nur die Sätze für Mitglieder (entwicklung_betrieb.anzeige_grund), für alle anderen nie.
     office: Dateiformate, die das Canvas jetzt am PC speichern kann (office_werkzeuge.OfficeDateien.anzeige); leer oder None: kein Feld.
     mail: ob Mails über Outlook am PC jetzt gehen (outlook_werkzeuge.OutlookMail.anzeige); nur dann trägt betrieb "mail": true.
     onenote: ob der Knopf "Als OneNote-Seite" gehen kann (onenote_werkzeuge.OneNoteSeiten.anzeige); False: kein Feld.
-    teams: ob Teams-Nachrichten am PC jetzt gehen (teams_werkzeuge.TeamsNachricht.anzeige); nur dann trägt betrieb "teams": true."""
+    teams: ob Teams-Nachrichten am PC jetzt gehen (teams_werkzeuge.TeamsNachricht.anzeige); nur dann trägt betrieb "teams": true.
+    pc_stufe: Stufe der PC-Steuerung dieser Sitzung (rechte.pc_stufe, admin oder mitglied); nur dann trägt betrieb "pc_stufe". Die
+    Oberfläche zeigt damit den Schalter PC-Steuerung auch einem freigeschalteten Mitglied; entscheiden tut immer der Kern."""
     sprache = sprache or {}
     message = {
         "type": "betrieb",
@@ -442,6 +448,8 @@ def betrieb_message(
         message["onenote"] = True
     if teams is True:
         message["teams"] = True
+    if pc_stufe in (rechte.ADMIN, rechte.MITGLIED):
+        message["pc_stufe"] = pc_stufe
     return message
 
 
@@ -456,9 +464,10 @@ def kein_modell_text(fehler: Exception, admin: bool = False) -> str:
 
 
 def darf_pc_freigeben(identity: Identity, pc_enabled: bool, steuerung_an: bool, haelt_sperre: bool) -> bool:
-    """Darf diese Sitzung eine kritische PC-Aktion freigeben? Nur admin mit PC-Werkzeugen, eingeschalteter
-    PC-Steuerung und gehaltener PC-Sperre (eine abgelöste Sitzung hält sie nie)."""
-    return identity.is_admin and pc_enabled and steuerung_an and haelt_sperre
+    """Darf diese Sitzung eine kritische PC-Aktion freigeben? Nur mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder
+    freigeschaltetes Mitglied, nie ein Laborprofil), mit PC-Werkzeugen, eingeschalteter PC-Steuerung und gehaltener PC-Sperre
+    (eine abgelöste Sitzung hält sie nie). Freigegeben wird immer nur am eigenen Laptop: Client und Sperre gehören dieser Sitzung."""
+    return rechte.pc_stufe(identity) is not None and pc_enabled and steuerung_an and haelt_sperre
 
 
 def pc_anzeige(status: str, gesperrt: bool) -> str:
@@ -477,12 +486,16 @@ def rechnername(system_info_text: str) -> str | None:
 
 def gate_pc_tools(
     schemas: list[FunctionSchema], allowed: Callable[[], bool], on_foreign_content: Callable[[], None],
-    doppel: DoppelWache | None = None,
+    doppel: DoppelWache | None = None, vorab: Callable[[str, dict], Awaitable[dict | None]] | None = None,
+    faerben: Callable[[str], None] | None = None,
 ) -> list[FunctionSchema]:
     """Hüllt die Handler der Host-Werkzeuge: bei ausgeschalteter PC-Steuerung eine klare Absage,
     sonst Aufruf des Originals. Ergebnisse vom PC (Fenstertitel, Ausgaben) gelten als Fremdinhalt.
     doppel (WAMO_WERKZEUG_DOPPELT): derselbe Öffnen-Aufruf im selben Zug läuft nicht noch einmal, eine weitere Seite derselben
-    Webseite bekommt einen Hinweis im Ergebnis (werkzeug_wache.py)."""
+    Webseite bekommt einen Hinweis im Ergebnis (werkzeug_wache.py).
+    vorab (nur Mitglieder, pc_mitglied.MitgliedSchutz.vorab): Werkzeugliste, Pflichtstufe der Stimme und Karte nach Fremdinhalt;
+    liefert es ein Ergebnis, geht dieses an das Modell und am Laptop passiert nichts. faerben (nur Mitglieder,
+    MitgliedSchutz.faerben): färbt den Zug je Werkzeug statt on_foreign_content (nachwirkend nur bei lesenden Werkzeugen)."""
     gated = []
     for schema in schemas:
         original = schema.handler
@@ -491,6 +504,11 @@ def gate_pc_tools(
             if not allowed():
                 await params.result_callback(PC_OFF)
                 return
+            if vorab is not None:
+                gesperrt = await vorab(params.function_name, params.arguments or {})
+                if gesperrt is not None:
+                    await params.result_callback(gesperrt)
+                    return
             if doppel is not None:
                 urteil = doppel.pruefen(params.function_name, params.arguments)
                 if urteil.aktion == "ueberspringen":
@@ -498,7 +516,10 @@ def gate_pc_tools(
                     return
                 if urteil.eintrag is not None:
                     params = umhuellen(params, doppel, urteil)
-            on_foreign_content()
+            if faerben is not None:
+                faerben(params.function_name)
+            else:
+                on_foreign_content()
             try:
                 await _original(params)
             except BaseException:  # Ausnahme oder Abbruch: kein Ergebnis, die Aktion gilt nicht als getan
@@ -647,30 +668,37 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     labor_sitzung = await LaborSitzung.starten(identity) if labor.ist_labor(identity) else None
     memory = labor_sitzung.memory if labor_sitzung else MemoryStore.from_env(identity.user_id)
     is_admin = identity.is_admin
+    # Stufe der PC-Steuerung (rechte.py): admin, mitglied (nur mit Freischaltung je Profil, WAMO_PC_MITGLIEDER_PROFILE) oder None; im Labor nie.
+    pc_stufe = None if labor_sitzung else rechte.pc_stufe(identity)
     # PC-Werkzeuge. Alter Weg: admin, im Büro zusätzlich an diesen PC gebunden (pc_host.py). Tunnel je Gerät
-    # (WAMO_PC_REGISTER=an): die Sitzung bekommt nur IHREN Laptop aus dem Geräteregister, sonst keine (pc_geraet.py).
+    # (WAMO_PC_REGISTER=an): die Sitzung bekommt nur IHREN Laptop aus dem Geräteregister, sonst keine (pc_geraet.py); Mitglieder nur
+    # die engere Werkzeugliste (pc_host.LLM_TOOLS_MITGLIED) und den Schutz aus pc_mitglied.py.
     geraet_zugang = await pc_zugang(identity) if register_modus() and not labor_sitzung else None
     pc_enabled = False if labor_sitzung else (geraet_zugang is not None if register_modus() else pc_host_fuer(identity))
     # Steht der Tunnel beim Start noch nicht (App-Start, stiller Start, Neuaufbau), holt die Sitzung den Zugang nach (pc_nachverbinden.py):
-    # nur Admin mit aktivem Gerät im Register, nie im Labor. Bis dahin gibt es keinen Client und keine PC-Werkzeuge.
+    # nur mit Stufe (Admin oder freigeschaltetes Mitglied) und aktivem Gerät im Register, nie im Labor. Bis dahin gibt es keinen Client und
+    # keine PC-Werkzeuge.
     pc_nachholen = False if labor_sitzung else await nachholen_moeglich(identity, zugang_da=geraet_zugang is not None)
-    entwicklung = is_admin and entwicklung_enabled()
+    im_buero = buero()
+    # Entwicklungsaufträge (Paket P5): Admins wie bisher; Mitglieder nur im Büro, nur mit WAMO_ENTWICKLUNG_MITGLIEDER=an im Drop-in und ihrer
+    # user_id in WAMO_ENTWICKLUNG_PROFILE (entwicklung_betrieb.zulassung_fuer), ohne Repos; Laborprofile nie. Rolle und Labor nur aus der Identität.
+    _ent_admin, ent_mitglied, _ent_labor = entwicklung_betrieb.rollen(identity)
+    entwicklung = (is_admin or (im_buero and ent_mitglied)) and entwicklung_enabled()
     # Fernzugriff auf die Sparks (rd_api): WAMO kennt ihn und kann den Dialog öffnen, nur für Admins und nur bei eingeschaltetem Schalter
     from rd_api import aktiv as rd_aktiv
     fernzugriff = is_admin and rd_aktiv()
     problem = entwicklung_problem() if entwicklung else None
-    im_buero = buero()
     if problem and not im_buero:
         logger.error("Entwicklungsaufträge aus: {}", problem)
         entwicklung = False
-    # Büro: Admin, Profilbindung und eigener Zugang (hier und nach zugang_laden), Grund für Log und Statusleiste der Admins;
-    # Unterwegs bleibt alles wie bisher (entwicklung_betrieb.py)
-    ent_grund = entwicklung_betrieb.grund_vorab(identity.user_id, is_admin, problem) if im_buero else None
+    # Büro: Admin oder freigeschaltetes Mitglied, Profilbindung und eigener Zugang (hier und nach zugang_laden), Grund für Log und
+    # Statusleiste (Mitglieder sehen nur ihre eigenen Sätze); Unterwegs bleibt alles wie bisher (entwicklung_betrieb.py)
+    ent_grund = entwicklung_betrieb.grund_fuer(identity, problem) if im_buero else None
     if im_buero:
         entwicklung = ent_grund is None
     if labor_sitzung:  # Entwicklungsgate am labor_art (labor.entwicklung_arten): Fernzugriff nie, Entwicklung bis zur Verdrahtung nie
         entwicklung, fernzugriff, ent_grund = False, False, "Entwicklungsaufträge gibt es im Labor nicht"
-    # PC-Steuerung je Sitzung standardmäßig aus; nur ein Admin schaltet sie in der UI ein.
+    # PC-Steuerung je Sitzung standardmäßig aus; nur ein Profil mit Stufe (rechte.pc_stufe) schaltet sie in der UI ein.
     state: dict = {"pc": "verbindet" if (pc_enabled or pc_nachholen) else "aus", "pc_latenz_ms": None, "pc_steuerung": False,
                    "client_ready": False, "live": True, "cleaned": False, "guard": None,
                    "pc_weg": False, "pc_tools": False, "pc_waechter": None, "geraet_wache": None, "labor_wache": None,  # pc_weg: Hinweis im Prompt
@@ -689,7 +717,8 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         return build_system_prompt(
             identity.name, identity.anrede, recall.persoenlich, recall.gemeinsam,
             pc_werkzeuge=pc_enabled, entwicklung=entwicklung, pc_erreichbar=not state["pc_weg"], fernzugriff=fernzugriff,
-            abnahme_befehle=abnahme_befehle_im_betrieb(), repo_pflicht=im_buero,
+            abnahme_befehle=abnahme_befehle_im_betrieb(), repo_pflicht=im_buero and not ent_mitglied, pc_stufe=pc_stufe,
+            ohne_repo=im_buero and ent_mitglied,
         )
 
     # Gedächtnis je Sitzung laden (kein prozessweiter Cache: jedes Profil sieht nur seins).
@@ -773,13 +802,14 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         # Büro: die Zulassung entsteht allein hier, aus der geprüften Identität (Admin, Profil aus WAMO_ENTWICKLUNG_PROFILE);
         # ohne sie wirft der Konstruktor. Unterwegs bleibt sie None.
         dev = DevAgent(memory, auftraggeber=identity.name, vorgaenge=vorgaenge, beurteiler=llm_beurteiler(zugang),
-                       zulassung=entwicklung_betrieb.zulassung_erteilen(identity.user_id, is_admin) if im_buero else None)
+                       zulassung=entwicklung_betrieb.zulassung_fuer(identity) if im_buero else None)
         dev.on_result = turn.taint
         dev.register(llm)
         standard_tools += dev.schemas()
     context = LLMContext(tools=ToolsSchema(standard_tools=standard_tools))
 
-    # PC-Werkzeuge nur für admin; im Hintergrund dazuholen (lokal per stdio, im Büro über den Tunnel).
+    # PC-Werkzeuge nur mit Stufe (Admin, im Tunnel je Gerät auch freigeschaltete Mitglieder); im Hintergrund dazuholen (lokal per stdio,
+    # im Büro über den Tunnel).
     pc_client = host_client(geraet_zugang) if pc_enabled else None
     # Teile, die den PC nur über lambda: pc_client erreichen, entstehen auch, wenn der Zugang erst nachgeholt wird. Ohne Client und ohne
     # Schemas (die bringt erst attach_pc_tools) bleiben sie wirkungslos, wie bei ausgeschalteter PC-Steuerung.
@@ -1042,11 +1072,12 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                                    pc_belegt=state["pc_belegt"], sprache=sprache.anzeige(SONIOX_VOICE),
                                    modell_modus=modus_wirksam(zugang), modell_quelle=zugang.quelle,
                                    modell_hinweis=llm_wahl.grund,
-                                   entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund),
+                                   entwicklung_grund=entwicklung_betrieb.anzeige_grund(is_admin, ent_grund, mitglied=ent_mitglied),
                                    office=office.anzeige() if office is not None else None,
                                    mail=mail.anzeige() if mail is not None else False,
                                    onenote=onenote is not None and onenote.anzeige(),
-                                   teams=teams.anzeige() if teams is not None else False))
+                                   teams=teams.anzeige() if teams is not None else False,
+                                   pc_stufe=pc_stufe if (pc_enabled or pc_nachholen) else None))
 
     async def stimme_sagen(text: str) -> None:
         """WAMO spricht einen Satz der Stimmprüfung (Anleitung beim Einlernen, Fehler), ohne das Modell zu fragen."""
@@ -1120,16 +1151,30 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # Freigaben kritischer PC-Aktionen (pc_freigaben.py): nur mit PC-Werkzeugen; die Karte entsteht in activity.py
     freigaben = PcFreigaben(
         memory, client=lambda: pc_client, melden=melde_llm, fremdinhalt=turn.taint, senden=send, von=identity.name,
-        darf=lambda: darf_pc_freigeben(identity, pc_enabled, bool(state["pc_steuerung"]), sitzung.pc_lease_haelt()),
+        darf=lambda: darf_pc_freigeben(identity, pc_enabled, bool(state["pc_steuerung"]), sitzung.pc_lease_haelt())
+        and bool(state["geraet_ok"]),  # wie pc_allowed: nach einem Entzug oder falschen Rechnernamen keine Freigabe mehr
         pc_name=lambda: state["pc_name"], markierung_von=markierung_von,
+        # Mitglieder: Karten des Kerns nur für ihre ändernden Werkzeuge, im Protokoll nie Wortlaut, Adresse oder Titel
+        kern_erlaubt=AENDERN_MITGLIED if pc_stufe == rechte.MITGLIED else frozenset(), knapp=pc_stufe == rechte.MITGLIED,
     ) if pc_teile else None
-    if freigaben is not None and is_admin:  # Mitglieder können nichts freigeben: keine Karte, die ins Leere läuft
+    # Mitglieder mit Freischaltung geben Aktionen am eigenen Laptop selbst frei (darf_pc_freigeben); ohne Stufe keine Karte, die ins Leere läuft
+    if freigaben is not None and pc_stufe is not None:
         aktivitaet.on_freigabe = freigaben.anfrage
         if mail is not None:  # Mail: Karte über dieselbe Freigabe (Job pc, Aktion mail), danach Zurückholen und Endstand
             mail.karte_anlegen = freigaben.anfrage
             freigaben.nach_ergebnis = mail.nach_freigabe
         if teams is not None:  # Teams: Karte über dieselbe Freigabe (Job pc, Aktion teams), danach öffnet der Host nur den Chat
             teams.karte_anlegen = freigaben.anfrage
+
+    # Mitglieder (pc_mitglied.py): nur die engere Werkzeugliste, Pflichtstufe der Stimme (ohne Abdruck nur getippt, in jedem Modus) und nach
+    # Fremdinhalt im Zug auch für ändernde Werkzeuge eine Karte; die Karte merkt PcFreigaben vor, der Klick führt aus.
+    mitglied_schutz = (MitgliedSchutz(gate=stimme.gate if stimme is not None else None,
+                                      fremd=lambda: turn.fremd_fuer_karte(NACHWIRKUNG_ZUEGE),
+                                      vormerken=lambda k, w, a: freigaben is not None and freigaben.kern_vormerken(k, w, a),
+                                      karte_offen=lambda: freigaben is not None and freigaben.kern_offen(),
+                                      faerben=lambda nachwirkend: turn.taint(nachwirkend=nachwirkend),
+                                      profil=entwicklung_betrieb.kennung_von(identity.user_id))
+                       if pc_stufe == rechte.MITGLIED and pc_teile else None)
 
     # Testlabor (labor_werkzeuge.py): nur Laborprofile, nach der Annahme oben (labor_sitzung.py). Werkzeuge (ticket_*, mail_senden) und Freigabekarte.
     # Fällt der Dienst zwischen Annahme und diesem Schritt aus (oder endet der Durchlauf dort), gibt es keine Sitzung: die Person bekommt dieselbe
@@ -1224,7 +1269,13 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             return False
         latenz = None
         if pc:
-            pc_schemas = gate_pc_tools(list(pc.standard_tools), pc_allowed, turn.taint, doppel)
+            pc_liste = list(pc.standard_tools)
+            if mitglied_schutz is not None:  # Mitglied: nur die engere Liste, auch wenn der Host mehr meldet (Host-Client filtert schon)
+                erlaubt = set(werkzeuge_fuer(pc_stufe))
+                pc_liste = [s for s in pc_liste if s.name in erlaubt]
+            pc_schemas = gate_pc_tools(pc_liste, pc_allowed, turn.taint, doppel,
+                                       vorab=mitglied_schutz.vorab if mitglied_schutz is not None else None,
+                                       faerben=mitglied_schutz.faerben if mitglied_schutz is not None else None)
             if stimme is not None:  # Handler im Schema registriert Pipecat selbst: auch sie fragen vorher das Gate der Stimmprüfung
                 pc_schemas = schemas_absichern(pc_schemas, stimme.gate)
             office_schemas = await office.schemas() if office is not None else []  # nur Formate, die der Host meldet
@@ -1372,7 +1423,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             if ok:
                 await refresh_prompt()  # WAMO soll den Eintrag sofort nicht mehr nutzen
         elif msg.type == "pc_steuerung":
-            # Nur ein Admin mit eingerichtetem PC-Host darf einschalten; ausschalten geht immer.
+            # Nur ein Profil mit Stufe (rechte.pc_stufe) und eingerichtetem PC-Host darf einschalten; ausschalten geht immer.
             # Im Büro steuert höchstens eine Sitzung den PC (pc_host.pc_lease_nehmen); eine abgelöste nie wieder.
             # Tunnel je Gerät ohne Zugang beim Start: "an" holt ihn zuerst nach (pc_nachverbinden.py); scheitert das, sagt die Sitzung es.
             state["pc_klick"] += 1
@@ -1382,7 +1433,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                 nicht_nachgeholt = not await nachholer.versuchen()
                 if klick != state["pc_klick"] or not state["live"]:
                     return  # inzwischen kam ein neuerer Klick (er entscheidet), oder die Sitzung ist zu Ende
-            an = bool(data.get("an") is True and pc_enabled and state["geraet_ok"])
+            an = bool(data.get("an") is True and pc_stufe is not None and pc_enabled and state["geraet_ok"])
             state["pc_belegt"] = an and not sitzung.pc_lease_nehmen()
             if state["pc_belegt"] or not an:
                 an = False

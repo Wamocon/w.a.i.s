@@ -627,7 +627,8 @@ Ein Update des Kerns ist `verteilen` und erneut `wamo-core-einrichten.sh` (erset
 | --- | --- | --- |
 | Freigabe-Schlüssel | PC `%LOCALAPPDATA%\WAMO\host-freigabe`, Kern `WAMO_PC_HOST_FREIGABE` in `/etc/wamo/core.env` | zweites Geheimnis neben dem Host-Token; nur damit führt der Host eine freigegebene kritische Aktion aus (`freigabe_entscheiden`, nie für das Sprachmodell). Fehlt er, startet der Host trotzdem, gibt aber nichts frei |
 | Kern-Einstellungen | `/etc/wamo/core.env` | `WAMO_SITZUNG_EINZELN` (eine Sitzung je Profil, Standard an), `WAMO_ANMELDUNG_MAX_STUNDEN` (Standard 168); `wamo-core-env` kennt die neuen Namen erst nach `wamo-core-einrichten.sh` |
-| GoTrue | `/home/wamocon/supabase-wamo/.env` und `docker-compose.wamo-sitzungen.yml` | `GOTRUE_SESSIONS_TIMEBOX` (168h), `GOTRUE_SESSIONS_INACTIVITY_TIMEOUT` (72h) und `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` (true, Passwortwechsel nur mit erneuter Anmeldung, Befund des Token-Tests vom 12.11.2026), geprüft gegen gotrue v2.196.0; erstellt nur den Auth-Container neu |
+| GoTrue | `/home/wamocon/supabase-wamo/.env` und `docker-compose.wamo-sitzungen.yml` | `GOTRUE_SESSIONS_TIMEBOX` (168h), `GOTRUE_SESSIONS_INACTIVITY_TIMEOUT` (72h) und `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` (true, Passwortwechsel nur mit erneuter Anmeldung, Befund des Token-Tests vom 12.11.2026), geprüft gegen gotrue v2.196.0; erstellt nur den Auth-Container neu; dazu `GOTRUE_PASSWORD_MIN_LENGTH` (12, P1a des Ausrollens). Der Code der erneuten Anmeldung gilt laut P0 nur für Sitzungen über 24 Stunden, frische Sitzungen schützt die Sperre in Caddy |
+| Erstanmeldung (Konto-Ebene) | Schema `wamo_auth` in der Datenbank des WAMO-Supabase, `wamo-auth-einrichten.sh` | Merker "Startpasswort noch nicht gewechselt" je Konto, Trigger auf `auth.users`, Stand für den Kern; Migration 0021 sperrt das Aktivieren ohne Merker (Planpapier `docs/ausrollen-neue-nutzer.md`, 4.1 und 6.2) |
 
 ```bash
 # PC: Freigabe-Schlüssel anlegen (Token bleibt), Überwacher dabei neu starten
@@ -638,6 +639,8 @@ ssh sokrates2 "sudo bash ~/wamo-infra/wamo-core-einrichten.sh"
 python scripts/wamo_kern_sokrates2.py token --neustart
 # GoTrue: Sitzungsgrenzen (Werte anpassbar mit SITZUNG_ZEITBOX=168h SITZUNG_INAKTIV=72h)
 ssh sokrates2 "NUR_SITZUNGSGRENZEN=1 bash ~/wamo-infra/supabase-wamo-einrichten.sh"
+# Erstanmeldung je Konto (als wamocon, ohne sudo): Trockenlauf, Einrichten mit SQL-Test, Stand; Rückweg: rueckweg
+ssh sokrates2 "bash ~/wamo-infra/wamo-auth-einrichten.sh einrichten --trocken && bash ~/wamo-infra/wamo-auth-einrichten.sh einrichten"
 python scripts/wamo_kern_sokrates2.py status                     # WAMO_PC_HOST_FREIGABE: gesetzt
 ```
 
@@ -910,8 +913,15 @@ ssh sokrates2 "cd ~/wamo-infra && sudo PYTHONDONTWRITEBYTECODE=1 WAMO_INFRA=\$HO
    lauscht, bevor ein Byte gesendet wird. Jede Anfrage trägt `X-WAMO-Geraet` und `X-WAMO-Profil` (der Host prüft sie gegen
    `geraet.json`). Der Rechnername des Hosts muss zum Register passen, sonst keine Werkzeuge. Alle 60 s (erste Prüfung nach
    15 s) prüft eine Wache, ob das Gerät noch aktiv ist; gesperrt, widerrufen oder drei Ausfälle des Registers beenden die
-   PC-Steuerung der Sitzung. Mitglieder bekommen Werkzeuge nur mit `WAMO_PC_MITGLIEDER=an` (Standard aus; vor der
-   Einwilligung für Bildschirmfotos und den Rechten auf dem eigenen Laptop nicht setzen). Ablehnungen stehen mit Präfix
+   PC-Steuerung der Sitzung. Mitglieder bekommen Werkzeuge nur mit ihrer `user_id` in `WAMO_PC_MITGLIEDER_PROFILE`
+   (Freischaltung je Person, durch Komma getrennt, Standard leer; `voice-core/rechte.py`, Paket P4 aus
+   `docs/ausrollen-neue-nutzer.md`), und zwar nur `LLM_TOOLS_MITGLIED` (ohne PowerShell, Git, GitHub, Bildschirm, Live-Bild und
+   Office), gesprochene Befehle nur mit eingelerntem Stimmabdruck (sonst nur getippt) und nach Fremdinhalt im Zug auch für
+   ändernde Werkzeuge mit Freigabekarte (`voice-core/pc_mitglied.py`). Laborprofile nie. Setzen nur über
+   `printf 'WAMO_PC_MITGLIEDER_PROFILE=%s\n' '<user_id>[,<user_id>]' | sudo /usr/local/sbin/wamo-core-env setzen` (Werte nur über
+   stdin), wirksam mit dem nächsten Kern-Release; Notaus je Person: Gerät in der Geräteverwaltung sperren, dann die Liste ohne die
+   Person setzen (oder `sudo /usr/local/sbin/wamo-core-env loeschen WAMO_PC_MITGLIEDER_PROFILE` für alle) und Kern-Release. Der frühere kernweite Schalter
+   `WAMO_PC_MITGLIEDER` wirkt nicht mehr. Ablehnungen stehen mit Präfix
    `WAMO-GERAET` im Journal. Umstellen: erst Rauchtest, dann in der Unit `WAMO_PC_REGISTER=an`, `daemon-reload`, Neustart
    des Kerns (nur wenn laut Journal keine Sitzung läuft); zurück mit `aus`.
 
@@ -1393,6 +1403,47 @@ und auf dem Server steht kein Zugangswert im Klartext.
 im Dispatcher zusätzlich die GitHub-ID `SELF_REPO_IDS`, dazu die Fork-Prüfung), Supabase und `deployment` in der Sandbox, der Befehl `pruefen` im Kern-Kanal (auch mit
 `WAMO_PRUEFEN=an`), Jira und Vercel, bis ein enges Konto in `DIENSTE` steht. `PARALLEL_MAX = 1` gilt für beide Kanäle.
 
+### 18.1 Mitglieder und Trennung je Profil (Dispatcher 8, Ausrollen P5, vorbereitet am 15.11.2026)
+
+Plan: `docs/ausrollen-neue-nutzer.md` (4.6, P5, Entscheidungen N6 und N13). Dispatcher 8 trennt die Profile im Kern-Kanal: Der Projektname lautet
+`kern-<Kennung>-<Name>` (Kennung = `profil` der Kopfzeile, 8 Hexzeichen, die Kurzkennung der user_id), die Kennung steht in `auftrag.json` und in jeder
+Zeile von `kernkanal.jsonl`. Ein Projektordner, den ein Kern-Auftrag eines anderen Profils (oder einer ohne Kennung) angelegt hat, ist gesperrt (`projekt`),
+ebenso eine Fortsetzung aus einem anderen Profil. Die Kennung schützt gegen Fehler und Verwechslungen, nicht gegen einen kompromittierten Kern: Der Kern setzt
+`profil` selbst, der Dispatcher kann es nicht unabhängig prüfen. Ordner `kern-<Name>` aus Aufträgen vor Dispatcher 8 (ohne Kennung) werden nicht fortgesetzt;
+neue Aufträge bekommen neue Ordner, die alten bleiben liegen (Aufräumen ist ein Folgepaket).
+
+**Grenzen.** Gesamtgrenzen wie bisher aus `kernkanal.conf`, dazu Grenzen je Profil (`grenze_profil`), die für jedes Profil gelten, auch für Admins, als Schlüssel
+in `kernkanal.conf` mit Standard und Bereich: `MAX_NEU_STUNDE_PROFIL` (3, 1 bis 60) und `MAX_NEU_TAG_PROFIL` (8, 1 bis 200) zählen je Auftrag nur seinen
+ersten Start, `MAX_VERSUCH_STUNDE_PROFIL` (10, 1 bis 60) gilt nicht für Folgen eines eigenen Auftrags (die begrenzt `MAX_FOLGEN`), `MAX_LAUFZEIT_TAG_S_PROFIL`
+(7200, 60 bis 86400). Die Gesamtgrenze der Versuche (`MAX_VERSUCH_STUNDE`) liegt seit Dispatcher 8 fest bei höchstens 60 (Standard 60, nur nach unten): zwei
+Personen mit je ihrer Grenze sperren den Admin nicht mehr aus. Ein bestehendes `kernkanal.conf` behält seine Werte (auch `MAX_VERSUCH_STUNDE=20`), bis `kanal`
+sie ändert. `PARALLEL_MAX = 1` bleibt; meldet der Dispatcher einen anderen laufenden Auftrag, sagt der Kern "Ein anderer Auftrag läuft gerade. Bitte versuche es
+in ein paar Minuten noch einmal." (einfache Form der Warteschlange).
+
+**Mitglieder.** Aufträge nur mit `WAMO_ENTWICKLUNG_MITGLIEDER=an` im Drop-in und mit ihrer `user_id` in `WAMO_ENTWICKLUNG_PROFILE` (jede Kurzkennung nur einmal,
+höchstens 20 Profile), Laborprofile nie. Für sie gelten höchstens 2 USD je Auftrag und 10 USD je Tag (der kleinere Wert mit dem Drop-in), keine Repos bis
+Folgepaket 1, keine Befehlskriterien, dieselben Arten wie im Kanal freigegeben. Die Tagesgrenze wird vor jedem Start gegen die Kosten bis dahin geprüft: ein
+letzter Auftrag kann sie um höchstens seine eigene Grenze überschreiten (bis zu einem Lauf mehr). `MAX_BUDGET_USD` (Kosten je Lauf) darf dann höchstens 2.00
+sein: `schalter ... --mitglieder an` und `kanal` mit höherem Budget brechen mit Exit 3 ab.
+
+**Versionspaar.** Kern `SCHRANKEN_VERSION = 2` gehört zu Dispatcher 8. Kern 2 mit Dispatcher 7 geht für Aufträge ohne Repo (Dispatcher 7 nimmt
+`kern-<Kennung>-<Name>` als gewöhnlichen Namen an, ohne Trennung und ohne Grenzen je Profil). Kern 1 mit Dispatcher 8 geht nicht: der alte Kern schickt
+`kern-<Name>`, jeder Start endet mit `projekt`. `schluessel`, `kanal` und `schalter ... --mitglieder an` verlangen Dispatcher 8 (die Datei bekommt die Schlüssel
+`MAX_*_PROFIL`, die Dispatcher 7 als Fehler läse), der Rauchtest ebenso.
+
+**Reihenfolge.** (1) Kern-Release mit `SCHRANKEN_VERSION = 2` über die Slots, Schalter unverändert. (2) Gleich danach bei Ruhe `wamo-job-einrichten.sh` (Dispatcher 8
+und Modul), dann `wamo-job-kern-einrichten.sh schluessel --trocken` und `schluessel --ablauf <JJJJMMTT> --hostfingerabdruck <SHA256:...>` (installiert den
+Rauchtest mit der Probe "Start mit fremder Kennung", schreibt die neuen Schlüssel mit Standardwerten, der Kanal bleibt, wie er ist), dann
+`wamo-job-kern-rauchtest --produktiv`. (3) Grenzen für mehrere Personen: `kanal --arten recherche --max-start-stunde 12 --max-start-tag 40 --max-laufzeit-tag-s 28800
+--max-versuch-stunde 60` (ein Aufruf ersetzt Arten, Repos und Dienste vollständig: was nicht genannt ist, ist danach nicht mehr erlaubt; Grenzen ohne Option
+bleiben). (4) `schalter an <release> --profil <niko>,<pilot> --kosten-auftrag 3 --kosten-tag 10 --mitglieder an --trocken`, dann ohne `--trocken` (verlangt
+`SCHRANKEN_VERSION` 2 im Zielrelease, Dispatcher 8 und `MAX_BUDGET_USD` bis 2.00; ohne `--mitglieder an` schreibt das Skript `aus` und sagt es).
+
+**Rückweg.** Sofort: `wamo-job-kern-rueckweg.sh notaus`. Nur die Mitglieder: `schalter an <release> --profil <niko> --mitglieder aus`. Ganz zurück in dieser
+Reihenfolge: zuerst `notaus` (oder `kanal zu`), dann den Kern zurück (`rueckweg-kern`), dann Dispatcher 7 aus dem vorigen Stand mit `wamo-job-einrichten.sh`,
+und erst danach `kernkanal.conf` ohne die Schlüssel `MAX_*_PROFIL` (Sicherung unter `/var/backups/wamo-job-kern/`), `notaus-aufheben`, `schluessel`, `kanal`.
+Bleibt Dispatcher 8 stehen, während der Kern zurück auf `SCHRANKEN_VERSION 1` geht, enden alle Starts mit `projekt` (fail closed).
+
 ## 19. Labor-Dienst (Test-Jira des Testlabors, Betrieb, vorbereitet am 12.11.2026, noch nicht ausgerollt)
 
 Der Dienst selbst liegt im Repo unter `labor-dienst/` (Vertrag `docs/labor-dienst-vertrag.md`, Umgebung `WAMO_LABOR_DIENST_*`, Weboberflächen `/board`, `/betreuer` und
@@ -1690,14 +1741,19 @@ Stunde und Profil. Er liest nur die Ablage; eingesetzt wird sie mit `wamo-vertei
 | Manifest | genau `v`, `produkt`, `version`, `datei`, `groesse`, `sha256`, `bauzeit`, `commit`; geprüft und signiert werden die exakten Bytes (Regel `wamo_verteilung_manifest.py`, gleich im Kern) |
 | Sperre, Journal | `/run/wamo-verteilung/lock`, `logger -t wamo-verteilung` |
 
-**Einsetzen** (vom PC, das Skript muss vorher in `~/wamo-infra` liegen): Für einen Stand ohne Manifest (0.2.0) zuerst
-`python scripts/wamo_installer_sokrates2.py manifest <exe> --commit <40 hex> --aus <ordner>`; ein signierter Bau bringt `aktuell.json` und
-`aktuell.json.sig` neben der exe schon mit. Dann immer zuerst trocken:
+**Einsetzen** (vom PC, das Skript muss vorher in `~/wamo-infra` liegen): Ein signierter Bau bringt `aktuell.json` und `aktuell.json.sig`
+neben der exe schon mit; das lokale Werkzeug prüft die Signatur gegen `desktop/update-schluessel.json`. Für den unsignierten Übergang 0.2.0
+zuerst `python scripts/wamo_installer_sokrates2.py manifest <exe> --commit <40 hex> --aus <ordner>` und bei `pruefen` und `verteilen`
+ausdrücklich `--unsigniert` (geht am Server nur, solange dort keine Schlüsselliste liegt). Die Schlüsselliste kommt an den Server, sobald der
+erste signierte Stand eingesetzt ist (danach ist eine gültige Signatur Pflicht, ein Rückweg auf 0.2.0 nur mit `--ohne-signatur`):
+`scp desktop/update-schluessel.json wamo-sokrates2:~/wamo-infra/` und
+`ssh wamo-sokrates2 "sudo install -D -o root -g root -m 0644 ~/wamo-infra/update-schluessel.json /etc/wamo-verteilung/update-schluessel.json"`.
+Dann immer zuerst trocken:
 
-```
-python scripts/wamo_installer_sokrates2.py pruefen <exe>
-python scripts/wamo_installer_sokrates2.py verteilen <exe> --trocken
-python scripts/wamo_installer_sokrates2.py verteilen <exe>
+```text
+python scripts/wamo_installer_sokrates2.py pruefen <exe> [--unsigniert]
+python scripts/wamo_installer_sokrates2.py verteilen <exe> --trocken [--unsigniert]
+python scripts/wamo_installer_sokrates2.py verteilen <exe> [--unsigniert]
 python scripts/wamo_installer_sokrates2.py status
 ```
 

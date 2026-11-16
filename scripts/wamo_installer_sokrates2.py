@@ -2,14 +2,14 @@
 Abschnitt 4.2; Ablage und Skript am Server: infra/sokrates2/README.md, Abschnitt 22). Kennt keine Geheimnisse und gibt keine aus.
 
 Befehle (im Repo-Hauptordner, mit der Python-Umgebung von voice-core, dort liegt cryptography):
-  python scripts/wamo_installer_sokrates2.py pruefen <exe> [--manifest P] [--signatur P] [--schluessel P]
+  python scripts/wamo_installer_sokrates2.py pruefen <exe> [--manifest P] [--signatur P] [--schluessel P] [--unsigniert]
         nur lokal: Manifest (Standard: aktuell.json neben der exe), Dateiname, Größe, SHA-256 und Signatur (Standard: <Manifest>.sig, falls es sie
         gibt) gegen die Schlüsselliste (Standard: desktop/update-schluessel.json, falls es sie gibt). Mit Schlüsselliste ist eine gültige Signatur
         Pflicht, ohne Liste gibt es nur einen Hinweis.
   python scripts/wamo_installer_sokrates2.py manifest <exe> --commit <40 hex> [--bauzeit ISO] --aus <ordner>
         schreibt <ordner>/aktuell.json für einen Stand ohne Signatur (zum Beispiel 0.2.0): kompakt, ohne Zeilenende, Felder in fester Reihenfolge.
         Ein vorhandenes aktuell.json oder aktuell.json.sig wird nie überschrieben.
-  python scripts/wamo_installer_sokrates2.py verteilen <exe> [--manifest P] [--signatur P] [--trocken]
+  python scripts/wamo_installer_sokrates2.py verteilen <exe> [--manifest P] [--signatur P] [--trocken] [--unsigniert]
         prüft wie pruefen, fragt am Server "status --json" ab und bricht ohne streng steigende Version ab, bevor etwas kopiert wird. Dann kopiert es
         Manifest, Signatur und exe per scp nach ~/wamo-verteilung-eingang/<Version>/ und ruft dort
         "sudo bash ~/wamo-infra/wamo-verteilung-einrichten.sh einsetzen ~/wamo-verteilung-eingang/<Version> [--trocken]" auf. Nach einem
@@ -87,8 +87,9 @@ def ed25519_gueltig(schluessel: list[bytes], signatur: bytes, daten: bytes) -> b
 
 
 def lieferung_pruefen(exe: Path, manifest_pfad: Path | None = None, signatur_pfad: Path | None = None,
-                      schluessel_pfad: Path | None = None) -> Lieferung:
-    """Manifest, Dateiname, Größe, SHA-256 und Signatur einer Lieferung. Wirft Abbruch."""
+                      schluessel_pfad: Path | None = None, unsigniert: bool = False) -> Lieferung:
+    """Manifest, Dateiname, Größe, SHA-256 und Signatur einer Lieferung. Wirft Abbruch. unsigniert: eine Lieferung ganz ohne
+    Signaturdatei trotz Schlüsselliste annehmen (Übergang 0.2.0, nur ausdrücklich); eine vorhandene Signatur wird immer geprüft."""
     exe = Path(exe)
     manifest_pfad = Path(manifest_pfad) if manifest_pfad else exe.parent / "aktuell.json"
     roh = _lesen(manifest_pfad, regel.MAX_MANIFEST)
@@ -121,8 +122,13 @@ def lieferung_pruefen(exe: Path, manifest_pfad: Path | None = None, signatur_pfa
             liste = regel.schluessel_lesen(_lesen(Path(schluessel_pfad), regel.MAX_SCHLUESSELLISTE))
         except ValueError as e:
             raise Abbruch(f"{schluessel_pfad}: {e}") from None
+        if signatur is None and unsigniert:
+            print(f"WARNUNG: unsignierter Stand trotz Schlüsselliste {schluessel_pfad}, nur ausdrücklich (--unsigniert) als Übergang."
+                  " Die App installiert ihn nie als Update; liegt die Schlüsselliste am Server, lehnt das Einsetzen ihn ab.", file=sys.stderr)
+            return Lieferung(exe, manifest_pfad, manifest, None, "keine")
         if signatur is None:
-            raise Abbruch(f"Die Signatur fehlt. Mit der Schlüsselliste {schluessel_pfad} ist eine gültige Signatur Pflicht.")
+            raise Abbruch(f"Die Signatur fehlt. Mit der Schlüsselliste {schluessel_pfad} ist eine gültige Signatur Pflicht"
+                          " (nur für den unsignierten Übergang 0.2.0 ausdrücklich mit --unsigniert).")
         if not ed25519_gueltig(liste, signatur, roh):
             raise Abbruch(f"Die Signatur passt zu keinem Schlüssel der Liste {schluessel_pfad}.")
         stand = "gueltig"
@@ -224,8 +230,8 @@ def status_holen() -> dict:
     return d
 
 
-def verteilen(exe: Path, manifest_pfad: Path | None, signatur_pfad: Path | None, trocken: bool) -> int:
-    lief = lieferung_pruefen(exe, manifest_pfad, signatur_pfad)
+def verteilen(exe: Path, manifest_pfad: Path | None, signatur_pfad: Path | None, trocken: bool, unsigniert: bool = False) -> int:
+    lief = lieferung_pruefen(exe, manifest_pfad, signatur_pfad, unsigniert=unsigniert)
     zeigen(lief)
     version = lief.manifest["version"]
     stand = status_holen()
@@ -273,6 +279,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     a.add_argument("exe", type=Path)
     a.add_argument("--manifest", type=Path, help="Standard: aktuell.json neben der exe")
     a.add_argument("--signatur", type=Path, help="Standard: <Manifest>.sig, falls es sie gibt")
+    a.add_argument("--unsigniert", action="store_true", help="Stand ohne Signatur trotz Schlüsselliste (nur Übergang 0.2.0)")
     a.add_argument("--schluessel", type=Path, help="Standard: desktop/update-schluessel.json, falls es sie gibt")
     m = befehle.add_parser("manifest", help="aktuell.json für einen Stand ohne Signatur schreiben")
     m.add_argument("exe", type=Path)
@@ -283,6 +290,7 @@ def parser_bauen() -> argparse.ArgumentParser:
     v.add_argument("exe", type=Path)
     v.add_argument("--manifest", type=Path)
     v.add_argument("--signatur", type=Path)
+    v.add_argument("--unsigniert", action="store_true", help="Stand ohne Signatur trotz Schlüsselliste (nur Übergang 0.2.0)")
     v.add_argument("--trocken", action="store_true", help="am Server nur prüfen (einsetzen --trocken)")
     befehle.add_parser("status", help="Stand der Ablage am Server")
     r = befehle.add_parser("rueckweg", help="am Server aktuell auf vorher stellen")
@@ -299,14 +307,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser_bauen().parse_args(argv)
     try:
         if args.befehl == "pruefen":
-            zeigen(lieferung_pruefen(args.exe, args.manifest, args.signatur, args.schluessel))
+            zeigen(lieferung_pruefen(args.exe, args.manifest, args.signatur, args.schluessel, unsigniert=args.unsigniert))
             return 0
         if args.befehl == "manifest":
             ziel = manifest_schreiben(args.aus, manifest_erzeugen(args.exe, args.commit, args.bauzeit))
             print(f"Geschrieben: {ziel} (ohne Signatur)")
             return 0
         if args.befehl == "verteilen":
-            return verteilen(args.exe, args.manifest, args.signatur, args.trocken)
+            return verteilen(args.exe, args.manifest, args.signatur, args.trocken, args.unsigniert)
         if args.befehl == "status":
             return ssh(f"sudo bash {SKRIPT} status").returncode
         return ssh(f"sudo bash {SKRIPT} rueckweg" + (" --trocken" if args.trocken else "")

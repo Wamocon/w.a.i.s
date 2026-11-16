@@ -193,7 +193,8 @@ copy .env.example .env                    # SONIOX_API_KEY und ANTHROPIC_API_KEY
 python scripts\wamo_db_rolle.py           # Datenbankzugang wamo_core (TLS), schreibt .env und ui\.env.local
 certutil -user -addstore Root infra\sokrates2\wamo-ca.crt   # einmal je PC: WAMO-CA für Browser und Desktop-App
 python scripts\wamo_db_rolle.py --rolle wamo_admin   # nur auf Admin-PCs: Zugang für wamo_admin.py
-python scripts\wamo_nutzer.py anlegen --email vorname.nachname@wamocon.com --name Vorname --rolle admin
+python scripts\wamo_nutzer.py anlegen --email vorname.nachname@wamocon.com --name "Vorname Nachname" --rolle admin --schema wamo_dev   # Konto gesperrt, Profil inaktiv
+python scripts\wamo_nutzer.py freischalten --email vorname.nachname@wamocon.com --schema wamo_dev   # am Übergabetag: Startpasswort (einmal im Terminal), Profil aktiv
 cd voice-core; uv sync; cd ..\host; uv sync; cd ..\ui; npm install; cd ..\desktop; npm install; cd ..
 scripts\wamo-desktop.cmd                  # startet Voice-Core, Oberfläche und Desktop-App
 ```
@@ -371,13 +372,29 @@ keine `.env`.
   Deinstaller mit `--updated` und `--keep-shortcuts` auf und benennt die Verknüpfung im Startmenü um (aus „WAMO“ wird
   „W.A.I.S.“). `%APPDATA%\WAMO` (Anmeldung, Sitzung, Einstellungen, Logs), `%LOCALAPPDATA%\WAMO` (Gerätedaten, Tunnel) und
   `%USERPROFILE%\.ssh` fasst er nicht an, das Löschen der App-Daten ist aus (`deleteAppDataOnUninstall: false`). Eine an die
-  Taskleiste angeheftete Verknüpfung behält ihren alten Namen, bis sie neu angeheftet wird. Einen automatischen Updater gibt es
-  in diesem Paket nicht (`publish` ist `null`). Weil die Verknüpfung beim Update bleibt, liest Windows den Eintrag der Kennung im
+  Taskleiste angeheftete Verknüpfung behält ihren alten Namen, bis sie neu angeheftet wird. Einen automatischen Updater von
+  electron-builder gibt es nicht (`publish` ist `null`); Updates aus der App laufen ab 0.3.0 über die signierte Prüfung unten.
+  Weil die Verknüpfung beim Update bleibt, liest Windows den Eintrag der Kennung im
   App-Zwischenspeicher der Shell sonst nicht neu (nachgestellt am 14.11.2026 mit einer Test-App unter eigener Kennung). Der
   Installer schreibt die Verknüpfung deshalb neu, meldet Verknüpfung und `WAMO.exe` der Shell als geändert und wartet 3 Sekunden,
   bevor er die App startet (`desktop/build/installer.nsh`). Das Audit-Protokoll
   des Hosts (`host\wamo_audit.jsonl`) liegt im Installationsordner und geht bei Update oder Deinstallation verloren; ein fester
   Ort per `WAMO_AUDIT_LOG` braucht eine Änderung in `scripts/wamo-tunnel.ps1`.
+- **Signierte Updates (ab 0.3.0, `desktop/update.js`)**: Die Brücke meldet `window.wamoDesktop.version` und bietet
+  `update.pruefen` und `update.installieren`. Die Oberfläche (Abschnitt „Erste Schritte“) reicht das Manifest des Kerns
+  (`GET /wamo/api/installer`: `manifest` als exakter Text von `aktuell.json`, `signatur` aus `aktuell.json.sig`) an die App. Die App
+  prüft die Ed25519-Signatur über die exakten Bytes gegen die fest eingebauten Schlüssel in `desktop/update-schluessel.json`, erst
+  danach das JSON (genau `v`, `produkt`, `version`, `datei`, `groesse`, `sha256`, `bauzeit`, `commit`), verlangt eine streng höhere
+  Version, fragt im Hauptprozess nach (nur bei sichtbarem Fenster, nach „Abbrechen“ 10 Minuten Ruhe), baut die TLS-Verbindung zum
+  Kern auf, prüft die Kette zur WAMO-CA und sendet erst danach das Token, lädt nach `%LOCALAPPDATA%\WAMO\updates`, vergleicht Größe
+  und SHA-256 im Strom und noch einmal auf der Platte und startet dann den Installer mit `--updated`. Ohne gültige Signatur fragt
+  und lädt die App nichts („Update vom Server nicht bestätigt, bitte Niko fragen.“). Signiert wird beim Bau:
+  `node scripts\wamo-dist-signieren.cjs signieren desktop\dist\WAIS-Setup-<Version>.exe --schluessel <Datei>` (Übergang, Datei nur
+  bei Niko außerhalb jedes Git-Arbeitsbaums) oder `--pkcs11-modul <ykcs11.dll> --pkcs11-id <hex>` (Hardware-Token). Das Skript
+  signiert nur einen Stand aus `origin/main`, prüft das Ergebnis mit derselben Funktion wie die App und schreibt `aktuell.json` und
+  `aktuell.json.sig` neben die EXE; `pruefen <exe>` prüft später erneut. Schlüsselwechsel: Die nächste Version bringt den neuen
+  öffentlichen Schlüssel in `update-schluessel.json` mit und wird noch mit dem alten signiert. Vertragsbeispiel für den Server:
+  `desktop/testdaten/update/` (Bytes geschützt über `.gitattributes`).
 - **Leeres Symbol in der Taskleiste**: Zeigt die Taskleiste für W.A.I.S. nur ein leeres Datei-Symbol, obwohl Startmenü und
   Fenster das richtige Symbol haben, hängt ein alter Eintrag im App-Zwischenspeicher der Shell. Neustart des Explorers, Löschen
   von `iconcache_*.db` und `ie4uinit` helfen dann nicht. Abhilfe: im Tray „Taskleisten-Symbol reparieren …“ wählen und bestätigen.
@@ -874,7 +891,7 @@ Der Test spielt über ein virtuelles Mikrofon Sprechproben und Geräusche gegen 
 WAMOs Ausgabestrom, das Mikrofon und die Lautstärke des Wiedergabeelements mit einer gemeinsamen Uhr auf. Die Person
 spricht immer dann, wenn WAMO in einem bestimmten Zustand ist („seit 5 s am Sprechen“). Szenarien: `fakten`, `kurz`,
 `lang`, `einwurf`, `ein_wort`, `backchannel`, `geraeusch`, `echo`, `schnell`, `pause`, `werkzeug`, `werkzeug_mhm`. Voraussetzung: ein temporäres
-Testkonto (`scripts/wamo_nutzer.py anlegen`, danach `sperren`), `konto.json` im Messordner (nicht im Repo), Oberfläche aus
+Testkonto (`scripts/wamo_nutzer.py anlegen` und `freischalten`, danach `sperren`, jeweils mit `--schema`), `konto.json` im Messordner (nicht im Repo), Oberfläche aus
 einer Kopie gebaut (`NEXT_PUBLIC_VOICE_CORE_URL=http://127.0.0.1:7861`).
 
 ```powershell
@@ -1168,9 +1185,14 @@ ansehen, die Schwellen bei Bedarf anpassen und danach wieder `streng` (Standard)
 
 | Befehl | Zweck |
 | --- | --- |
-| `python scripts\wamo_nutzer.py anlegen --email … --name … --rolle admin\|mitglied` | Konto (falls neu, Passwort wird verdeckt abgefragt) und Profil |
-| `python scripts\wamo_nutzer.py sperren --email …` | Profil sperren |
-| `python scripts\wamo_nutzer.py liste` | Profile anzeigen |
+| `python scripts\wamo_nutzer.py anlegen --email … --name … --rolle admin\|mitglied --schema …` | Konto (neu: in GoTrue gesperrt, Zufallspasswort) und inaktives Profil; `--schema` ist bei allen ändernden Befehlen Pflicht |
+| `python scripts\wamo_nutzer.py freischalten --email … --schema … [--frist-stunden 72] [--faktoren-loeschen]` | Übergabetag: Startpasswort verdeckt eintippen (steht nur auf dem Willkommensblatt, wird nie ausgegeben), Merker der Erstanmeldung, Profil aktiv, Sperre auf; nur im eigenen Terminal |
+| `python scripts\wamo_nutzer.py zuruecksetzen --email … --schema …` | wie `freischalten`, zweite Faktoren werden gelöscht (verlorenes Handy) |
+| `python scripts\wamo_nutzer.py passwort --email … --schema …` | Übergang: Die Person tippt ihr Passwort selbst am Platz, der Merker steht auf erledigt |
+| `python scripts\wamo_nutzer.py umbenennen --email … --name … --schema …` | Anzeigename ändern (volle Namen) |
+| `python scripts\wamo_nutzer.py sperren --schema … (--email … \| --offene)` | Profil, Konto in GoTrue und Sitzungen sperren; `--offene`: alle Konten mit offener oder abgelaufener Erstanmeldung |
+| `python scripts\wamo_nutzer.py austreten --email … --schema …` | wie `sperren`, dazu Faktoren, Geräte, Claude-Schlüssel und Token entfernen |
+| `python scripts\wamo_nutzer.py liste [--schema …]` | Profile mit Stand der Erstanmeldung, Frist, Faktoren und Sperre |
 | `uv run python wamo_admin.py vorschlaege` (in `voice-core/`) | offene Vorschläge für das gemeinsame Gedächtnis |
 | `uv run python wamo_admin.py freigeben <id> --admin <uuid>` | Vorschlag freigeben (`ablehnen` entsprechend) |
 

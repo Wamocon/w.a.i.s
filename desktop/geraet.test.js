@@ -366,7 +366,7 @@ test("aktivieren: schreibt known_hosts und geraet.json, startet den Tunnel genau
   await u.geraet.signiere({ nonce: NONCE, userId: USER });
   const r = await u.geraet.aktivieren(guteAntwort());
   assert.equal(r.ok, true);
-  assert.deepEqual(r.status, { eingerichtet: true, kennung: "pc-anna", stufe: "mitglied", tunnel: "unbekannt" });
+  assert.deepEqual(r.status, { eingerichtet: true, kennung: "pc-anna", stufe: "mitglied", tunnel: "unbekannt", hostUmgebung: "entwickler" });
 
   assert.equal(fs.readFileSync(u.pfade.knownHostsDatei, "utf8"), `192.168.178.136 ${HOSTSCHLUESSEL}\n`);
   assert.equal(path.basename(u.pfade.knownHostsDatei), "known_hosts_wamo_pc");
@@ -555,13 +555,19 @@ test("Tunnel-Zustand aus tunnel.status", () => {
 
 test("status(): nicht eingerichtet, eingerichtet mit Tunnel-Zustand", async () => {
   const u = umgebung();
-  assert.deepEqual(u.geraet.status(), { eingerichtet: false, kennung: null, stufe: null, tunnel: "unbekannt" });
+  assert.deepEqual(u.geraet.status(), { eingerichtet: false, kennung: null, stufe: null, tunnel: "unbekannt", hostUmgebung: "entwickler" });
   await u.geraet.vorbereiten();
   await u.geraet.signiere({ nonce: NONCE, userId: USER });
   await u.geraet.aktivieren(guteAntwort({ stufe: "admin" }));
   assert.equal(u.geraet.status().tunnel, "unbekannt"); // noch keine tunnel.status
   fs.writeFileSync(u.pfade.tunnelStatusDatei, JSON.stringify(statusDatei(u.zeit() - 3000)));
-  assert.deepEqual(u.geraet.status(), { eingerichtet: true, kennung: "pc-anna", stufe: "admin", tunnel: "verbunden" });
+  assert.deepEqual(u.geraet.status(), {
+    eingerichtet: true,
+    kennung: "pc-anna",
+    stufe: "admin",
+    tunnel: "verbunden",
+    hostUmgebung: "entwickler",
+  });
   fs.writeFileSync(u.pfade.tunnelStatusDatei, JSON.stringify(statusDatei(u.zeit() - 3000, { tunnel: false })));
   assert.equal(u.geraet.status().tunnel, "host");
   u.setzeZeit(u.zeit() + 90_000);
@@ -570,6 +576,22 @@ test("status(): nicht eingerichtet, eingerichtet mit Tunnel-Zustand", async () =
   assert.equal(u.geraet.status().tunnel, "unbekannt");
   fs.writeFileSync(u.pfade.geraetDatei, JSON.stringify({ v: 1, kennung: "PC kaputt" }));
   assert.equal(u.geraet.status().eingerichtet, false);
+});
+
+test("status(): Stand der Host-Umgebung nur aus den vier bekannten Werten, Fehler beim Lesen zählt als fehler", () => {
+  const ort = path.join(os.tmpdir(), "wais-nirgends");
+  const mit = (hostStatus) => erzeugeGeraet({ home: ort, localAppData: ort, hostStatus }).status().hostUmgebung;
+  assert.equal(mit(() => "bereit"), "bereit");
+  assert.equal(mit(() => "fehlt"), "fehlt");
+  assert.equal(mit(() => "fehler"), "fehler");
+  assert.equal(mit(() => "irgendwas"), "fehler");
+  assert.equal(
+    mit(() => {
+      throw new Error("kaputt");
+    }),
+    "fehler",
+  );
+  assert.equal(mit(undefined), "entwickler");
 });
 
 test("Wächter-Entscheidung (reine Funktion mit eingespeister Uhr)", () => {

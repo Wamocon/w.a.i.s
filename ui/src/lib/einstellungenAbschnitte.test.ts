@@ -33,6 +33,17 @@ test("Admin sieht alle Abschnitte, Mitglied und unbekannte Rolle nicht den Verbr
   }
 });
 
+test("Verbrauch: auch für Mitglieder mit eigenem Claude-Code-Token, nie in der Laborsicht", () => {
+  const mitToken = (rolle: "admin" | "mitglied" | null) => abschnitteFuer({ rolle, token: true }).map((a) => a.id);
+  assert.ok(mitToken("mitglied").includes("verbrauch"));
+  assert.ok(mitToken(null).includes("verbrauch"));
+  assert.ok(mitToken("admin").includes("verbrauch"));
+  assert.ok(!abschnitteFuer({ rolle: "mitglied", token: false }).map((a) => a.id).includes("verbrauch"));
+  for (const id of ["gedaechtnis", "fernzugriff", "aenderungen"] as const) assert.ok(!mitToken("mitglied").includes(id), id);
+  assert.ok(!abschnitteFuer({ rolle: "mitglied", token: true, labor: true }).map((a) => a.id).includes("verbrauch"));
+  assert.equal(wirksamerAbschnitt({ offen: true, abschnitt: "verbrauch" }, abschnitteFuer({ rolle: "mitglied", token: true }), true), "verbrauch");
+});
+
 test("Fernzugriff: eigener Abschnitt und Block nur für Admins", () => {
   assert.ok(ids("admin").includes("fernzugriff"));
   for (const rolle of ["mitglied", null] as const) {
@@ -248,7 +259,7 @@ test("Abschnitt Erste Schritte: direkt nach Konto, für jede Rolle, nie in der L
   }
   const start = ABSCHNITTE.find((a) => a.id === "start");
   assert.equal(start?.titel, "Erste Schritte");
-  assert.equal(start?.kurz, "Modellzugang einrichten und Installer laden");
+  assert.equal(start?.kurz, "Modellzugang, Installer, Prüfliste und Updates");
   assert.equal(start?.nurAdmin, undefined);
   assert.equal(start?.laborSicht, undefined);
   for (const rolle of ["admin", "mitglied", null] as const) {
@@ -268,4 +279,20 @@ test("Abschnitt Stimme: für jede Rolle da, in der Laborsicht nicht, mit eigenem
   assert.equal(abschnitteFuer({ rolle: "admin", labor: true }).some((a) => a.id === "stimme"), false, "Laborkonten sehen keine Stimmerkennung");
   assert.deepEqual(parseHash("#einstellungen/stimme"), { offen: true, abschnitt: "stimme" });
   assert.equal(ABSCHNITTE.find((a) => a.id === "stimme")?.titel, "Stimme");
+});
+
+test("Erste Schritte: für jede Rolle direkt nach Konto, in der Laborsicht nicht, mit eigenem Hash", () => {
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    const liste = ids(rolle);
+    assert.equal(liste.indexOf("start"), liste.indexOf("konto") + 1, `Rolle ${rolle}`);
+  }
+  const start = ABSCHNITTE.find((a) => a.id === "start");
+  assert.deepEqual({ titel: start?.titel, kurz: start?.kurz }, { titel: "Erste Schritte", kurz: "Modellzugang, Installer, Prüfliste und Updates" });
+  assert.equal(start?.nurAdmin, undefined);
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    assert.equal(abschnitteFuer({ rolle, labor: true }).some((a) => a.id === "start"), false, `Labor ${rolle}`);
+  }
+  assert.deepEqual(parseHash("#einstellungen/start"), { offen: true, abschnitt: "start" });
+  // im Laborkonto führt ein Hash auf die Prüfliste nie dorthin
+  assert.equal(wirksamerAbschnitt(parseHash("#einstellungen/start"), abschnitteFuer({ rolle: "admin", labor: true }), true), "sprache");
 });

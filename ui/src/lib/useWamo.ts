@@ -128,8 +128,14 @@ declare global {
       rechnername?: () => Promise<unknown>;
       /** Windows-Datenschutz für das Mikrofon: "granted", "denied", "restricted" oder "not-determined" (lib/mikrofon.ts) */
       mikrofonStatus?: () => Promise<unknown>;
-      /** Einrichtung des Laptops bei der Anmeldung (nur Büro; lib/geraet.ts) */
+      /** Einrichtung des Laptops bei der Anmeldung (nur Büro; lib/geraet.ts). status() meldet ab App 0.3.0 zusätzlich
+       *  hostUmgebung ("bereit", "fehlt", "fehler" oder "entwickler"), gelesen von der Prüfliste (lib/einrichtung.ts). */
       geraet?: GeraetBruecke;
+      /** Version der App "x.y.z" (app.getVersion()); fehlt bei App 0.2.0, dann zeigt die Prüfliste "Update empfohlen." */
+      version?: string;
+      /** Update der App (ab 0.3.0): prüfen gibt das Manifest des Servers zur Prüfung von Signatur und Version an die App,
+       *  installieren startet es (die App fragt selbst nach). Antworten ungeprüft, gelesen in lib/einrichtung.ts. */
+      update?: import("@/lib/einrichtung").UpdateBruecke;
     };
   }
 }
@@ -1359,6 +1365,7 @@ export function useWamo(): WamoAktionen {
           rolleKern: s.profil?.rolle ?? null,
           rolleGemerkt: rolleGemerktLesen(nutzer.id),
           laborKonto: istLaborKonto(nutzer.email),
+          pcStufeKern: s.betrieb?.pcStufe ?? null,
         }),
       });
       const wunschBeginnen = () => {
