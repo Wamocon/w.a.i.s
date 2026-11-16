@@ -85,6 +85,11 @@ class StimmWaechter(FrameProcessor):
             # Abdruck lädt erst nach dem Start, und diese Angabe kommt nur einmal.
             frame = replace(frame, ttfs_p99_latency=(frame.ttfs_p99_latency or 0.0) + self._warten)
         elif direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
+            if frame.text.strip():
+                # in jedem Modus, auch ohne Abdruck: nach diesem Transkript gilt Getipptes nicht mehr für die Pflichtstufe der Mitglieder
+                # (stimme_gate.pflicht_grund), auch wenn die Sprachpausenerkennung die Äußerung nicht gemeldet hat. Getippter Text kommt
+                # nie als Transkript (Pipecat: LLMMessagesAppendFrame)
+                self._gate.gesprochen()
             if _satz_fertig(frame.text):
                 self._pruefer.satz_ende()  # was danach gesprochen wird, gehört nicht mehr zu diesem Satz (auch wenn er verworfen wird)
             if self.aktiv():

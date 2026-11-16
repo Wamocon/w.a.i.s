@@ -5,8 +5,9 @@ pc_zugang genau einmal, die Sitzung blieb ohne PC, und jeder Klick auf den Schal
 jedem stillen Start und jedem Neuaufbau des Tunnels.
 
 Regeln:
-  * Nachgeholt wird nur für Admins, nie im Labor, nur im Tunnel je Gerät mit Host an und nur, wenn das Register für das Profil ein aktives
-    Gerät führt (nachholen_moeglich). Mitglieder und Laborprofile bekommen auf diesem Weg nie PC-Werkzeuge.
+  * Nachgeholt wird nur für Profile mit einer Stufe (rechte.pc_stufe: Admin oder freigeschaltetes Mitglied), nie im Labor, nur im Tunnel je
+    Gerät mit Host an und nur, wenn das Register für das Profil ein aktives Gerät führt (nachholen_moeglich). Mitglieder ohne Freischaltung
+    und Laborprofile bekommen auf diesem Weg nie PC-Werkzeuge; ein Mitglied bekommt auch nachgeholt nur seine engere Liste.
   * Ein Versuch ist genau der Weg des Sitzungsstarts (bot.py, pc_nachholen_versuch): pc_zugang mit lies_geheimnisse, host_client nur für
     dieses Gerät, dann start_pc mit Rechnernamen-Abgleich, Gerätewache und Tunnelwächter. PC-Sperre, Stimmabdruck-Gate und das Gate der
     PC-Werkzeuge gelten unverändert; eingeschaltet wird nur per Klick der Person.
@@ -27,6 +28,7 @@ from collections.abc import Awaitable, Callable
 from loguru import logger
 
 import labor
+import rechte
 from pc_geraet import geraet_erwartet
 from pc_host import pc_host_enabled, register_modus
 
@@ -41,9 +43,10 @@ HINWEIS_NICHT_VERBUNDEN = "Der Laptop ist noch nicht verbunden. Läuft die Deskt
 
 
 async def nachholen_moeglich(identity, *, zugang_da: bool, register=None) -> bool:
-    """Soll diese Sitzung den Zugang zu IHREM Laptop nachholen? Nur Admin, nie Labor, nur im Tunnel je Gerät mit Host an, nur ohne
-    Zugang beim Start und nur mit aktivem Gerät im Register. Die billigen Prüfungen zuerst: Register nur, wenn alle anderen passen."""
-    if zugang_da or labor.ist_labor(identity) or not getattr(identity, "is_admin", False):
+    """Soll diese Sitzung den Zugang zu IHREM Laptop nachholen? Nur mit Stufe (Admin oder freigeschaltetes Mitglied), nie Labor, nur im
+    Tunnel je Gerät mit Host an, nur ohne Zugang beim Start und nur mit aktivem Gerät im Register. Die billigen Prüfungen zuerst: Register
+    nur, wenn alle anderen passen."""
+    if zugang_da or labor.ist_labor(identity) or rechte.pc_stufe(identity) is None:
         return False
     if not (register_modus() and pc_host_enabled()):
         return False
