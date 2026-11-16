@@ -25,7 +25,7 @@ Sicherheit
 
 Quellen (Funktionen auf Modulebene, die Tests ersetzen): erstanmeldung_stand (Paket P1b dockt nur dort an), aktives_geraet und
 geraete_status (Register devices), dateien_pruefen und gegenstelle_pruefen (Tunnel), modellzugang_stand (model_access),
-soniox_gesetzt, entwicklung_problem und abdruck_vorhanden (speakers). Rechte nach heutigem Stand (WAMO_PC_MITGLIEDER,
+soniox_gesetzt, entwicklung_problem und abdruck_vorhanden (speakers). Rechte der PC-Steuerung aus rechte.pc_stufe (WAMO_PC_MITGLIEDER_PROFILE,
 entwicklung_betrieb); mit rechte.py (P4, P5) fragt die Prüfliste dort.
 """
 
@@ -47,6 +47,7 @@ import entwicklung_betrieb
 import labor
 import modellzugang as mz
 import pc_geraet
+import rechte
 import pc_host
 import pc_tunnel
 import sprache_anbieter
@@ -345,9 +346,9 @@ async def _stimmabdruck(user_id: str) -> Punkt:
 
 
 def _pc(ich: Identity, erreichbar: bool) -> Punkt:
-    """Heute: Admins, Mitglieder nur mit WAMO_PC_MITGLIEDER (wie pc_geraet.pc_zugang_fuer; P4: rechte.pc_stufe)."""
+    """Dieselbe Stelle wie die PC-Steuerung selbst (rechte.pc_stufe, P4): Admins, Mitglieder nur mit Freischaltung je Profil."""
     try:
-        if not (ich.is_admin or pc_geraet.mitglieder_erlaubt()):
+        if rechte.pc_stufe(ich) is None:
             return _punkt("pc", ROT, SATZ_PC_NICHT_FREI)
         if not pc_host.pc_host_enabled():
             return _punkt("pc", ROT, SATZ_PC_AUS)

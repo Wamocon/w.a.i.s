@@ -124,7 +124,8 @@ def umgebung(monkeypatch):
     for name, wert in (("WAMO_BETRIEB", "buero"), ("WAMO_PC_REGISTER", "an"), ("WAMO_PC_HOST", "on"),
                        ("WAMO_ENTWICKLUNG_BUERO", "an"), ("WAMO_ENTWICKLUNG_PROFILE", ADMIN)):
         monkeypatch.setenv(name, wert)
-    for name in ("WAMO_PC_MITGLIEDER", "WAMO_STT_ANBIETER", "WAMO_TTS_ANBIETER", "WAMO_PC_SOCKET_WURZEL"):
+    for name in ("WAMO_PC_MITGLIEDER", "WAMO_PC_MITGLIEDER_PROFILE", "WAMO_STT_ANBIETER", "WAMO_TTS_ANBIETER",
+                 "WAMO_PC_SOCKET_WURZEL"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -444,11 +445,17 @@ def test_pc_mitglied_ohne_schalter(ctx):
 
 
 def test_pc_mitglied_mit_schalter_und_erreichbarem_geraet(ctx, quellen, monkeypatch):
-    monkeypatch.setenv("WAMO_PC_MITGLIEDER", "an")
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER_PROFILE", MITGLIED)
     ctx.ich = Identity(MITGLIED, "Mitglied", "mitglied", "du")
     assert punkte(ctx)["pc"] == ("gruen", api.SATZ_PC_OK)
     quellen.socket = pc_tunnel.GegenstelleFalsch("x")
     assert neu(ctx, quellen)["pc"] == ("rot", api.SATZ_PC_NICHT_ERREICHBAR)
+
+
+def test_pc_alter_kernweiter_schalter_wirkt_nicht(ctx, monkeypatch):
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER", "an")  # seit P4 ohne Wirkung, nur WAMO_PC_MITGLIEDER_PROFILE zählt
+    ctx.ich = Identity(MITGLIED, "Mitglied", "mitglied", "du")
+    assert punkte(ctx)["pc"] == ("rot", "PC-Steuerung ist für dein Profil noch nicht freigeschaltet.")
 
 
 def test_pc_am_server_aus(ctx, monkeypatch):
