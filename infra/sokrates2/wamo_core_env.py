@@ -44,6 +44,10 @@ ERLAUBT = set(PFLICHT) | {
     "ANTHROPIC_API_KEY", "WAMO_CLAUDE_SCHLUESSEL_PROFIL", "WAMO_SCHLUESSEL_KEK", "WAMO_SCHLUESSEL_KEK_ALT",
     # Bindung des PCs am Tunnel (genau eine user_id)
     "WAMO_PC_HOST_PROFILE",
+    # PC-Steuerung für Mitglieder (voice-core/rechte.py, Paket P4): user_id der freigeschalteten Mitglieder, durch Komma getrennt. Leer heißt
+    # aus (Standard); ein ungültiger Eintrag heißt niemand. Laborprofile nie, Admins brauchen keinen Eintrag. Kommt nur vom Server, nie aus
+    # der .env des PCs (nicht in AUS_ENV von scripts/wamo_kern_sokrates2.py); wirkt mit dem nächsten Kern-Release.
+    "WAMO_PC_MITGLIEDER_PROFILE",
     # Einstellungen wie in der .env des PCs
     "WAMO_DB_SCHEMA", "SONIOX_STT_URL", "SONIOX_TTS_URL", "SONIOX_VOICE", "SONIOX_TERMS", "CLAUDE_MODEL_FAST",
     "VISION_MODEL", "MIN_INTERRUPT_WORDS", "WAMO_CITY", "WAMO_TIMEZONE", "WAMO_GREETING", "WAMO_MAX_SITZUNG_MIN",
