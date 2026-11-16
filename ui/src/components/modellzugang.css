@@ -77,3 +77,16 @@
 /* Die Statusregion bleibt im DOM (Ansage), nimmt leer aber keinen Platz */
 .mz-abschnitt > .mz-meldung:empty { min-height: 0; margin-top: -10px; }
 .mz-meldung[data-fehler] { color: var(--ink); padding-left: 8px; border-left: 4px solid var(--accent); }
+
+/* Modelle je Aufgabe (components/ModellAuswahl.tsx) und Stimme im Haus (components/SprachWahl.tsx): native Auswahllisten */
+.mz-modelle { gap: 14px; }
+.mz-sprache { gap: 12px; }
+.mz-modell { display: grid; gap: 5px; min-width: 0; }
+.mz-modell select {
+  min-height: 44px; max-width: 100%; padding: 0 10px;
+  border: 1px solid var(--steuer-rand); border-radius: 4px;
+  font: 400 16px var(--body); background: var(--bg); color: var(--ink);
+}
+.mz-modell select:hover:not(:disabled) { border-color: var(--ink); }
+.mz-modell select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.mz-modell select:disabled { opacity: 0.6; cursor: not-allowed; }

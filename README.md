@@ -1431,14 +1431,25 @@ Jedes Profil hat genau eine von zwei Arten (`voice-core/modellzugang.py`, Tabell
 - **Je Sitzung ein eigener Client:** Es gibt keinen Anthropic-Client und keinen Schlüssel, der Profile teilt. Der
   Verbrauch steht als Tokenzahlen je Profil im Log (`Verbrauch profil=… anbieter=… modell=… ein=… aus=…`), ohne Inhalt.
 - **Stimme:** Jedes Profil trägt `stt` und `tts` (`soniox` oder `haus`). Soniox bleibt Standard. Seit Paket H5 (Migration 0023)
-  wählt die Person selbst in der Karte Modellzugang „Soniox (Standard)“ oder „Im Haus (Datenschutz)“, ab der nächsten Sitzung,
-  mit einer Zeile in `actions` (Werkzeug `stimme_wahl`); ein Admin setzt die Werte weiter mit `modellzugang-setzen --stt haus
-  --tts haus`. Laborsitzungen hören immer über Soniox. Im Haus braucht der Kern `WAMO_STT_HAUS_MODELL`, `WAMO_TTS_HAUS_MODELL`
+  wählt die Person selbst in der Karte Modellzugang „Soniox (Standard)“ oder „Im Haus (Datenschutz)“, seit Migration 0024 getrennt
+  für Spracherkennung und Sprachausgabe und dazu die Stimme im Haus (eine der neun Stimmen des Dienstes, keine nativ deutsch; ohne
+  Wahl gilt `WAMO_TTS_HAUS_STIMME`), ab der nächsten Sitzung, mit einer Zeile in `actions` (Werkzeug `stimme_wahl`); ein Admin setzt
+  `stt` und `tts` weiter mit `modellzugang-setzen --stt haus --tts haus`. Laborsitzungen hören immer über Soniox. Im Haus braucht der Kern `WAMO_STT_HAUS_MODELL`, `WAMO_TTS_HAUS_MODELL`
   und `WAMO_TTS_HAUS_STIMME` sowie die Einträge im Gateway; sonst Rückfall auf Soniox mit Grund in der Oberfläche
   (Messung M7 und Einrichtung in `docs/hausmodelle-und-kikollege.md`).
 - **Modus je Profil** (Migration 0011, Spalte `modell_modus`): „Automatisch“ oder „Nur Hausmodelle“, gewählt in der Karte
   Modellzugang und gültig ab der nächsten Sitzung. Der Zwang eines Admins (`nur_haus`) bleibt stärker. Im Modus Nur
   Hausmodelle geht nichts an Anthropic, auch nicht als Rückfall, und Claude-Code-Aufträge sind aus.
+- **Modelle je Aufgabe** (Migration 0024, `voice-core/modellwahl.py`, Karte Modellzugang, Abschnitt „Modelle je Aufgabe“):
+  Gesprächsmodell, Bildschirm und Bilder, Lernen und Zusammenfassung, je „Automatisch“ (Standard, der Boss wählt) oder ein Modell
+  aus der festen Liste, die der Kern aus der Modellkarte bildet (Name und eine Zeile zu Güte und Tempo). Claude-Modelle (Haiku,
+  Sonnet, Opus) nur mit eigenem Claude-Zugang; der Kern prüft eine Claude-Wahl mit einer Anfrage über ein Ausgabe-Token mit dem
+  Schlüssel der Person. Ein Hausprofil sieht keine Claude-Modelle, ein vom Admin festgelegtes Profil sieht die Wahl gesperrt mit
+  Grund, ein vom Admin gesetztes Claude-Modell ist das einzige Claude-Modell. Der Kern prüft jede Wahl beim Setzen und beim Laden
+  (Aktion `modell`, höchstens 10 Wechsel je 10 Minuten, Zeile in `actions` mit dem Werkzeug `modell_wahl`). In der Sitzung gilt:
+  Vorgabe des Betriebs (`WAMO_LLM_*`) vor der Wahl der Person vor dem Boss; ist das gewählte Modell nicht nutzbar, übernimmt das
+  nächstbeste, und die Statusleiste nennt den Grund. Boss-Aufgaben (Code, Analyse, Bewertung, Bildbeschreibung) folgen keiner Wahl.
+  Laborprofile sehen nichts davon und bekommen 403.
 - **Zweiter Schlüsseltyp, Claude-Code-Token** (`sk-ant-oat…` aus `claude setup-token`, Max-Tarif): nur für
   Entwicklungsaufträge, nie für das Gespräch. Der Kern prüft nur das Format (eine Testanfrage würde das Kontingent
   verbrauchen), verschlüsselt ihn wie den API-Schlüssel (AES-256-GCM, Zweck als zusätzliche Daten, zwei getrennte Felder

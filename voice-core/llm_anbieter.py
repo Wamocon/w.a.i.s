@@ -77,6 +77,10 @@ _ENV = {
     "zusammenfassung": ("WAMO_LLM_ZUSAMMENFASSUNG", "WAMO_LLM_ZUSAMMENFASSUNG_MODELL"),
 }
 BAUSTEINE = tuple(_ENV)
+# Wahl der Person je Bereich (modellwahl.py, Migration 0024): welcher Baustein welcher Wahl folgt. Boss-Aufgaben (Code, Analyse,
+# Bewertung, Bildbeschreibung) folgen keiner Wahl, sie gehören dem Boss.
+BAUSTEIN_BEREICH = {"gespraech": "gespraech", "vision": "bilder", "lernen": "hintergrund", "zusammenfassung": "hintergrund"}
+BETRIEB_VOR_WAHL = "deine Modellwahl gilt gerade nicht, der Betrieb hat das Modell für alle festgelegt"
 # Standard ist überall Haiku (Vorgabe: Sonnet kostet ein Vielfaches); VISION_MODEL kann das Bildmodell anheben.
 STANDARD_CLAUDE = "claude-haiku-5-5"
 PRUEF_TTL_SECS = 30.0  # so lange gilt das Ergebnis einer Gateway-Prüfung
@@ -133,6 +137,10 @@ class Zugang:
     # Hat die Person einen Claude-Code-Token hinterlegt? Nur dieses Merkmal, nie der Token selbst (den liefert
     # modellzugang.claude_code_zugang_fuer kurz vor einem Entwicklungslauf). Er berührt das Gespräch nicht.
     claude_code: bool = False
+    # Wahl der Person je Bereich (gespraech, bilder, hintergrund -> Alias), schon beim Laden gegen die feste Liste geprüft
+    # (modellzugang.zugang_laden, modellwahl.gueltig); leer heißt automatisch. tts_stimme: Stimme im Haus, None heißt Standard des Kerns.
+    modell_wahl: tuple[tuple[str, str], ...] = ()
+    tts_stimme: str | None = None
     _client: list = field(default_factory=list, repr=False, init=False)  # einmal je Zugang gebaut
     _zu: list = field(default_factory=list, repr=False, init=False)  # gefüllt, sobald die Sitzung schloss
 
@@ -144,8 +152,10 @@ class Zugang:
 
     @classmethod
     def haus(cls, user_id: str, quelle: str = "keiner", hinweis: str | None = None, *, stt: str = "soniox",
-             tts: str = "soniox", claude_code: bool = False) -> Zugang:
-        return cls(user_id, "haus", quelle, stt=stt, tts=tts, hinweis=hinweis, claude_code=claude_code)
+             tts: str = "soniox", claude_code: bool = False, modell_wahl: tuple[tuple[str, str], ...] = (),
+             tts_stimme: str | None = None) -> Zugang:
+        return cls(user_id, "haus", quelle, stt=stt, tts=tts, hinweis=hinweis, claude_code=claude_code,
+                   modell_wahl=modell_wahl, tts_stimme=tts_stimme)
 
     @classmethod
     def betreiber(cls) -> Zugang:
@@ -288,10 +298,27 @@ def verbrauch_loggen(zugang: Zugang | None, anbieter: str, modell: str, baustein
 # --- Konfiguration -----------------------------------------------------------------------------
 
 
+def person_wunsch(baustein: str, zugang: Zugang | None) -> tuple[Anbieter, str] | None:
+    """Die Wahl der Person für diesen Baustein als (Anbieter, Modell), oder None (automatisch). Ein Claude-Modell gilt nur für einen
+    Zugang mit Claude; ein Hausprofil bekommt hier nie ein Claude-Modell, auch wenn der Zugang eins trüge."""
+    bereich = BAUSTEIN_BEREICH.get(baustein)
+    if zugang is None or bereich is None:
+        return None
+    wert = dict(zugang.modell_wahl).get(bereich)
+    if not wert:
+        return None
+    if wert.startswith("claude-"):
+        return ("claude", wert) if zugang.art == "claude" else None
+    return "litellm", wert
+
+
 def claude_standardmodell(baustein: str, zugang: Zugang | None = None) -> str:
-    """Modell des Profils (vom Admin festgelegt), sonst VISION_MODEL bzw. CLAUDE_MODEL_FAST, sonst Haiku."""
+    """Modell des Profils (vom Admin festgelegt), sonst das Claude-Modell, das die Person für den Bereich gewählt hat, sonst
+    VISION_MODEL bzw. CLAUDE_MODEL_FAST, sonst Haiku."""
     if zugang is not None and zugang.claude_modell:
         return zugang.claude_modell
+    if (wunsch := person_wunsch(baustein, zugang)) is not None and wunsch[0] == "claude":
+        return wunsch[1]
     if baustein == "vision":
         return _env("VISION_MODEL") or _env("CLAUDE_MODEL_FAST") or STANDARD_CLAUDE
     return _env("CLAUDE_MODEL_FAST") or STANDARD_CLAUDE
@@ -329,18 +356,22 @@ def vorgabe(baustein: str, zugang: Zugang | None = None) -> tuple[Anbieter | Non
 def konfiguration(baustein: str, zugang: Zugang | None = None) -> tuple[Anbieter, str | None]:
     """(Anbieter, Modell): die Vorgabe des Betriebs aus der Umgebung, sonst der Standard aus der Modellkarte (Boss).
     Für haus-Profile ist der Anbieter immer litellm und das Modell das beste Hausmodell der Karte; für ein Profil mit
-    Claude-Schlüssel ist es das Modell mit den besten Punkten, im Gespräch also Claude Haiku."""
+    Claude-Schlüssel ist es das Modell mit den besten Punkten, im Gespräch also Claude Haiku. Zwischen Betrieb und Karte steht
+    die Wahl der Person (person_wunsch)."""
     import boss
 
     anbieter, modell = vorgabe(baustein, zugang)
     klasse = boss.BAUSTEIN_KLASSE[baustein]
-    if anbieter is None:  # der Betrieb legt nichts fest: Modellkarte
+    wunsch = person_wunsch(baustein, zugang)
+    if anbieter is None:  # der Betrieb legt nichts fest: Wahl der Person, sonst Modellkarte
+        if wunsch is not None:
+            return wunsch[0], wunsch[1] if wunsch[0] == "litellm" else None
         liste = boss.rangliste(klasse, claude_erlaubt=zugang is None or zugang.art == "claude")
         if liste and liste[0].anbieter == "litellm":
             return "litellm", liste[0].alias
         return "claude", None
     if anbieter == "litellm" and not modell:
-        modell = boss.hausstandard(klasse)
+        modell = wunsch[1] if wunsch is not None and wunsch[0] == "litellm" else boss.hausstandard(klasse)
     return anbieter, modell
 
 
@@ -562,35 +593,56 @@ def anthropic_ziel(modell: str | None) -> str | None:
     return None
 
 
-async def _haus_wahl(baustein: str, zugang: Zugang, gewuenscht: Anbieter, grund: str | None = None) -> Wahl:
-    """Bestes nutzbares Hausmodell für den Baustein (Boss): zuerst die Vorgabe des Betriebs, dann die Modellkarte der
-    Reihe nach; für das Gespräch zusätzlich mit Probe, ob das Modell jetzt schnell genug antwortet. LLMNichtVerfuegbar,
-    wenn keines nutzbar ist (nie ein Ersatz durch Claude)."""
+async def _haus_wahl(baustein: str, zugang: Zugang, gewuenscht: Anbieter, grund: str | None = None, *,
+                     wunsch: tuple[Anbieter, str] | None = None) -> Wahl:
+    """Bestes nutzbares Hausmodell für den Baustein (Boss): zuerst die Vorgabe des Betriebs, sonst das Hausmodell, das die Person
+    gewählt hat (wunsch), dann die Modellkarte der Reihe nach; für das Gespräch zusätzlich mit Probe, ob das Modell jetzt schnell
+    genug antwortet. Ist die Wahl der Person nicht nutzbar, nennt Wahl.grund warum. LLMNichtVerfuegbar, wenn keines nutzbar ist
+    (nie ein Ersatz durch Claude)."""
     import boss
 
     _anbieter, vorgabe_modell = vorgabe(baustein, Zugang.haus(zugang.user_id))
+    haus_wunsch = wunsch[1] if wunsch is not None and wunsch[0] == "litellm" else None
+    bevorzugt = vorgabe_modell or haus_wunsch
+    betrieb = BETRIEB_VOR_WAHL if vorgabe_modell and haus_wunsch and vorgabe_modell != haus_wunsch else None
     try:
         wahl = await boss.waehlen(boss.BAUSTEIN_KLASSE[baustein], Zugang.haus(zugang.user_id), baustein=baustein,
-                                  bevorzugt=("litellm", vorgabe_modell) if vorgabe_modell else None)
+                                  bevorzugt=("litellm", bevorzugt) if bevorzugt else None)
     except LLMNichtVerfuegbar as e:
         fehler = LLMNichtVerfuegbar(f"Hausmodell für {baustein} nicht nutzbar: {e.gruende or e}")
         fehler.gruende = e.gruende
         raise fehler from None
-    if gewuenscht != wahl.gewuenscht or grund:
-        return Wahl(wahl.baustein, wahl.anbieter, wahl.modell, gewuenscht, "; ".join(x for x in (grund, wahl.grund) if x) or None)
+    if gewuenscht != wahl.gewuenscht or grund or betrieb:
+        return Wahl(wahl.baustein, wahl.anbieter, wahl.modell, gewuenscht,
+                    "; ".join(x for x in (grund, betrieb, wahl.grund) if x) or None)
     return wahl
 
 
 async def waehlen(baustein: str, zugang: Zugang) -> Wahl:
-    """Anbieter und Modell für einen Baustein nach dem Zugang des Profils. Der Boss (boss.py) wählt aus der
-    Modellkarte, es sei denn, der Betrieb legt den Anbieter in der Umgebung fest (WAMO_LLM_*)."""
+    """Anbieter und Modell für einen Baustein nach dem Zugang des Profils. Reihenfolge: Vorgabe des Betriebs in der Umgebung
+    (WAMO_LLM_*, gilt für alle), dann die Wahl der Person (person_wunsch), dann der Boss (boss.py) mit der Modellkarte. Weicht das
+    Ergebnis von der Wahl der Person ab, steht der Grund in Wahl.grund (Statusleiste der Oberfläche)."""
     import boss
 
+    wunsch = person_wunsch(baustein, zugang)
     if zugang.art == "haus":
-        return await _haus_wahl(baustein, zugang, "litellm")
-    anbieter_vorgabe, _modell_vorgabe = vorgabe(baustein, zugang)
+        return await _haus_wahl(baustein, zugang, "litellm", wunsch=wunsch)
+    anbieter_vorgabe, modell_vorgabe = vorgabe(baustein, zugang)
     if anbieter_vorgabe is None:
-        return await boss.waehlen(boss.BAUSTEIN_KLASSE[baustein], zugang, baustein=baustein)
+        return await boss.waehlen(boss.BAUSTEIN_KLASSE[baustein], zugang, baustein=baustein, bevorzugt=wunsch)
+    wahl = await _betrieb_wahl(baustein, zugang)
+    # Nur wenn die Vorgabe selbst der Wahl widerspricht; ein Rückfall nennt seinen eigenen Grund
+    widerspruch = wunsch is not None and (anbieter_vorgabe != wunsch[0] or bool(modell_vorgabe and modell_vorgabe != wunsch[1]))
+    if widerspruch and (wahl.anbieter, wahl.modell) != wunsch:
+        wahl = replace(wahl, grund="; ".join(x for x in (wahl.grund, BETRIEB_VOR_WAHL) if x))
+    return wahl
+
+
+async def _betrieb_wahl(baustein: str, zugang: Zugang) -> Wahl:
+    """Claude-Profil, der Betrieb legt den Anbieter des Bausteins in der Umgebung fest (WAMO_LLM_*). Ohne Modell in der Vorgabe
+    füllt die Wahl der Person das Modell, wenn sie zum Anbieter passt (konfiguration, claude_standardmodell)."""
+    import boss
+
     anbieter, modell = konfiguration(baustein, zugang)
     if anbieter == "claude":
         if modell and not modell.startswith("claude-"):
