@@ -286,7 +286,7 @@ eigene Instanz `wamo-qwen3-tts` (Port 172.17.0.1:8104, Quelle und Rückweg in `i
    bekommt sein erstes Audio nach 0,14 s. Ohne Streaming hielt ein abgebrochener langer Satz den Dienst bis zum Ende fest.
 
 **Messung** (Sätze: kurz "Gerne.", "Alles klar.", "Erledigt.", "Moment, ich schaue nach.", "Fertig."; normal drei Sätze mit 67 bis 77
-Zeichen; Stimme `sohee`; erstes Audio = erste Bytes nach dem WAV-Kopf). Gateway gemessen an einer Probe-Instanz derselben LiteLLM 1.92.0
+Zeichen; Stimme `sohee`, wo nicht anders genannt; erstes Audio = erste Bytes nach dem WAV-Kopf). Gateway gemessen an einer Probe-Instanz derselben LiteLLM 1.92.0
 (gleiches Abbild, nur auf Loopback, eigener Wegwerf-Schlüssel, danach entfernt); das zentrale Gateway blieb unberührt.
 
 | Weg | kurz p50 / p95 | normal p50 / p95 | n |
@@ -296,6 +296,8 @@ Zeichen; Stimme `sohee`; erstes Audio = erste Bytes nach dem WAV-Kopf). Gateway 
 | Dienst direkt, gestreamt (vier Messreihen) | 0,13 / 0,13 bis 0,19 s | 0,13 / 0,13 bis 0,15 s | je 20 |
 | Gateway, Durchreiche, gestreamt (drei Messreihen) | 0,14 / 0,14 bis 0,19 s | 0,14 / 0,14 bis 0,15 s, einmal 0,43 s | je 20 |
 | Kern (`HausTTSService`, SSH-Tunnel vom Laptop), Durchreiche | 0,14 / 0,15 s gemischt | | 12 |
+| Stimme `uncle_fu`: Dienst direkt, ganze Datei | 0,61 / 1,16 s | 3,10 / 3,29 s | je 12 |
+| Stimme `uncle_fu`: Dienst direkt, gestreamt | 0,13 / 0,13 s | 0,13 / 0,14 s | je 20 |
 | Kern, Modellweg | 2,25 / 3,57 s gemischt | | 12 |
 
 Pufferreserve beim Abspielen (Wiedergabe ab dem ersten Block): Die GPU teilt sich der Dienst mit anderer Last (Ollama, vLLM; beim
