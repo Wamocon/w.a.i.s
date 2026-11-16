@@ -247,3 +247,43 @@ test("electron-builder ruft customInstall nach dem Anlegen der Verknüpfung und 
   assert.ok(text.indexOf("!insertmacro setLinkVars") < zusatz);
   assert.ok(text.indexOf('StrCpy $appExe "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"') < zusatz);
 });
+
+test("Version 0.3.0: die App meldet ihre Version und prüft Updates (Paket P3)", () => {
+  assert.equal(paket.version, "0.3.0");
+  const sperre = JSON.parse(fs.readFileSync(path.join(__dirname, "package-lock.json"), "utf8"));
+  assert.equal(sperre.version, paket.version);
+  assert.equal(sperre.packages[""].version, paket.version);
+});
+
+test("Brücke: genau die bekannten Kanäle, neu nur version und update (REA vergleicht dasselbe am gebauten Paket)", () => {
+  const preload = fs.readFileSync(path.join(__dirname, "preload.js"), "utf8");
+  const kanaele = [...preload.matchAll(/ipcRenderer\.(?:invoke|send|on)\("([^"]+)"/g)].map((m) => m[1]).sort();
+  assert.deepEqual(kanaele, [
+    "betriebsart",
+    "betriebsart:lesen",
+    "betriebsart:setzen",
+    "geraet:aktivieren",
+    "geraet:signieren",
+    "geraet:status",
+    "geraet:vorbereiten",
+    "levels",
+    "markierung",
+    "mikrofon:status",
+    "rechnername",
+    "update:installieren",
+    "update:pruefen",
+  ]);
+  const main = fs.readFileSync(path.join(__dirname, "main.js"), "utf8");
+  for (const k of ["update:pruefen", "update:installieren"]) {
+    const zeile = main.split(`ipcMain.handle("${k}", (event, `)[1] ?? "";
+    assert.match(zeile.slice(0, 80), /^[a-z]+\) =>\s*\(?fromMainUi\(event\) && updater/, k);
+  }
+  assert.match(main, /additionalArguments: \[`--wamo-version=\$\{app\.getVersion\(\)\}`\]/);
+});
+
+test("Der öffentliche Update-Schlüssel kommt ins Paket, die Beispieldaten des Vertragstests nicht", () => {
+  const dateien = paket.build.files;
+  assert.ok(!dateien.some((f) => f.includes("update-schluessel")));
+  assert.ok(dateien.includes("!testdaten/**"));
+  assert.ok(fs.existsSync(path.join(__dirname, "update-schluessel.json")));
+});

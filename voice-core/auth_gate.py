@@ -58,7 +58,7 @@ import os
 import ssl
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -163,6 +163,9 @@ class Identity:
     labor_art: str | None = None
     labor_platz: int | None = None
     labor_aktiv: bool = False
+    # Stand der Erstanmeldung, wie ihn das Gate gelesen hat (None bei Laborprofilen und ohne Prüfung); zählt nicht beim Vergleich,
+    # reist nicht im Body. Die Prüfliste (einrichtung_api.erstanmeldung_stand) liest ihn hier.
+    erstanmeldung: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "labor_art", labor.art_normalisieren(self.labor_art))
@@ -496,7 +499,7 @@ class AccessGate:
         except Exception:  # fail-closed: unbekannte Fehler dürfen nie Zugang geben
             logger.exception("Zugangskontrolle: Erstanmeldung nicht lesbar")
             return Decision(None, 503, GRUND_ERSTANMELDUNG)
-        entscheidung = Decision(identity, erstanmeldung=stand)
+        entscheidung = Decision(replace(identity, erstanmeldung=stand), erstanmeldung=stand)
         return erstanmeldung_sperre(entscheidung, weg_frei=weg_frei) or entscheidung
 
     async def erstanmeldung_stand(self, user_id: str) -> str:

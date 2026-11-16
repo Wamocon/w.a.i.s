@@ -1,4 +1,5 @@
-// Komponententest der Statusleiste (components/Statusleiste.tsx): Der Grund, warum Entwicklungsaufträge aus sind, steht nur für Admins,
+// Komponententest der Statusleiste (components/Statusleiste.tsx): Der Grund, warum Entwicklungsaufträge aus sind, steht für Admins und
+// Mitglieder (den Text für Mitglieder filtert der Kern),
 // einmal und ohne title-Attribut (per Tastatur und Touch nicht erreichbar): kompakt für Screenreader, ausführlich sichtbar.
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { render } from "@testing-library/react";
@@ -42,11 +43,12 @@ describe("Statusleiste, Grund der gesperrten Entwicklung", () => {
     expect(leise?.textContent).toContain(GRUND);
   });
 
-  it("ein Mitglied sieht den Grund nie, auch wenn er in der Nachricht stünde", () => {
-    zustand("mitglied");
+  it("ein Mitglied sieht den Satz, den der Kern ihm schickt (Paket P5)", () => {
+    const satz = "Entwicklungsaufträge sind für Mitglieder noch nicht freigeschaltet";
+    zustand("mitglied", satz);
     for (const kompakt of [true, false]) {
       const { container, unmount } = render(<StatusDetails kompakt={kompakt} />);
-      expect(container.textContent).not.toContain(GRUND);
+      expect(container.textContent).toContain(satz);
       expect(feld(container)!.textContent).toMatch(/gesperrt/);
       unmount();
     }

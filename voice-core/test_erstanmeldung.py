@@ -168,6 +168,14 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
                 d = await tor(Verzeichnis(stand=stand)).authorize(token())
                 self.assertEqual((d.status, d.erstanmeldung), (200, stand))
                 self.assertEqual(d.identity, Identity(USER, "Erika Muster", "mitglied", "du"))
+                # Die Identität trägt den Stand mit (Prüfliste einrichtung_api.erstanmeldung_stand), nicht im Body
+                self.assertEqual(d.identity.erstanmeldung, stand)
+                self.assertNotIn("erstanmeldung", d.identity.to_body())
+
+    async def test_pruefliste_liest_den_stand_von_der_identitaet(self):
+        import einrichtung_api
+        d = await tor(Verzeichnis(stand="erledigt")).authorize(token())
+        self.assertEqual(einrichtung_api.erstanmeldung_stand(d.identity), "erledigt")
 
     async def test_offen_und_abgelaufen_sind_403_mit_code_und_satz(self):
         for stand in ("offen", "abgelaufen"):

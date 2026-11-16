@@ -41,14 +41,14 @@ class SchrankenVersionTests(unittest.TestCase):
     def test_genau_eine_zeile_im_muster_des_server_skripts(self):
         quelle = (Path(__file__).parent / "entwicklung_betrieb.py").read_text(encoding="utf-8")
         treffer = [z for z in quelle.splitlines() if re.fullmatch(r"SCHRANKEN_VERSION = [1-9][0-9]*", z)]
-        self.assertEqual(treffer, ["SCHRANKEN_VERSION = 1"])
-        self.assertEqual(eb.SCHRANKEN_VERSION, 1)
+        self.assertEqual(treffer, ["SCHRANKEN_VERSION = 2"])  # 2: Mitglieder und Trennung je Profil (Ausrollen P5)
+        self.assertEqual(eb.SCHRANKEN_VERSION, 2)
 
 
 class KonftestTests(unittest.TestCase):
     def test_conftest_neutralisiert_alle_neuen_variablen(self):
         """Eine Variable aus der Umgebung des Entwicklers oder einer .env darf nie in einen Test hineinwirken."""
-        self.assertEqual(len(eb.ALLE_VARIABLEN), 5)
+        self.assertEqual(len(eb.ALLE_VARIABLEN), 6)
         for name in eb.ALLE_VARIABLEN:
             with self.subTest(name=name):
                 self.assertNotIn(name, os.environ)
@@ -90,9 +90,9 @@ class BueroProblemTests(unittest.TestCase):
         for roh, wert in (("3", 3.0), ("0.5", 0.5), ("10.00", 10.0), (" 2.25 ", 2.25)):
             with self.subTest(roh=roh), buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=roh, WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="50"):
                 self.assertIsNone(eb.buero_problem())
-                self.assertEqual(eb.kosten_auftrag(), wert)
+                self.assertEqual(eb.kosten_auftrag(None), wert)
         with buero():
-            self.assertEqual(eb.kosten_tag(), 10.0)
+            self.assertEqual(eb.kosten_tag(None), 10.0)
 
     def test_ungueltiger_schalterwert_schaltet_ab(self):
         with buero(WAMO_ENTWICKLUNG_BUERO="vielleicht"):
@@ -565,7 +565,7 @@ PROJEKTNAMEN = (
 )
 GRUND_CODES = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt",
                "dienst", "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit",
-               "grenze_folgen", "abstand", "platz")
+               "grenze_folgen", "abstand", "platz", "grenze_profil")
 
 
 class ProjektnameTests(unittest.TestCase):
@@ -675,7 +675,13 @@ class GrundSaetzeTests(unittest.TestCase):
     def test_ablehngrund_je_ereignis_und_code(self):
         g = eb.ablehn_grund
         self.assertEqual(g(2, {"kanal_gesperrt": {"grund": "kanal_zu"}}), eb.GRUND_SAETZE["kanal_zu"])
-        self.assertIn("läuft schon", g(4, {"belegt": {}}))
+        # einfache Form der Warteschlange: nur wenn der Dispatcher wirklich einen anderen Auftrag meldet, "später noch einmal"
+        self.assertEqual(g(4, {"belegt": {"grund": "Es läuft schon ein Auftrag"}}), eb.SATZ_ANDERER_AUFTRAG)
+        self.assertEqual(g(4, {"belegt": {"grund": "Es laufen schon 2 Aufträge"}}), eb.SATZ_ANDERER_AUFTRAG)
+        self.assertIn("in ein paar Minuten", eb.SATZ_ANDERER_AUFTRAG)
+        for ev in ({}, {"grund": "Dieser Auftrag läuft bereits"}, {"grund": "Im Projekt läuft schon ein anderer Auftrag"}, "x"):
+            with self.subTest(ev=ev):
+                self.assertEqual(g(4, {"belegt": ev}), eb.SATZ_BELEGT)
         self.assertIn("Claude-Zugang", g(5, {"keine_zugangsdaten": {}}))
         self.assertIn("Claude-Zugang", g(2, {"zugang_ungueltig": {}}))
         self.assertIn("Selbsttest", g(3, {"selbsttest_fehlgeschlagen": {}}))
@@ -700,16 +706,16 @@ class RepoPflichtTests(BueroFlow):
         ergebnis = await self.vorbereiten(repo=None, art="recherche", projekt="Marktstudie", auftrag="Recherchiere den Markt")
         self.assertTrue(ergebnis["ok"])
         karte = next(m for m in self.task.messages() if m.get("type") == "auftrag")
-        self.assertEqual(karte["projekt"], "kern-marktstudie")
+        self.assertEqual(karte["projekt"], "kern-0f6c2b1e-marktstudie")  # mit der Kennung des Profils
         self.assertNotIn("repo", karte)
 
     async def test_projekt_wird_aus_dem_repo_abgeleitet_das_modellwort_zaehlt_nicht(self):
         ergebnis = await self.vorbereiten(repo="Acme/Test-Repo", projekt="irgendwas anderes")
         self.assertTrue(ergebnis["ok"])
         karte = next(m for m in self.task.messages() if m.get("type") == "auftrag")
-        self.assertEqual((karte["projekt"], karte["repo"]), ("kern-test-repo", "Acme/Test-Repo"))
+        self.assertEqual((karte["projekt"], karte["repo"]), ("kern-0f6c2b1e-test-repo", "Acme/Test-Repo"))
         job = self.agent._jobs[ergebnis["auftrag_id"]]
-        self.assertEqual(str(job.projekt), "/srv/wamo/projekte/kern-test-repo")
+        self.assertEqual(str(job.projekt), "/srv/wamo/projekte/kern-0f6c2b1e-test-repo")
 
     async def test_repo_aus_der_adresse_im_auftragstext_genuegt(self):
         ergebnis = await self.vorbereiten(repo=None, auftrag="Prüfe https://github.com/acme/testrepo auf Fehler")
@@ -781,7 +787,7 @@ class QuittungTests(BueroFlow):
         await self.klick(job)
         (q,) = self.quittungen()
         self.assertFalse(q["ok"])
-        self.assertIn("läuft schon", q["grund"])
+        self.assertEqual(q["grund"], eb.SATZ_ANDERER_AUFTRAG)  # ein anderer Auftrag (auch eines anderen Profils) belegt den Dispatcher
 
     async def test_belegt_im_kern_ein_auftrag_laeuft_noch(self):
         job = self.neuer_job()
@@ -1216,3 +1222,199 @@ class FreigabeBuchungTests(BueroFlow):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------- Mitglieder (Ausrollen P5, Entscheidungen N6 und N13)
+MITGLIED = "3c5e7a9b-1d2f-4a6c-8e0b-9d8c7b6a5f4e"  # synthetische Kennung, kein echtes Profil
+
+
+def mitglieder(**extra):
+    return buero(**{"WAMO_ENTWICKLUNG_PROFILE": f"{NIKO},{MITGLIED}", "WAMO_ENTWICKLUNG_MITGLIEDER": "an", **extra})
+
+
+class MitgliederZulassungTests(unittest.TestCase):
+    def test_ein_mitglied_bekommt_die_zulassung_nur_mit_schalter_und_liste(self):
+        with mitglieder():
+            z = eb.zulassung_erteilen(MITGLIED, False, mitglied=True)
+            self.assertIsInstance(z, eb.BueroZulassung)
+            self.assertTrue(z.mitglied)
+            self.assertTrue(eb.zulassung_gueltig(z, MITGLIED))
+            self.assertIn("mitglied", repr(z))
+            self.assertNotIn(MITGLIED, repr(z))
+            self.assertIsNone(eb.zulassung_erteilen(MITGLIED, False))  # ohne die Rolle mitglied nichts
+            self.assertIsNone(eb.zulassung_erteilen(ANDERE, False, mitglied=True))  # nicht in der Liste
+            self.assertFalse(eb.zulassung_erteilen(NIKO, True).mitglied)  # ein Admin bleibt Admin
+        for schalter in ("aus", "", "vielleicht", "AN-"):
+            with self.subTest(schalter=schalter), mitglieder(WAMO_ENTWICKLUNG_MITGLIEDER=schalter):
+                self.assertIsNone(eb.zulassung_erteilen(MITGLIED, False, mitglied=True))
+                self.assertFalse(eb.zulassung_gueltig(eb.BueroZulassung(MITGLIED, mitglied=True), MITGLIED))
+                self.assertIsNotNone(eb.zulassung_erteilen(NIKO, True))  # Admins hängen nicht am Schalter der Mitglieder
+
+    def test_ein_laborprofil_bekommt_nie_eine_zulassung(self):
+        with mitglieder():
+            self.assertIsNone(eb.zulassung_erteilen(MITGLIED, False, mitglied=True, labor=True))
+            self.assertIsNone(eb.zulassung_erteilen(NIKO, True, labor=True))
+            self.assertEqual(eb.grund_vorab(MITGLIED, False, mitglied=True, labor=True), eb.GRUND_LABOR)
+
+    def test_zulassung_aus_der_identitaet(self):
+        from auth_gate import Identity
+
+        with mitglieder():
+            self.assertFalse(eb.zulassung_fuer(Identity(NIKO, "Niko", "admin", "du")).mitglied)
+            self.assertTrue(eb.zulassung_fuer(Identity(MITGLIED, "Kollege", "mitglied", "du")).mitglied)
+            self.assertIsNone(eb.zulassung_fuer(Identity(MITGLIED, "Gast", "mitglied", "du", labor_art="platz")))
+            self.assertIsNone(eb.zulassung_fuer(Identity(MITGLIED, "Gast", "mitglied", "du", labor_art="schaufenster")))
+            self.assertIsNone(eb.zulassung_fuer(Identity(NIKO, "Niko", "admin", "du", labor_art="platz")))
+            self.assertIsNone(eb.zulassung_fuer(Identity(MITGLIED, "X", "gast", "du")))  # unbekannte Rolle
+            self.assertIsNone(eb.grund_fuer(Identity(MITGLIED, "Kollege", "mitglied", "du")))
+            self.assertEqual(eb.grund_fuer(Identity(MITGLIED, "Gast", "mitglied", "du", labor_art="platz")), eb.GRUND_LABOR)
+        with buero(WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{MITGLIED}"):
+            self.assertIsNone(eb.zulassung_fuer(Identity(MITGLIED, "Kollege", "mitglied", "du")))
+            self.assertEqual(eb.grund_fuer(Identity(MITGLIED, "Kollege", "mitglied", "du")), eb.GRUND_MITGLIEDER_AUS)
+            self.assertIsNone(eb.grund_fuer(Identity(NIKO, "Niko", "admin", "du")))
+
+    def test_gruende_der_mitglieder(self):
+        with buero(WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{MITGLIED}"):
+            self.assertEqual(eb.grund_vorab(MITGLIED, False, mitglied=True), eb.GRUND_MITGLIEDER_AUS)
+        with mitglieder(WAMO_ENTWICKLUNG_MITGLIEDER="kaputt"):
+            self.assertIn("ungültig", eb.grund_vorab(MITGLIED, False, mitglied=True))
+        with mitglieder():
+            self.assertIsNone(eb.grund_vorab(MITGLIED, False, mitglied=True))
+            self.assertEqual(eb.grund_vorab(ANDERE, False, mitglied=True), eb.GRUND_NICHT_FREIGEGEBEN)
+            self.assertEqual(eb.grund_vorab(MITGLIED, False, problem="x", mitglied=True), "x")
+            self.assertEqual(eb.grund_vorab(MITGLIED, False), eb.GRUND_NUR_ADMINS)  # ohne Rolle mitglied wie bisher
+        with mitglieder(WAMO_ENTWICKLUNG_BUERO="aus"):
+            self.assertIn("aus", eb.grund_vorab(MITGLIED, False, mitglied=True))
+
+    def test_mitglieder_sehen_nur_ihre_saetze_nie_einstellungen(self):
+        self.assertEqual(eb.anzeige_grund(False, eb.GRUND_MITGLIEDER_AUS, mitglied=True), eb.GRUND_MITGLIEDER_AUS)
+        self.assertEqual(eb.anzeige_grund(False, eb.GRUND_KEIN_ZUGANG, mitglied=True), eb.GRUND_KEIN_ZUGANG)
+        with buero(WAMO_ENTWICKLUNG_PROFILE=""):
+            problem = eb.buero_problem()
+        self.assertIn("WAMO_ENTWICKLUNG_PROFILE", problem)
+        self.assertEqual(eb.anzeige_grund(False, problem, mitglied=True), eb.GRUND_ALLGEMEIN)
+        self.assertEqual(eb.anzeige_grund(True, problem), problem[:120])  # Admins sehen ihn ganz
+        self.assertIsNone(eb.anzeige_grund(False, problem))  # weder Admin noch Mitglied: nichts
+        self.assertIsNone(eb.anzeige_grund(False, None, mitglied=True))
+
+
+class MitgliederKostenTests(unittest.TestCase):
+    def test_die_kleinere_grenze_gilt(self):
+        m, a = eb.BueroZulassung(MITGLIED, mitglied=True), eb.BueroZulassung(NIKO)
+        with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="3", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="25"):
+            self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (2.0, 10.0))
+            self.assertEqual((eb.kosten_auftrag(a), eb.kosten_tag(a)), (3.0, 25.0))
+            self.assertEqual((eb.kosten_auftrag(None), eb.kosten_tag(None)), (3.0, 25.0))
+            self.assertTrue(eb.auftragsgrenze_erreicht(2.0, m))
+            self.assertFalse(eb.auftragsgrenze_erreicht(1.99, m))
+            self.assertFalse(eb.auftragsgrenze_erreicht(2.5, a))
+            self.assertEqual(eb.kosten_mit_untergrenze(0.5, m), 2.0)
+            self.assertEqual(eb.kosten_mit_untergrenze(0.5, a), 3.0)
+        with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="1.5", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="4"):
+            self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (1.5, 4.0))  # ein kleinerer Wert im Drop-in gilt
+        with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="x"):
+            self.assertEqual((eb.kosten_auftrag(m), eb.kosten_tag(m)), (None, None))  # fehlt die Grenze, bleibt es aus
+            self.assertTrue(eb.auftragsgrenze_erreicht(0.0, m))
+
+    def test_die_kostenfunktionen_haben_keine_stille_vorgabe(self):
+        import inspect
+
+        for funktion in (eb.kosten_auftrag, eb.kosten_tag, eb.kosten_mit_untergrenze, eb.auftragsgrenze_erreicht):
+            with self.subTest(funktion=funktion.__name__):
+                self.assertIs(inspect.signature(funktion).parameters["zulassung"].default, inspect.Parameter.empty)
+
+    def test_mitglied_muss_ein_wahrheitswert_sein(self):
+        for schlecht in ("ja", 1, None):
+            with self.subTest(schlecht=schlecht), self.assertRaises(ValueError):
+                eb.BueroZulassung(MITGLIED, mitglied=schlecht)  # type: ignore[arg-type]
+
+
+class MitgliederTagesgrenzeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_die_tagesgrenze_des_mitglieds_ist_zehn_dollar(self):
+        with buero(WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD="3", WAMO_ENTWICKLUNG_KOSTEN_TAG_USD="25"):
+            for zulassung, vortag, erwartet in ((eb.BueroZulassung(MITGLIED, mitglied=True), 9.5, None),
+                                                (eb.BueroZulassung(MITGLIED, mitglied=True), 10.0, eb.SATZ_TAGESGRENZE),
+                                                (eb.BueroZulassung(NIKO), 10.0, None)):
+                with self.subTest(mitglied=zulassung.mitglied, vortag=vortag):
+                    memory = AuditMemory(user_id=zulassung.user_id)
+                    memory.vortag_kosten = vortag
+                    aktion, satz = await eb.AuftragsBuch(memory, zulassung).beginnen("ab12cd34ef56ab12", "recherche", "kern-x", None, False)
+                    self.assertEqual(satz, erwartet)
+                    self.assertEqual(memory.veraltet_aufrufe[-1]["kosten_usd"], 2.0 if zulassung.mitglied else 3.0)
+
+
+class KennungsKollisionTests(unittest.TestCase):
+    def test_zwei_profile_mit_derselben_kurzkennung_heissen_keine_liste(self):
+        zwilling = NIKO[:8] + "-0000-4000-8000-000000000000"  # gleiche erste 8 Hexzeichen, andere user_id
+        with buero(WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{zwilling}"):
+            self.assertIsNone(eb.profile())
+            self.assertIn("WAMO_ENTWICKLUNG_PROFILE", eb.buero_problem())
+            self.assertIsNone(eb.zulassung_erteilen(NIKO, True))
+        with buero(WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{MITGLIED}"):
+            self.assertEqual(eb.profile(), (NIKO, MITGLIED))
+
+
+class MitgliederProjektTests(unittest.TestCase):
+    def test_projektname_mit_kennung_aus_der_zulassung(self):
+        m, a = eb.BueroZulassung(MITGLIED, mitglied=True), eb.BueroZulassung(NIKO)
+        self.assertEqual(eb.buero_projekt("recherche", None, "Marktstudie", m), "kern-3c5e7a9b-marktstudie")
+        self.assertEqual(eb.buero_projekt("recherche", None, "Marktstudie", a), "kern-0f6c2b1e-marktstudie")
+        self.assertEqual(eb.buero_projekt("review", "acme/testrepo", None, a), "kern-0f6c2b1e-testrepo")
+        self.assertEqual(eb.buero_projekt("recherche", None, "Marktstudie"), "kern-marktstudie")  # ohne Zulassung keine Kennung
+
+    def test_mitglieder_bekommen_kein_repo(self):
+        m = eb.BueroZulassung(MITGLIED, mitglied=True)
+        for art, repo in (("recherche", "acme/testrepo"), ("review", "acme/testrepo"), ("review", None), ("umsetzung", None)):
+            with self.subTest(art=art, repo=repo), self.assertRaises(ValueError) as ctx:
+                eb.buero_projekt(art, repo, "x", m)
+            self.assertEqual(str(ctx.exception), eb.SATZ_MITGLIED_REPO)
+
+    def test_eine_ungueltige_kennung_gibt_keinen_namen(self):
+        for kennung in ("0F6C2B1E", "0f6c2b1", "0f6c2b1e0", "", "../x"):
+            with self.subTest(kennung=kennung), self.assertRaises(eb.ProjektnameFehler) as ctx:
+                eb.kern_projektname(None, "x", kennung)
+            self.assertEqual(ctx.exception.grund, "projekt")
+        self.assertEqual(eb.kern_projektname("acme/" + "a" * 36, None, "0f6c2b1e"), "kern-0f6c2b1e-" + "a" * 36)
+        with self.assertRaises(eb.ProjektnameFehler):
+            eb.kern_projektname("acme/" + "a" * 37, None, "0f6c2b1e")
+
+
+class MitgliedImDevAgentTests(BueroFlow):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.mitglied_env = mitglieder()
+        self.mitglied_env.start()
+        self.memory_m = AuditMemory(user_id=MITGLIED)
+        self.agent_m = dev_agent.DevAgent(memory=self.memory_m, auftraggeber="Kollege",
+                                          zulassung=eb.BueroZulassung(MITGLIED, mitglied=True))
+        self.agent_m.attach(self.task)
+
+    async def asyncTearDown(self):
+        self.mitglied_env.stop()
+        await super().asyncTearDown()
+
+    async def test_recherche_ohne_repo_bekommt_ein_projekt_mit_der_eigenen_kennung(self):
+        ergebnis = await self.vorbereiten(self.agent_m, repo=None, art="recherche", projekt="Marktstudie", auftrag="Recherchiere den Markt")
+        self.assertTrue(ergebnis["ok"], ergebnis)
+        karte = next(m for m in self.task.messages() if m.get("type") == "auftrag")
+        self.assertEqual(karte["projekt"], "kern-3c5e7a9b-marktstudie")
+
+    async def test_befehlskriterien_bleiben_fuer_mitglieder_aus(self):
+        with buero(WAMO_ABNAHME_BEFEHLE="ja", WAMO_ENTWICKLUNG_BEFEHLE_BUERO="an",
+                   WAMO_ENTWICKLUNG_PROFILE=f"{NIKO},{MITGLIED}", WAMO_ENTWICKLUNG_MITGLIEDER="an"):
+            self.assertFalse(self.agent_m._befehle_moeglich())
+            self.assertEqual(self.agent_m._befehle_hinweis(), dev_agent.BEFEHLE_AUS_HINWEIS)
+            self.assertNotEqual(self.agent._befehle_hinweis(), dev_agent.BEFEHLE_AUS_HINWEIS)  # der Admin bekommt den echten Grund
+
+    async def test_die_kopfzeile_traegt_die_kennung_der_zulassung(self):
+        with mock.patch.object(dev_agent, "persoenlicher_zugang", new=mock.AsyncMock(return_value={"typ": "api", "wert": "x"})):
+            kopf, _zeile = await self.agent_m._remote_zugang()
+        self.assertEqual(kopf["profil"], eb.BueroZulassung(MITGLIED, mitglied=True).kennung)
+
+    async def test_ein_repo_wird_fuer_mitglieder_abgelehnt(self):
+        for argumente in ({"repo": "acme/testrepo", "art": "recherche"}, {"repo": "acme/testrepo"}, {"repo": None, "art": "review"}):
+            with self.subTest(argumente=argumente):
+                ergebnis = await self.vorbereiten(self.agent_m, **argumente)
+                self.assertFalse(ergebnis["ok"])
+                self.assertEqual(ergebnis["fehler"], eb.SATZ_MITGLIED_REPO)
+        self.assertEqual(self.agent_m._jobs, {})

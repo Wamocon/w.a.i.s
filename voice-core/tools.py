@@ -83,15 +83,29 @@ class TurnState:
     taint_marks: list[int] = field(default_factory=list)
     transcript_len: Callable[[], int] = lambda: 0
     turn_nr: int = 0  # zählt die Beiträge der Person; wechselt sie, ist ein Werkzeugaufruf ein neuer Auftrag (werkzeug_wache.py)
+    # Nur für die Karten der Mitglieder (pc_mitglied.py): Beiträge der Person (ohne Meldungen von W.A.I.S. selbst) und der Beitrag, in dem
+    # zuletzt Inhalt aus einer Fremdquelle kam, die über den Zug hinaus nachwirkt
+    person_zuege: int = 0
+    fremd_zug: int | None = None
 
     def new_user_turn(self, text: str) -> None:
         self.last_user_text = text or ""
         self.tainted = False
         self.turn_nr += 1
+        self.person_zuege += 1
 
-    def taint(self) -> None:
+    def taint(self, nachwirkend: bool = True) -> None:
+        """nachwirkend=False nur für die Ergebnisse ändernder PC-Werkzeuge der Mitglieder (pc_mitglied.MitgliedSchutz.faerben): sie färben den
+        laufenden Zug, wirken für die Karten aber nicht in die nächsten Beiträge nach."""
         self.tainted = True
         self.taint_marks.append(self.transcript_len())
+        if nachwirkend:
+            self.fremd_zug = self.person_zuege
+
+    def fremd_fuer_karte(self, nachwirkung: int) -> bool:
+        """Braucht eine Änderung am Laptop eines Mitglieds eine Karte? Ja bei Fremdinhalt im laufenden Zug und bis nachwirkung weitere
+        Beiträge der Person nach Inhalt aus einer nachwirkenden Fremdquelle (ein "mach weiter" nach einer Webseite)."""
+        return self.tainted or (self.fremd_zug is not None and self.person_zuege - self.fremd_zug <= nachwirkung)
 
     def section_tainted(self, start: int, end: int) -> bool:
         return any(start <= m <= end for m in self.taint_marks)
