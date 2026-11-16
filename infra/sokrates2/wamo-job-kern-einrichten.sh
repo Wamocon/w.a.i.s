@@ -24,7 +24,7 @@
 #       wamo-core-slots.sh umschalten-kern <release>. Scheitert das vor dem Umschalten, kommt das vorige Drop-in zurück. Wurde schon
 #       umgeschaltet, bleibt es und das Skript endet mit Exit 4. Gleicher Stand ist ein No-op. --mitglieder an (Standard aus, jeder
 #       Aufruf ohne die Option schreibt aus) lässt auch Mitglieder aus --profil Aufträge starten und verlangt SCHRANKEN_VERSION 2 oder
-#       höher im Zielrelease, Dispatcher 8 mit dem Modul des Kern-Kanals und MAX_BUDGET_USD höchstens 2.00 in kernkanal.conf.
+#       höher im Zielrelease und Dispatcher 8 mit dem Modul des Kern-Kanals (MAX_BUDGET_USD gilt wie bisher für alle Läufe).
 #       --trocken prüft alles wie echt und zeigt das Drop-in (user_id nur als Kurzkennung), schreibt aber nichts und schaltet nicht um.
 #       --haus an|aus (Paket P6b, Standard aus, die Zeile WAMO_ENTWICKLUNG_HAUS steht immer im Drop-in): Entwicklungsaufträge mit
 #       Hausmodellen für Profile ohne eigenen Zugang oder mit nur Hausmodellen. --haus an verlangt Dispatcher, Kern-Kanal und Release
@@ -78,7 +78,6 @@ STD_KOSTEN_TAG_USD=10
 STD_MITGLIEDER=aus
 MIN_SCHRANKEN_MITGLIEDER=2   # erst ab dieser SCHRANKEN_VERSION kennt der Kern WAMO_ENTWICKLUNG_MITGLIEDER und die Grenzen der Mitglieder
 MIN_DISPATCHER=8             # erst Dispatcher 8 kennt die Kennung des Profils und die Schlüssel MAX_*_PROFIL in kernkanal.conf
-MAX_BUDGET_MITGLIEDER_CENT=200   # Kosten je Lauf (MAX_BUDGET_USD) höchstens so hoch wie die Grenze je Auftrag der Mitglieder (2 USD)
 MAX_PROFILE=20               # wie MAX_PROFILE in voice-core/entwicklung_betrieb.py
 
 KERN_IP=192.168.178.136
@@ -328,13 +327,6 @@ dispatcher_pruefen() {   # Dispatcher ab MIN_DISPATCHER und ein Modul, das die G
   [ -f "$WAECHTER/wamo_job_kernkanal.py" ] || vorbedingung "$WAECHTER/wamo_job_kernkanal.py fehlt (wamo-job-einrichten.sh)"
   grep -q '"grenze_profil"' "$WAECHTER/wamo_job_kernkanal.py" 2>/dev/null \
     || vorbedingung "das installierte Modul wamo_job_kernkanal.py kennt die Grenzen je Profil nicht (wamo-job-einrichten.sh)"
-}
-
-cent() {   # Betrag mit Punkt (0 bis 99.99) in Cent
-  local ganz="${1%%.*}" rest=""
-  [[ "$1" == *.* ]] && rest="${1#*.}"
-  rest="${rest}00"
-  echo $(( 10#$ganz * 100 + 10#${rest:0:2} ))
 }
 
 mitglieder_im_dropin() {   # an, wenn das vorhandene Drop-in WAMO_ENTWICKLUNG_MITGLIEDER=an setzt
@@ -684,9 +676,6 @@ cmd_kanal() {
   [ -z "$MAX_LAUFZEIT" ] || K[MAX_LAUFZEIT_TAG_S]="$MAX_LAUFZEIT"
   local g
   for g in "${!GRENZE[@]}"; do K[$g]="${GRENZE[$g]}"; done
-  if [ "$(mitglieder_im_dropin)" = an ] && [ "$(cent "${K[MAX_BUDGET_USD]}")" -gt "$MAX_BUDGET_MITGLIEDER_CENT" ]; then
-    vorbedingung "MAX_BUDGET_USD ${K[MAX_BUDGET_USD]} liegt über 2.00, der Grenze je Auftrag der Mitglieder (erst schalter ... --mitglieder aus)"
-  fi
   K[KANAL]=offen
   konfig_schreiben
   echo "Kanal offen für: ${K[ARTEN]}${K[REPOS]:+ mit Repos ${K[REPOS]}}. Ablauf ${K[ABLAUF]} ($tage Tage)."
@@ -738,9 +727,6 @@ schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
     [ -n "$version" ] && [ "$version" -ge "$MIN_SCHRANKEN_MITGLIEDER" ] \
       || vorbedingung "das Release $RELEASE kennt die Schranken der Mitglieder nicht (SCHRANKEN_VERSION ${version:-?}, nötig ab $MIN_SCHRANKEN_MITGLIEDER): ein altes Release ließe --mitglieder an wirkungslos"
     dispatcher_pruefen
-    konfig_lesen_hart
-    [ "$(cent "${K[MAX_BUDGET_USD]}")" -le "$MAX_BUDGET_MITGLIEDER_CENT" ] \
-      || vorbedingung "MAX_BUDGET_USD ${K[MAX_BUDGET_USD]} in kernkanal.conf liegt über 2.00, der Grenze je Auftrag der Mitglieder (kanal --max-budget-usd 2.00)"
   fi
   if "$COREENV" liste 2>/dev/null | grep -q '^WAMO_ENTWICKLUNG'; then
     vorbedingung "core.env enthält ein WAMO_ENTWICKLUNG*: es hätte vor dem Drop-in Vorrang (wamo-core-env loeschen)"

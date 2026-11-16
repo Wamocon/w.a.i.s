@@ -1204,20 +1204,20 @@ def test_schalter_mit_mitgliedern_verlangt_dispatcher_8_und_das_neue_modul(welt)
 
 
 @braucht_bash
-def test_mitglieder_vertragen_kein_budget_je_lauf_ueber_zwei_dollar(welt):
+def test_mitglieder_verlangen_kein_bestimmtes_budget_je_lauf(welt):
+    # Entscheidung von Niko (16.11.2026): keine Grenze von 2 USD für Mitglieder; MAX_BUDGET_USD gilt wie bisher für alle Läufe
     schluessel_einrichten(welt)
     release_version(welt, 2)
     konfig = welt["w"] / "etc/wamo/kernkanal.conf"
     konfig.write_text(konfig.read_text().replace("MAX_BUDGET_USD=2.00", "MAX_BUDGET_USD=2.50"))
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
-    assert p.returncode == 3 and "MAX_BUDGET_USD 2.50" in p.stderr, p.stdout + p.stderr
-    konfig.write_text(konfig.read_text().replace("MAX_BUDGET_USD=2.50", "MAX_BUDGET_USD=2"))
-    assert einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an").returncode == 0
-    # mit aktivem Schalter der Mitglieder lässt kanal kein höheres Budget zu, ein gleiches oder kleineres schon
-    p = einr(welt, "kanal", "--arten", "recherche", "--max-budget-usd", "2.01")
-    assert p.returncode == 3 and "über 2.00" in p.stderr, p.stdout + p.stderr
-    assert einr(welt, "kanal", "--arten", "recherche", "--max-budget-usd", "1.50").returncode == 0
-    assert konfig_von(welt)["MAX_BUDGET_USD"] == "1.50"
+    assert p.returncode == 0, p.stdout + p.stderr
+    # auch mit aktivem Schalter der Mitglieder nimmt kanal jedes gültige Budget je Lauf
+    p = einr(welt, "kanal", "--arten", "recherche", "--max-budget-usd", "5.00")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert konfig_von(welt)["MAX_BUDGET_USD"] == "5.00"
+    skript = (INFRA / "wamo-job-kern-einrichten.sh").read_text(encoding="utf-8")
+    assert "MAX_BUDGET_MITGLIEDER" not in skript and "über 2.00" not in skript
 
 
 @braucht_bash

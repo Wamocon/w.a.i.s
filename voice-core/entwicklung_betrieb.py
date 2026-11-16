@@ -12,8 +12,8 @@ entscheidet, damit dev_agent.py (über 800 Zeilen) und bot.py nur dünne Einhän
     Schalter, ältere starten deshalb mit Entwicklung aus.
   * Zulassung: BueroZulassung entsteht allein aus der geprüften Identität (Admin oder, mit WAMO_ENTWICKLUNG_MITGLIEDER=an,
     Mitglied; Profil in der Liste; nie ein Laborprofil). Ohne sie startet im Büro nichts.
-  * Mitglieder (Ausrollen P5): dieselben Arten wie Admins, aber keine Repos (bis Folgepaket 1) und Kostengrenzen von höchstens
-    MITGLIED_KOSTEN_AUFTRAG_MAX je Auftrag und MITGLIED_KOSTEN_TAG_MAX je Tag (der kleinere Wert aus Drop-in und Konstante).
+  * Mitglieder (Ausrollen P5): dieselben Arten und dieselben Kostengrenzen aus dem Drop-in wie Admins (Entscheidung von Niko
+    16.11.2026: keine eigene Grenze für Mitglieder), aber keine Repos (bis Folgepaket 1) und keine Befehlskriterien.
   * Trennung je Profil: der Projektname trägt die Kurzkennung des Profils (kern-<Kennung>-<Name>), der Dispatcher prüft sie.
   * Fail closed: unbekannt, fehlend oder ungültig heißt aus, mit einem Grund für Log und Statusleiste (Admins). Nichts
     davon wirft beim Start des Kerns, ein Fehler schaltet nur die Entwicklung aus. Gründe nennen nie Werte oder Pfade.
@@ -47,8 +47,6 @@ ENV_MITGLIEDER = "WAMO_ENTWICKLUNG_MITGLIEDER"
 ENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"
 ALLE_VARIABLEN = (ENV_SCHALTER, ENV_PROFILE, ENV_KOSTEN_AUFTRAG, ENV_KOSTEN_TAG, ENV_BEFEHLE, ENV_MITGLIEDER, ENV_HAUS)
 # Kostengrenzen der Mitglieder in USD (Entscheidung N6): es gilt der kleinere Wert aus Drop-in und Konstante
-MITGLIED_KOSTEN_AUFTRAG_MAX = 2.0
-MITGLIED_KOSTEN_TAG_MAX = 10.0
 
 MAX_PROFILE = 20
 ANZEIGE_ZEICHEN = 120  # Grund in der Statusnachricht (nur Admins)
@@ -131,18 +129,19 @@ def _ist_mitglied(zulassung: object) -> bool:
 
 
 def kosten_auftrag(zulassung: object) -> float | None:
-    """Grenze je Auftrag in USD (alle Läufe zusammen) oder None, wenn sie fehlt oder ungültig ist. Mit der Zulassung eines Mitglieds
-    höchstens MITGLIED_KOSTEN_AUFTRAG_MAX."""
-    grenze = _kosten(ENV_KOSTEN_AUFTRAG)
-    return min(grenze, MITGLIED_KOSTEN_AUFTRAG_MAX) if grenze is not None and _ist_mitglied(zulassung) else grenze
+    """Grenze je Auftrag in USD (alle Läufe zusammen) oder None, wenn sie fehlt oder ungültig ist. Für Admins und Mitglieder gleich
+    (Entscheidung von Niko 16.11.2026); die Zulassung reicht jeder Aufrufer trotzdem durch, damit eine Grenze je Person später nur
+    hier entsteht."""
+    del zulassung  # heute für alle gleich
+    return _kosten(ENV_KOSTEN_AUFTRAG)
 
 
 def kosten_tag(zulassung: object) -> float | None:
-    """Grenze je Tag und Profil in USD (Europe/Berlin) oder None, wenn sie fehlt oder ungültig ist. Mit der Zulassung eines Mitglieds
-    höchstens MITGLIED_KOSTEN_TAG_MAX. Geprüft wird vor jedem Start gegen die Kosten bis dahin: ein letzter Auftrag kann die Grenze
+    """Grenze je Tag und Profil in USD (Europe/Berlin) oder None, wenn sie fehlt oder ungültig ist. Für Admins und Mitglieder gleich
+    (Entscheidung von Niko 16.11.2026). Geprüft wird vor jedem Start gegen die Kosten bis dahin: ein letzter Auftrag kann die Grenze
     um höchstens seine eigene Auftragsgrenze überschreiten (bis zu einem Lauf mehr)."""
-    grenze = _kosten(ENV_KOSTEN_TAG)
-    return min(grenze, MITGLIED_KOSTEN_TAG_MAX) if grenze is not None and _ist_mitglied(zulassung) else grenze
+    del zulassung  # heute für alle gleich
+    return _kosten(ENV_KOSTEN_TAG)
 
 
 def buero_problem(ssh_pruefung: Callable[[], str | None] | None = None) -> str | None:
@@ -572,7 +571,7 @@ class AuftragsBuch:
         und freigeben (pending, approved) und auf running setzen. Liefert (aktion_id, None) oder (None, Satz für die Quittung).
         abbruch fragt nach jedem Warten auf die Datenbank, ob die Sitzung inzwischen beendet ist (close): dann entsteht keine Zeile
         mehr oder die angelegte wird zurückgezogen. Eine unerwartete Ausnahme lässt nie eine offene Zeile zurück und geht weiter."""
-        auftrag_grenze, tag_grenze = kosten_auftrag(self._zulassung), kosten_tag(self._zulassung)  # Mitglieder: höchstens 2 und 10 USD
+        auftrag_grenze, tag_grenze = kosten_auftrag(self._zulassung), kosten_tag(self._zulassung)  # für alle aus dem Drop-in
         if auftrag_grenze is None or tag_grenze is None:
             return None, SATZ_PROBLEM
         m = self._memory
