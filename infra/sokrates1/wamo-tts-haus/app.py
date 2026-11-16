@@ -33,6 +33,8 @@ DE_HINT = re.compile(r"[äöüßÄÖÜ]|\b(und|der|die|das|ist|nicht|ein|eine|ic
 DEFAULT_SPEAKER = os.environ.get("DEFAULT_SPEAKER", "aiden")
 KONTEXT_FRAMES = 25  # wie faster-qwen3-tts: Vorlauf des Codec-Decoders für Folgeblöcke, damit die Übergänge sauber bleiben
 MAX_ZEICHEN = 4000   # Schutz vor Endlosanfragen; der Kern schickt Sätze
+# Erlaubte Ausgabeformate (wav und pcm ohne ffmpeg); alles andere wäre ungeprüft Dateiendung und Ausgabeformat von ffmpeg
+FORMATE = {"wav": "audio/wav", "pcm": "audio/wav", "mp3": "audio/mpeg", "opus": "audio/opus", "flac": "audio/flac", "aac": "audio/aac"}
 
 
 def _int_env(name: str, standard: int, unten: int, oben: int) -> int:
@@ -83,10 +85,11 @@ def _decode(alle):
 
 
 def naechster_block(geliefert: int, block: int) -> int:
-    """Anlauf: der nächste Block ist höchstens halb so lang wie das schon gelieferte Audio (2, 1, 1, 2, 3, 4, 6, 6 ... Frames bei
-    erster Block 2, block 6). Bei rund 50 ms Rechenzeit je Frame (80 ms Audio) ist er dann fertig, bevor das Gelieferte abgespielt
-    ist; gemessen bleiben mindestens rund 0,1 s Vorrat. Ein sofort großer zweiter Block ließe nach dem ersten Ton eine Lücke."""
-    return max(1, min(block, geliefert // 2))
+    """Anlauf: der nächste Block ist höchstens ein Drittel so lang wie das schon gelieferte Audio (2, 1, 1, 1, 1, 2, 2, 3, 4, 5, 6
+    Frames bei erster Block 2, block 6). Rund 48 ms Rechenzeit je Frame (80 ms Audio) reichen allein schon mit halb so langen
+    Blöcken; ein Drittel hält den Vorrat auch dann über null, wenn andere Last auf der GPU die Erzeugung auf rund 65 ms je Frame
+    bremst. Ein sofort großer zweiter Block ließe nach dem ersten Ton eine Lücke."""
+    return max(1, min(block, geliefert // 3))
 
 
 def _stream_bloecke(text: str, speaker: str, language: str, instruct: str | None, erster: int, block: int, stopp: threading.Event):
@@ -322,7 +325,9 @@ async def speech(request: Request):
     lang = body.get("language")
     language = LANG_MAP.get(str(lang).lower()[:2], None) if lang else None
     language = language or _guess_language(text)
-    fmt = (body.get("response_format") or "mp3").lower()
+    fmt = str(body.get("response_format") or "mp3").lower()
+    if fmt not in FORMATE:
+        raise HTTPException(422, "response_format nicht unterstützt")  # das Format wird Dateiendung und ffmpeg-Ziel
 
     if body.get("stream") is True and fmt in ("wav", "pcm") and STREAM_BEREIT:
         return await _stream_antwort(request, text, speaker, language, body.get("instructions"), fmt,
@@ -341,5 +346,5 @@ async def speech(request: Request):
             if r.returncode != 0:
                 raise HTTPException(500, "ffmpeg-Fehler: " + r.stderr.decode()[:300])
             data = open(dst.name, "rb").read()
-    media = {"mp3": "audio/mpeg", "opus": "audio/opus", "flac": "audio/flac", "aac": "audio/aac"}.get(fmt, "audio/mpeg")
+    media = FORMATE[fmt]
     return Response(data, media_type=media, headers={"X-Synth-Seconds": f"{dt:.3f}", "X-Language": language})

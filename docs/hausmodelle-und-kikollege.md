@@ -273,7 +273,8 @@ eigene Instanz `wamo-qwen3-tts` (Port 172.17.0.1:8104, Quelle und Rückweg in `i
 
 1. Das Modell ist für Streaming gebaut: faster-qwen3-tts 0.4.0 liefert Codec-Frames einzeln (12,5 je Sekunde, 80 ms Audio je Frame),
    ein Frame kostet auf dem GB10 rund 48 ms. Der Dienst gibt jetzt mit `"stream": true` den ersten Block nach 2 Frames aus und lässt die
-   Blöcke danach im Anlauf wachsen (2, 1, 1, 2, 3, 4, 6 Frames), damit nach dem ersten Ton keine Lücke entsteht.
+   Blöcke danach im Anlauf wachsen (2, 1, 1, 1, 1, 2, 2, 3, 4, 5, 6 Frames), damit nach dem ersten Ton keine Lücke entsteht, auch wenn
+   andere Last auf der GPU die Erzeugung bremst.
 2. Der Modellweg des Gateways puffert: LiteLLM 1.92.0 reicht bei `/audio/speech` nur `response_format`, `speed` und `instructions`
    weiter (nie `stream`) und holt die Antwort mit `openai_client.audio.speech.create` ohne Streaming, also ganz (`litellm/llms/openai/openai.py`,
    `async_audio_speech`); erst danach gibt der Proxy sie in Stücken zu 8192 Byte weiter. Gemessen: erstes Audio gleich Gesamtdauer.
@@ -292,14 +293,16 @@ Zeichen; Stimme `sohee`; erstes Audio = erste Bytes nach dem WAV-Kopf). Gateway 
 | --- | --- | --- | --- |
 | vorher: Dienst direkt, ganze Datei | 0,63 / 1,27 s | 2,84 / 3,27 s | je 12 |
 | Gateway, Modellweg `/v1/audio/speech` (mit `stream`) | 0,53 / 1,26 s | 2,68 / 3,26 s | je 12 |
-| Dienst direkt, gestreamt | 0,13 / 0,14 s | 0,13 / 0,14 s | je 20 |
-| Gateway, Durchreiche, gestreamt | 0,14 / 0,16 s | 0,14 / 0,14 s | je 20 |
+| Dienst direkt, gestreamt (vier Messreihen) | 0,13 / 0,13 bis 0,19 s | 0,13 / 0,13 bis 0,15 s | je 20 |
+| Gateway, Durchreiche, gestreamt (drei Messreihen) | 0,14 / 0,14 bis 0,19 s | 0,14 / 0,14 bis 0,15 s, einmal 0,43 s | je 20 |
 | Kern (`HausTTSService`, SSH-Tunnel vom Laptop), Durchreiche | 0,14 / 0,15 s gemischt | | 12 |
 | Kern, Modellweg | 2,25 / 3,57 s gemischt | | 12 |
 
-Pufferreserve beim Abspielen (Wiedergabe ab dem ersten Block): meist mindestens 0,1 s; in 1 von 30 Läufen kurz knapp unter null, als
-andere Last auf derselben GPU (Ollama, vLLM) die Erzeugung um rund 40 % bremste. Mit `TTS_STREAM_ERSTER_BLOCK=3` kommt der erste Ton
-nach 0,18 s, die Reserve steigt um rund 80 ms. Erster Block 1 Frame: 0,086 s, Reserve nur rund 25 ms (nicht empfohlen).
+Pufferreserve beim Abspielen (Wiedergabe ab dem ersten Block): Die GPU teilt sich der Dienst mit anderer Last (Ollama, vLLM; beim
+Messen 94 bis 96 % Auslastung), die die Erzeugung zeitweise von rund 48 auf 65 ms je Frame bremst. Mit Blöcken halb so lang wie das
+Gelieferte fiel die Reserve deshalb in 2 von 40 Läufen kurz unter null; mit einem Drittel (jetziger Stand) blieb sie in 40 Läufen über
+0,04 s, in den Messreihen oben einmal bei -0,035 s, sonst über 0,04 s (Durchreiche 0,106 s). Mit `TTS_STREAM_ERSTER_BLOCK=3` kommt der
+erste Ton nach 0,18 s, die Reserve steigt um rund 80 ms. Erster Block 1 Frame: 0,086 s, Reserve nur rund 25 ms (nicht empfohlen).
 
 **Nicht umgesetzt.** Satzteile früher schicken: Mit Streaming hängt das erste Audio nicht mehr an der Satzlänge; der Rest ist die Zeit
 des Sprachmodells bis zum ersten Satzende. Vorab erzeugen, während der vorige Satz spielt: geschieht schon, denn Pipecat holt den nächsten

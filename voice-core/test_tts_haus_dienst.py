@@ -166,6 +166,13 @@ class StreamTest(unittest.IsolatedAsyncioTestCase):
         # kein sauberes Ende (more_body False): der Aufrufer sieht einen Abbruch statt eines scheinbar ganzen Satzes
         self.assertFalse([n for n in gesendet if n["type"] == "http.response.body" and not n.get("more_body", False)])
 
+    async def test_unbekanntes_format_wird_abgelehnt(self):
+        self.ersetze(anzahl=1)
+        for fmt in ("../../tmp/x", "m3u8", "wav/../x"):
+            gesendet = await post({**ANFRAGE, "stream": False, "response_format": fmt})
+            self.assertEqual(gesendet[0]["status"], 422, fmt)
+        self.assertEqual(self.spur, [])
+
     async def test_ohne_streaming_bereitschaft_kein_stream(self):
         dienst.STREAM_BEREIT = False
         self.ersetze(anzahl=1)
@@ -185,27 +192,29 @@ class StreamTest(unittest.IsolatedAsyncioTestCase):
 class BlockTest(unittest.TestCase):
     def test_anlauf_der_bloecke(self):
         folge, geliefert, ziel = [], 0, 2
-        for _ in range(9):
+        for _ in range(13):
             folge.append(ziel)
             geliefert += ziel
             ziel = dienst.naechster_block(geliefert, 6)
-        self.assertEqual(folge, [2, 1, 1, 2, 3, 4, 6, 6, 6])
+        self.assertEqual(folge, [2, 1, 1, 1, 1, 2, 2, 3, 4, 5, 6, 6, 6])
 
-    def test_vorrat_waechst_bei_echtzeitfaktor_1_6(self):
-        # 50 ms Rechenzeit je Frame (80 ms Audio): jeder Folgeblock ist fertig, bevor das Gelieferte abgespielt ist
+    def test_vorrat_bleibt_auch_unter_last_ueber_null(self):
+        # Ohne Last rund 48 ms Rechenzeit je Frame, mit anderer Last auf der GPU gemessen bis rund 65 ms (80 ms Audio je Frame),
+        # dazu rund 5 ms je Block für den Decoder: jeder Folgeblock ist fertig, bevor das Gelieferte abgespielt ist
         folge, geliefert, ziel = [], 0, 2
-        for _ in range(12):
+        for _ in range(20):
             folge.append(ziel)
             geliefert += ziel
             ziel = dienst.naechster_block(geliefert, 6)
-        ankunft, audio_bis, t_erst = 0.0, 0.0, None
-        for n in folge:
-            ankunft += n * 0.05
-            if t_erst is None:
-                t_erst = ankunft
-            else:
-                self.assertLess(ankunft, t_erst + audio_bis, folge)
-            audio_bis += n * 0.08
+        for je_frame in (0.048, 0.065):
+            ankunft, audio_bis, t_erst = 0.0, 0.0, None
+            for n in folge:
+                ankunft += n * je_frame + 0.005
+                if t_erst is None:
+                    t_erst = ankunft
+                else:
+                    self.assertLess(ankunft, t_erst + audio_bis, (je_frame, folge))
+                audio_bis += n * 0.08
 
     def test_blockgroesse_aus_der_anfrage_begrenzt(self):
         self.assertEqual(dienst._block_wert({"block": 100}, "block", 6, 48), 48)
