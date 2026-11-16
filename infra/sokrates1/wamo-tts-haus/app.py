@@ -34,7 +34,9 @@ DEFAULT_SPEAKER = os.environ.get("DEFAULT_SPEAKER", "aiden")
 KONTEXT_FRAMES = 25  # wie faster-qwen3-tts: Vorlauf des Codec-Decoders für Folgeblöcke, damit die Übergänge sauber bleiben
 MAX_ZEICHEN = 4000   # Schutz vor Endlosanfragen; der Kern schickt Sätze
 # Erlaubte Ausgabeformate (wav und pcm ohne ffmpeg); alles andere wäre ungeprüft Dateiendung und Ausgabeformat von ffmpeg
-FORMATE = {"wav": "audio/wav", "pcm": "audio/wav", "mp3": "audio/mpeg", "opus": "audio/opus", "flac": "audio/flac", "aac": "audio/aac"}
+# Format: (Medientyp, Dateiendung); die Endung kommt aus dieser Tabelle, nie aus der Anfrage
+FORMATE = {"wav": ("audio/wav", ".wav"), "pcm": ("audio/wav", ".wav"), "mp3": ("audio/mpeg", ".mp3"),
+           "opus": ("audio/opus", ".opus"), "flac": ("audio/flac", ".flac"), "aac": ("audio/aac", ".aac")}
 
 
 def _int_env(name: str, standard: int, unten: int, oben: int) -> int:
@@ -341,10 +343,10 @@ async def speech(request: Request):
         if fmt in ("wav", "pcm"):
             return Response(open(src.name, "rb").read(), media_type="audio/wav",
                             headers={"X-Synth-Seconds": f"{dt:.3f}", "X-Language": language})
-        with tempfile.NamedTemporaryFile(suffix="." + fmt) as dst:
+        media, endung = FORMATE[fmt]
+        with tempfile.NamedTemporaryFile(suffix=endung) as dst:
             r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src.name, dst.name], capture_output=True)
             if r.returncode != 0:
                 raise HTTPException(500, "ffmpeg-Fehler: " + r.stderr.decode()[:300])
             data = open(dst.name, "rb").read()
-    media = FORMATE[fmt]
     return Response(data, media_type=media, headers={"X-Synth-Seconds": f"{dt:.3f}", "X-Language": language})
