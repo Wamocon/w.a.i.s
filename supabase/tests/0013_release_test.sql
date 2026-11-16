@@ -413,6 +413,20 @@ do $$ begin
     current_setting('t.r4')), '23514', '%gültigen, frischen Freigabe%');
 end $$;
 reset role;
+-- Seit 0021 braucht ein Re-Aktivieren einen Merker der Erstanmeldung (wamo_auth). In dieser zurückgerollten Transaktion: über die
+-- echte Funktion, sonst über einen Ersatz der Tabelle (Schema vor P1a, nur bis zum Rollback).
+do $$ begin
+  if to_regclass('wamo_auth.erstanmeldungen') is null then
+    create schema if not exists wamo_auth;
+    create table wamo_auth.erstanmeldungen (user_id uuid primary key);
+  end if;
+  if to_regprocedure('wamo_auth.erstanmeldung_anlegen(uuid,integer,text,boolean)') is not null then
+    perform wamo_auth.erstanmeldung_anlegen('00000000-0000-4000-8000-0000000013a1', 72, 'freischalten', false);
+    perform wamo_auth.erstanmeldung_anlegen('00000000-0000-4000-8000-0000000013a2', 72, 'freischalten', false);
+  else
+    insert into wamo_auth.erstanmeldungen (user_id) values ('00000000-0000-4000-8000-0000000013a1'), ('00000000-0000-4000-8000-0000000013a2') on conflict do nothing;
+  end if;
+end $$;
 update __SCHEMA__.profiles set aktiv = true where user_id = '00000000-0000-4000-8000-0000000013a2';
 -- Verfall: bei normal gilt eine Freigabe 60 Minuten
 select wamo_testhilfe.freigabe_altern(current_setting('t.r4')::uuid, interval '2 hours');
