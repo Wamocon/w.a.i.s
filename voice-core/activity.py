@@ -51,13 +51,17 @@ def _detail(name: str, args: dict) -> str:
 
 
 APPROVAL_ID_RE = re.compile(r"[0-9a-f]{16}")
-FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote", "teams")
-# Nur diese Werkzeuge können eine Freigabe-Anfrage des Hosts liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
+# aendern: Freigabe des Kerns für ein änderndes Werkzeug eines Mitglieds nach Fremdinhalt im Zug (pc_mitglied.py); nur mit einer Kennung,
+# die der Kern selbst vorgemerkt hat (pc_freigaben.PcFreigaben.kern_vormerken), sonst gibt es keine Karte
+FREIGABE_AKTIONEN = ("powershell", "senden", "webseite", "klicken", "github", "mail", "onenote", "teams", "aendern")
+# Nur diese Werkzeuge können eine Freigabe-Anfrage liefern (auf_bildschirm_klicken über maus_klicken, onenote_seite
 # über onenote_seite_anfragen, onenote_werkzeuge.py; outlook_senden und teams_nachricht legen ihre Karte selbst über diese Funktion
-# an, outlook_werkzeuge.py und teams_werkzeuge.py)
+# an, outlook_werkzeuge.py und teams_werkzeuge.py; die ändernden Werkzeuge der Mitglieder über pc_mitglied.py)
 FREIGABE_WERKZEUGE = frozenset({"powershell_lesen", "tastatur_tippen", "tasten_druecken", "webseite_oeffnen",
                                 "auf_bildschirm_klicken", "element_klicken", "element_text_setzen",
-                                "github_repo_anlegen", "onenote_seite", "outlook_senden", "teams_nachricht"})
+                                "github_repo_anlegen", "onenote_seite", "outlook_senden", "teams_nachricht",
+                                "programm_oeffnen", "dark_mode", "fenster_fokussieren", "maus_scrollen", "oeffnen_mit",
+                                "ordner_anlegen"})
 FREIGABE_DETAIL_ZEICHEN = 2000  # wie die Grenze der Oberfläche für Labor und Geräte (ui/src/lib/nachrichten.ts FREIGABE_DETAIL_KURZ)
 FREIGABE_DETAIL_ZEICHEN_MAIL = 8000  # lange Karte für Mails und Teams (host/office_outlook.py KARTE_MAX, ui/src/lib/nachrichten.ts)
 FREIGABE_KURZ_ZEICHEN = 200
@@ -75,6 +79,9 @@ def _karten_text(wert: object, grenze: int, zeilen: bool = False, utf16: bool = 
         text = " ".join(sichtbar(text).split())
     laenge = len(text.encode("utf-16-le")) // 2 if utf16 else len(text)
     return text if laenge <= grenze else None
+
+
+karten_text = _karten_text  # dieselbe Bereinigung für die Karten des Kerns (pc_mitglied.py)
 
 
 def _als_dict(result) -> dict | None:
