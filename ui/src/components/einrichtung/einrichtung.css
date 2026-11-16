@@ -17,6 +17,9 @@
 .ea-text { margin: 0; font-size: 16px; line-height: 1.45; }
 .ea-klein { margin: 0; font-size: 14px; line-height: 1.4; color: var(--ink-soft); }
 .ea-knoepfe { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Rückfrage, wenn beim Überspringen, Weiter oder Zurück noch etwas im Feld steht */
+.ea-nachfrage { display: grid; gap: 10px; padding: 10px 12px; border-left: 4px solid var(--accent); background: var(--surface); }
+.ea-nachfrage > p:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .ea-knoepfe button[aria-disabled="true"] { opacity: 0.55; cursor: progress; }
 .ea-knoepfe button.btn-primary[aria-disabled="true"]:hover { background: linear-gradient(180deg, var(--core-hot), var(--core)); }
 .ea-knoepfe button.btn-secondary[aria-disabled="true"]:hover { background: transparent; color: var(--ink-soft); border-color: var(--steuer-rand); }
