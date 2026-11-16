@@ -1,4 +1,4 @@
-"""Kern-Kanal des WAMO-Auftragsdispatchers auf Sokrates-2 (Dispatcher Version 7).
+"""Kern-Kanal des WAMO-Auftragsdispatchers auf Sokrates-2 (Dispatcher Version 8).
 
 Installiert als /opt/wamo/waechter/wamo_job_kernkanal.py (root:wamo 0640) durch wamo-job-einrichten.sh. Der Dispatcher
 (wamo_job_dispatch.py) lädt dieses Modul erst, wenn er es braucht, und ruft nur die Funktionen von hier auf. Hier steht
@@ -26,18 +26,28 @@ Regeln des Kern-Kanals, in dieser Reihenfolge (jeder Verstoß ist ein Code):
     3  Befehlsliste (ping start status pending approve cancel)   befehl; bei geschlossenem Kanal nur ping status pending cancel
     4  nur eigene Aufträge (auftrag.json mit kanal=kern)         fremd
     5  Art, Repo, Dienste aus der Konfiguration                  art, repo, repo_fehlt, dienst
-    6  Projektname kern-<Name>, bei Repo genau daraus abgeleitet projekt
+    6  Projektname kern-<Kennung>-<Name>, bei Repo genau daraus projekt
+       abgeleitet; Kennung = Profil der Kopfzeile; kein Ordner
+       eines anderen Profils
     7  Zugang nur "folgt" oder "haus", je mit Profil             zugang (ZUGAENGE_KERN; haus: Hausmodell über den Proxy,
                                                                 der Dispatcher braucht dafür zusätzlich WAMO_HAUS=an)
     8  Fork-Prüfung beim ersten Zugriff je Lauf (fork_pruefen)   fork
     9  Grenzen je Stunde und Tag, Folgen, Abstand, Platz         grenze_start, grenze_laufzeit, grenze_folgen, abstand, platz
+       und je Profil (neue Aufträge, Versuche, Laufzeit)          grenze_profil
        Auch jeder Start, der die erste Prüfung besteht, zählt als Versuch (höchstens MAX_VERSUCH_STUNDE je Stunde, fest 20, nur nach unten
        einstellbar), damit Aufträge, die an einer Sperre scheitern, nicht unbegrenzt Ordner und Logzeilen erzeugen. Der Abstand gilt nicht
        für Folgen desselben Auftrags (Abnahme-Runden), MAX_FOLGEN begrenzt sie. Ein Projektordner, den kein Auftrag mit kanal=kern angelegt
-       hat, und ein Ordner, den ein anderes Repo belegt hat, sind gesperrt (projekt).
+       hat, ein Ordner, den ein anderes Repo belegt hat, und ein Ordner, den ein Auftrag eines anderen Profils (oder einer ohne Profil)
+       angelegt hat, sind gesperrt (projekt).
+
+Trennung je Profil (Ausrollen P5): Die Kennung (8 Hexzeichen, die Kurzkennung der user_id, die der Kern als profil in der Kopfzeile
+schickt) steht im Projektnamen (kern-<Kennung>-<Name>) und in auftrag.json. Die Grenzen je Profil (Schlüssel MAX_*_PROFIL in
+kernkanal.conf, mit Standard und Bereich wie die übrigen) gelten zusätzlich zu den Gesamtgrenzen und für jedes Profil, auch für Admins;
+sie zählen nur Zählerzeilen mit derselben Kennung. Die Kennung schützt gegen Fehler und Verwechslungen, nicht gegen einen kompromittierten
+Kern: Der Kern setzt profil selbst, der Dispatcher kann es nicht unabhängig prüfen.
 
 Die Fenster der Zähler gleiten (Stunde = 3600 s, Tag = 86400 s). Die Zähler stehen in /srv/wamo/logs/kernkanal.jsonl,
-je Start und je Ende eine Zeile {"t", "job", "ereignis", "dauer_s" (nur bei ende)}.
+je Start und je Ende eine Zeile {"t", "job", "ereignis", "dauer_s" (nur bei ende), "profil" (Kennung, wenn bekannt)}.
 """
 
 from __future__ import annotations
@@ -60,7 +70,7 @@ from typing import Callable, Iterable, Mapping
 # Feste Liste der Gründe (Schnittstelle zum Kern: voice-core/entwicklung_betrieb.py hält GRUND_SAETZE mit denselben Schlüsseln)
 KANAL_GRUENDE = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt",
                  "dienst", "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit", "grenze_folgen",
-                 "abstand", "platz")
+                 "abstand", "platz", "grenze_profil")
 
 BEFEHLE_KERN = ("ping", "start", "status", "pending", "approve", "cancel")
 # Regel 7: Zugangsarten des Kerns (folgt: der eigene Zugang des Profils als zweite Zeile; haus: Hausmodell über den Proxy, kein Wert vom
@@ -77,7 +87,9 @@ SELF_REPO = SELF_REPOS[0]  # Alias für ältere Verweise, nie zum Vergleichen
 MAX_PROJEKT_ZEICHEN = 50
 MAX_REPOS = 10
 MAX_ABLAUF_TAGE = 400
-MAX_VERSUCH_STUNDE_FEST = 20  # Versuche je Stunde (jeder Start, der die erste Prüfung besteht, auch wenn er später an Sperren scheitert)
+# Versuche je Stunde für alle Profile zusammen (jeder Start, der die erste Prüfung besteht, auch wenn er später an Sperren scheitert).
+# 60 seit Dispatcher 8: mit mehreren Profilen dürfen zwei Personen mit je ihrer Grenze den Admin nicht aussperren. Nur nach unten einstellbar.
+MAX_VERSUCH_STUNDE_FEST = 60
 MAX_SCHLUESSELDATEI_BYTES = 256 * 1024
 MAX_AUTH_BYTES = 16 * 1024
 MAX_KONFIG_BYTES = 64 * 1024
@@ -88,6 +100,7 @@ TAG_S = 86400
 MIB = 1024 * 1024
 
 JOB_RE = re.compile(r"[0-9a-f]{16,32}")
+PROFIL_RE = re.compile(r"[0-9a-f]{8}")  # wie PROFIL_RE im Dispatcher und BueroZulassung.kennung im Kern
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}")  # wie REPO_RE im Dispatcher
 SCHLUESSEL_RE = re.compile(r"[A-Z][A-Z_]*")
 ART_RE = re.compile(r"[a-z][a-z_]{1,29}")
@@ -103,7 +116,10 @@ NORMAL_RE = re.compile(r"[^a-z0-9-]")
 # Schlüssel der Konfiguration: (kleinster Wert, größter Wert) für Zahlen; Standard wie beim Anlegen durch das Skript
 ZAHLEN = {"MAX_TURNS": (1, 200), "MAX_START_STUNDE": (1, 60), "MAX_START_TAG": (1, 200), "MAX_LAUFZEIT_TAG_S": (60, 86400),
           "MAX_FOLGEN": (0, 20), "MIN_ABSTAND_S": (0, 3600), "MIN_PLATZ_MB": (100, 1000000),
-          "MAX_VERSUCH_STUNDE": (1, MAX_VERSUCH_STUNDE_FEST)}  # Versuche je Stunde: der Wert darf den festen nur senken
+          "MAX_VERSUCH_STUNDE": (1, MAX_VERSUCH_STUNDE_FEST),  # Versuche je Stunde: der Wert darf den festen nur senken
+          # je Profil (Dispatcher 8): neue Aufträge je Stunde und Tag (Folgen zählen nicht), Versuche je Stunde, Laufzeit je Tag
+          "MAX_NEU_STUNDE_PROFIL": (1, 60), "MAX_NEU_TAG_PROFIL": (1, 200), "MAX_VERSUCH_STUNDE_PROFIL": (1, MAX_VERSUCH_STUNDE_FEST),
+          "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400)}
 LISTEN = ("ARTEN", "REPOS", "DIENSTE")
 BEKANNTE_SCHLUESSEL = frozenset({"KANAL", "ABLAUF", "MAX_BUDGET_USD", *ZAHLEN, *LISTEN})
 
@@ -146,6 +162,10 @@ class Konfig:
     max_laufzeit_tag_s: int = 14400
     max_folgen: int = 5
     max_versuch_stunde: int = MAX_VERSUCH_STUNDE_FEST
+    max_neu_stunde_profil: int = 3
+    max_neu_tag_profil: int = 8
+    max_versuch_stunde_profil: int = 10
+    max_laufzeit_tag_s_profil: int = 7200
     min_abstand_s: int = 60
     min_platz_mb: int = 2048
 
@@ -173,9 +193,11 @@ class StartAnfrage:
     github: bool  # die Art hat eine GitHub-Stufe
     dienste: tuple[str, ...]  # Dienste der Art außer GitHub
     app_modus: bool  # die GitHub-App ist eingerichtet (kein Rückfall auf einen persönlichen Token)
-    fremd: bool = False  # der Auftrag besteht schon und gehört nicht dem Kern-Kanal (Regel 4)
-    projekt_fremd: bool = False  # der Projektordner besteht schon und stammt aus keinem Auftrag mit kanal=kern
-    projekt_kollision: bool = False  # ein Kern-Auftrag hat denselben Projektordner mit einem anderen Repo belegt
+    # Die Lage des Auftrags und des Projektordners hat keine Vorgabe: wer eine Anfrage baut, muss sie ermitteln (nie still "frei")
+    fremd: bool  # der Auftrag besteht schon und gehört nicht dem Kern-Kanal (Regel 4)
+    projekt_fremd: bool  # der Projektordner besteht schon und stammt aus keinem Auftrag mit kanal=kern
+    projekt_kollision: bool  # ein Kern-Auftrag hat denselben Projektordner mit einem anderen Repo belegt
+    projekt_profil_fremd: bool  # ein Kern-Auftrag eines anderen Profils (oder ohne Profil) hat den Projektordner angelegt
 
 
 class KonfigFehler(Exception):
@@ -523,10 +545,14 @@ def _normal(name: str) -> str:
     return re.sub(r"-{2,}", "-", text).strip("-")
 
 
-def kern_projektname(repo: str | None, wort: str | None = None) -> str:
-    """Projektname im Kern-Kanal: kern- plus Name. Der Name kommt aus dem Repo (Teil nach dem Schrägstrich), sonst aus dem
-    Projektwort. ProjektnameFehler mit grund repo (ungültiges Repo, nie das WAMO-Repo) oder projekt (kein Name ableitbar,
-    länger als 50 Zeichen mit Präfix). Dieselbe Regel und dieselbe Wertetabelle wie voice-core/entwicklung_betrieb.py."""
+def kern_projektname(repo: str | None, wort: str | None = None, kennung: str | None = None) -> str:
+    """Projektname im Kern-Kanal: kern- plus Name, mit kennung (8 Hexzeichen, das Profil) kern-<kennung>-<Name>. Der Name kommt aus
+    dem Repo (Teil nach dem Schrägstrich), sonst aus dem Projektwort. ProjektnameFehler mit grund repo (ungültiges Repo, nie das
+    WAMO-Repo) oder projekt (kein Name ableitbar, ungültige Kennung, länger als 50 Zeichen mit Präfix). Dieselbe Regel und dieselbe
+    Wertetabelle wie voice-core/entwicklung_betrieb.py."""
+    if kennung is not None and (not isinstance(kennung, str) or not PROFIL_RE.fullmatch(kennung)):
+        raise ProjektnameFehler("projekt", "Kennung des Profils ungültig")
+    praefix = PRAEFIX + (f"{kennung}-" if kennung else "")
     if repo:
         if not REPO_RE.fullmatch(repo) or repo.count("/") != 1:
             raise ProjektnameFehler("repo", "Repo ungültig")
@@ -538,25 +564,38 @@ def kern_projektname(repo: str | None, wort: str | None = None) -> str:
         name = _normal(wort or "")
         if ist_eigenes_repo(name):  # auch ohne Repo kein Projekt kern-wamo oder kern-w-a-i-s (der Kern lehnt es ebenfalls ab)
             raise ProjektnameFehler("projekt", "der Name des eigenen Repos ist gesperrt")
-    if not name or len(PRAEFIX) + len(name) > MAX_PROJEKT_ZEICHEN:
+    if not name or len(praefix) + len(name) > MAX_PROJEKT_ZEICHEN:
         raise ProjektnameFehler("projekt", "Projektname nicht ableitbar")
-    return PRAEFIX + name
+    return praefix + name
 
 
-def projekt_pruefen(projekt: str, repo: str | None) -> str | None:
-    """Regel 6: das Projekt beginnt mit kern-, mit gesetztem Repo ist es genau kern-<abgeleiteter Name>."""
+def projekt_pruefen(projekt: str, repo: str | None, profil: str | None = None) -> str | None:
+    """Regel 6: das Projekt beginnt mit kern-, mit gesetztem Repo ist es genau kern-<abgeleiteter Name>. Mit profil (die Kennung aus
+    der Kopfzeile) gehört die Kennung dazu: kern-<profil>-<Name>; eine ungültige Kennung ist projekt. Ohne profil gilt die Regel ohne
+    Kennung (ein Start ohne Profil scheitert ohnehin an Regel 7)."""
     if not projekt.startswith(PRAEFIX):
+        return "projekt"
+    if profil is not None and (not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil)):
         return "projekt"
     if repo:
         try:
-            erwartet = kern_projektname(repo)
+            erwartet = kern_projektname(repo, kennung=profil)
         except ProjektnameFehler as e:
             return e.grund
         return None if projekt == erwartet else "projekt"
-    rest = projekt[len(PRAEFIX):]
+    praefix = PRAEFIX + (f"{profil}-" if profil else "")
+    if not projekt.startswith(praefix):
+        return "projekt"
+    rest = projekt[len(praefix):]
     if rest and not ist_eigenes_repo(rest) and _normal(rest) == rest and len(projekt) <= MAX_PROJEKT_ZEICHEN:
         return None
     return "projekt"
+
+
+def profil_fremd(profil: str | None, vorhandene: Iterable[object]) -> bool:
+    """Hat ein Kern-Auftrag eines anderen Profils denselben Projektordner angelegt? vorhandene: die Werte profil aus auftrag.json der
+    Kern-Aufträge mit diesem Projekt. Ein Eintrag ohne gültige Kennung zählt als fremd (fail closed), ohne profil ist jeder fremd."""
+    return any(not isinstance(v, str) or not PROFIL_RE.fullmatch(v) or v != profil for v in vorhandene)
 
 
 def repo_kollision(repo: str | None, vorhandene: Iterable[str | None]) -> bool:
@@ -605,12 +644,15 @@ def zaehler_lesen(pfad) -> list[dict]:
             continue
         if art == "ende" and (not isinstance(dauer, int) or isinstance(dauer, bool) or dauer < 0):
             continue
-        ereignisse.append({"t": e["t"], "job": job, "ereignis": art, **({"dauer_s": dauer} if art == "ende" else {})})
+        profil = e.get("profil")
+        ereignisse.append({"t": e["t"], "job": job, "ereignis": art, **({"dauer_s": dauer} if art == "ende" else {}),
+                           **({"profil": profil} if isinstance(profil, str) and PROFIL_RE.fullmatch(profil) else {})})
     return ereignisse
 
 
-def zaehler_schreiben(pfad, job: str, ereignis: str, jetzt: float, dauer_s: int | None = None) -> None:
-    """Hängt eine Zeile an den Zähler (eine Zeile je Schreibaufruf, atomar genug für zwei Prozesse). OSError, wenn es nicht geht."""
+def zaehler_schreiben(pfad, job: str, ereignis: str, jetzt: float, dauer_s: int | None = None, profil: str | None = None) -> None:
+    """Hängt eine Zeile an den Zähler (eine Zeile je Schreibaufruf, atomar genug für zwei Prozesse). OSError, wenn es nicht geht.
+    profil: die Kennung (8 Hexzeichen) für die Grenzen je Profil, nie eine volle user_id."""
     if not JOB_RE.fullmatch(job) or ereignis not in EREIGNISSE:
         raise ValueError("Auftrag oder Ereignis ungültig")
     zeile: dict = {"t": int(jetzt), "job": job, "ereignis": ereignis}
@@ -618,6 +660,10 @@ def zaehler_schreiben(pfad, job: str, ereignis: str, jetzt: float, dauer_s: int 
         if not isinstance(dauer_s, int) or dauer_s < 0:
             raise ValueError("dauer_s ungültig")
         zeile["dauer_s"] = dauer_s
+    if profil is not None:
+        if not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil):
+            raise ValueError("profil ungültig")
+        zeile["profil"] = profil
     daten = (json.dumps(zeile) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(pfad, flags, 0o640)
@@ -635,9 +681,35 @@ def freier_platz_mb(pfad) -> int | None:
         return None
 
 
-def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, platz_mb: int | None) -> str | None:
-    """Regel 9 in der Reihenfolge grenze_start, grenze_laufzeit, grenze_folgen, abstand, platz. Der n-te Start im Fenster geht,
-    der (n+1)-te nicht (n ist die Grenze). Fenster gleiten: Stunde 3600 s, Tag 86400 s."""
+def pruefe_grenzen_profil(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, profil: str | None) -> str | None:
+    """Die Grenzen je Profil (grenze_profil) aus kernkanal.conf: neue Aufträge je Stunde und Tag (gezählt wird je Auftrag nur sein erster
+    Start, eine Folge ist kein neuer Auftrag), Versuche je Stunde (gilt nicht für die Folge eines eigenen Auftrags, die begrenzt MAX_FOLGEN),
+    Laufzeit je Tag. Gezählt werden nur Zeilen mit derselben Kennung. Ohne gültige Kennung: grenze_profil (fail closed)."""
+    if not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil):
+        return "grenze_profil"
+    eigene = [e for e in ereignisse if e.get("profil") == profil]
+    erste: dict[str, int] = {}  # Auftrag -> sein erster Start
+    for e in eigene:
+        if e["ereignis"] == "start":
+            erste[e["job"]] = min(e["t"], erste.get(e["job"], e["t"]))
+    folge = job in erste
+    if not folge:
+        neu_stunde = sum(1 for t in erste.values() if t > jetzt - STUNDE_S)
+        neu_tag = sum(1 for t in erste.values() if t > jetzt - TAG_S)
+        if neu_stunde >= konfig.max_neu_stunde_profil or neu_tag >= konfig.max_neu_tag_profil:
+            return "grenze_profil"
+        if sum(1 for e in eigene if e["ereignis"] == "versuch" and e["t"] > jetzt - STUNDE_S) >= konfig.max_versuch_stunde_profil:
+            return "grenze_profil"
+    if sum(e.get("dauer_s", 0) for e in eigene if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S) >= konfig.max_laufzeit_tag_s_profil:
+        return "grenze_profil"
+    return None
+
+
+def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: float, platz_mb: int | None,
+                   profil: str | None) -> str | None:
+    """Regel 9 in der Reihenfolge grenze_start, grenze_laufzeit, grenze_profil, grenze_folgen, abstand, platz. Der n-te Start im
+    Fenster geht, der (n+1)-te nicht (n ist die Grenze). Fenster gleiten: Stunde 3600 s, Tag 86400 s. profil: die Kennung aus der
+    Kopfzeile für die Grenzen je Profil."""
     starts = [e for e in ereignisse if e["ereignis"] == "start"]
     in_stunde = sum(1 for e in starts if e["t"] > jetzt - STUNDE_S)
     am_tag = sum(1 for e in starts if e["t"] > jetzt - TAG_S)
@@ -647,6 +719,9 @@ def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: floa
     laufzeit = sum(e.get("dauer_s", 0) for e in ereignisse if e["ereignis"] == "ende" and e["t"] > jetzt - TAG_S)
     if laufzeit >= konfig.max_laufzeit_tag_s:
         return "grenze_laufzeit"
+    grund = pruefe_grenzen_profil(konfig, ereignisse, job, jetzt, profil)
+    if grund is not None:
+        return grund
     folge = any(e["job"] == job for e in starts)  # eine Folge desselben Auftrags (Abnahme-Runde): MAX_FOLGEN begrenzt sie, der Abstand nicht
     if sum(1 for e in starts if e["job"] == job) >= konfig.max_folgen + 1:
         return "grenze_folgen"
@@ -685,16 +760,16 @@ def pruefe_start(anfrage: StartAnfrage, zustand: KernZustand, *, ereignisse: lis
     for dienst in anfrage.dienste:
         if dienst == "supabase" or dienst not in konfig.dienste:
             return "dienst"
-    grund = projekt_pruefen(anfrage.projekt, repo)
+    grund = projekt_pruefen(anfrage.projekt, repo, anfrage.profil)
     if grund is not None:
         return grund
-    if anfrage.projekt_fremd or anfrage.projekt_kollision:
+    if anfrage.projekt_fremd or anfrage.projekt_kollision or anfrage.projekt_profil_fremd:
         return "projekt"
     if anfrage.zugang not in ZUGAENGE_KERN or not anfrage.profil:
         return "zugang"
     if ereignisse is None:  # der Zähler ist nicht lesbar: die Grenzen lassen sich nicht prüfen
         return "grenze_start"
-    return pruefe_grenzen(konfig, ereignisse, anfrage.job, jetzt, freier_platz_mb)
+    return pruefe_grenzen(konfig, ereignisse, anfrage.job, jetzt, freier_platz_mb, anfrage.profil)
 
 
 # ---------------------------------------------------------------- Regel 8: Fork-Prüfung

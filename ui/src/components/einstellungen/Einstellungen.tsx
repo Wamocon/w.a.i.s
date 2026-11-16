@@ -32,6 +32,7 @@ import { GeraeteAbschnitt } from "./Geraete";
 import { VerbrauchAbschnitt } from "./Verbrauch";
 import { AenderungenAbschnitt } from "./Aenderungen";
 import { GedaechtnisAbschnitt } from "./Gedaechtnis";
+import { ErsteSchritteAbschnitt } from "./ErsteSchritte";
 
 /**
  * Die Einstellungsseite: eine Ansicht der Hauptseite, kein eigener Pfad (siehe lib/einstellungenAbschnitte.ts). Ab 860 px
@@ -102,7 +103,9 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
   const rolle = useSelect(wamo, (s) => s.profil?.rolle ?? null);
   // Laborkonten (lib/laborPlatz.ts): nur die Mikrofonwahl; ein Hash auf einen anderen Abschnitt führt dann zur Liste oder zur Mikrofonwahl
   const labor = laborAnsicht(email).einstellungen === "mikrofon";
-  const erlaubt = abschnitteFuer({ rolle, labor });
+  // Verbrauch (Kontingent des eigenen Max-Abos) auch für Mitglieder mit eigenem Claude-Code-Token (Ausrollen P5)
+  const token = useSelect(wamo, (s) => s.modellzugang?.codeHinterlegt === true);
+  const erlaubt = abschnitteFuer({ rolle, labor, token });
   const wirksam = wirksamerAbschnitt(ziel, erlaubt, zweispaltig);
   const titel = wirksam ? abschnittTitel(wirksam) : "";
 
@@ -218,6 +221,7 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
               </div>
               <div className="ez-abschnitt-inhalt" key={wirksam}>
                 {wirksam === "konto" && <KontoAbschnitt email={email} onAbmelden={onAbmelden} />}
+                {wirksam === "start" && <ErsteSchritteAbschnitt />}
                 {wirksam === "modellzugang" && <ModellZugang onAnfrage={aktionen.modellzugang} />}
                 {wirksam === "verbrauch" && <VerbrauchAbschnitt />}
                 {wirksam === "sprache" && (

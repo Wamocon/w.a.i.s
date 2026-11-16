@@ -505,14 +505,15 @@ def test_der_pc_kanal_darf_den_namensraum_kern_nicht_oeffnen():
 
 # ---------------------------------------------------------------- Start: Regeln 5 bis 7
 def anfrage(**ueber):
-    werte = dict(job=JOB, projekt="kern-marktstudie", art="recherche", repo=None, zugang="folgt", profil="1a2b3c4d",
-                 github=False, dienste=(), app_modus=True)
+    werte = dict(job=JOB, projekt="kern-1a2b3c4d-marktstudie", art="recherche", repo=None, zugang="folgt", profil="1a2b3c4d",
+                 github=False, dienste=(), app_modus=True, fremd=False, projekt_fremd=False, projekt_kollision=False,
+                 projekt_profil_fremd=False)
     werte.update(ueber)
     return K.StartAnfrage(**werte)
 
 
 def github_anfrage(**ueber):
-    werte = dict(projekt="kern-test-repo", art="review", repo="acme/test-repo", github=True)
+    werte = dict(projekt="kern-1a2b3c4d-test-repo", art="review", repo="acme/test-repo", github=True)
     werte.update(ueber)
     return anfrage(**werte)
 
@@ -524,7 +525,7 @@ def start(a, z=None, ereignisse=(), platz=10_000, jetzt=JETZT):
 def test_eine_gute_recherche_und_ein_guter_review_laufen_durch():
     assert start(anfrage()) is None
     assert start(github_anfrage()) is None
-    assert start(github_anfrage(repo="Acme/Test-Repo", projekt="kern-test-repo")) is None  # klein verglichen
+    assert start(github_anfrage(repo="Acme/Test-Repo", projekt="kern-1a2b3c4d-test-repo")) is None  # klein verglichen
 
 
 def test_regel_1_und_2_stehen_auch_vor_den_startregeln():
@@ -543,18 +544,18 @@ def test_regel_4_ein_bestehender_fremder_auftrag_wird_vor_der_art_abgewiesen():
 
 
 def test_regel_5_art():
-    assert start(anfrage(art="umsetzung", github=True, repo="acme/test-repo", projekt="kern-test-repo"),
+    assert start(anfrage(art="umsetzung", github=True, repo="acme/test-repo", projekt="kern-1a2b3c4d-test-repo"),
                  zustand(konfig_text(ARTEN="recherche"))) == "art"
     assert start(anfrage(art="gibtsnicht")) == "art"
 
 
 def test_regel_5_github_arten_brauchen_ein_repo_aus_repos_und_den_app_modus():
-    assert start(github_anfrage(repo=None, projekt="kern-test-repo")) == "repo_fehlt"
-    assert start(github_anfrage(repo="acme/anderes", projekt="kern-anderes")) == "repo"
+    assert start(github_anfrage(repo=None, projekt="kern-1a2b3c4d-test-repo")) == "repo_fehlt"
+    assert start(github_anfrage(repo="acme/anderes", projekt="kern-1a2b3c4d-anderes")) == "repo"
     assert start(github_anfrage(repo="evil/test-repo")) == "repo"  # der Owner zählt
     assert start(github_anfrage(app_modus=False)) == "repo"  # kein Rückfall auf einen persönlichen Token
-    assert start(anfrage(repo="acme/anderes", projekt="kern-anderes")) == "repo"  # ein Repo, das gesetzt ist, muss auch ohne GitHub-Art erlaubt sein
-    assert start(anfrage(repo="acme/test-repo", projekt="kern-test-repo")) is None
+    assert start(anfrage(repo="acme/anderes", projekt="kern-1a2b3c4d-anderes")) == "repo"  # ein Repo, das gesetzt ist, muss auch ohne GitHub-Art erlaubt sein
+    assert start(anfrage(repo="acme/test-repo", projekt="kern-1a2b3c4d-test-repo")) is None
 
 
 def test_regel_5_dienste_ausser_github_nur_aus_dienste_und_supabase_nie():
@@ -568,7 +569,7 @@ def test_regel_5_dienste_ausser_github_nur_aus_dienste_und_supabase_nie():
 def test_regel_6_projekt():
     assert start(anfrage(projekt="marktstudie")) == "projekt"
     assert start(github_anfrage(projekt="test-repo")) == "projekt"
-    assert start(github_anfrage(projekt="kern-anderes")) == "projekt"
+    assert start(github_anfrage(projekt="kern-1a2b3c4d-anderes")) == "projekt"
     assert start(anfrage(projekt="kern-")) == "projekt"
     assert start(anfrage(projekt="kern-" + "a" * 46)) == "projekt"
 
@@ -581,7 +582,7 @@ def test_regel_7_zugang_nur_folgt_oder_haus_mit_profil():
     assert start(anfrage(zugang="Haus")) == "zugang"
     assert start(anfrage(zugang="folgt", profil=None)) == "zugang"
     assert start(anfrage(zugang="haus", profil=None)) == "zugang"
-    assert start(anfrage(zugang="haus", profil="")) == "zugang"
+    assert start(anfrage(zugang="haus", profil="")) == "projekt"  # seit Dispatcher 8 fällt eine leere Kennung schon unter Regel 6
     assert start(anfrage(zugang="folgt")) is None
     assert start(anfrage(zugang="haus")) is None  # Hausmodell über den Proxy, der Kern schickt kein Geheimnis
 
@@ -690,7 +691,7 @@ def test_die_reihenfolge_der_grenzen_in_regel_9():
 def test_alle_codes_der_regeln_gehoeren_zur_festen_liste_i6():
     assert K.KANAL_GRUENDE == ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt",
                                "dienst", "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit",
-                               "grenze_folgen", "abstand", "platz")
+                               "grenze_folgen", "abstand", "platz", "grenze_profil")
     quelle = MODUL_PFAD.read_text(encoding="utf-8")
     for code in K.KANAL_GRUENDE:
         assert quelle.count(f'"{code}"') >= 2, code  # jeder Code steht in der Liste und wird irgendwo geliefert
@@ -840,8 +841,9 @@ def test_versuche_zaehlen_nur_die_letzte_stunde_und_der_wert_darf_nur_nach_unten
     assert start(anfrage(), drei, [_versuch(100), _versuch(200), _versuch(300)]) == "grenze_start"
     assert lese(konfig_text(MAX_VERSUCH_STUNDE="20")).max_versuch_stunde == 20
     assert lese(konfig_text(MAX_VERSUCH_STUNDE="1")).max_versuch_stunde == 1
-    assert lese(konfig_text(MAX_VERSUCH_STUNDE=None)).max_versuch_stunde == 20  # fester Standard
-    for schlecht in ("21", "0", "-1", "zwanzig", "020", ""):
+    assert lese(konfig_text(MAX_VERSUCH_STUNDE="60")).max_versuch_stunde == 60
+    assert lese(konfig_text(MAX_VERSUCH_STUNDE=None)).max_versuch_stunde == 60  # fester Standard seit Dispatcher 8
+    for schlecht in ("61", "0", "-1", "zwanzig", "020", ""):
         with pytest.raises(K.KonfigFehler):
             lese(konfig_text(MAX_VERSUCH_STUNDE=schlecht))
 
@@ -906,3 +908,175 @@ def test_zeilen_trennt_nur_der_zeilenumbruch_wie_die_shell(trenner):
     assert K.schluessel_aus_auth(f"keyboard-interactive{trenner}publickey {PC_KEY}\n") is None
     text = f"# Kommentar{trenner}" + KERN_KEY + "\n"
     assert K.schluessel_aus_text(text) == set()  # die ganze Zeile ist ein Kommentar, der Schlüssel dahinter zählt nicht
+
+
+# ---------------------------------------------------------------- Trennung je Profil (Ausrollen P5, Dispatcher 8)
+PROFIL_A, PROFIL_B = "1a2b3c4d", "9f8e7d6c"
+
+
+@pytest.mark.parametrize("repo, wort, kennung, erwartet", [
+    (None, "Marktstudie", PROFIL_A, "kern-1a2b3c4d-marktstudie"),
+    ("Acme/Test-Repo", None, PROFIL_A, "kern-1a2b3c4d-test-repo"),
+    ("acme/" + "a" * 36, None, PROFIL_A, "kern-1a2b3c4d-" + "a" * 36),  # genau 50 Zeichen
+    (None, "Marktstudie", None, "kern-marktstudie"),  # ohne Kennung die alte Form (nur für Tabellen und Prüfungen ohne Profil)
+])
+def test_projektname_mit_kennung(repo, wort, kennung, erwartet):
+    assert K.kern_projektname(repo, wort, kennung) == erwartet
+
+
+@pytest.mark.parametrize("repo, wort, kennung, grund", [
+    ("acme/" + "a" * 37, None, PROFIL_A, "projekt"),  # 51 Zeichen
+    (None, "x", "1A2B3C4D", "projekt"), (None, "x", "1a2b3c4", "projekt"), (None, "x", "1a2b3c4d5", "projekt"), (None, "x", "", "projekt"),
+    (None, "x", "../x", "projekt"), ("acme/wamo", None, PROFIL_A, "repo"), (None, "wais", PROFIL_A, "projekt"),
+])
+def test_projektname_mit_kennung_abgelehnt(repo, wort, kennung, grund):
+    with pytest.raises(K.ProjektnameFehler) as info:
+        K.kern_projektname(repo, wort, kennung)
+    assert info.value.grund == grund
+
+
+@pytest.mark.parametrize("projekt, repo, profil, erwartet", [
+    ("kern-1a2b3c4d-marktstudie", None, PROFIL_A, None),
+    ("kern-1a2b3c4d-test-repo", "Acme/Test-Repo", PROFIL_A, None),
+    ("kern-marktstudie", None, PROFIL_A, "projekt"),  # ohne Kennung
+    ("kern-9f8e7d6c-marktstudie", None, PROFIL_A, "projekt"),  # fremde Kennung
+    ("kern-test-repo", "acme/test-repo", PROFIL_A, "projekt"),
+    ("kern-9f8e7d6c-test-repo", "acme/test-repo", PROFIL_A, "projekt"),
+    ("kern-1a2b3c4d-", None, PROFIL_A, "projekt"), ("kern-1a2b3c4d-wais", None, PROFIL_A, "projekt"),
+    ("kern-1a2b3c4d-x", "acme/wamo", PROFIL_A, "repo"),
+    ("kern-1a2b3c4d-marktstudie", None, "1A2B3C4D", "projekt"), ("kern-1a2b3c4d-marktstudie", None, "", "projekt"),
+    ("1a2b3c4d-marktstudie", None, PROFIL_A, "projekt"),
+])
+def test_projekt_im_kern_kanal_mit_profil(projekt, repo, profil, erwartet):
+    assert K.projekt_pruefen(projekt, repo, profil) == erwartet
+
+
+def test_jeder_name_des_kerns_mit_kennung_besteht_die_pruefung_mit_demselben_profil_und_kein_anderes():
+    for repo, wort in ((None, "Marktstudie"), ("acme/my_repo.js", None), (None, "Märkte"), ("acme/x", "egal")):
+        name = K.kern_projektname(repo, wort, PROFIL_A)
+        assert K.projekt_pruefen(name, repo, PROFIL_A) is None, name
+        assert K.projekt_pruefen(name, repo, PROFIL_B) == "projekt", name
+
+
+def test_ein_ordner_eines_anderen_profils_ist_fremd():
+    assert K.profil_fremd(PROFIL_A, []) is False
+    assert K.profil_fremd(PROFIL_A, [PROFIL_A, PROFIL_A]) is False
+    assert K.profil_fremd(PROFIL_A, [PROFIL_B]) is True
+    assert K.profil_fremd(PROFIL_A, [PROFIL_A, None]) is True  # ein Auftrag ohne Kennung: unklar heißt fremd
+    assert K.profil_fremd(PROFIL_A, ["1A2B3C4D"]) is True and K.profil_fremd(PROFIL_A, [5]) is True
+    assert K.profil_fremd(None, [PROFIL_A]) is True
+    assert start(anfrage(projekt_profil_fremd=True)) == "projekt"
+    assert start(anfrage(projekt_profil_fremd=True, zugang=None)) == "projekt"  # Regel 6 vor Regel 7
+    assert start(anfrage(projekt="kern-9f8e7d6c-marktstudie")) == "projekt"  # das Projekt eines anderen Profils
+
+
+def _p(e: dict, profil: str | None = PROFIL_A) -> dict:
+    return {**e, "profil": profil} if profil else e
+
+
+def test_grenze_profil_neue_auftraege_je_stunde_folgen_zaehlen_nicht():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200")
+    zwei = [_p(_start(100, "a" * 16)), _p(_start(200, "b" * 16))]
+    assert start(anfrage(), zs, zwei) is None  # der dritte neue Auftrag in der Stunde geht
+    drei = zwei + [_p(_start(300, "c" * 16))]
+    assert start(anfrage(), zs, drei) == "grenze_profil"  # der vierte nicht
+    assert start(anfrage(job="a" * 16), zs, drei) is None  # eine Folge eines eigenen Auftrags ist kein neuer
+    assert start(anfrage(), zs, [_p(e, PROFIL_B) for e in drei]) is None  # ein anderes Profil zählt nicht mit
+    assert start(anfrage(), zs, [{k: v for k, v in e.items() if k != "profil"} for e in drei]) is None  # Zeilen ohne Kennung zählen nur gesamt
+    assert start(anfrage(profil=PROFIL_B, projekt="kern-9f8e7d6c-marktstudie"), zs, drei) is None
+    alt = [_p(_start(3601 + i, f"{i:x}" * 16)) for i in range(3)]
+    assert start(anfrage(), zs, alt) is None  # älter als eine Stunde
+
+
+def test_grenze_profil_neue_auftraege_je_tag():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200")
+    sieben = [_p(_start(4000 + i * 4000, f"{i + 1:x}" * 16)) for i in range(7)]
+    assert start(anfrage(), zs, sieben) is None
+    assert start(anfrage(), zs, sieben + [_p(_start(40000, "e" * 16))]) == "grenze_profil"
+    assert start(anfrage(), zs, sieben + [_p(_start(90000, "e" * 16))]) is None  # älter als ein Tag
+
+
+def test_grenze_profil_versuche_und_laufzeit():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200")
+    neun = [_p(_versuch(100 + i)) for i in range(9)]
+    assert start(anfrage(), zs, neun) is None
+    assert start(anfrage(), zs, neun + [_p(_versuch(500))]) == "grenze_profil"
+    assert start(anfrage(), zs, neun + [_p(_versuch(500), PROFIL_B)]) is None
+    assert start(anfrage(), zs, [_p(_ende(5000, 7199))]) is None
+    assert start(anfrage(), zs, [_p(_ende(5000, 7200))]) == "grenze_profil"
+    assert start(anfrage(), zs, [_p(_ende(5000, 7200), PROFIL_B)]) is None
+    assert start(anfrage(), zs, [_p(_ende(90000, 7200))]) is None
+
+
+def test_die_reihenfolge_gesamt_vor_profil_vor_folgen():
+    zs = zustand(konfig_text(ARTEN="recherche", MIN_ABSTAND_S="0", MAX_FOLGEN="0", MAX_START_STUNDE="3"))
+    drei = [_p(_start(100 + i, f"{i + 1:x}" * 16)) for i in range(3)]
+    assert start(anfrage(), zs, drei) == "grenze_start"  # gesamt zuerst
+    zs2 = zustand(konfig_text(ARTEN="recherche", MIN_ABSTAND_S="0", MAX_FOLGEN="0", MAX_START_STUNDE="60", MAX_START_TAG="200"))
+    assert start(anfrage(), zs2, drei) == "grenze_profil"
+    for ohne in (None, "", "1A2B3C4D", "../x", 5):  # ohne gültige Kennung: gesperrt (fail closed)
+        assert K.pruefe_grenzen_profil(K.Konfig(), [], JOB, JETZT, ohne) == "grenze_profil", ohne
+
+
+def test_der_zaehler_traegt_die_kennung(tmp_path):
+    pfad = tmp_path / "z.jsonl"
+    K.zaehler_schreiben(pfad, JOB, "versuch", JETZT, profil=PROFIL_A)
+    K.zaehler_schreiben(pfad, JOB, "ende", JETZT, dauer_s=3, profil=PROFIL_A)
+    K.zaehler_schreiben(pfad, JOB, "start", JETZT)
+    assert K.zaehler_lesen(pfad) == [{"t": int(JETZT), "job": JOB, "ereignis": "versuch", "profil": PROFIL_A},
+                                     {"t": int(JETZT), "job": JOB, "ereignis": "ende", "dauer_s": 3, "profil": PROFIL_A},
+                                     {"t": int(JETZT), "job": JOB, "ereignis": "start"}]
+    for schlecht in ("1A2B3C4D", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "", 5):
+        with pytest.raises(ValueError):
+            K.zaehler_schreiben(tmp_path / "n.jsonl", JOB, "start", JETZT, profil=schlecht)
+    assert not (tmp_path / "n.jsonl").exists()
+    pfad.write_text(f'{{"t": 1, "job": "{JOB}", "ereignis": "start", "profil": "../x"}}\n', encoding="utf-8")
+    assert K.zaehler_lesen(pfad) == [{"t": 1, "job": JOB, "ereignis": "start"}]  # eine ungültige Kennung fällt weg, die Zeile zählt gesamt
+
+
+
+def test_grenze_profil_zaehlt_je_auftrag_nur_den_ersten_start():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20")
+    # drei alte Aufträge (erster Start vor mehr als einer Stunde) mit Folgen in dieser Stunde: keiner ist in dieser Stunde neu
+    alt_mit_folgen = [_p(_start(5000 + i, f"{i + 1:x}" * 16)) for i in range(3)] + [_p(_start(100 + i, f"{i + 1:x}" * 16)) for i in range(3)]
+    assert start(anfrage(), zs, alt_mit_folgen) is None
+    # am Tag zählen sie je einmal, nicht je Start
+    tag = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20", MAX_NEU_TAG_PROFIL="4")
+    assert start(anfrage(), tag, alt_mit_folgen) is None  # drei Aufträge, sechs Starts: der vierte Auftrag geht
+    assert start(anfrage(), tag, alt_mit_folgen + [_p(_start(6000, "d" * 16))]) == "grenze_profil"
+
+
+def test_eine_folge_des_eigenen_auftrags_scheitert_nicht_an_den_versuchen_je_profil():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_FOLGEN="20")
+    versuche = [_p(_versuch(100 + i, JOB)) for i in range(12)] + [_p(_start(50, JOB))]  # der Auftrag läuft schon (Abnahme-Runden)
+    assert start(anfrage(), zs, versuche) is None  # MAX_FOLGEN begrenzt die Folgen, nicht die Versuche je Profil
+    assert start(anfrage(job="e" * 16), zs, versuche) == "grenze_profil"  # ein neuer Auftrag desselben Profils schon
+    assert start(anfrage(), zs, versuche + [_p(_ende(10, 7200, JOB))]) == "grenze_profil"  # die Laufzeit gilt auch für Folgen
+
+
+def test_die_grenzen_je_profil_stehen_in_der_konfiguration():
+    std = lese(konfig_text())
+    assert (std.max_neu_stunde_profil, std.max_neu_tag_profil, std.max_versuch_stunde_profil, std.max_laufzeit_tag_s_profil) == (3, 8, 10, 7200)
+    k = lese(konfig_text(MAX_NEU_STUNDE_PROFIL="12", MAX_NEU_TAG_PROFIL="40", MAX_VERSUCH_STUNDE_PROFIL="60", MAX_LAUFZEIT_TAG_S_PROFIL="28800"))
+    assert (k.max_neu_stunde_profil, k.max_neu_tag_profil, k.max_versuch_stunde_profil, k.max_laufzeit_tag_s_profil) == (12, 40, 60, 28800)
+    for name, schlecht in (("MAX_NEU_STUNDE_PROFIL", "0"), ("MAX_NEU_STUNDE_PROFIL", "61"), ("MAX_NEU_TAG_PROFIL", "201"),
+                           ("MAX_VERSUCH_STUNDE_PROFIL", "61"), ("MAX_LAUFZEIT_TAG_S_PROFIL", "59"), ("MAX_LAUFZEIT_TAG_S_PROFIL", "86401")):
+        with pytest.raises(K.KonfigFehler):
+            lese(konfig_text(**{name: schlecht}))
+    eins = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_NEU_STUNDE_PROFIL="1")
+    assert start(anfrage(), eins, [_p(_start(100, "a" * 16))]) == "grenze_profil"
+    viel = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_LAUFZEIT_TAG_S_PROFIL="28800")
+    assert start(anfrage(), viel, [_p(_ende(5000, 7200))]) is None  # ein Admin mit mehr Laufzeit: der Wert ist einstellbar
+
+
+def test_zwei_profile_mit_ihren_versuchen_sperren_ein_drittes_nicht_aus():
+    zs = z(MAX_START_STUNDE="60", MAX_START_TAG="200", MAX_VERSUCH_STUNDE=None)  # Gesamtgrenze: der Standard 60
+    zwei = [_p(_versuch(100 + i), PROFIL_A) for i in range(10)] + [_p(_versuch(200 + i), PROFIL_B) for i in range(10)]
+    assert start(anfrage(profil="0a0b0c0d", projekt="kern-0a0b0c0d-marktstudie"), zs, zwei) is None
+    assert K.MAX_VERSUCH_STUNDE_FEST == 60 and K.Konfig().max_versuch_stunde == 60
+
+
+def test_eine_anfrage_ohne_lage_des_ordners_gibt_es_nicht():
+    with pytest.raises(TypeError):
+        K.StartAnfrage(job=JOB, projekt="kern-1a2b3c4d-x", art="recherche", repo=None, zugang="folgt", profil=PROFIL_A, github=False,
+                       dienste=(), app_modus=True)  # fremd, projekt_fremd, projekt_kollision und projekt_profil_fremd sind Pflicht

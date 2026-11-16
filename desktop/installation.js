@@ -21,12 +21,15 @@ const BETRIEBSARTEN = ["buero", "unterwegs"];
 /**
  * Löst alle Ordner und Dateien auf, die main.js braucht.
  * Optionen: istPaketiert (app.isPackaged), resourcesPath (process.resourcesPath), verzeichnis (__dirname von main.js),
- * userData (app.getPath("userData")), existiert (Dateiprüfung, für Tests einstellbar).
+ * userData (app.getPath("userData")), lokaleDaten (%LOCALAPPDATA%, nur installiert nötig), existiert (Dateiprüfung, für Tests
+ * einstellbar). updateOrdner: wohin die App einen geprüften Installer lädt (update.js); nur installiert, lokal statt Roaming,
+ * weil der Installer groß ist und nicht in ein synchronisiertes Profil gehört.
  */
-function loeseAuf({ istPaketiert, resourcesPath, verzeichnis, userData, existiert = fs.existsSync }) {
+function loeseAuf({ istPaketiert, resourcesPath, verzeichnis, userData, lokaleDaten, existiert = fs.existsSync }) {
   if (istPaketiert) {
     if (typeof resourcesPath !== "string" || resourcesPath === "") throw new Error("resourcesPath fehlt");
     if (typeof userData !== "string" || userData === "") throw new Error("userData fehlt");
+    if (typeof lokaleDaten !== "string" || lokaleDaten === "") throw new Error("lokaleDaten fehlt");
     return {
       modus: "installiert",
       repo: null,
@@ -39,6 +42,7 @@ function loeseAuf({ istPaketiert, resourcesPath, verzeichnis, userData, existier
       hostDir: path.join(resourcesPath, "host"),
       lokalerKernMoeglich: false,
       hostUmgebungVerwalten: true,
+      updateOrdner: path.join(lokaleDaten, "WAMO", "updates"),
     };
   }
   const repo = path.resolve(verzeichnis, "..");
@@ -55,6 +59,7 @@ function loeseAuf({ istPaketiert, resourcesPath, verzeichnis, userData, existier
     hostDir: path.join(repo, "host"),
     lokalerKernMoeglich: existiert(path.join(voiceCoreDir, "bot.py")),
     hostUmgebungVerwalten: false,
+    updateOrdner: null,
   };
 }
 

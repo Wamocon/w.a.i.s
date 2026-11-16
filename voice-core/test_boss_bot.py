@@ -3,6 +3,7 @@ Zugang (Claude-Code-Token, Übergang, keine) und dass der Token nur für genau d
 
 from __future__ import annotations
 
+import inspect
 import os
 import unittest
 from unittest import mock
@@ -117,10 +118,46 @@ class BueroEntwicklungTests(unittest.IsolatedAsyncioTestCase):
         dev, _ = await self.build(benutzer=ANDERES_PROFIL, WAMO_ENTWICKLUNG_PROFILE=f"{ANDERES_PROFIL},{USER}")
         self.assertTrue(dev.called)  # weitere Admins stehen einzeln in der Liste
 
-    async def test_mitglied_nie_auch_nicht_im_profil(self):
+    async def test_mitglied_nur_mit_schalter_der_mitglieder_und_im_profil(self):
+        # Paket P5: ohne WAMO_ENTWICKLUNG_MITGLIEDER=an nie, auch nicht im Profil
         dev, log = await self.build(rolle="mitglied")
         self.assertFalse(dev.called)
-        self.assertIn("Entwicklungsaufträge aus: Entwicklungsaufträge gibt es nur für Admins", log)
+        self.assertIn("Entwicklungsaufträge aus: Entwicklungsaufträge sind für Mitglieder noch nicht freigeschaltet", log)
+        dev, log = await self.build(rolle="mitglied", WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertTrue(dev.called)
+        zulassung = dev.call_args.kwargs["zulassung"]
+        self.assertEqual((zulassung.user_id, zulassung.mitglied), (USER, True))
+        dev, log = await self.build(rolle="mitglied", benutzer=ANDERES_PROFIL, WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertFalse(dev.called)  # nicht in WAMO_ENTWICKLUNG_PROFILE
+        self.assertIn("Dieses Profil ist für Entwicklungsaufträge im Büro nicht freigegeben", log)
+
+    async def test_mitglied_ausserhalb_des_buero_nie(self):
+        dev, _log = await self.build(rolle="mitglied", WAMO_BETRIEB="", WAMO_ENTWICKLUNG="an", WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertFalse(dev.called)
+
+    def test_laborprofil_nie_auch_mit_beiden_schaltern(self):
+        # Die Laborsitzung selbst prüft test_labor_sitzung.py (dort setzt bot.py Entwicklung zuletzt fest auf aus); hier die Entscheidung,
+        # die bot.py für jedes Profil fragt: weder Zulassung noch Satz für Mitglieder, auch mit beiden Schaltern und der user_id in der Liste
+        eb = bot.entwicklung_betrieb
+        with mock.patch.dict(os.environ, {**BUERO_ENV, "WAMO_ENTWICKLUNG_MITGLIEDER": "an"}):
+            for art in ("platz", "schaufenster"):
+                labor = Identity(USER, "Gast", "mitglied", "du", labor_art=art)
+                self.assertEqual(eb.rollen(labor), (False, False, True))
+                self.assertIsNone(eb.zulassung_fuer(labor))
+                self.assertEqual(eb.grund_fuer(labor), eb.GRUND_LABOR)
+                self.assertIsNone(eb.anzeige_grund(False, eb.grund_fuer(labor), mitglied=eb.rollen(labor)[1]))
+        quelle = inspect.getsource(bot.build_session)
+        self.assertIn('entwicklung, fernzugriff, ent_grund = False, False, "Entwicklungsaufträge gibt es im Labor nicht"', quelle)
+
+    async def test_prompt_eines_mitglieds_ohne_repo(self):
+        with mock.patch.object(bot, "build_system_prompt", wraps=bot.build_system_prompt) as prompt:
+            dev, _log = await self.build(rolle="mitglied", WAMO_ENTWICKLUNG_MITGLIEDER="an")
+        self.assertTrue(dev.called)
+        kwargs = prompt.call_args.kwargs
+        self.assertEqual((kwargs["ohne_repo"], kwargs["repo_pflicht"]), (True, False))
+        text = bot.build_system_prompt("Erika", "du", entwicklung=True, ohne_repo=True)
+        self.assertIn("Für Erika gibt es im Büro nur Recherchen (art recherche) ohne Repo", text)
+        self.assertNotIn("braucht jeder Auftrag außer der Recherche das GitHub-Repo", text)
 
     async def test_uebergang_zaehlt_im_buero_wie_keine(self):
         zugang = Zugang(USER, "claude", "zuordnung", claude_schluessel=KEY)

@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import shutil
 import os
 import re
 import stat
@@ -2124,7 +2125,7 @@ class PersoenlicherZugangStartTests(unittest.TestCase):
         ping = self.ereignisse[-1]
         self.assertIs(ping["serverzugang"], False)
         self.assertIs(ping["kontingent"], True)
-        self.assertEqual(ping["version"], "7")  # 7: Kern-Kanal (6: Befehl pruefen, standardmäßig aus)
+        self.assertEqual(ping["version"], "8")  # 8: Trennung je Profil (7: Kern-Kanal, 6: Befehl pruefen, standardmäßig aus)
         self.assertIs(ping["pruefen"], False)  # ohne WAMO_PRUEFEN=an
         self.assertEqual(ping["kanal"], "lokal")  # I7: kanal und kernkanal, nie ein Wert aus geheim.env
         self.assertEqual(set(ping["kernkanal"]), {"strikt", "offen", "grund", "arten", "repos", "ablauf", "tage_rest"})
@@ -2722,7 +2723,7 @@ class KernKanalDispatchTests(unittest.TestCase):
         self.handler = mocks
         return code
 
-    def start(self, kopf_extra=None, zugangszeile=None, projekt="kern-marktstudie", art="recherche", job=JOB, kanal="kern",
+    def start(self, kopf_extra=None, zugangszeile=None, projekt="kern-1a2b3c4d-marktstudie", art="recherche", job=JOB, kanal="kern",
               geheim=None, session=None):
         """cmd_start im Kern-Kanal mit Attrappen für Sperren, Selbsttest und Sandbox. Gibt (Code, Aufrufe von _ausfuehren) zurück.
         Ein Wert None in kopf_extra entfernt das Feld."""
@@ -2862,7 +2863,7 @@ class KernKanalDispatchTests(unittest.TestCase):
         with mock.patch.object(D, "github_status", return_value="token"), mock.patch.object(D, "KANAL", "kern"):
             D.cmd_ping()
         ping = self.ereignisse[-1]
-        self.assertEqual(ping["version"], "7")
+        self.assertEqual(ping["version"], "8")
         self.assertEqual(ping["kanal"], "kern")
         kk = ping["kernkanal"]
         self.assertTrue(kk["strikt"] and kk["offen"])
@@ -2919,13 +2920,13 @@ class KernKanalDispatchTests(unittest.TestCase):
         self.assertIn("haus", self.K.ZUGAENGE_KERN)
 
     def test_jede_regel_5_bis_7_wird_vor_den_geheimnissen_abgewiesen(self):
-        faelle = (("art", dict(art="umsetzung", projekt="kern-test-repo", kopf={"repo": "acme/test-repo"})),
+        faelle = (("art", dict(art="umsetzung", projekt="kern-1a2b3c4d-test-repo", kopf={"repo": "acme/test-repo"})),
                   ("repo_fehlt", dict(art="review", projekt="kern-x")),
                   ("repo", dict(art="review", projekt="kern-anderes", kopf={"repo": "acme/anderes"})),
                   ("repo", dict(art="recherche", projekt="kern-anderes", kopf={"repo": "acme/anderes"})),
                   ("repo", dict(art="review", projekt="kern-wamo", kopf={"repo": "acme/wamo"})),
                   ("repo", dict(art="review", projekt="kern-wamo", kopf={"repo": "acme/WAMO"})),
-                  ("dienst", dict(art="planung", projekt="kern-test-repo", kopf={"repo": "acme/test-repo"})),  # planung bekommt auch Jira
+                  ("dienst", dict(art="planung", projekt="kern-1a2b3c4d-test-repo", kopf={"repo": "acme/test-repo"})),  # planung bekommt auch Jira
                   ("projekt", dict(art="recherche", projekt="marktstudie")),
                   ("projekt", dict(art="review", projekt="kern-anderes", kopf={"repo": "acme/test-repo"})),
                   ("zugang", dict(art="recherche", projekt="kern-x", kopf={"zugang": None, "profil": None})))
@@ -2939,7 +2940,7 @@ class KernKanalDispatchTests(unittest.TestCase):
 
     def test_der_projektname_wird_ohne_vorherige_spuren_abgewiesen_und_ein_bestehender_fremder_auftrag_ist_fremd(self):
         (self.jobs / JOB).mkdir()
-        (self.jobs / JOB / "auftrag.json").write_text(json.dumps({"job": JOB, "projekt": "kern-marktstudie", "art": "recherche", "repo": None}))
+        (self.jobs / JOB / "auftrag.json").write_text(json.dumps({"job": JOB, "projekt": "kern-1a2b3c4d-marktstudie", "art": "recherche", "repo": None}))
         code, aufrufe = self.start()
         self.assertEqual((code, aufrufe, self.gesperrt(), self.geheim_gelesen), (D.EXIT_ABGEWIESEN, [], ["fremd"], 0))
 
@@ -2961,9 +2962,10 @@ class KernKanalDispatchTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--max-budget-usd") + 1], "0.75")
         self.assertEqual(self.gesperrt(), [])
         meta = json.loads((self.jobs / JOB / "auftrag.json").read_text(encoding="utf-8"))
-        self.assertEqual((meta["kanal"], meta["projekt"], meta["art"]), ("kern", "kern-marktstudie", "recherche"))
+        self.assertEqual((meta["kanal"], meta["projekt"], meta["art"], meta["profil"]),
+                         ("kern", "kern-1a2b3c4d-marktstudie", "recherche", self.PROFIL))
         self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], OAUTH_WERT)
-        self.assertTrue(any(z.startswith(f"start {JOB} kern-marktstudie recherche") and f"profil={self.PROFIL}" in z for z in self.logzeilen))
+        self.assertTrue(any(z.startswith(f"start {JOB} kern-1a2b3c4d-marktstudie recherche") and f"profil={self.PROFIL}" in z for z in self.logzeilen))
 
     def test_die_grenzen_kommen_nur_aus_der_konfiguration_nie_aus_der_kopfzeile(self):
         for feld in ("max_turns", "max_budget_usd", "max-turns", "grenzen"):
@@ -3045,7 +3047,7 @@ class KernKanalDispatchTests(unittest.TestCase):
              mock.patch.object(D, "_kopfzeile_lesen", return_value=b'{"auftrag": "x", "zugang": "folgt", "profil": "1a2b3c4d"}\n'), \
              mock.patch.object(D, "_zugangszeile_lesen", return_value=zeile()), mock.patch.object(D, "KANAL", "kern"):
             with self.assertRaises(RuntimeError):
-                D.cmd_start("c" * 16, "kern-marktstudie", "recherche")
+                D.cmd_start("c" * 16, "kern-1a2b3c4d-marktstudie", "recherche")
         self.assertEqual([e["ereignis"] for e in self.zaehler()], ["versuch", "start", "ende", "versuch", "start", "ende"])
 
     def test_nur_der_kern_kanal_schreibt_in_den_zaehler(self):
@@ -3201,23 +3203,24 @@ class KernKanalDispatchTests(unittest.TestCase):
         self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["grenze_start"]))
 
     def test_ein_projektordner_den_kein_kern_auftrag_angelegt_hat_ist_gesperrt(self):
-        (self.projekte / "kern-marktstudie").mkdir()  # etwa vom PC-Kanal oder von Hand
+        (self.projekte / "kern-1a2b3c4d-marktstudie").mkdir()  # etwa vom PC-Kanal oder von Hand
         code, aufrufe = self.start()
         self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["projekt"]))
         self.assertEqual((self.geheim_gelesen, self.selbsttests), (0, 0))
         # mit einem Kern-Auftrag, der den Ordner belegt hat, geht ein weiterer Auftrag in dasselbe Projekt
         (self.jobs / ("c" * 16)).mkdir()
         (self.jobs / ("c" * 16) / "auftrag.json").write_text(json.dumps(
-            {"job": "c" * 16, "projekt": "kern-marktstudie", "art": "recherche", "repo": None, "kanal": "kern"}), encoding="utf-8")
+            {"job": "c" * 16, "projekt": "kern-1a2b3c4d-marktstudie", "art": "recherche", "repo": None, "kanal": "kern",
+             "profil": "1a2b3c4d"}), encoding="utf-8")
         self.ereignisse.clear()
         self.assertEqual(self.start(job="d" * 16)[0], D.EXIT_OK)
         self.assertEqual(self.gesperrt(), [])
         # ein Auftrag mit kanal=pc im selben Namen belegt den Ordner nicht für den Kern
-        (self.projekte / "kern-andere").mkdir()
+        (self.projekte / "kern-1a2b3c4d-andere").mkdir()
         (self.jobs / ("e" * 16)).mkdir()
         (self.jobs / ("e" * 16) / "auftrag.json").write_text(json.dumps(
-            {"job": "e" * 16, "projekt": "kern-andere", "art": "recherche", "repo": None, "kanal": "pc"}), encoding="utf-8")
-        self.assertEqual(self.start(projekt="kern-andere", job="f" * 16)[0], D.EXIT_ABGEWIESEN)
+            {"job": "e" * 16, "projekt": "kern-1a2b3c4d-andere", "art": "recherche", "repo": None, "kanal": "pc"}), encoding="utf-8")
+        self.assertEqual(self.start(projekt="kern-1a2b3c4d-andere", job="f" * 16)[0], D.EXIT_ABGEWIESEN)
         self.assertEqual(self.gesperrt(), ["projekt"])
 
     def test_ein_neuer_projektordner_ist_kein_hindernis_und_ein_link_an_der_stelle_schon(self):
@@ -3226,18 +3229,63 @@ class KernKanalDispatchTests(unittest.TestCase):
             self.skipTest("symbolische Links brauchen unter Windows besondere Rechte")
         ziel = Path(self.tmp.name) / "fremd"
         ziel.mkdir()
-        (self.projekte / "kern-verlinkt").symlink_to(ziel)
-        self.assertEqual(self.start(projekt="kern-verlinkt", job="a" * 16)[0], D.EXIT_ABGEWIESEN)
+        (self.projekte / "kern-1a2b3c4d-verlinkt").symlink_to(ziel)
+        self.assertEqual(self.start(projekt="kern-1a2b3c4d-verlinkt", job="a" * 16)[0], D.EXIT_ABGEWIESEN)
         self.assertEqual(self.gesperrt()[-1], "projekt")
 
     def test_zwei_repos_mit_gleichem_normalisiertem_namen_teilen_sich_keinen_projektordner(self):
         self.konfig(REPOS="acme/my_repo,acme/my-repo")
         (self.jobs / ("c" * 16)).mkdir()
         (self.jobs / ("c" * 16) / "auftrag.json").write_text(json.dumps(
-            {"job": "c" * 16, "projekt": "kern-my-repo", "art": "review", "repo": "acme/my_repo", "kanal": "kern"}), encoding="utf-8")
-        (self.projekte / "kern-my-repo").mkdir()
-        code, aufrufe = self.start({"repo": "acme/my-repo"}, art="review", projekt="kern-my-repo", job="d" * 16)
+            {"job": "c" * 16, "projekt": "kern-1a2b3c4d-my-repo", "art": "review", "repo": "acme/my_repo", "kanal": "kern",
+             "profil": "1a2b3c4d"}), encoding="utf-8")
+        (self.projekte / "kern-1a2b3c4d-my-repo").mkdir()
+        code, aufrufe = self.start({"repo": "acme/my-repo"}, art="review", projekt="kern-1a2b3c4d-my-repo", job="d" * 16)
         self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["projekt"]))
+
+    def test_ein_projekt_mit_der_kennung_eines_anderen_profils_ist_gesperrt(self):
+        code, aufrufe = self.start(projekt="kern-9f8e7d6c-marktstudie")
+        self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["projekt"]))
+        code, aufrufe = self.start(projekt="kern-marktstudie", job="a" * 16)  # die Form ohne Kennung gilt mit Profil nicht mehr
+        self.assertEqual((code, aufrufe, self.gesperrt()[-1]), (D.EXIT_ABGEWIESEN, [], "projekt"))
+        self.assertEqual((self.geheim_gelesen, self.selbsttests), (0, 0))
+
+    def test_ein_projektordner_eines_anderen_profils_ist_gesperrt_auch_mit_passendem_namen(self):
+        for fremd in ("9f8e7d6c", None):
+            with self.subTest(fremd=fremd):
+                self.ereignisse.clear()
+                job = "c" * 16 if fremd else "e" * 16
+                (self.jobs / job).mkdir()
+                meta = {"job": job, "projekt": "kern-1a2b3c4d-marktstudie", "art": "recherche", "repo": None, "kanal": "kern"}
+                (self.jobs / job / "auftrag.json").write_text(json.dumps({**meta, **({"profil": fremd} if fremd else {})}), encoding="utf-8")
+                code, aufrufe = self.start(job=uuid.uuid4().hex[:16])
+                self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["projekt"]))
+                shutil.rmtree(self.jobs / job)
+
+    def test_eine_fortsetzung_aus_einem_anderen_profil_wird_abgewiesen(self):
+        self.assertEqual(self.start()[0], D.EXIT_OK)
+        meta = json.loads((self.jobs / JOB / "auftrag.json").read_text(encoding="utf-8"))
+        meta["profil"] = "9f8e7d6c"
+        (self.jobs / JOB / "auftrag.json").write_text(json.dumps(meta), encoding="utf-8")
+        self.konfig(MIN_ABSTAND_S="0")
+        self.ereignisse.clear()
+        code, aufrufe = self.start()  # derselbe Auftrag, aber auftrag.json gehört einem anderen Profil
+        self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["projekt"]))
+        with self.assertRaises(D.Abgewiesen):  # und die Bindung im Auftragsordner hält auch ohne die Regel des Kanals
+            D.vorbereiten(self.jobs / JOB, JOB, "kern-1a2b3c4d-marktstudie", "recherche", None, "kern", self.PROFIL)
+
+    def test_zaehlerzeilen_tragen_die_kennung_und_die_grenzen_je_profil_greifen(self):
+        self.konfig(MIN_ABSTAND_S="0", MAX_START_STUNDE="60", MAX_START_TAG="200")
+        for i in range(3):
+            self.assertEqual(self.start(job=f"{i + 1:x}" * 16)[0], D.EXIT_OK)
+        self.assertTrue(all(e.get("profil") == self.PROFIL for e in self.zaehler()))
+        self.ereignisse.clear()
+        code, aufrufe = self.start(job="d" * 16)
+        self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["grenze_profil"]))
+        # ein anderes Profil startet trotzdem
+        self.ereignisse.clear()
+        code, _ = self.start({"profil": "9f8e7d6c"}, projekt="kern-9f8e7d6c-marktstudie", job="e" * 16)
+        self.assertEqual((code, self.gesperrt()), (D.EXIT_OK, []))
 
     def test_kern_wamo_ohne_repo_wird_im_dispatcher_abgelehnt(self):
         code, aufrufe = self.start(projekt="kern-wamo")
@@ -3271,7 +3319,7 @@ class KernKanalDispatchTests(unittest.TestCase):
 
     def test_ein_github_start_prueft_den_fork_status_mit_dem_token_und_laeuft_dann(self):
         erzeugt, widerrufe, anfragen = self._app({"full_name": "acme/test-repo", "name": "test-repo", "fork": False})
-        code, aufrufe = self.start({"repo": "acme/test-repo"}, art="review", projekt="kern-test-repo")
+        code, aufrufe = self.start({"repo": "acme/test-repo"}, art="review", projekt="kern-1a2b3c4d-test-repo")
         self.assertEqual((code, self.gesperrt()), (D.EXIT_OK, []))
         self.assertEqual(erzeugt, [("review", "acme/test-repo")])
         self.assertEqual(anfragen, ["GET /repos/acme/test-repo"])
@@ -3285,28 +3333,30 @@ class KernKanalDispatchTests(unittest.TestCase):
                      {"full_name": "acme/test-repo", "fork": False, "parent": {"full_name": "Wamocon/W.A.I.S"}},
                      {"full_name": "acme/test-repo"}, [], None)
         self.konfig(MAX_START_STUNDE="60", MAX_START_TAG="200")  # auch ein abgewiesener Start zählt als Start
-        for antwort in antworten:
+        for nr, antwort in enumerate(antworten, start=1):
             with self.subTest(antwort=antwort):
                 self.ereignisse.clear()
                 erzeugt, widerrufe, _ = self._app(antwort)
-                code, aufrufe = self.start({"repo": "acme/test-repo"}, art="review", projekt="kern-test-repo", job=uuid.uuid4().hex[:16])
+                profil = f"{nr:08x}"  # je Versuch ein eigenes Profil: die Grenze je Profil (neue Aufträge je Stunde) soll hier nicht greifen
+                code, aufrufe = self.start({"repo": "acme/test-repo", "profil": profil}, art="review", projekt=f"kern-{profil}-test-repo",
+                                           job=uuid.uuid4().hex[:16])
                 self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["fork"]))
                 self.assertEqual(len(erzeugt), 1)
                 self.assertEqual(len(widerrufe), 1)  # das Token wurde erzeugt und sofort widerrufen
 
     def test_eine_github_art_ohne_app_modus_wird_vor_dem_token_abgewiesen(self):
         with mock.patch.object(D, "installations_token") as token:
-            code, aufrufe = self.start({"repo": "acme/test-repo"}, art="review", projekt="kern-test-repo")
+            code, aufrufe = self.start({"repo": "acme/test-repo"}, art="review", projekt="kern-1a2b3c4d-test-repo")
         self.assertEqual((code, aufrufe, self.gesperrt()), (D.EXIT_ABGEWIESEN, [], ["repo"]))  # NIKO_GEHEIM hat keine App-Variablen
         token.assert_not_called()
 
     def test_eine_abweisung_im_kern_kanal_erzeugt_nie_ein_token(self):
         erzeugt, widerrufe, anfragen = self._app({"full_name": "acme/test-repo", "fork": False})
         for ueber in ({"zugang": None, "profil": None}, {"zugang": "server", "profil": None}):
-            code, _ = self.start({"repo": "acme/test-repo", **ueber}, art="review", projekt="kern-test-repo", job=uuid.uuid4().hex[:16])
+            code, _ = self.start({"repo": "acme/test-repo", **ueber}, art="review", projekt="kern-1a2b3c4d-test-repo", job=uuid.uuid4().hex[:16])
             self.assertEqual(code, D.EXIT_ABGEWIESEN)
         self.pfade.notaus.write_text("x")
-        self.assertEqual(self.start({"repo": "acme/test-repo"}, art="review", projekt="kern-test-repo", job=uuid.uuid4().hex[:16])[0], D.EXIT_ABGEWIESEN)
+        self.assertEqual(self.start({"repo": "acme/test-repo"}, art="review", projekt="kern-1a2b3c4d-test-repo", job=uuid.uuid4().hex[:16])[0], D.EXIT_ABGEWIESEN)
         self.assertEqual((erzeugt, widerrufe, anfragen), ([], [], []))
 
     # ---- Eigenschaften der Datei
@@ -3314,7 +3364,7 @@ class KernKanalDispatchTests(unittest.TestCase):
         self.assertEqual(D.SELF_REPOS, ("wamo", "w.a.i.s"))
         self.assertEqual(D.SELF_REPO, "wamo")  # nur noch Alias
         self.assertEqual(D.PARALLEL_MAX, 1)
-        self.assertEqual(D.VERSION, "7")
+        self.assertEqual(D.VERSION, "8")
         import ast
         baum = ast.parse((INFRA / "wamo_job_dispatch.py").read_text(encoding="utf-8"))
         oben = {a.name for n in baum.body if isinstance(n, ast.Import) for a in n.names}
