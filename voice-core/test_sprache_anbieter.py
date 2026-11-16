@@ -1,6 +1,7 @@
 """Tests für die Wahl von Spracherkennung und Sprachausgabe je Sitzung (sprache_anbieter.py)."""
 
 import io
+import json
 import unittest
 import wave
 from types import SimpleNamespace
@@ -113,7 +114,7 @@ class HausTTSTest(unittest.IsolatedAsyncioTestCase):
     def dienst(self, handler) -> sa.HausTTSService:
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         return sa.HausTTSService(modell="wamo-tts", stimme="thorsten", basis="http://litellm.test.invalid:4000/v1",
-                                 schluessel="k", client=client, sample_rate=24000)
+                                 schluessel="k", client=client, sample_rate=24000, stream=False)
 
     async def test_wav_wird_als_audio_ausgegeben_und_umgerechnet(self):
         anfragen = []
@@ -135,6 +136,155 @@ class HausTTSTest(unittest.IsolatedAsyncioTestCase):
                                      frames_to_send=[TTSSpeakFrame("Hallo.")])
         self.assertFalse([f for f in unten if isinstance(f, TTSAudioRawFrame)])
         self.assertTrue([f for f in [*unten, *oben] if isinstance(f, ErrorFrame)])
+
+    async def test_ohne_schalter_kein_stream_und_modellweg(self):
+        anfragen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            anfragen.append(request)
+            return httpx.Response(200, content=wav(24000))
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with mock.patch.dict("os.environ", {"WAMO_TTS_HAUS_STREAM": ""}):
+            dienst = sa.HausTTSService(modell="wamo-tts", stimme="thorsten", basis="http://litellm.test.invalid:4000/v1",
+                                       schluessel="k", client=client, sample_rate=24000)
+        self.assertFalse(dienst.stream)
+        await run_test(dienst, frames_to_send=[TTSSpeakFrame("Hallo.")])
+        self.assertEqual(anfragen[0].url.path, "/v1/audio/speech")
+        self.assertNotIn("stream", json.loads(anfragen[0].content))
+
+
+def stueckweise(daten: bytes, *groessen: int):
+    """Antwortkörper in Stücken wie über das Netz: erst die genannten Größen, dann der Rest."""
+    async def gen():
+        rest = daten
+        for g in groessen:
+            yield rest[:g]
+            rest = rest[g:]
+        if rest:
+            yield rest
+    return gen()
+
+
+def audio_bytes(frames) -> int:
+    return sum(len(f.audio) for f in frames if isinstance(f, TTSAudioRawFrame))
+
+
+class HausTTSStreamTest(unittest.IsolatedAsyncioTestCase):
+    """Gestreamte Sprachausgabe über die Durchreiche des Gateways (WAMO_TTS_HAUS_STREAM=an)."""
+
+    def setUp(self):
+        sa.HausTTSService.durchreiche_pause_bis = 0.0
+
+    def tearDown(self):
+        sa.HausTTSService.durchreiche_pause_bis = 0.0
+
+    def dienst(self, handler, *, stream: bool = True) -> sa.HausTTSService:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return sa.HausTTSService(modell="wamo-tts-haus", stimme="sohee", basis="http://litellm.test.invalid:4000/v1",
+                                 schluessel="k", client=client, sample_rate=24000, stream=stream)
+
+    def test_schalter_aus_der_umgebung(self):
+        for wert, erwartet in (("an", True), ("AN", True), ("aus", False), ("", False), ("ja", False)):
+            with mock.patch.dict("os.environ", {"WAMO_TTS_HAUS_STREAM": wert}):
+                self.assertIs(sa.tts_stream_an(), erwartet, wert)
+
+    def test_wurzel_des_gateways(self):
+        self.assertEqual(sa.litellm_wurzel("http://gw:4000/v1"), "http://gw:4000")
+        self.assertEqual(sa.litellm_wurzel("http://gw:4000/v1/"), "http://gw:4000")
+        self.assertEqual(sa.litellm_wurzel("https://gw.example/litellm"), "https://gw.example/litellm")
+
+    async def test_stream_geht_ueber_die_durchreiche_mit_stream_feld(self):
+        anfragen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            anfragen.append(request)
+            return httpx.Response(200, content=stueckweise(wav(24000), 44 + 960, 960))
+
+        unten, _ = await run_test(self.dienst(handler), frames_to_send=[TTSSpeakFrame("Hallo.")])
+        self.assertEqual(len(anfragen), 1)
+        self.assertEqual(anfragen[0].url.host, "litellm.test.invalid")
+        self.assertEqual(anfragen[0].url.path, "/wamo-tts-haus/v1/audio/speech")
+        self.assertEqual(anfragen[0].headers["authorization"], "Bearer k")
+        koerper = json.loads(anfragen[0].content)
+        self.assertIs(koerper["stream"], True)
+        self.assertEqual((koerper["model"], koerper["voice"], koerper["response_format"]), ("wamo-tts-haus", "sohee", "wav"))
+        self.assertEqual(audio_bytes(unten), 24000 * 2 // 5)  # 0,2 s, 16 Bit, ohne Kopf
+
+    async def test_wav_kopf_in_kleinen_stuecken_wird_erkannt(self):
+        # Über das Netz kann der 44-Byte-Kopf zerteilt ankommen; die Abtastrate muss trotzdem aus dem Kopf kommen (hier 22050 Hz,
+        # umgerechnet auf 24000 Hz), und kein Byte des Kopfes darf als Audio durchrutschen.
+        async def ausgabe(*stuecke: int) -> int:
+            antwort = lambda r: httpx.Response(200, content=stueckweise(wav(22050), *stuecke))  # noqa: E731
+            unten, _ = await run_test(self.dienst(antwort), frames_to_send=[TTSSpeakFrame("Hallo.")])
+            return audio_bytes(unten)
+
+        am_stueck = await ausgabe()
+        self.assertGreater(am_stueck, 0)
+        self.assertAlmostEqual(await ausgabe(10, 20, 30), am_stueck, delta=8)
+        self.assertAlmostEqual(await ausgabe(44, 1), am_stueck, delta=8)
+
+    async def test_abgelehnte_durchreiche_faellt_auf_den_modellweg_zurueck_und_pausiert(self):
+        for status in (401, 403, 404):
+            with self.subTest(status=status):
+                sa.HausTTSService.durchreiche_pause_bis = 0.0
+                anfragen = []
+
+                def handler(request: httpx.Request, status=status) -> httpx.Response:
+                    anfragen.append(request.url.path)
+                    if request.url.path.startswith("/wamo-tts-haus/"):
+                        return httpx.Response(status, json={"detail": "abgelehnt"})
+                    return httpx.Response(200, content=wav(24000))
+
+                unten, oben = await run_test(self.dienst(handler),
+                                             frames_to_send=[TTSSpeakFrame("Hallo."), TTSSpeakFrame("Noch was.")])
+                self.assertEqual(anfragen, ["/wamo-tts-haus/v1/audio/speech", "/v1/audio/speech", "/v1/audio/speech"])
+                self.assertEqual(audio_bytes(unten), 2 * 24000 * 2 // 5)
+                self.assertFalse([f for f in [*unten, *oben] if isinstance(f, ErrorFrame)])
+                self.assertGreater(sa.HausTTSService.durchreiche_pause_bis, 0.0)
+
+    async def test_nach_der_pause_wieder_die_durchreiche(self):
+        anfragen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            anfragen.append(request.url.path)
+            return httpx.Response(200, content=wav(24000))
+
+        sa.HausTTSService.durchreiche_pause_bis = 1000.0
+        with mock.patch.object(sa, "_uhr", return_value=999.0):
+            await run_test(self.dienst(handler), frames_to_send=[TTSSpeakFrame("Hallo.")])
+        with mock.patch.object(sa, "_uhr", return_value=1000.5):
+            await run_test(self.dienst(handler), frames_to_send=[TTSSpeakFrame("Hallo.")])
+        self.assertEqual(anfragen, ["/v1/audio/speech", "/wamo-tts-haus/v1/audio/speech"])
+
+    async def test_fehler_der_durchreiche_ausser_ablehnung_bleibt_ein_fehler(self):
+        anfragen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            anfragen.append(request.url.path)
+            return httpx.Response(500, text="kaputt")
+
+        unten, oben = await run_test(self.dienst(handler), frames_to_send=[TTSSpeakFrame("Hallo.")])
+        self.assertEqual(anfragen, ["/wamo-tts-haus/v1/audio/speech"])
+        self.assertTrue([f for f in [*unten, *oben] if isinstance(f, ErrorFrame)])
+
+    async def test_ohne_stream_bleibt_der_modellweg(self):
+        anfragen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            anfragen.append(request)
+            return httpx.Response(200, content=wav(24000))
+
+        await run_test(self.dienst(handler, stream=False), frames_to_send=[TTSSpeakFrame("Hallo.")])
+        self.assertEqual(anfragen[0].url.path, "/v1/audio/speech")
+        self.assertNotIn("stream", json.loads(anfragen[0].content))
+
+    async def test_haus_tts_liest_den_schalter(self):
+        env = {"WAMO_TTS_HAUS_STREAM": "an", "WAMO_TTS_HAUS_STIMME": "sohee", **UMGEBUNG}
+        with mock.patch.dict("os.environ", env):
+            self.assertTrue(sa.haus_tts(sa.Baustein("haus", "haus", "wamo-tts-haus")).stream)
+        with mock.patch.dict("os.environ", {**env, "WAMO_TTS_HAUS_STREAM": "aus"}):
+            self.assertFalse(sa.haus_tts(sa.Baustein("haus", "haus", "wamo-tts-haus")).stream)
 
 
 if __name__ == "__main__":
