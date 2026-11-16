@@ -198,19 +198,26 @@ def modus_wirksam(zugang: Zugang) -> str:
     return "automatisch" if zugang.art == "claude" else "nur_haus"
 
 
-def entwicklung_quelle(zugang: Zugang) -> str:
+def entwicklung_quelle(zugang: Zugang, *, haus: bool = False) -> str:
     """Womit ein Entwicklungsauftrag dieses Profils läuft (Claude Code in der Sandbox auf Sokrates-2).
       token      Mit dem eigenen Claude-Code-Token der Person (Max-Tarif, Kontingent des Abos, Standardmodell Sonnet).
       api        Mit dem eigenen API-Schlüssel (Guthaben, Standardmodell Haiku), wenn kein Token hinterlegt ist.
       uebergang  Das Profil, dem der Schlüssel des Kerns gehört (quelle zuordnung), nutzt wie bisher den Zugang der
                  Sandbox, bis es seinen eigenen hinterlegt hat.
-      keine      Alle anderen, auch die Quelle labor (Laborprofile führen das Gespräch über den Server-Schlüssel, nie einen
-                 Entwicklungsauftrag). Eine Hausmodell-Variante mit wamo-coder gibt es noch nicht (nicht gebaut, nicht
-                 gemessen), und ohne eigenen Zugang dürfte ein Auftrag nur auf dem Zugang einer anderen Person laufen.
-    Wählt die Person nur Hausmodelle oder legt der Admin es fest, gibt es keinen Claude-Code-Lauf (nichts geht in die
-    Cloud). Ein Profil ohne API-Schlüssel, aber mit Token bleibt ein Hausprofil für das Gespräch: Der Token gilt allein
-    für Entwicklungsaufträge, die die Person ausdrücklich per Klick startet."""
-    if zugang.quelle in ("wahl", "festgelegt", "labor"):
+      haus       Nur mit haus=True (bot.py: im Büro und mit WAMO_ENTWICKLUNG_HAUS=an): Claude Code mit einem Hausmodell über
+                 den Proxy auf Sokrates-2, für Profile ohne Token und ohne API-Schlüssel (quelle keiner) und für Profile mit
+                 nur Hausmodellen (quellen wahl und festgelegt, auch mit hinterlegtem Token: nichts geht in die Cloud). Der Kern
+                 gibt dem Dispatcher dabei kein Geheimnis mit, nur die Art haus.
+      keine      Alle anderen, immer die Quellen fehler und labor (Laborprofile führen das Gespräch über den Server-Schlüssel,
+                 nie einen Entwicklungsauftrag); ohne eigenen Zugang dürfte ein Auftrag sonst nur auf dem Zugang einer anderen
+                 Person laufen.
+    Ohne haus gibt es für nur Hausmodelle keinen Claude-Code-Lauf. Ein Profil ohne API-Schlüssel, aber mit Token bleibt ein
+    Hausprofil für das Gespräch: Der Token gilt allein für Entwicklungsaufträge, die die Person ausdrücklich per Klick startet.
+    Nur ein echtes True schaltet haus ein."""
+    haus = haus is True
+    if zugang.quelle in ("wahl", "festgelegt"):
+        return "haus" if haus else "keine"
+    if zugang.quelle == "labor":
         return "keine"
     if zugang.claude_code:
         return "token"
@@ -218,6 +225,8 @@ def entwicklung_quelle(zugang: Zugang) -> str:
         return "api"
     if zugang.art == "claude" and zugang.quelle == "zuordnung":
         return "uebergang"
+    if haus and zugang.quelle == "keiner":
+        return "haus"
     return "keine"
 
 

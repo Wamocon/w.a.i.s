@@ -9,12 +9,14 @@ Ausführen:  uv run python -m pytest -q test_sokrates2_dispatch.py   (im Ordner 
 
 import contextlib
 import dataclasses
+import hashlib
 import importlib.util
 import io
 import json
 import shutil
 import os
 import re
+import stat
 import struct
 import sys
 import tempfile
@@ -1649,6 +1651,16 @@ class ConsistencyTests(unittest.TestCase):
             self.assertNotIn(name, erlaubt)
         self.assertFalse(any(n.startswith("WAMO_") for n in erlaubt))  # App-Konfiguration nie in der Sandbox
 
+    def test_namen_der_zugangsart_haus_in_der_erlaubnisliste_des_laeufers(self):
+        """ERLAUBT_RE in wamo-job.sh erweitert Paket P6a um die Namen der Zugangsart haus: entweder alle (nach P6a) oder noch keinen,
+        nie einen Teil. Basis-URL und Schlüssel standen schon vorher darin, der LiteLLM-Schlüssel nie."""
+        runner = (INFRA / "wamo-job.sh").read_text(encoding="utf-8")
+        erlaubt = set(re.search(r"ERLAUBT_RE='\^\(([^)]*)\)\$'", runner).group(1).split("|"))
+        self.assertLessEqual({"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"}, erlaubt)
+        neu = set(D.HAUS_MODELL_VARIABLEN) | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"}
+        self.assertIn(len(neu & erlaubt), (0, len(neu)))
+        self.assertNotIn("LITELLM_API_KEY", erlaubt)
+
     def test_egress_rules(self):
         nft = (INFRA / "wamo-egress.nft").read_text(encoding="utf-8")
         for regel in ("table inet wamo_egress", "type filter hook output priority 0; policy accept;",
@@ -1697,7 +1709,7 @@ class ConsistencyTests(unittest.TestCase):
         """Die zweite stdin-Zeile: Felder, Arten und Meldungen müssen auf PC/Kern und Server gleich lauten."""
         self.assertEqual(D.ZUGANG_FELDER, {"typ", "wert", "workspace"})
         self.assertEqual(set(D.ZUGANG_FORMAT), {"oauth", "api"})
-        self.assertEqual(D.ZUGANG_MODI, ("folgt", "server"))
+        self.assertEqual(D.ZUGANG_MODI, ("folgt", "server", "haus"))  # haus: Hausmodell über den Proxy, nie eine zweite Zeile
         self.assertEqual(D.ZUGANG_VARIABLE, {"oauth": "CLAUDE_CODE_OAUTH_TOKEN", "api": "ANTHROPIC_API_KEY"})
         self.assertEqual(set(D.ZUGANG_VARIABLE.values()), set(wk.CLAUDE_VARIABLEN))
         self.assertIn("zugang_ungueltig", dev_agent.REMOTE_EREIGNIS_STATUS)
@@ -2173,6 +2185,421 @@ class PersoenlicherZugangStartTests(unittest.TestCase):
         self.assertNotIn("GEHEIM", " ".join(self.logzeilen))
 
 
+# ---------------------------------------------------------------- Zugangsart haus (Paket P6b, Vertrag mit dem Proxy aus P6a)
+HAUS_TOKEN = f"wh1-{JOB}-" + "5e" * 32
+HAUS_ENV_NAMEN = {"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                  "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL",
+                  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"}
+# geheim.env mit eingeschalteten Hausmodellen, dazu Werte, die nie in eine Sandbox mit Hausmodell gehören
+HAUS_GEHEIM = {**NIKO_GEHEIM, "WAMO_HAUS": "an", "LITELLM_API_KEY": "sk-litellm-GEHEIMhaus0123456789",
+               "ANTHROPIC_BASE_URL": "https://boese.example"}
+
+
+def haus_zugang(token: str = HAUS_TOKEN, profil: str = "1a2b3c4d") -> "D.ClaudeZugang":
+    return D.ClaudeZugang("haus", token, None, profil)
+
+
+class HausZugangTests(unittest.TestCase):
+    """Zugangsart haus: Claude Code mit einem Hausmodell über wamo-haus-proxy auf Loopback. Der Kern schickt kein Geheimnis, nur die Art;
+    der Dispatcher erzeugt je Lauf ein Auftragstoken. Nie ein Claude-Zugang aus geheim.env, nie der Schlüssel von LiteLLM."""
+
+    def test_vertrag_mit_dem_proxy(self):
+        self.assertEqual(D.HAUS_URL, "http://127.0.0.1:18090")
+        self.assertEqual(D.HAUS_MODELL, "qwen3.6-35b")
+        self.assertIn(D.HAUS_MODELL, D.HAUS_MODELLE)
+        for modell in D.HAUS_MODELLE:
+            self.assertIsNotNone(D.MODELL_RE.fullmatch(modell), modell)  # passt durch die Prüfung der Kopfzeile
+            self.assertNotIn(modell, wk.MODELLE_ERLAUBT)
+        self.assertEqual(D.HAUS_ORDNER, Path("/run/wamo-haus"))
+        self.assertEqual(D.HAUS_TOKEN_RE.pattern, rb"wh1-[0-9a-f]{16,32}-[0-9a-f]{64}")
+        self.assertEqual(D.HAUS_MAX_TOKEN_STANDARD, 3_000_000)
+        self.assertEqual((D.HAUS_MAX_TOKEN_MIN, D.HAUS_MAX_TOKEN_MAX), (10_000, 20_000_000))
+        self.assertEqual(D.HAUS_NACHLAUF_S, 300)
+        self.assertEqual(set(D.HAUS_MODELL_VARIABLEN), HAUS_ENV_NAMEN - {"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY",
+                                                                         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY",
+                                                                         "DISABLE_ERROR_REPORTING"})
+        self.assertNotIn("haus", D.ZUGANG_FORMAT)  # haus kommt nie als zweite Zeile mit einem Wert
+        self.assertNotIn("haus", D.ZUGANG_VARIABLE)
+
+    def test_einstellungen_ohne_vorabpruefung_nur_bei_haus(self):
+        normal = D.claude_argv("S", "claude-haiku-5-5")
+        haus = D.claude_argv("S", D.HAUS_MODELL, haus=True)
+        self.assertEqual(json.loads(normal[normal.index("--settings") + 1]), {"enabledPlugins": {"ecc@ecc": True}})
+        self.assertEqual(json.loads(haus[haus.index("--settings") + 1]),
+                         {"enabledPlugins": {"ecc@ecc": True}, "skipWebFetchPreflight": True})
+        self.assertEqual(D.claude_argv("S", "m", None, ("5", "1.50"), haus=True)[-4:], ["--max-turns", "5", "--max-budget-usd", "1.50"])
+
+    def test_abgelaufene_tokendateien_werden_geloescht(self):
+        with tempfile.TemporaryDirectory() as d:
+            ordner = Path(d)
+            jetzt = 1_000_000
+            alt, frisch, eigen = "a" * 16, "b" * 16, "c" * 16
+            for job, bis in ((alt, jetzt - 1), (frisch, jetzt + 60), (eigen, jetzt - 1)):
+                (ordner / f"{job}.json").write_text(json.dumps({"v": 1, "job": job, "bis": bis}), encoding="utf-8")
+            (ordner / "fremd.txt").write_text("x", encoding="utf-8")
+            (ordner / ("d" * 16 + ".json")).write_text("kaputt", encoding="utf-8")
+            rest = ordner / f".{alt}.0123456789abcdef.tmp"
+            rest.write_text("{}", encoding="utf-8")
+            os.utime(rest, (jetzt - 7200, jetzt - 7200))
+            self.assertEqual(D.haus_alte_dateien_loeschen(ordner, eigen, jetzt=jetzt), 2)
+            self.assertEqual(sorted(p.name for p in ordner.iterdir()),
+                             sorted([f"{frisch}.json", f"{eigen}.json", "fremd.txt", "d" * 16 + ".json"]))
+            self.assertEqual(D.haus_alte_dateien_loeschen(ordner / "fehlt", eigen), 0)
+
+    def test_auftragstoken_je_lauf_neu(self):
+        a, b = D.haus_token(JOB), D.haus_token(JOB)
+        self.assertNotEqual(a, b)
+        for token in (a, b):
+            self.assertRegex(token, rf"^wh1-{JOB}-[0-9a-f]{{64}}$")
+            self.assertIsNotNone(D.HAUS_TOKEN_RE.fullmatch(token.encode()))
+        with self.assertRaises(D.Abgewiesen):
+            D.haus_token("../x")
+
+    def test_kopfzeile_haus_braucht_ein_profil_und_traegt_nie_einen_wert(self):
+        def kopf(**extra):
+            return json.dumps({"auftrag": "x", **extra}).encode() + b"\n"
+        self.assertEqual(D.parse_header(kopf(zugang="haus", profil="1a2b3c4d"))[4:], ("haus", "1a2b3c4d"))
+        with self.assertRaises(D.Abgewiesen):  # ohne Kennung gäbe es keine Buchführung je Profil
+            D.parse_header(kopf(zugang="haus"))
+        for schlecht in ({"zugang": "Haus", "profil": "1a2b3c4d"}, {"zugang": "haus", "profil": "1A2B3C4D"},
+                         {"zugang": "haus", "profil": "1a2b3c4d", "wert": HAUS_TOKEN},
+                         {"zugang": "haus", "profil": "1a2b3c4d", "token": HAUS_TOKEN}):
+            with self.subTest(schlecht=schlecht), self.assertRaises(D.Abgewiesen):
+                D.parse_header(kopf(**schlecht))
+        with self.assertRaises(D.ZugangUngueltig):  # und nie als Typ einer Zugangszeile
+            D.parse_zugang(json.dumps({"typ": "haus", "wert": HAUS_TOKEN}).encode() + b"\n")
+
+    def test_schalter_standard_aus_und_ein_tippfehler_sperrt(self):
+        self.assertFalse(D.haus_schalter({}))
+        self.assertTrue(D.haus_schalter({"WAMO_HAUS": "an"}))
+        self.assertTrue(D.haus_schalter({"WAMO_HAUS": "an", "WAMO_HAUS_MAX_TOKEN": "50000"}))
+        for aus in ("aus", "AN", "ja", "1", "true", "an!"):
+            self.assertFalse(D.haus_schalter({"WAMO_HAUS": aus}), aus)
+        for tippfehler in ("WAMO_HAUSS", "WAMO_HAUS_", "WAMO_HAU", "WAMO_HAUS_MAXTOKEN", "WAMO_HAUS_AN"):
+            self.assertFalse(D.haus_schalter({"WAMO_HAUS": "an", tippfehler: "an"}), tippfehler)
+
+    def test_hoechstmenge_an_token_nur_aus_ziffern_im_bereich(self):
+        self.assertEqual(D.haus_max_token({}), 3_000_000)
+        for wert, erwartet in (("50000", 50_000), ("10000", 10_000), ("20000000", 20_000_000), ("0050000", 50_000)):
+            self.assertEqual(D.haus_max_token({"WAMO_HAUS_MAX_TOKEN": wert}), erwartet, wert)
+        for schlecht in ("9999", "20000001", "abc", "1e6", "+50000", "-50000", "50_000", "50000.0", " 50000", "٥٠٠٠٠",
+                         "9" * 30):
+            self.assertEqual(D.haus_max_token({"WAMO_HAUS_MAX_TOKEN": schlecht}), 3_000_000, schlecht)
+
+    def test_umgebung_mit_hausmodell_ohne_jedes_geheimnis_aus_geheim_env(self):
+        for art in wk.AUFTRAGSARTEN:
+            with self.subTest(art=art):
+                env = D.sandbox_env(art, HAUS_GEHEIM, zugang=haus_zugang(), modell=D.HAUS_MODELL)
+                self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:18090")
+                self.assertEqual(env["ANTHROPIC_API_KEY"], HAUS_TOKEN)
+                for name in D.HAUS_MODELL_VARIABLEN:
+                    self.assertEqual(env[name], "qwen3.6-35b")
+                self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
+                for verboten in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_WORKSPACE_ID", "LITELLM_API_KEY",
+                                 "WAMO_HAUS"):
+                    self.assertNotIn(verboten, env)
+                self.assertEqual([v for v in env.values() if "sk-ant-" in v or "sk-litellm" in v], [])
+                self.assertNotIn("boese.example", json.dumps(env))
+                erlaubt = set(D.basis_env()) | HAUS_ENV_NAMEN | {wk.sandbox_name(n) for n in wk.zugangs_variablen(art)}
+                self.assertLessEqual({k for k in env if not k.startswith("GIT_CONFIG_")}, erlaubt)
+        self.assertEqual(D.sandbox_env("umsetzung", HAUS_GEHEIM, zugang=haus_zugang())["GH_TOKEN"], "ghp_cccccccccccc")  # Dienst-Token wie bisher
+        self.assertEqual(D.sandbox_env("review", {}, zugang=haus_zugang())["ANTHROPIC_DEFAULT_OPUS_MODEL"], "qwen3.6-35b")  # Standard
+        # die anderen Zugangsarten bekommen nichts davon, auch nicht die Basis-URL aus geheim.env
+        for zugang in (None, D.ClaudeZugang("oauth", OAUTH_WERT, None, "1a2b3c4d"), D.ClaudeZugang("api", API_WERT, None, "1a2b3c4d")):
+            env = D.sandbox_env("review", HAUS_GEHEIM, zugang=zugang)
+            self.assertEqual(set(env) & (HAUS_ENV_NAMEN - {"ANTHROPIC_API_KEY"}), set(), zugang)
+
+    def test_modell_bei_haus_nur_aus_der_eigenen_liste(self):
+        for art in wk.AUFTRAGSARTEN:
+            self.assertEqual(D.modell_waehlen(art, None, "haus"), "qwen3.6-35b")
+        self.assertEqual(D.modell_waehlen("umsetzung", "qwen3.6-35b", "haus"), "qwen3.6-35b")
+        for wunsch in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5", "qwen3.6-35b-gross", "sokrates-steuer"):
+            with self.subTest(wunsch=wunsch), self.assertRaises(ValueError):  # die Allowlist der Werkzeugkarte gilt hier nicht
+                D.modell_waehlen("umsetzung", wunsch, "haus")
+        with self.assertRaises(ValueError):  # und ein Hausmodell nie für einen Claude-Zugang
+            D.modell_waehlen("umsetzung", "qwen3.6-35b", "api")
+        self.assertEqual(D.zugang_typ(D.sandbox_env("review", {}, zugang=haus_zugang())), "haus")
+        self.assertEqual(D.zugang_typ({"ANTHROPIC_API_KEY": API_WERT, "ANTHROPIC_BASE_URL": "https://boese.example"}), "api")
+
+    def test_buchfuehrung_je_profil(self):
+        namen = D.zugangs_quellen("review", HAUS_GEHEIM, zugang=haus_zugang())
+        self.assertIn("HAUS@1a2b3c4d", namen)
+        self.assertNotIn("ANTHROPIC_API_KEY", namen)
+        self.assertNotIn(HAUS_TOKEN, " ".join(namen))
+        self.assertNotEqual(namen, D.zugangs_quellen("review", HAUS_GEHEIM, zugang=haus_zugang(profil="9f8e7d6c")))
+        self.assertNotEqual(namen, D.zugangs_quellen("review", HAUS_GEHEIM, zugang=D.ClaudeZugang("oauth", OAUTH_WERT, None, "1a2b3c4d")))
+
+    def test_schwaerzen_des_auftragstokens_in_ausgabe_und_dateien(self):
+        ersetzungen = D.schwaerzungen(D.sandbox_env("review", {}, zugang=haus_zugang()))
+        fremd = "wh1-" + "f" * 16 + "-" + "0" * 64  # nicht der Wert dieses Laufs, aber ein Auftragstoken
+        text = f"a {HAUS_TOKEN} b {fremd} c wh1-kurz d".encode()
+        self.assertEqual(D.schwaerzen(text, ersetzungen), b"a [CLAUDE_ZUGANG] b [CLAUDE_ZUGANG] c wh1-kurz d")
+        self.assertEqual(D.schwaerzen(fremd.encode(), []), b"[CLAUDE_ZUGANG]")
+        self.assertEqual(D.schwaerzen(b"nichts Besonderes", ersetzungen), b"nichts Besonderes")
+        with tempfile.TemporaryDirectory() as tmp:
+            sitzung = Path(tmp) / "claude" / "projects" / "s.jsonl"
+            sitzung.parent.mkdir(parents=True)
+            sitzung.write_bytes(f"KEY={HAUS_TOKEN}\n".encode())
+            D.zugang_aus_dateien_entfernen(Path(tmp) / "claude", ersetzungen)
+            self.assertEqual(sitzung.read_bytes(), b"KEY=[CLAUDE_ZUGANG]\n")
+
+    def test_zeitlimit_des_laufs_wie_wamo_job_sh(self):
+        runner = (INFRA / "wamo-job.sh").read_text(encoding="utf-8")
+        self.assertIn(f"\nZEITLIMIT_S={D.LAUF_ZEITLIMIT_STANDARD_S}\n", runner)
+        self.assertIn(f"\nZEITLIMIT_MAX_S={D.LAUF_ZEITLIMIT_MAX_S}\n", runner)
+        with tempfile.TemporaryDirectory() as tmp:
+            konf = Path(tmp) / "wamo-job.conf"
+            self.assertEqual(D.lauf_zeitlimit_s(konf), 1800)  # keine Datei: Standard des Läufers
+            for text, erwartet in (("CLAUDE_VERSION=2.1.0\n", 1800), ("ZEITLIMIT_S=3600\n", 3600),
+                                   ('ZEITLIMIT_S="2400"  # Kommentar\n', 2400), ("ZEITLIMIT_S=3600\nZEITLIMIT_S=900\n", 900),
+                                   ("export ZEITLIMIT_S=600\n", 600), ("ZEITLIMIT_S=$((60*60))\n", 7200), ("ZEITLIMIT_S=\n", 7200)):
+                konf.write_text(text, encoding="utf-8")
+                self.assertEqual(D.lauf_zeitlimit_s(konf), erwartet, text)  # nicht verstanden: die Obergrenze, nie kürzer als der Lauf
+
+
+class HausTokendateiTests(unittest.TestCase):
+    """Die Datei /run/wamo-haus/<job>.json für den Proxy: atomar, 0640, genau die Felder des Vertrags, nie das Token selbst, und weg nach
+    dem Lauf, auch nach einer Ausnahme oder einem Signal. Fehlt der Ordner oder ist er nicht sicher, startet nichts."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ordner = Path(self.tmp.name) / "wamo-haus"
+        self.ordner.mkdir()
+        if LINUX:
+            os.chmod(self.ordner, 0o2750)
+        self.logzeilen: list[str] = []
+        self.log = mock.patch.object(D, "log", side_effect=lambda t, pflicht=False: self.logzeilen.append(t))
+        self.log.start()
+
+    def tearDown(self):
+        self.log.stop()
+        self.tmp.cleanup()
+
+    def datei(self) -> Path:
+        return self.ordner / f"{JOB}.json"
+
+    def tokendatei(self, ordner: Path | None = None, max_token: int = 50_000, zeitlimit_s: int = 1800):
+        return D.haus_tokendatei(JOB, HAUS_TOKEN, "1a2b3c4d", max_token, zeitlimit_s, ordner=ordner or self.ordner)
+
+    def test_inhalt_rechte_und_ende(self):
+        vorher = int(time.time())
+        with self.tokendatei():
+            roh = self.datei().read_text(encoding="utf-8")
+            daten = json.loads(roh)
+            self.assertEqual(list(daten), ["v", "job", "hash", "profil", "bis", "max_token"])  # genau diese Felder
+            self.assertEqual((daten["v"], daten["job"], daten["profil"], daten["max_token"]), (1, JOB, "1a2b3c4d", 50_000))
+            self.assertEqual(daten["hash"], hashlib.sha256(HAUS_TOKEN.encode()).hexdigest())
+            self.assertIs(type(daten["bis"]), int)
+            self.assertTrue(vorher + 1800 + 300 <= daten["bis"] <= int(time.time()) + 1800 + 300)
+            self.assertNotIn(HAUS_TOKEN, roh)
+            self.assertNotIn(HAUS_TOKEN.rsplit("-", 1)[1], roh)
+            self.assertEqual([p.name for p in self.ordner.iterdir()], [f"{JOB}.json"])  # keine Reste der Temp-Datei
+            if LINUX:
+                self.assertEqual(stat.S_IMODE(self.datei().stat().st_mode), 0o640)
+        self.assertEqual(list(self.ordner.iterdir()), [])
+        self.assertNotIn(HAUS_TOKEN, "\n".join(self.logzeilen))
+
+    def test_datei_ist_nach_ausnahme_und_signal_weg(self):
+        for fehler in (RuntimeError("kaputt"), D._Beendet(15), KeyboardInterrupt()):
+            with self.subTest(fehler=type(fehler).__name__):
+                with self.assertRaises(type(fehler)):
+                    with self.tokendatei():
+                        self.assertTrue(self.datei().is_file())
+                        raise fehler
+                self.assertEqual(list(self.ordner.iterdir()), [])
+
+    def test_fehlender_ordner_heisst_kein_start(self):
+        fehlt = Path(self.tmp.name) / "gibt-es-nicht"
+        with self.assertRaises(D.HausNichtBereit):
+            with self.tokendatei(ordner=fehlt):
+                self.fail("ohne Ordner darf nichts laufen")
+        self.assertFalse(fehlt.exists())  # der Dispatcher legt ihn nie selbst an
+        datei = Path(self.tmp.name) / "datei"
+        datei.write_text("x")
+        with self.assertRaises(D.HausNichtBereit):
+            with self.tokendatei(ordner=datei):
+                self.fail("eine Datei ist kein Ordner")
+        self.assertTrue(issubclass(D.HausNichtBereit, Exception))
+
+    @unittest.skipUnless(LINUX, "Links und Rechte nur unter Linux")
+    def test_ordner_als_link_oder_fuer_andere_beschreibbar_heisst_kein_start(self):
+        link = Path(self.tmp.name) / "link"
+        link.symlink_to(self.ordner, target_is_directory=True)
+        with self.assertRaises(D.HausNichtBereit):
+            with self.tokendatei(ordner=link):
+                self.fail("ein Link als Ordner")
+        for modus in (0o2777, 0o2770):
+            os.chmod(self.ordner, modus)
+            with self.assertRaises(D.HausNichtBereit):
+                with self.tokendatei():
+                    self.fail(f"Ordner mit {modus:o}")
+        self.assertEqual(list(self.ordner.iterdir()), [])
+
+    def test_alte_datei_desselben_auftrags_wird_ersetzt(self):
+        self.datei().write_text('{"hash": "alt"}', encoding="utf-8")
+        with self.tokendatei():
+            self.assertEqual(json.loads(self.datei().read_text())["hash"], hashlib.sha256(HAUS_TOKEN.encode()).hexdigest())
+        self.assertFalse(self.datei().exists())
+
+    @unittest.skipUnless(LINUX, "Links nur unter Linux")
+    def test_ein_link_an_der_stelle_der_datei_wird_nicht_verfolgt(self):
+        ziel = Path(self.tmp.name) / "fremd.txt"
+        ziel.write_text("bleibt")
+        self.datei().symlink_to(ziel)
+        with self.tokendatei():
+            self.assertFalse(self.datei().is_symlink())
+        self.assertEqual(ziel.read_text(), "bleibt")
+        self.assertFalse(os.path.lexists(self.datei()))
+
+    def test_schreibfehler_heisst_kein_start_und_hinterlaesst_nichts(self):
+        with mock.patch.object(D.os, "replace", side_effect=OSError("kein Platz")):
+            with self.assertRaises(D.HausNichtBereit):
+                with self.tokendatei():
+                    self.fail("ohne Datei darf nichts laufen")
+        self.assertEqual(list(self.ordner.iterdir()), [])
+
+
+class HausStartTests(unittest.TestCase):
+    """cmd_start mit zugang haus: Sperren, Selbsttest und Sandbox-Lauf sind Attrappen (wie PersoenlicherZugangStartTests), der Ordner
+    /run/wamo-haus liegt in einem Wegwerf-Ordner, alles andere ist echt."""
+
+    _Sperre = PersoenlicherZugangStartTests._Sperre
+    _selbsttest = PersoenlicherZugangStartTests._selbsttest
+    ereignis_namen = PersoenlicherZugangStartTests.ereignis_namen
+    nirgends = PersoenlicherZugangStartTests.nirgends
+
+    def setUp(self):
+        PersoenlicherZugangStartTests.setUp(self)
+        self.addCleanup(PersoenlicherZugangStartTests.tearDown, self)  # auch wenn der Rest von setUp scheitert
+        self.haus = Path(self.tmp.name) / "run-wamo-haus"
+        self.haus.mkdir()
+        if LINUX:
+            os.chmod(self.haus, 0o2750)
+        for p in (mock.patch.object(D, "HAUS_ORDNER", self.haus),
+                  mock.patch.object(D, "LAUF_KONF", Path(self.tmp.name) / "gibt-es-nicht.conf")):
+            p.start()
+            self.patches.append(p)
+
+    def lauf(self, kopf_extra=None, geheim=None, beim_lauf=None, art="umsetzung", job=JOB):
+        """cmd_start mit zugang haus. Liefert (Code, Aufrufe von _ausfuehren als (argv, env, Dateien im Ordner während des Laufs))."""
+        aufrufe: list[tuple] = []
+
+        def fake_ausfuehren(argv, env, auftrag, jobdir, job_, projekt, art_):
+            aufrufe.append((list(argv), dict(env), {p.name: p.read_text(encoding="utf-8") for p in self.haus.iterdir()}))
+            if beim_lauf is not None:
+                beim_lauf()
+            return D.EXIT_OK
+
+        kopf = {"auftrag": "Baue etwas", "system": "Regeln", "zugang": "haus", "profil": "1a2b3c4d", **(kopf_extra or {})}
+        kopf = {k: v for k, v in kopf.items() if v is not None}
+        with mock.patch.object(D, "_kopfzeile_lesen", return_value=json.dumps(kopf).encode() + b"\n"), \
+             mock.patch.object(D, "_zugangszeile_lesen", return_value=zeile()) as lesen, \
+             mock.patch.object(D, "lese_geheimnisse", return_value=dict(HAUS_GEHEIM if geheim is None else geheim)), \
+             mock.patch.object(D, "_ausfuehren", side_effect=fake_ausfuehren):
+            try:
+                code = D.cmd_start(job, "rezepte-app", art)
+            finally:
+                self.zeilen_gelesen = lesen.call_count
+        return code, aufrufe
+
+    def test_lauf_mit_auftragstoken_ohne_jedes_geheimnis_und_ohne_zweite_zeile(self):
+        code, aufrufe = self.lauf()
+        self.assertEqual(code, D.EXIT_OK)
+        self.assertEqual(self.zeilen_gelesen, 0)  # haus liest nie eine Zugangszeile
+        argv, env, dateien = aufrufe[0]
+        token = env["ANTHROPIC_API_KEY"]
+        self.assertRegex(token, rf"^wh1-{JOB}-[0-9a-f]{{64}}$")
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], D.HAUS_URL)
+        for name in D.HAUS_MODELL_VARIABLEN:
+            self.assertEqual(env[name], "qwen3.6-35b")
+        self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
+        for verboten in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "LITELLM_API_KEY"):
+            self.assertNotIn(verboten, env)
+        self.assertEqual([v for v in env.values() if "sk-ant-" in v or "sk-litellm" in v], [])
+        self.assertEqual(env["GH_TOKEN"], "ghp_cccccccccccc")  # Dienst-Token der Art wie bisher
+        self.assertEqual(argv[argv.index("--model") + 1], "qwen3.6-35b")
+        self.assertNotIn(token, " ".join(argv))
+        self.assertEqual(list(dateien), [f"{JOB}.json"])  # die Tokendatei liegt während des Laufs bereit ...
+        daten = json.loads(dateien[f"{JOB}.json"])
+        self.assertEqual((daten["hash"], daten["profil"], daten["max_token"], daten["job"]),
+                         (hashlib.sha256(token.encode()).hexdigest(), "1a2b3c4d", 3_000_000, JOB))
+        self.assertEqual(list(self.haus.iterdir()), [])  # ... und ist danach weg
+        self.assertTrue(any("claude=haus" in z and "modell=qwen3.6-35b" in z and "HAUS@1a2b3c4d" in z for z in self.logzeilen))
+        self.nirgends(token, NIKO_GEHEIM["ANTHROPIC_API_KEY"], NIKO_GEHEIM["CLAUDE_CODE_OAUTH_TOKEN"], HAUS_GEHEIM["LITELLM_API_KEY"])
+
+    def test_jeder_lauf_bekommt_ein_neues_token(self):
+        erster = self.lauf(job=uuid.uuid4().hex[:16])[1][0][1]["ANTHROPIC_API_KEY"]
+        zweiter = self.lauf(job=uuid.uuid4().hex[:16])[1][0][1]["ANTHROPIC_API_KEY"]
+        self.assertNotEqual(erster, zweiter)
+
+    def test_hoechstmenge_aus_geheim_env(self):
+        _code, aufrufe = self.lauf(geheim={**HAUS_GEHEIM, "WAMO_HAUS_MAX_TOKEN": "50000"})
+        self.assertEqual(json.loads(aufrufe[0][2][f"{JOB}.json"])["max_token"], 50_000)
+
+    def test_schalter_aus_startet_nichts(self):
+        for geheim in (NIKO_GEHEIM, {**HAUS_GEHEIM, "WAMO_HAUS": "aus"}, {**HAUS_GEHEIM, "WAMO_HAUSS": "an"}):
+            self.ereignisse.clear()
+            code, aufrufe = self.lauf(geheim=geheim, job=uuid.uuid4().hex[:16])
+            self.assertEqual((code, aufrufe), (D.EXIT_KEIN_ZUGANG, []))
+            self.assertEqual(self.ereignis_namen(), ["keine_zugangsdaten"])
+            ereignis = self.ereignisse[-1]
+            self.assertEqual(ereignis["zugang"], "haus")
+            self.assertIn("WAMO_HAUS", ereignis["grund"])
+            self.assertEqual(list(self.haus.iterdir()), [])
+
+    def test_ohne_ordner_startet_nichts(self):
+        self.haus.rmdir()
+        code, aufrufe = self.lauf()
+        self.assertEqual((code, aufrufe), (D.EXIT_KEIN_ZUGANG, []))
+        self.assertEqual(self.ereignis_namen(), ["keine_zugangsdaten"])
+        self.assertEqual(self.ereignisse[-1]["zugang"], "haus")
+        self.assertFalse(self.haus.exists())
+
+    def test_tokendatei_ist_nach_einer_ausnahme_oder_einem_signal_im_lauf_weg(self):
+        for fehler in (RuntimeError("Sandbox kaputt"), D._Beendet(15)):
+            def werfen(f=fehler):
+                raise f
+            with self.subTest(fehler=type(fehler).__name__), self.assertRaises(type(fehler)):
+                self.lauf(beim_lauf=werfen, job=uuid.uuid4().hex[:16])
+            self.assertEqual(list(self.haus.iterdir()), [])
+
+    def test_modellwunsch_nur_aus_der_liste_der_hausmodelle(self):
+        _code, aufrufe = self.lauf({"modell": "qwen3.6-35b"})
+        argv = aufrufe[0][0]
+        self.assertEqual(argv[argv.index("--model") + 1], "qwen3.6-35b")
+        for wunsch in ("claude-sonnet-5-5", "qwen-anders"):
+            self.selbsttests = 0
+            with self.subTest(wunsch=wunsch), self.assertRaises(D.Abgewiesen):
+                self.lauf({"modell": wunsch}, job=uuid.uuid4().hex[:16])
+            self.assertEqual(self.selbsttests, 0)  # scheitert vor Sperren und Selbsttest
+
+    def test_ohne_profil_abgewiesen(self):
+        with self.assertRaises(D.Abgewiesen):
+            self.lauf({"profil": None})
+        self.assertEqual(self.selbsttests, 0)
+
+    def test_ein_anderes_profil_oder_ein_anderer_zugang_im_projekt_braucht_eine_freigabe(self):
+        self.assertEqual(self.lauf()[0], D.EXIT_OK)  # leeres Projekt
+        (self.projekte / "rezepte-app" / "datei.txt").write_text("Inhalt")
+        self.assertEqual(self.lauf(job=uuid.uuid4().hex[:16])[0], D.EXIT_OK)  # dasselbe Profil: frei
+        self.ereignisse.clear()
+        code, aufrufe = self.lauf({"profil": "9f8e7d6c"}, job=uuid.uuid4().hex[:16])
+        self.assertEqual((code, aufrufe), (D.EXIT_ZUGANG_ERWEITERT, []))
+        self.assertIn("HAUS@9f8e7d6c", self.ereignisse[-1]["input"]["neu"])
+        self.assertEqual(list(self.haus.iterdir()), [])
+        persoenlich = PersoenlicherZugangStartTests.start(self, {"zugang": "folgt", "profil": "1a2b3c4d"}, zeile(), job=uuid.uuid4().hex[:16])
+        self.assertEqual(persoenlich[0], D.EXIT_ZUGANG_ERWEITERT)  # der Token derselben Person ist ein anderer Zugang
+
+    def test_ping_meldet_haus(self):
+        for geheim, ordner, erwartet in (({"WAMO_HAUS": "an"}, True, True), ({}, True, False), ({"WAMO_HAUS": "an"}, False, False)):
+            if not ordner:
+                self.haus.rmdir()
+            with mock.patch.object(D, "lese_geheimnisse", return_value=geheim), mock.patch.object(D, "github_status", return_value="token"):
+                D.cmd_ping()
+            self.assertIs(self.ereignisse[-1]["haus"], erwartet, (geheim, ordner))
+        self.assertNotIn("wh1-", json.dumps(self.ereignisse))
+
+
 class AbschottungTests(unittest.TestCase):
     def test_ports(self):
         self.assertEqual(A.parse_ports("22, 5432,,11434"), {22, 5432, 11434})
@@ -2475,6 +2902,22 @@ class KernKanalDispatchTests(unittest.TestCase):
     def test_start_mit_zugang_server_endet_mit_exit_2_und_liest_nie_geheimnisse(self):
         code, aufrufe = self.start({"zugang": "server", "profil": None})
         self.assertEqual((code, aufrufe, self.gesperrt(), self.geheim_gelesen), (D.EXIT_ABGEWIESEN, [], ["zugang"], 0))
+
+    def test_start_mit_zugang_haus_und_profil_laeuft_im_kern_kanal_mit_den_grenzen_der_konfiguration(self):
+        haus = Path(self.tmp.name) / "run-wamo-haus"
+        haus.mkdir()
+        if LINUX:
+            os.chmod(haus, 0o2750)
+        with mock.patch.object(D, "HAUS_ORDNER", haus):  # eine leere Zugangszeile hieße zugang_ungueltig: haus liest sie nie
+            code, aufrufe = self.start({"zugang": "haus"}, zugangszeile=b"", geheim={**NIKO_GEHEIM, "WAMO_HAUS": "an"})
+        self.assertEqual((code, self.gesperrt()), (D.EXIT_OK, []))
+        argv, env = aufrufe[0]
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], D.HAUS_URL)
+        self.assertRegex(env["ANTHROPIC_API_KEY"], r"^wh1-")
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", env)
+        self.assertEqual(argv[argv.index("--max-turns") + 1], "17")  # die Grenzen gelten auch mit Hausmodell
+        self.assertEqual(list(haus.iterdir()), [])
+        self.assertIn("haus", self.K.ZUGAENGE_KERN)
 
     def test_jede_regel_5_bis_7_wird_vor_den_geheimnissen_abgewiesen(self):
         faelle = (("art", dict(art="umsetzung", projekt="kern-1a2b3c4d-test-repo", kopf={"repo": "acme/test-repo"})),

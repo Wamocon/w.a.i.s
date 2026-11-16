@@ -29,7 +29,8 @@ Regeln des Kern-Kanals, in dieser Reihenfolge (jeder Verstoß ist ein Code):
     6  Projektname kern-<Kennung>-<Name>, bei Repo genau daraus projekt
        abgeleitet; Kennung = Profil der Kopfzeile; kein Ordner
        eines anderen Profils
-    7  Zugang nur "folgt" mit Profil                             zugang
+    7  Zugang nur "folgt" oder "haus", je mit Profil             zugang (ZUGAENGE_KERN; haus: Hausmodell über den Proxy,
+                                                                der Dispatcher braucht dafür zusätzlich WAMO_HAUS=an)
     8  Fork-Prüfung beim ersten Zugriff je Lauf (fork_pruefen)   fork
     9  Grenzen je Stunde und Tag, Folgen, Abstand, Platz         grenze_start, grenze_laufzeit, grenze_folgen, abstand, platz
        und je Profil (neue Aufträge, Versuche, Laufzeit)          grenze_profil
@@ -72,6 +73,9 @@ KANAL_GRUENDE = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl
                  "abstand", "platz", "grenze_profil")
 
 BEFEHLE_KERN = ("ping", "start", "status", "pending", "approve", "cancel")
+# Regel 7: Zugangsarten des Kerns (folgt: der eigene Zugang des Profils als zweite Zeile; haus: Hausmodell über den Proxy, kein Wert vom
+# Kern). Nie server: der Zugang des Servers gilt im Kern-Kanal nicht. test_kernkanal_vertrag.py hält die Liste mit dem Dispatcher gleich.
+ZUGAENGE_KERN = ("folgt", "haus")
 BEFEHLE_GESCHLOSSEN = ("ping", "status", "pending", "cancel")  # bei geschlossenem oder fehlerhaftem Kanal
 BEFEHLE_NOTAUS = ("ping", "status")
 
@@ -761,7 +765,7 @@ def pruefe_start(anfrage: StartAnfrage, zustand: KernZustand, *, ereignisse: lis
         return grund
     if anfrage.projekt_fremd or anfrage.projekt_kollision or anfrage.projekt_profil_fremd:
         return "projekt"
-    if anfrage.zugang != "folgt" or not anfrage.profil:
+    if anfrage.zugang not in ZUGAENGE_KERN or not anfrage.profil:
         return "zugang"
     if ereignisse is None:  # der Zähler ist nicht lesbar: die Grenzen lassen sich nicht prüfen
         return "grenze_start"

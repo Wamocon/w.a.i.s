@@ -5,7 +5,9 @@ entscheidet, damit dev_agent.py (über 800 Zeilen) und bot.py nur dünne Einhän
 
   * Schalter und Einstellungen: WAMO_ENTWICKLUNG_BUERO (an oder aus, Standard aus), WAMO_ENTWICKLUNG_ORT (im Büro nur
     sokrates2), WAMO_ENTWICKLUNG_PROFILE (eine oder mehrere user_id, Pflicht), die beiden Kostengrenzen in USD
-    (Pflicht) und WAMO_ENTWICKLUNG_BEFEHLE_BUERO (Befehlskriterien, Standard aus). Die Units behalten
+    (Pflicht), WAMO_ENTWICKLUNG_BEFEHLE_BUERO (Befehlskriterien, Standard aus) und WAMO_ENTWICKLUNG_HAUS (Aufträge mit
+    Hausmodellen für Profile ohne eigenen Zugang oder mit nur Hausmodellen, Standard aus; ein ungültiger Wert schaltet nur
+    die Hausmodelle aus, nicht die Entwicklung). Die Units behalten
     WAMO_ENTWICKLUNG=aus, der alte Schalter wird im Büro ignoriert. Nur Releases mit diesen Schranken lesen den neuen
     Schalter, ältere starten deshalb mit Entwicklung aus.
   * Zulassung: BueroZulassung entsteht allein aus der geprüften Identität (Admin oder, mit WAMO_ENTWICKLUNG_MITGLIEDER=an,
@@ -42,7 +44,8 @@ ENV_KOSTEN_AUFTRAG = "WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD"
 ENV_KOSTEN_TAG = "WAMO_ENTWICKLUNG_KOSTEN_TAG_USD"
 ENV_BEFEHLE = "WAMO_ENTWICKLUNG_BEFEHLE_BUERO"
 ENV_MITGLIEDER = "WAMO_ENTWICKLUNG_MITGLIEDER"
-ALLE_VARIABLEN = (ENV_SCHALTER, ENV_PROFILE, ENV_KOSTEN_AUFTRAG, ENV_KOSTEN_TAG, ENV_BEFEHLE, ENV_MITGLIEDER)
+ENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"
+ALLE_VARIABLEN = (ENV_SCHALTER, ENV_PROFILE, ENV_KOSTEN_AUFTRAG, ENV_KOSTEN_TAG, ENV_BEFEHLE, ENV_MITGLIEDER, ENV_HAUS)
 # Kostengrenzen der Mitglieder in USD (Entscheidung N6): es gilt der kleinere Wert aus Drop-in und Konstante
 MITGLIED_KOSTEN_AUFTRAG_MAX = 2.0
 MITGLIED_KOSTEN_TAG_MAX = 10.0
@@ -55,6 +58,10 @@ _KOSTEN_RE = re.compile(r"\d{1,5}(?:\.\d{1,4})?")
 
 GRUND_KEIN_ZUGANG = "kein eigener Zugang für Claude Code (Karte Modellzugang)"
 GRUND_UEBERGANG = "kein eigener Zugang für Claude Code, der Zugang des Servers gilt im Büro nicht"
+GRUND_KEIN_ZUGANG_HAUS_AUS = "kein eigener Zugang für Claude Code (Karte Modellzugang), Aufträge mit Hausmodellen sind aus"
+GRUND_NUR_HAUS = "nur Hausmodelle gewählt oder festgelegt, Aufträge mit Hausmodellen sind aus"
+GRUND_HAUS_UNGUELTIG = f"{ENV_HAUS} ist ungültig (erlaubt: an, aus)"
+HAUS_QUELLEN = ("keiner", "wahl", "festgelegt")  # Zugangsquellen, für die es Aufträge mit Hausmodellen gibt (boss.entwicklung_quelle)
 
 
 def _an_aus(name: str) -> str:
@@ -74,6 +81,17 @@ def mitglieder_schalter() -> str:
     """WAMO_ENTWICKLUNG_MITGLIEDER als "an", "aus" (Standard) oder "ungueltig": dürfen Mitglieder aus WAMO_ENTWICKLUNG_PROFILE im Büro
     Entwicklungsaufträge starten? Nur ein Release mit SCHRANKEN_VERSION 2 kennt den Schalter (das Skript prüft das)."""
     return _an_aus(ENV_MITGLIEDER)
+
+
+def haus_schalter() -> str:
+    """WAMO_ENTWICKLUNG_HAUS als "an", "aus" oder "ungueltig" (Standard aus)."""
+    return _an_aus(ENV_HAUS)
+
+
+def haus_an() -> bool:
+    """WAMO_ENTWICKLUNG_HAUS=an: Entwicklungsaufträge mit Hausmodellen (Quelle haus in boss.entwicklung_quelle) für Profile ohne Token
+    und ohne API-Schlüssel und für Profile mit nur Hausmodellen. Nur im Büro wirksam (bot.py); ein ungültiger Wert gilt als aus."""
+    return haus_schalter() == "an"
 
 
 def befehle_buero_an() -> bool:
@@ -272,12 +290,19 @@ def grund_fuer(identity: object, problem: str | None = None) -> str | None:
     return grund_vorab(getattr(identity, "user_id", None), ist_admin, problem, mitglied=mitglied, labor=labor)
 
 
-def grund_quelle(quelle: str) -> str | None:
-    """Grund aus der Zugangsquelle des Profils (boss.entwicklung_quelle) oder None. Im Büro zählt nur ein eigener Zugang
-    (token oder api); uebergang (Zugang des Servers) gilt wie keine."""
-    if quelle in ("token", "api"):
+def grund_quelle(quelle: str, zugang_quelle: str | None = None) -> str | None:
+    """Grund aus der Quelle des Entwicklungsauftrags (boss.entwicklung_quelle) oder None. Im Büro zählt nur ein eigener Zugang
+    (token oder api) oder ein Hausmodell (haus); uebergang (Zugang des Servers) gilt wie keine. zugang_quelle (Zugang.quelle) macht
+    den Grund ehrlich, wenn es mit Hausmodellen ginge, diese aber aus oder ungültig eingestellt sind."""
+    if quelle in ("token", "api", "haus"):
         return None
-    return GRUND_UEBERGANG if quelle == "uebergang" else GRUND_KEIN_ZUGANG
+    if quelle == "uebergang":
+        return GRUND_UEBERGANG
+    if zugang_quelle in HAUS_QUELLEN and haus_schalter() == "ungueltig":
+        return GRUND_HAUS_UNGUELTIG
+    if zugang_quelle in ("wahl", "festgelegt"):
+        return GRUND_NUR_HAUS
+    return GRUND_KEIN_ZUGANG_HAUS_AUS if zugang_quelle == "keiner" else GRUND_KEIN_ZUGANG
 
 
 def anzeige_grund(ist_admin: bool, grund: str | None, *, mitglied: bool = False) -> str | None:
@@ -410,6 +435,7 @@ SATZ_ANDERER_AUFTRAG = "Ein anderer Auftrag läuft gerade. Bitte versuche es in 
 SATZ_PROBLEM = "Der Auftrag startet nicht: Die Einstellungen für Entwicklungsaufträge sind nicht in Ordnung."
 SATZ_UNBEKANNT = "Dieser Auftrag ist nicht mehr bekannt. Bitte stelle ihn neu."
 SATZ_KEIN_ZUGANG = "Für dieses Profil ist kein Claude-Zugang hinterlegt, bitte in der Karte Modellzugang eintragen."
+SATZ_HAUS_NICHT_BEREIT = "Entwicklungsaufträge mit Hausmodellen sind auf dem Server gerade nicht verfügbar."
 SATZ_INTERN = "Der Auftrag ist wegen eines Fehlers im Kern nicht gestartet."
 GRUND_NICHT_GESTARTET = "Der Auftrag ist nicht gestartet."
 
@@ -456,6 +482,9 @@ def ablehn_grund(returncode: int | None, ereignisse: dict, stderr: str = "") -> 
     if "zugang_ungueltig" in ereignisse:
         return "Der Claude-Zugang wurde nicht angenommen, bitte in der Karte Modellzugang neu hinterlegen."
     if "keine_zugangsdaten" in ereignisse:
+        ev = ereignisse["keine_zugangsdaten"]
+        if isinstance(ev, dict) and ev.get("zugang") == "haus":  # Hausmodelle: Schalter, Proxy oder Tokendatei am Server
+            return SATZ_HAUS_NICHT_BEREIT
         return "Es ist kein Claude-Zugang angekommen, bitte in der Karte Modellzugang prüfen."
     if "selbsttest_fehlgeschlagen" in ereignisse:
         return "Der Wächter-Selbsttest auf Sokrates-2 ist fehlgeschlagen."

@@ -22,7 +22,10 @@ Betriebsart (WAMO_ENTWICKLUNG_ORT)
      eigenen Zugang gilt der Zugang aus geheim.env nur für das Profil, das dafür vorgesehen ist
      (WAMO_ENTWICKLUNG_SERVERZUGANG_PROFIL, sonst WAMO_CLAUDE_SCHLUESSEL_PROFIL); für alle anderen startet nichts, mit klarer
      Meldung. Das Kontingent des Max-Abos (Ereignis kontingent des Dispatchers, kontingent.py) wird je Profil gespeichert
-     und als Servernachricht kontingent an die Oberfläche geschickt.
+     und als Servernachricht kontingent an die Oberfläche geschickt. Hat die Sitzung Hausmodelle zugelassen (haus=True, nur
+     im Büro mit WAMO_ENTWICKLUNG_HAUS=an, Quelle haus in boss.entwicklung_quelle), geht ohne eigenen Zugang nur die Art
+     {"zugang": "haus", "profil": ...} in die Kopfzeile, ohne Wert, ohne zweite Zeile und ohne Modellwunsch; der
+     Dispatcher läuft dann mit einem Hausmodell über den Proxy auf Sokrates-2.
   lokal: der frühere Weg, Claude Code als Windows-Benutzer auf diesem PC. Nur mit zusätzlich
      WAMO_ENTWICKLUNG_LOKAL_BESTAETIGT=ja, mit deutlicher Warnung im Log; der Wächter ist dort nur eine Bremse.
 
@@ -88,7 +91,7 @@ import pc_host
 from dev_agent_regeln import (  # noqa: F401 (alle Namen bleiben über dev_agent erreichbar: bot.py, Tests)
     DENY_RULES, JOB_ENV_NAMES, JOB_ENV_PREFIXES, REMOTE_RULES, RULES_TEMPLATE, job_env, rules_for)
 from dev_agent_weg import (  # noqa: F401 (wie oben)
-    REMOTE_ARG_RE, REMOTE_ENDE_STATUS, REMOTE_EREIGNIS_STATUS, REMOTE_EXIT_STATUS, SSH_KNOWN_HOSTS_STANDARD, SSH_ZIEL_RE,
+    HAUS_NICHT_BEREIT_STATUS, REMOTE_ARG_RE, REMOTE_ENDE_STATUS, REMOTE_EREIGNIS_STATUS, REMOTE_EXIT_STATUS, SSH_KNOWN_HOSTS_STANDARD, SSH_ZIEL_RE,
     SSH_ZIEL_STANDARD, _lesbar, remote_status, ssh_argv, ssh_known_hosts, ssh_problem, ssh_schluessel, ssh_ziel)
 from dev_guard import REPO_ROOT, _skript_befehl, decide, fingerprint, ist_eigenes_repo, write_json_atomic
 from entwicklung_betrieb import BueroZulassung
@@ -516,7 +519,10 @@ class DevAgent:
 
     def __init__(self, memory, auftraggeber: str, ort: str | None = None, vorgaenge: Vorgaenge | None = None,
                  beurteiler: abnahme.Beurteiler | None = None, befehl_ausfuehrer: abnahme.Ausfuehrer | None = None,
-                 dispatcher_ping: abnahme_remote.DispatcherPing | None = None, zulassung: BueroZulassung | None = None):
+                 dispatcher_ping: abnahme_remote.DispatcherPing | None = None, zulassung: BueroZulassung | None = None,
+                 haus: bool = False):
+        # Hausmodelle für diese Sitzung (bot.py entscheidet einmal: Quelle haus); nur ein echtes True, nie ein Wert
+        self._haus = haus is True
         if pc_host.buero():
             nutzer = getattr(memory, "user_id", None)
             if not isinstance(zulassung, BueroZulassung) or (nutzer and not entwicklung_betrieb.zulassung_gueltig(zulassung, nutzer)):
@@ -1296,7 +1302,9 @@ class DevAgent:
             )
             stderr_task = asyncio.create_task(_drain(self._proc.stderr, stderr_tail))
             kopf_daten = {"auftrag": prompt, "system": system_append}
-            if modell_wunsch():  # sonst wählt der Dispatcher das Modell der Art (Werkzeugkarte auf Sokrates-2, Haiku)
+            # sonst wählt der Dispatcher das Modell der Art (Werkzeugkarte auf Sokrates-2, Haiku); bei haus wählt er das Hausmodell
+            # selbst, ein Claude-Modell wiese er ab
+            if modell_wunsch() and zugang_kopf.get("zugang") != "haus":
                 kopf_daten["modell"] = modell_wunsch()
             if job.repo:  # im App-Modus gilt das GitHub-Token dann nur für dieses Repo
                 kopf_daten["repo"] = job.repo
@@ -1351,8 +1359,9 @@ class DevAgent:
 
     async def _remote_zugang(self) -> tuple[dict, bytes | None] | None:
         """Felder der Kopfzeile und, mit eigenem Zugang, die zweite Zeile für den Dispatcher; None ohne erlaubten Zugang.
-        Eigener Zugang des Profils (Max-Token oder API-Schlüssel) hat Vorrang. Ohne ihn gilt der Zugang aus geheim.env nur,
-        wenn das Profil dafür vorgesehen ist (serverzugang_erlaubt)."""
+        Eigener Zugang des Profils (Max-Token oder API-Schlüssel) hat Vorrang. Ohne ihn läuft der Auftrag mit einem Hausmodell,
+        wenn die Sitzung das zugelassen hat (haus: nur die Art, nie ein Wert, keine zweite Zeile, nie der Zugang des Servers),
+        sonst gilt der Zugang aus geheim.env nur, wenn das Profil dafür vorgesehen ist (serverzugang_erlaubt)."""
         user_id = getattr(self._memory, "user_id", None)
         if not (normalize_uuid(user_id) if user_id else None):
             return None
@@ -1362,6 +1371,8 @@ class DevAgent:
         if eigener is not None:
             return ({"zugang": "folgt", "profil": profil},
                     (json.dumps(eigener, ensure_ascii=False) + "\n").encode("utf-8"))
+        if self._haus:
+            return {"zugang": "haus", "profil": profil}, None
         if serverzugang_erlaubt(user_id):
             return {"zugang": "server", "profil": profil}, None
         return None

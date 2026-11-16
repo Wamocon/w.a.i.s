@@ -36,6 +36,8 @@ REMOTE_EREIGNIS_STATUS = {
     # Vertragstest (test_kernkanal_vertrag.py) ihn prüft, als Rückfall für jeden, der dieses Wörterbuch ohne die Sonderbehandlung liest.
     "kanal_gesperrt": "nicht gestartet (Kanal gesperrt)",
 }
+# keine_zugangsdaten mit zugang haus: Hausmodelle sind am Server aus oder der Proxy ist nicht bereit (nie ein fehlender Claude-Zugang)
+HAUS_NICHT_BEREIT_STATUS = "nicht gestartet (Hausmodelle auf Sokrates-2 nicht verfügbar)"
 
 REMOTE_ENDE_STATUS = {
     "fertig": "fertig", "zeitlimit": "abgebrochen (Zeitlimit)", "abgebrochen": "abgebrochen",
@@ -132,6 +134,9 @@ def remote_status(returncode: int | None, ereignisse: dict[str, dict]) -> str:
         return f"beendet (Code {ende.get('code')})"
     if "kanal_gesperrt" in ereignisse:  # mit dem Satz zum Grund-Code, nie mit Werten des Dispatchers
         return entwicklung_betrieb.kanal_status(ereignisse["kanal_gesperrt"])
+    kein_zugang = ereignisse.get("keine_zugangsdaten")
+    if isinstance(kein_zugang, dict) and kein_zugang.get("zugang") == "haus":
+        return HAUS_NICHT_BEREIT_STATUS
     for name, text in REMOTE_EREIGNIS_STATUS.items():
         if name in ereignisse:
             return text

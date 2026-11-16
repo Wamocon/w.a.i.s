@@ -356,19 +356,37 @@ async def test_llm_anbieter_haus_ohne_gateway_meldung(hz, monkeypatch):
 # --- Entwicklung, Sprache --------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("zugang,erwartet", [
-    (Zugang.haus(USER, "keiner"), "keine"),
-    (Zugang.haus(USER, "keiner", claude_code=True), "token"),
-    (Zugang.haus(USER, "wahl"), "keine"),
-    (Zugang.haus(USER, "festgelegt"), "keine"),
-    (Zugang.haus(USER, "wahl", claude_code=True), "keine"),
-    (Zugang(USER, "claude", "profil", claude_schluessel=SCHLUESSEL), "api"),  # eigener Schlüssel, Guthaben, Haiku
-    (Zugang(USER, "claude", "profil", claude_schluessel=SCHLUESSEL, claude_code=True), "token"),
-    (Zugang(USER, "claude", "zuordnung", claude_schluessel=SCHLUESSEL), "uebergang"),
-    (Zugang(USER, "claude", "zuordnung", claude_schluessel=SCHLUESSEL, claude_code=True), "token"),
+# Wertetabelle: Quelle des Entwicklungsauftrags ohne und mit Schalter für Hausmodelle (WAMO_ENTWICKLUNG_HAUS, Paket P6b)
+@pytest.mark.parametrize("zugang,ohne,mit", [
+    (Zugang.haus(USER, "keiner"), "keine", "haus"),  # weder Token noch API-Schlüssel
+    (Zugang.haus(USER, "keiner", claude_code=True), "token", "token"),  # Mischfall: der Token hat Vorrang
+    (Zugang.haus(USER, "wahl"), "keine", "haus"),  # die Person hat nur Hausmodelle gewählt
+    (Zugang.haus(USER, "festgelegt"), "keine", "haus"),  # der Admin hat nur Hausmodelle festgelegt
+    (Zugang.haus(USER, "wahl", claude_code=True), "keine", "haus"),  # nie der Token: nichts geht in die Cloud
+    (Zugang.haus(USER, "festgelegt", claude_code=True), "keine", "haus"),
+    (Zugang.haus(USER, "fehler"), "keine", "keine"),  # Zugang nicht lesbar: nie ein Auftrag
+    (Zugang.haus(USER, "labor"), "keine", "keine"),
+    (Zugang(USER, "claude", "labor", claude_schluessel=SCHLUESSEL), "keine", "keine"),  # Laborprofile nie
+    (Zugang(USER, "claude", "labor", claude_schluessel=SCHLUESSEL, claude_code=True), "keine", "keine"),
+    (Zugang.haus(USER, "betreiber"), "keine", "keine"),
+    (Zugang(USER, "claude", "profil", claude_schluessel=SCHLUESSEL), "api", "api"),  # eigener Schlüssel, Guthaben, Haiku
+    (Zugang(USER, "claude", "profil", claude_schluessel=SCHLUESSEL, claude_code=True), "token", "token"),
+    (Zugang(USER, "claude", "zuordnung", claude_schluessel=SCHLUESSEL), "uebergang", "uebergang"),
+    (Zugang(USER, "claude", "zuordnung", claude_schluessel=SCHLUESSEL, claude_code=True), "token", "token"),
 ])
-def test_entwicklung_quelle(zugang, erwartet):
-    assert boss.entwicklung_quelle(zugang) == erwartet
+def test_entwicklung_quelle(zugang, ohne, mit):
+    assert boss.entwicklung_quelle(zugang) == ohne  # ohne Schalter wie bisher
+    assert boss.entwicklung_quelle(zugang, haus=False) == ohne
+    assert boss.entwicklung_quelle(zugang, haus=True) == mit
+
+
+def test_entwicklung_quelle_haus_nie_fuer_fehler_labor_oder_unbekannte_quellen():
+    for quelle in ("fehler", "labor", "betreiber", "profil", "zuordnung", "unbekannt", ""):
+        for code in (False, True):
+            for zugang in (Zugang.haus(USER, quelle, claude_code=code),
+                           Zugang(USER, "claude", quelle, claude_schluessel=SCHLUESSEL, claude_code=code)):
+                assert boss.entwicklung_quelle(zugang, haus=True) != "haus", (quelle, code, zugang.art)
+    assert boss.entwicklung_quelle(Zugang.haus(USER, "keiner"), haus=1) == "keine"  # nur ein echtes True schaltet ein
 
 
 def test_modus_wirksam():

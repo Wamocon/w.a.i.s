@@ -19,13 +19,21 @@ aus SSH_ORIGINAL_COMMAND und wird streng geprüft (feste Muster, keine Shell):
     pruefen <job>                               ein Befehl der Abnahme in der Sandbox des Auftrags (JSON-Zeile, standardmäßig AUS)
 
 start: Die erste stdin-Zeile ist ein JSON-Objekt {"auftrag": "...", "system": "...", "modell": "..." (optional),
-"repo": "owner/name" (optional, Ziel-Repo für das GitHub-Token), "zugang": "folgt" | "server" (optional),
-"profil": "<8 Hexzeichen>" (optional, Kennung des Profils für die Buchführung)}. Mit "zugang": "folgt" kommt als
+"repo": "owner/name" (optional, Ziel-Repo für das GitHub-Token), "zugang": "folgt" | "server" | "haus" (optional),
+"profil": "<8 Hexzeichen>" (bei folgt und haus Pflicht, Kennung des Profils für die Buchführung)}. Mit "zugang": "folgt" kommt als
 zweite Zeile der persönliche Claude-Zugang des Profils {"typ": "oauth" | "api", "wert": "...", "workspace": "wrkspc_..."
 (nur api, optional)}; er gilt für genau diesen Lauf und ersetzt den Claude-Zugang aus geheim.env vollständig (kein
 Mischen). "server" erlaubt ausdrücklich den Zugang aus geheim.env (Standard ohne das Feld, für ältere Kerne; mit
 WAMO_SERVERZUGANG=aus in geheim.env abschaltbar). Der Wert steht nie in argv, Log, Auftragsordner, Kopfzeile, Ereignissen
 oder Fehlertexten und wird nicht gespeichert; in der Ausgabe und in den Dateien unter claude/ wird er geschwärzt.
+"haus" (Paket P6b, standardmäßig AUS, nur mit WAMO_HAUS=an in geheim.env; jeder andere Wert und jeder Tippfehler im Namen sperrt) lässt
+Claude Code mit einem Hausmodell über den Proxy wamo-haus-proxy auf Loopback (HAUS_URL) laufen. Der Kern schickt dabei nur die Art und
+das Profil, nie einen Wert, und keine zweite Zeile. Der Dispatcher erzeugt je Lauf ein Auftragstoken wh1-<job>-<64 Hexzeichen>, gibt
+es der Sandbox als ANTHROPIC_API_KEY (dazu ANTHROPIC_BASE_URL, die Modellnamen und CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, nichts
+aus geheim.env für Claude) und legt für den Proxy nur dessen SHA-256 ab: /run/wamo-haus/<job>.json (haus_tokendatei, atomar, 0640,
+Felder v, job, hash, profil, bis, max_token), gelöscht am Laufende, auch bei Abbruch, Ausnahme oder Signal. Fehlt der Ordner (tmpfiles.d
+des Proxys) oder ist er nicht sicher, startet nichts (Ereignis keine_zugangsdaten mit zugang haus, Exit 5). Das Modell ist HAUS_MODELL,
+ein Wunsch im Feld modell gilt nur aus HAUS_MODELLE. Die Buchführung je Projekt zählt HAUS@<profil> als eigenen Zugang.
 Danach bleibt stdin
 offen und dient als Lebenslinie: endet sie (Auflegen, Verbindungsabbruch, Voice-Core beendet), wird der
 Auftrag sofort beendet. stdout trägt die stream-json-Ausgabe von Claude Code und eigene Zeilen
@@ -46,7 +54,8 @@ Ablauf je Lauf:
        Claude-Zugang: der persönliche aus der zweiten stdin-Zeile oder, wenn erlaubt, der aus geheim.env. Bekäme der
        Lauf ein Token, das ein früherer Lauf im selben Projekt nicht hatte (ein persönlicher Zugang zählt je Profil),
        startet er nur nach einer Freigabe (Ereignis zugang_erweitert) oder auf einem frischen, leeren Projektordner.
-       Das Modell richtet sich nach der Zugangsart (modell_waehlen): Abo (oauth) Sonnet, sonst das der Art.
+       Das Modell richtet sich nach der Zugangsart (modell_waehlen): Abo (oauth) Sonnet, Hausmodell (haus) HAUS_MODELL, sonst das
+       der Art. Bei haus statt eines Claude-Zugangs das Auftragstoken dieses Laufs (siehe oben).
     6. GitHub im App-Modus (WAMO_GH_APP_ID, WAMO_GH_APP_INSTALLATION_ID, WAMO_GH_APP_SCHLUESSEL in geheim.env):
        der Dispatcher signiert außerhalb der Sandbox ein JWT (RS256) mit dem privaten Schlüssel der App, holt
        damit ein Installations-Token nur mit den Rechten der Auftragsart (Werkzeugkarte, GITHUB_ZUGRIFF) und,
@@ -80,12 +89,12 @@ Rauchtests, Notaus), pc (Schlüssel aus authorized_keys.d/wamo, Verhalten wie Ve
 authorized_keys.d/wamo-kern). Die Zuordnung hängt am benutzten Schlüssel (SSH_USER_AUTH, sshd ExposeAuthInfo), nie an der Adresse.
 Existiert ein Kern-Schlüssel oder /etc/wamo/kernkanal.conf, gilt der strikte Modus: was sich nicht eindeutig zuordnen lässt,
 endet mit dem Ereignis kanal_gesperrt (herkunft_unklar) und Exit 2, vor jedem Lesen von geheim.env. Im Kern-Kanal gelten Befehlsliste,
-nur eigene Aufträge (auftrag.json mit kanal=kern), Namensraum kern-, nur zugang=folgt und die Grenzen aus kernkanal.conf (Wendungen und
+nur eigene Aufträge (auftrag.json mit kanal=kern), Namensraum kern-, nur zugang=folgt oder haus (je mit Profil) und die Grenzen aus kernkanal.conf (Wendungen und
 Kosten je Lauf als Flags von Claude Code, Starts, Laufzeit, Folgen, Abstand, Platz); eine Notaus-Datei lässt nur ping und status zu.
 Version 8 trennt die Profile: Projektname kern-<Kennung>-<Name> mit der Kennung aus profil, die Kennung steht in auftrag.json, ein
 Projektordner eines anderen Profils ist gesperrt (projekt), dazu feste Grenzen je Profil (grenze_profil).
 Die Regeln stehen in wamo_job_kernkanal.py, hier nur die Einhängepunkte. Jeder Verstoß: {"type": "wamo", "ereignis":
-"kanal_gesperrt", "grund": <Code>} und Exit 2. ping meldet kanal und kernkanal.
+"kanal_gesperrt", "grund": <Code>} und Exit 2. ping meldet kanal und kernkanal, dazu haus (Schalter an und Ordner des Proxys bereit).
 
 Nur Standardbibliothek, im App-Modus zusätzlich das Systempaket python3-cryptography. Wächter, Werkzeugkarte, Kontingent-Parser,
 die Prüflogik von pruefen (abnahme_befehl.py, wamo_job_pruefen.py) und die Regeln des Kern-Kanals (wamo_job_kernkanal.py) kommen aus
@@ -101,6 +110,7 @@ import http.client
 import json
 import os
 import re
+import secrets
 import shlex
 import signal
 import socket
@@ -113,7 +123,7 @@ import threading
 import time
 import unicodedata
 from collections import namedtuple
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -177,7 +187,7 @@ REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}")
 # Persönlicher Claude-Zugang eines Profils (zweite stdin-Zeile von start). Das Format wird streng geprüft: oauth ist
 # der Token aus `claude setup-token` (sk-ant-oat01-...), api ein Anthropic-API-Schlüssel (sk-ant-api03-...); Admin-
 # Schlüssel (sk-ant-admin01-...) und Sitzungsschlüssel passen auf keins von beiden.
-ZUGANG_MODI = ("folgt", "server")
+ZUGANG_MODI = ("folgt", "server", "haus")
 ZUGANG_FORMAT = {"oauth": re.compile(r"sk-ant-oat[0-9]{2}-[A-Za-z0-9_-]{20,400}"),
                  "api": re.compile(r"sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{20,250}")}
 ZUGANG_VARIABLE = {"oauth": "CLAUDE_CODE_OAUTH_TOKEN", "api": "ANTHROPIC_API_KEY"}
@@ -191,6 +201,24 @@ MAX_SCHWAERZ_DATEIEN = 5000
 SCHWAERZ_ZEIT_S = 20.0  # Zeitbudget für das Schwärzen nach dem Lauf; danach gilt es als unvollständig
 KONTINGENT_ABSTAND_S = 2.0  # höchstens alle 2 Sekunden ein Ereignis kontingent (die Zeilen kommen aus der Sandbox)
 SK_ANT_RE = re.compile(rb"sk-ant-[A-Za-z0-9_-]{20,}")  # jeder Anthropic-Schlüssel in der Ausgabe, auch ein fremder
+# Zugangsart haus (Paket P6b, Vertrag mit dem Proxy wamo-haus-proxy aus P6a): Claude Code spricht über den Proxy auf Loopback mit einem
+# Hausmodell, nur der Proxy kennt den Schlüssel für LiteLLM. Die Sandbox bekommt ein Auftragstoken je Lauf, der Proxy nur dessen SHA-256.
+HAUS_SCHALTER = "WAMO_HAUS"  # in geheim.env, nur "an" schaltet ein (Standard aus)
+HAUS_MAX_TOKEN_NAME = "WAMO_HAUS_MAX_TOKEN"  # in geheim.env, Höchstmenge an Token je Lauf, die der Proxy durchsetzt
+HAUS_URL = "http://127.0.0.1:18090"
+HAUS_MODELL = "qwen3.6-35b"
+HAUS_MODELLE = (HAUS_MODELL,)  # ein Wunsch im Kopfzeilenfeld modell gilt bei haus nur aus dieser Liste, nie aus der Allowlist der Werkzeugkarte
+HAUS_MODELL_VARIABLEN = ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                         "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL")  # jede Modellklasse von Claude Code zeigt aufs Hausmodell
+HAUS_ORDNER = Path("/run/wamo-haus")  # tmpfiles.d des Proxys: 2750 wamo:wamo-haus-proxy; der Dispatcher legt ihn nie selbst an
+HAUS_TOKEN_RE = re.compile(rb"wh1-[0-9a-f]{16,32}-[0-9a-f]{64}")  # jedes Auftragstoken in der Ausgabe, auch ein fremdes
+HAUS_MAX_TOKEN_STANDARD = 3_000_000
+HAUS_MAX_TOKEN_MIN, HAUS_MAX_TOKEN_MAX = 10_000, 20_000_000
+HAUS_NACHLAUF_S = 300  # die Tokendatei gilt bis Start plus Zeitlimit des Laufs plus diese Sekunden
+HAUS_DATEI_MODUS = 0o640
+LAUF_KONF = APP / "wamo-job.conf"  # root:wamo 0640, wamo-job.sh liest daraus ZEITLIMIT_S
+LAUF_ZEITLIMIT_STANDARD_S = 1800  # wie ZEITLIMIT_S in wamo-job.sh
+LAUF_ZEITLIMIT_MAX_S = 7200  # wie ZEITLIMIT_MAX_S in wamo-job.sh
 MAX_COMMAND_CHARS = 300
 MAX_HEADER_BYTES = 256 * 1024
 MAX_TEXT_CHARS = 20000
@@ -211,6 +239,8 @@ SPEICHER_DISPATCHER = 1024 * 1024 * 1024  # weiche Adressraumgrenze dieses Proze
 SELFTEST_EVENT = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}}
 SELFTEST_GRUND = "GESPERRT: Force-Push"  # Anfang der erwarteten Ablehnung durch dev_guard.py
 PLUGIN_SETTINGS = json.dumps({"enabledPlugins": {"ecc@ecc": True}})
+# Zugangsart haus: zusätzlich keine Vorabprüfung von WebFetch bei Anthropic (sonst ginge die abgerufene Domain an Anthropic)
+PLUGIN_SETTINGS_HAUS = json.dumps({"enabledPlugins": {"ecc@ecc": True}, "skipWebFetchPreflight": True})
 # Aus der globalen Claude-Konfiguration von wamo nur diese Schlüssel in den Auftrag übernehmen
 CLAUDE_JSON_KEYS = (
     "installMethod", "userID", "machineID", "firstStartTime", "firstStartVersion",
@@ -229,13 +259,19 @@ class ZugangUngueltig(Abgewiesen):
     """Die Zugangszeile ist unbrauchbar. Der Text nennt nie den Inhalt der Zeile."""
 
 
-# Kopfzeile von start; zugang: None (älterer Kern), "folgt" (zweite Zeile mit dem Zugang) oder "server"
+class HausNichtBereit(Exception):
+    """Ein Lauf mit Hausmodell kann nicht starten: Schalter aus, Ordner des Proxys fehlt oder ist nicht sicher, die Tokendatei lässt
+    sich nicht schreiben. Der Text nennt nie das Token."""
+
+
+# Kopfzeile von start; zugang: None (älterer Kern), "folgt" (zweite Zeile mit dem Zugang), "server" oder "haus" (Hausmodell, keine Zeile)
 Kopf = namedtuple("Kopf", ("auftrag", "system", "modell", "repo", "zugang", "profil"))
 
 
 @dataclass(frozen=True, slots=True)
 class ClaudeZugang:
-    """Persönlicher Claude-Zugang für einen Lauf: typ oauth | api, wert (Geheimnis!), workspace (nur api), profil.
+    """Persönlicher Claude-Zugang für einen Lauf: typ oauth | api, wert (Geheimnis!), workspace (nur api), profil. Mit typ haus ist wert
+    das Auftragstoken, das der Dispatcher selbst erzeugt (haus_token), nie ein Wert aus der Kopfzeile oder aus geheim.env.
     Der Wert fehlt in der Darstellung (repr=False) und ist weder iterierbar noch in JSON umwandelbar: ein
     versehentliches Protokollieren zeigt ihn nicht."""
 
@@ -401,9 +437,10 @@ def check_repo(value: object) -> str:
 
 def parse_header(raw: bytes) -> Kopf:
     """Erste stdin-Zeile von start: {"auftrag": str, "system": str, "modell": str (optional), "repo": "owner/name"
-    (optional), "zugang": "folgt" | "server" (optional), "profil": 8 Hexzeichen (optional)}. Steuerzeichen außer
-    Zeilenumbruch und Tabulator fliegen heraus; beide Texte sind begrenzt. Das Modell prüft cmd_start gegen die
-    Allowlist der Werkzeugkarte, das Repo prüft check_repo. Die Kopfzeile trägt nie einen Zugangswert."""
+    (optional), "zugang": "folgt" | "server" | "haus" (optional), "profil": 8 Hexzeichen (bei folgt und haus Pflicht)}.
+    Steuerzeichen außer Zeilenumbruch und Tabulator fliegen heraus; beide Texte sind begrenzt. Das Modell prüft cmd_start
+    gegen die Allowlist der Werkzeugkarte (bei haus gegen HAUS_MODELLE), das Repo prüft check_repo. Die Kopfzeile trägt
+    nie einen Zugangswert."""
     if not raw.endswith(b"\n") or len(raw) > MAX_HEADER_BYTES:
         raise Abgewiesen("Kopfzeile fehlt oder ist zu lang")
     try:
@@ -420,11 +457,11 @@ def parse_header(raw: bytes) -> Kopf:
         repo = check_repo(repo)
     zugang, profil = data.get("zugang"), data.get("profil")
     if zugang is not None and zugang not in ZUGANG_MODI:
-        raise Abgewiesen("Kopfzeile: zugang ungültig (folgt oder server)")
+        raise Abgewiesen("Kopfzeile: zugang ungültig (folgt, server oder haus)")
     if profil is not None and (not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil)):
         raise Abgewiesen("Kopfzeile: profil ungültig")
-    if zugang == "folgt" and profil is None:  # sonst teilten sich alle persönlichen Zugänge eine Kennung in der Buchführung
-        raise Abgewiesen("Kopfzeile: profil fehlt bei zugang folgt")
+    if zugang in ("folgt", "haus") and profil is None:  # sonst teilten sich alle Profile eine Kennung in der Buchführung
+        raise Abgewiesen(f"Kopfzeile: profil fehlt bei zugang {zugang}")
     auftrag, system = data.get("auftrag"), data.get("system", "")
     if not isinstance(auftrag, str) or not isinstance(system, str):
         raise Abgewiesen("Kopfzeile: auftrag und system müssen Text sein")
@@ -462,14 +499,30 @@ def parse_zugang(raw: bytes, profil: str | None = None) -> ClaudeZugang:
 
 
 def zugang_typ(env: dict[str, str]) -> str:
-    """Art des Claude-Zugangs in einer Sandbox-Umgebung: oauth (Abo, Kontingent) oder api (Guthaben)."""
+    """Art des Claude-Zugangs in einer Sandbox-Umgebung: oauth (Abo, Kontingent), api (Guthaben) oder haus (Hausmodell über den
+    Proxy, erkennbar an HAUS_URL; die Basis-URL setzt allein sandbox_env, aus geheim.env kommt sie nie)."""
+    if env.get("ANTHROPIC_BASE_URL") == HAUS_URL:
+        return "haus"
     return "oauth" if env.get("CLAUDE_CODE_OAUTH_TOKEN") else "api"
+
+
+def haus_modell(wunsch: str | None) -> str:
+    """Modell eines Laufs mit Hausmodell: ohne Wunsch HAUS_MODELL, ein Wunsch nur aus HAUS_MODELLE (ValueError sonst). Die Allowlist der
+    Werkzeugkarte (Claude-Modelle) gilt hier nicht, ein Hausmodell umgekehrt nie für einen Claude-Zugang."""
+    if not wunsch:
+        return HAUS_MODELL
+    if wunsch not in HAUS_MODELLE:
+        raise ValueError(f"Modell {wunsch!r} ist für Hausmodelle nicht erlaubt (erlaubt: {', '.join(HAUS_MODELLE)})")
+    return wunsch
 
 
 def modell_waehlen(art: str, wunsch: str | None, typ: str) -> str:
     """Modell des Laufs. Ein Wunsch (WAMO_ENTWICKLUNG_MODELL, Kopfzeilenfeld modell) gilt nur aus der Allowlist der
     Werkzeugkarte (ValueError sonst). Ohne Wunsch: Abo-Zugang (oauth, Kontingent des Max-Abos) Sonnet, wenn die Art
-    nicht ohnehin ein stärkeres Modell festlegt; sonst (api, Guthaben) das Modell der Art, derzeit Haiku."""
+    nicht ohnehin ein stärkeres Modell festlegt; sonst (api, Guthaben) das Modell der Art, derzeit Haiku. Mit typ haus
+    gilt haus_modell."""
+    if typ == "haus":
+        return haus_modell(wunsch)
     wk = werkzeugkarte()
     modell = wk.modell_fuer(art, wunsch)
     if not wunsch and typ == "oauth" and modell == wk.MODELL_STANDARD:
@@ -506,6 +559,192 @@ def pruefen_aktiv(geheim: dict[str, str]) -> bool:
     except Exception:  # noqa: BLE001 (fehlt oder defekt: nicht aktiv)
         return False
     return True
+
+
+# ---------------------------------------------------------------- Zugangsart haus: Schalter, Token, Tokendatei für den Proxy
+def haus_schalter(geheim: dict[str, str]) -> bool:
+    """Ist die Zugangsart haus eingeschaltet? Nur WAMO_HAUS=an in geheim.env (Standard aus). Fail-closed wie pruefen_schalter: jeder
+    andere Wert und jeder Name, der mit WAMO_HAU beginnt und weder WAMO_HAUS noch WAMO_HAUS_MAX_TOKEN ist (ein Tippfehler), sperrt."""
+    if any(n.startswith("WAMO_HAU") and n not in (HAUS_SCHALTER, HAUS_MAX_TOKEN_NAME) for n in geheim):
+        return False
+    return geheim.get(HAUS_SCHALTER, "") == "an"
+
+
+def haus_max_token(geheim: dict[str, str]) -> int:
+    """Höchstmenge an Token je Lauf für den Proxy: WAMO_HAUS_MAX_TOKEN aus geheim.env, nur ASCII-Ziffern von HAUS_MAX_TOKEN_MIN bis
+    HAUS_MAX_TOKEN_MAX, sonst HAUS_MAX_TOKEN_STANDARD."""
+    wert = geheim.get(HAUS_MAX_TOKEN_NAME, "")
+    if re.fullmatch(r"[0-9]{1,9}", wert) and HAUS_MAX_TOKEN_MIN <= int(wert) <= HAUS_MAX_TOKEN_MAX:
+        return int(wert)
+    return HAUS_MAX_TOKEN_STANDARD
+
+
+def haus_token(job: str) -> str:
+    """Neues Auftragstoken für genau einen Lauf: wh1-<job>-<64 Hexzeichen aus secrets>. Es steht nur in der Umgebung der Sandbox und im
+    Speicher dieses Prozesses; der Proxy bekommt nur seinen SHA-256 (haus_tokendatei)."""
+    return f"wh1-{check_job(job)}-{secrets.token_hex(32)}"
+
+
+def haus_ordner_problem(ordner: Path | None = None) -> str | None:
+    """Warum der Ordner für die Tokendateien nicht taugt, oder None. Er muss ein echter Ordner sein (kein Link), diesem Prozess gehören
+    (im Betrieb wamo, angelegt von tmpfiles.d des Proxys) und darf für niemanden außer dem Besitzer beschreibbar sein."""
+    ordner = ordner or HAUS_ORDNER
+    try:
+        st = os.lstat(ordner)
+    except OSError:
+        return "der Ordner für die Tokendateien des Proxys fehlt (Proxy nicht eingerichtet)"
+    if not stat.S_ISDIR(st.st_mode):
+        return "der Ordner für die Tokendateien des Proxys ist kein Ordner"
+    if hasattr(os, "geteuid") and st.st_uid != os.geteuid():
+        return "der Ordner für die Tokendateien des Proxys gehört nicht dem Dispatcher"
+    if os.name == "posix" and st.st_mode & 0o022:
+        return "der Ordner für die Tokendateien des Proxys ist für andere beschreibbar"
+    return None
+
+
+def haus_problem(geheim: dict[str, str]) -> str | None:
+    """Warum ein Lauf mit Hausmodell jetzt nicht starten kann (Schalter, Ordner des Proxys), oder None. Wirft nie."""
+    if not haus_schalter(geheim):
+        return f"Hausmodelle sind auf diesem Server aus ({HAUS_SCHALTER}=an fehlt in /etc/wamo/geheim.env)"
+    return haus_ordner_problem()
+
+
+def haus_aktiv(geheim: dict[str, str]) -> bool:
+    """Schalter an UND Ordner des Proxys bereit: nur dann meldet ping haus als aktiv (wie pruefen)."""
+    return haus_problem(geheim) is None
+
+
+_ZEITLIMIT_ZEILE_RE = re.compile(r"\s*(?:export\s+)?ZEITLIMIT_S=")
+_ZEITLIMIT_WERT_RE = re.compile(r"\s*(?:export\s+)?ZEITLIMIT_S=([\"']?)([0-9]{1,6})\1\s*(?:#.*)?")
+
+
+def lauf_zeitlimit_s(pfad: Path | None = None) -> int:
+    """Zeitlimit eines Laufs in Sekunden, wie wamo-job.sh es setzt (der Dispatcher übergibt kein eigenes --zeitlimit): die letzte Zuweisung
+    ZEITLIMIT_S in wamo-job.conf, sonst LAUF_ZEITLIMIT_STANDARD_S. Eine Zuweisung, die diese einfache Lesart nicht versteht, ergibt
+    LAUF_ZEITLIMIT_MAX_S: die Frist der Tokendatei endet so nie vor dem Lauf."""
+    text = read_no_follow(pfad or LAUF_KONF, 64 * 1024)
+    wert = LAUF_ZEITLIMIT_STANDARD_S
+    for zeile in (text or "").splitlines():
+        if _ZEITLIMIT_ZEILE_RE.match(zeile):
+            treffer = _ZEITLIMIT_WERT_RE.fullmatch(zeile)
+            wert = int(treffer.group(2)) if treffer and int(treffer.group(2)) > 0 else LAUF_ZEITLIMIT_MAX_S
+    return wert
+
+
+def _haus_datei_loeschen(ordner: Path, job: str) -> None:
+    try:
+        os.unlink(ordner / f"{job}.json")
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        log(f"haus_token {job}: Tokendatei nicht gelöscht ({type(e).__name__}), sie gilt nur bis zu ihrer Frist")
+
+
+def _haus_datei_schreiben(ordner: Path, job: str, inhalt: bytes) -> None:
+    """Atomar: Temp-Datei im selben Ordner (O_EXCL, O_NOFOLLOW, 0640 unabhängig von der umask), fsync, os.replace. Ein Link an der Stelle
+    der Zieldatei wird ersetzt, nie verfolgt. Bei einem Fehler bleibt keine Temp-Datei liegen."""
+    tmp = ordner / f".{job}.{secrets.token_hex(8)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(tmp, flags, HAUS_DATEI_MODUS)
+    try:
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, HAUS_DATEI_MODUS)
+            rest = memoryview(inhalt)
+            while rest:
+                rest = rest[os.write(fd, rest):]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, ordner / f"{job}.json")
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def haus_alte_dateien_loeschen(ordner: Path, eigener_job: str, jetzt: float | None = None, hoechstens: int = 200) -> int:
+    """Löscht abgelaufene Tokendateien (bis vor jetzt) früherer Läufe, etwa nach einem SIGKILL des Dispatchers. Nur Dateien der Form
+    <job>.json, nie die des laufenden Auftrags, höchstens hoechstens Dateien je Aufruf; dazu liegengebliebene Temp-Dateien (.<job>.<hex>.tmp)
+    älter als eine Stunde. Unlesbares bleibt liegen (der Proxy weist es ohnehin ab). Liefert die Zahl der gelöschten Dateien; wirft nie."""
+    jetzt = time.time() if jetzt is None else jetzt
+    geloescht = 0
+    try:
+        alle = sorted(os.listdir(ordner))
+    except OSError:
+        return 0
+    for name in [n for n in alle if n.startswith(".") and n.endswith(".tmp")][:hoechstens]:
+        try:
+            if os.lstat(ordner / name).st_mtime < jetzt - 3600:
+                os.unlink(ordner / name)
+                geloescht += 1
+        except OSError:
+            pass
+    namen = [n for n in alle if n.endswith(".json") and JOB_RE.fullmatch(n[:-5]) and n[:-5] != eigener_job][:hoechstens]
+    for name in namen:
+        inhalt = read_no_follow(ordner / name, 4096)
+        try:
+            bis = json.loads(inhalt or "").get("bis")
+        except (ValueError, AttributeError):
+            continue
+        if type(bis) is int and bis < jetzt:
+            try:
+                os.unlink(ordner / name)
+                geloescht += 1
+            except OSError:
+                pass
+    if geloescht:
+        log(f"haus_token: {geloescht} abgelaufene Tokendateien gelöscht")
+    return geloescht
+
+
+@contextmanager
+def haus_tokendatei(job: str, token: str, profil: str, max_token: int, zeitlimit_s: int, ordner: Path | None = None):
+    """Legt für die Dauer des Blocks HAUS_ORDNER/<job>.json für den Proxy an, genau {"v": 1, "job", "hash" (SHA-256 des Tokens als Hex),
+    "profil", "bis" (Start plus Zeitlimit des Laufs plus HAUS_NACHLAUF_S, Unix-Sekunden), "max_token"}; nie das Token selbst. Die Datei
+    verschwindet nach dem Block, auch bei Ausnahme, Abbruch oder Signal. Während des Schreibens sind SIGTERM und SIGHUP aufgeschoben (keine
+    Datei ohne Löschen), während des Löschens ignoriert. HausNichtBereit, bevor etwas startet: Ordner fehlt oder ist nicht sicher, Schreiben
+    scheitert. Gegen SIGKILL hilft nur die Frist bis: danach weist der Proxy das Token ab."""
+    ordner = ordner or HAUS_ORDNER
+    grund = haus_ordner_problem(ordner)
+    if grund is not None:
+        raise HausNichtBereit(grund)
+    haus_alte_dateien_loeschen(ordner, job)
+    bis = int(time.time()) + int(zeitlimit_s) + HAUS_NACHLAUF_S
+    inhalt = json.dumps({"v": 1, "job": check_job(job), "hash": hashlib.sha256(token.encode("utf-8")).hexdigest(), "profil": profil,
+                         "bis": bis, "max_token": int(max_token)}).encode("utf-8")
+    maske = _signale_aufschieben()
+    try:
+        _haus_datei_schreiben(ordner, job, inhalt)
+    except OSError as e:
+        _haus_datei_loeschen(ordner, job)  # eine alte Datei desselben Auftrags bleibt nicht stehen
+        _signale_zulassen(maske)
+        raise HausNichtBereit(f"die Tokendatei für den Proxy lässt sich nicht schreiben ({type(e).__name__})") from None
+    except BaseException:
+        _haus_datei_loeschen(ordner, job)  # auch nach einem Abbruch zwischen os.replace und hier bleibt keine Datei stehen
+        _signale_zulassen(maske)
+        raise
+    try:
+        _signale_zulassen(maske)  # ein aufgeschobenes Signal kommt jetzt an und endet im finally (Datei weg)
+        log(f"haus_token {job} profil={profil} bis={bis} max_token={int(max_token)}", pflicht=True)
+        yield
+    finally:
+        for _versuch in range(2):  # ein erstes Signal genau jetzt (_Beendet) überspringt das Löschen nicht
+            try:
+                with _signale(signal.SIG_IGN):
+                    _haus_datei_loeschen(ordner, job)
+                break
+            except _Beendet:
+                continue
+
+
+def haus_lauf(job: str, zugang: "ClaudeZugang | None", geheim: dict[str, str]):
+    """Die Tokendatei für einen Lauf mit Hausmodell; für jede andere Zugangsart ein leerer Block."""
+    if zugang is None or zugang.typ != "haus":
+        return nullcontext()
+    return haus_tokendatei(job, zugang.wert, zugang.profil or "", haus_max_token(geheim), lauf_zeitlimit_s())
 
 
 # Unsichtbare Zeichen können eine Zusatzanweisung an Claude Code tragen, die niemand liest. Zwei Stufen:
@@ -591,9 +830,11 @@ def zugangs_quellen(art: str, geheim: dict[str, str], app_modus: bool = False, r
     Umfang des Tokens: "@owner/name" (kleingeschrieben) für ein Repo, "@*" für die ganze Installation. Ein anderes
     oder breiteres Repo als in früheren Läufen des Projekts zählt so als neuer Zugang und braucht eine Freigabe.
     Ein persönlicher Claude-Zugang heißt <Variable>@<Profil> (nie der Wert): der Zugang einer anderen Person, auch
-    der aus geheim.env, ist für ein Projekt ein neuer Zugang."""
+    der aus geheim.env, ist für ein Projekt ein neuer Zugang. Ein Lauf mit Hausmodell heißt HAUS@<Profil>."""
     wk = werkzeugkarte()
-    if zugang is not None:
+    if zugang is not None and zugang.typ == "haus":
+        claude = f"HAUS@{zugang.profil or '?'}"
+    elif zugang is not None:
         claude = f"{ZUGANG_VARIABLE[zugang.typ]}@{zugang.profil or '?'}"
     else:
         claude = next((name for name in wk.CLAUDE_VARIABLEN if geheim.get(name)), None)
@@ -607,15 +848,25 @@ def zugangs_quellen(art: str, geheim: dict[str, str], app_modus: bool = False, r
 
 
 def sandbox_env(art: str, geheim: dict[str, str], app_modus: bool = False,
-                gh_token: str | None = None, zugang: ClaudeZugang | None = None) -> dict[str, str] | None:
+                gh_token: str | None = None, zugang: ClaudeZugang | None = None, modell: str | None = None) -> dict[str, str] | None:
     """Basis plus genau ein Claude-Zugang und die Token der Auftragsart. None ohne Claude-Zugang. Im App-Modus
     kommt GitHub nur als gh_token (kurzlebiges Installations-Token dieses Laufs) an, nie GH_TOKEN oder
     GH_TOKEN_LESEN aus geheim.env; die App-Variablen (WAMO_GH_APP_*) gelangen nie in die Umgebung.
     Mit einem persönlichen Zugang (zugang) ist das der einzige Claude-Zugang des Laufs: nichts davon kommt aus
-    geheim.env, auch nicht der Workspace-Header des Organisationsschlüssels (kein Mischen mit einem fremden Schlüssel)."""
+    geheim.env, auch nicht der Workspace-Header des Organisationsschlüssels (kein Mischen mit einem fremden Schlüssel).
+    Mit zugang.typ haus: Basis-URL des Proxys, das Auftragstoken als ANTHROPIC_API_KEY, jede Modellklasse auf das
+    Hausmodell (modell, nur aus HAUS_MODELLE, sonst HAUS_MODELL) und kein Verkehr nebenbei; kein Claude-Zugang, kein
+    Workspace und kein Schlüssel für LiteLLM. modell gilt nur für haus."""
     wk = werkzeugkarte()
     env = basis_env()
-    if zugang is not None:
+    if zugang is not None and zugang.typ == "haus":
+        env["ANTHROPIC_BASE_URL"] = HAUS_URL
+        env["ANTHROPIC_API_KEY"] = zugang.wert
+        for name in HAUS_MODELL_VARIABLEN:
+            env[name] = haus_modell(modell)
+        for name in ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING"):
+            env[name] = "1"  # kein Verkehr nebenbei zu Anthropic (Telemetrie, Fehlerberichte, Aktualisierung)
+    elif zugang is not None:
         env[ZUGANG_VARIABLE[zugang.typ]] = zugang.wert
         if zugang.typ == "api" and zugang.workspace:
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"anthropic-workspace-id: {zugang.workspace}"
@@ -2052,7 +2303,7 @@ def cmd_ping() -> int:
     geheim = lese_geheimnisse()
     emit({"ok": True, "version": VERSION, "runner": RUNNER.is_file(), "waechter": (WAECHTER / "dev_guard.py").is_file(),
           "github": github_status(), "serverzugang": serverzugang_erlaubt(geheim),
-          "kontingent": kontingent_modul() is not None, "pruefen": pruefen_aktiv(geheim),
+          "kontingent": kontingent_modul() is not None, "pruefen": pruefen_aktiv(geheim), "haus": haus_aktiv(geheim),
           "abnahme_befehl_sha256": modul_sha256("abnahme_befehl"), "kanal": KANAL, "kernkanal": kernkanal_ping()})
     return EXIT_OK
 
@@ -2354,10 +2605,15 @@ def schwaerzungen(env: dict[str, str]) -> list[tuple[bytes, bytes]]:
 
 
 def schwaerzen(daten: bytes, ersetzungen: list[tuple[bytes, bytes]]) -> bytes:
-    """Ersetzt die Werte dieses Laufs wörtlich und danach alles, was wie ein Anthropic-Schlüssel aussieht."""
+    """Ersetzt die Werte dieses Laufs wörtlich und danach alles, was wie ein Anthropic-Schlüssel oder ein Auftragstoken für
+    Hausmodelle aussieht (das Token dieses Laufs steht als ANTHROPIC_API_KEY schon in den Ersetzungen)."""
     for wert, ersatz in ersetzungen:
         daten = daten.replace(wert, ersatz)
-    return SK_ANT_RE.sub(ZUGANG_ERSATZ, daten) if b"sk-ant-" in daten else daten
+    if b"sk-ant-" in daten:
+        daten = SK_ANT_RE.sub(ZUGANG_ERSATZ, daten)
+    if b"wh1-" in daten:
+        daten = HAUS_TOKEN_RE.sub(ZUGANG_ERSATZ, daten)
+    return daten
 
 
 def _datei_schwaerzen(pfad: str, ordner: str, ersetzungen: list[tuple[bytes, bytes]]) -> str:
@@ -2648,8 +2904,12 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
     elif KANAL == "pc" and projekt.startswith(KERN_PRAEFIX):
         raise Abgewiesen("Projektnamen mit kern- sind dem Kern-Kanal vorbehalten")
     auftrag, system, wunsch, repo = kopf.auftrag, kopf.system, kopf.modell, kopf.repo
-    try:
-        werkzeugkarte().modell_fuer(art, wunsch)  # ein Wunsch außerhalb der Allowlist scheitert vor allem anderen
+    haus = kopf.zugang == "haus"  # Hausmodell über den Proxy: kein Claude-Zugang, keine zweite Zeile, ein Auftragstoken je Lauf
+    try:  # ein Wunsch außerhalb der Allowlist scheitert vor allem anderen (bei haus gilt nur die Liste der Hausmodelle)
+        if haus:
+            haus_modell(wunsch)
+        else:
+            werkzeugkarte().modell_fuer(art, wunsch)
     except ValueError as e:
         raise Abgewiesen(str(e)) from None
     zugang = None
@@ -2696,18 +2956,23 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
         app = github_app_konfig(geheim)
     except GithubAppFehler as e:
         return _start_abgelehnt(jobdir, job, projekt, art, str(e))
-    if zugang is None and not serverzugang_erlaubt(geheim):
+    if haus:  # Schalter und Ordner des Proxys vor allem anderen; nie ein Rückfall auf einen Claude-Zugang
+        grund = haus_problem(geheim)
+        if grund is not None:
+            return _haus_abgelehnt(jobdir, job, projekt, art, grund)
+        zugang = ClaudeZugang("haus", haus_token(job), None, kopf.profil)
+    elif zugang is None and not serverzugang_erlaubt(geheim):
         wamo_event("keine_zugangsdaten", grund="Kein persönlicher Claude-Zugang übergeben, und der Zugang aus geheim.env "
                    "ist abgeschaltet (WAMO_SERVERZUGANG=aus)")
         _status(jobdir, job, projekt, art, ergebnis="keine_zugangsdaten", code=EXIT_KEIN_ZUGANG)
         return EXIT_KEIN_ZUGANG
-    env = sandbox_env(art, geheim, app_modus=app is not None, zugang=zugang)
+    env = sandbox_env(art, geheim, app_modus=app is not None, zugang=zugang, modell=wunsch if haus else None)
     if env is None:
         wamo_event("keine_zugangsdaten", grund="ANTHROPIC_API_KEY oder CLAUDE_CODE_OAUTH_TOKEN in /etc/wamo/geheim.env fehlt")
         _status(jobdir, job, projekt, art, ergebnis="keine_zugangsdaten", code=EXIT_KEIN_ZUGANG)
         return EXIT_KEIN_ZUGANG
     modell = modell_waehlen(art, wunsch, zugang_typ(env))
-    quelle = f"persoenlich-{zugang.typ}" if zugang is not None else "server"
+    quelle = "haus" if haus else f"persoenlich-{zugang.typ}" if zugang is not None else "server"
     zugaenge = sorted(zugangs_quellen(art, geheim, app_modus=app is not None, repo=repo, zugang=zugang))
     snapshot = read_json(jobdir / "zustand" / "approvals.json", [])
     anfrage = zugang_pruefen(projekt, set(zugaenge), snapshot if isinstance(snapshot, list) else [])
@@ -2726,7 +2991,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
         if grund is not None:
             return kanal_abweisen(grund)
         grenzen = (str(konfig.max_turns), konfig.max_budget_usd)  # nur aus kernkanal.conf, die Kopfzeile kann nichts steuern
-    claude = claude_argv(system, modell, session, grenzen) if grenzen else claude_argv(system, modell, session)
+    claude = claude_argv(system, modell, session, grenzen, haus=haus)
     argv = [str(RUNNER), "--auftrag", job, "--projekt", projekt, "--", *claude]
     # Ab hier lebt ggf. ein GitHub-Token: SIGTERM und SIGHUP werden zur Ausnahme, damit Sandbox-Stopp und Widerruf
     # (finally in github_token_fuer_lauf) sicher laufen. SIGKILL lässt sich nicht abfangen: dann läuft das Token
@@ -2735,7 +3000,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
         try:
             with github_token_fuer_lauf(job, art, repo, app) as gh_token:
                 if gh_token is not None:
-                    env = sandbox_env(art, geheim, app_modus=True, gh_token=gh_token, zugang=zugang)
+                    env = sandbox_env(art, geheim, app_modus=True, gh_token=gh_token, zugang=zugang, modell=wunsch if haus else None)
                     if kern:  # Regel 8: kein Fork, keine Vorlage, kein Ursprung wamo; das Token wird danach widerrufen
                         grund = kern_fork_grund(repo, gh_token)
                         if grund is not None:
@@ -2743,11 +3008,24 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
                 log(f"start {job} {projekt} {art} {'fortsetzung' if session else 'neu'} modell={modell} "
                     f"zugaenge={','.join(zugaenge)} github={github} repo={repo or '-'} claude={quelle} "
                     f"profil={kopf.profil or '-'}", pflicht=True)
-                code = _ausfuehren(argv, env, auftrag, jobdir, job, projekt, art)
+                with haus_lauf(job, zugang, geheim):  # nur bei haus: die Tokendatei für den Proxy, weg am Laufende
+                    code = _ausfuehren(argv, env, auftrag, jobdir, job, projekt, art)
         except GithubAppFehler as e:
             return _start_abgelehnt(jobdir, job, projekt, art, str(e))
+        except HausNichtBereit as e:
+            return _haus_abgelehnt(jobdir, job, projekt, art, str(e))
     del gehalten  # erst jetzt frei (Prozessende gibt sie ohnehin frei)
     return code
+
+
+def _haus_abgelehnt(jobdir: Path, job: str, projekt: str, art: str, grund: str) -> int:
+    """Ein Lauf mit Hausmodell startet nicht (Schalter aus, Ordner des Proxys fehlt, Tokendatei nicht schreibbar): Ereignis
+    keine_zugangsdaten mit zugang haus (der Kern nennt dann den Satz für Hausmodelle), nie ein Rückfall auf einen anderen Zugang."""
+    grund = f"Hausmodelle: {grund}"[:300]
+    log(f"haus_abgelehnt {job} {projekt} {art}: {grund}", pflicht=True)
+    wamo_event("keine_zugangsdaten", zugang="haus", grund=grund)
+    _status(jobdir, job, projekt, art, ergebnis="keine_zugangsdaten", code=EXIT_KEIN_ZUGANG)
+    return EXIT_KEIN_ZUGANG
 
 
 def _start_abgelehnt(jobdir: Path, job: str, projekt: str, art: str, grund: str) -> int:
@@ -2759,11 +3037,13 @@ def _start_abgelehnt(jobdir: Path, job: str, projekt: str, art: str, grund: str)
     return EXIT_GITHUB_APP
 
 
-def claude_argv(system: str, modell: str, session: str | None = None, grenzen: tuple[str, str] | None = None) -> list[str]:
+def claude_argv(system: str, modell: str, session: str | None = None, grenzen: tuple[str, str] | None = None,
+                haus: bool = False) -> list[str]:
     """Aufruf von Claude Code in der Sandbox (auch vom Rauchtest genutzt). grenzen (Wendungen, Kosten in USD) gibt es nur im
-    Kern-Kanal und nur aus kernkanal.conf: --max-turns und --max-budget-usd."""
+    Kern-Kanal und nur aus kernkanal.conf: --max-turns und --max-budget-usd. haus: Einstellungen ohne Vorabprüfung von WebFetch."""
     argv = [str(CLAUDE), "-p", "--output-format", "stream-json", "--verbose", "--permission-mode",
-            "bypassPermissions", "--model", modell, "--settings", PLUGIN_SETTINGS, "--append-system-prompt", system]
+            "bypassPermissions", "--model", modell, "--settings", PLUGIN_SETTINGS_HAUS if haus else PLUGIN_SETTINGS,
+            "--append-system-prompt", system]
     if session:
         argv += ["--resume", session]
     if grenzen:
