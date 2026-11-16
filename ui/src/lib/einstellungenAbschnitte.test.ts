@@ -252,6 +252,26 @@ test("Texte der Laborsicht ohne Gedankenstrich, nur an der Laborsicht zu erkenne
   for (const a of abschnitteFuer({ rolle: null, labor: true })) assert.ok(!/[–—]|\s-\s/.test(`${a.titel} ${a.kurz}`), a.id);
 });
 
+test("Abschnitt Erste Schritte: direkt nach Konto, für jede Rolle, nie in der Laborsicht, mit eigenem Hash", () => {
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    const liste = ids(rolle);
+    assert.equal(liste.indexOf("start"), liste.indexOf("konto") + 1, `Rolle ${rolle}`);
+  }
+  const start = ABSCHNITTE.find((a) => a.id === "start");
+  assert.equal(start?.titel, "Erste Schritte");
+  assert.equal(start?.kurz, "Modellzugang, Installer, Prüfliste und Updates");
+  assert.equal(start?.nurAdmin, undefined);
+  assert.equal(start?.laborSicht, undefined);
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    assert.ok(!abschnitteFuer({ rolle, labor: true }).some((a) => a.id === "start"), `Laborsicht ${rolle}`);
+  }
+  assert.deepEqual(parseHash("#einstellungen/start"), { offen: true, abschnitt: "start" });
+  // im Labor führt ein Hash auf "start" nie in den Abschnitt
+  assert.equal(wirksamerAbschnitt(parseHash("#einstellungen/start"), abschnitteFuer({ rolle: "mitglied", labor: true }), true), "sprache");
+  // ohne Abschnitt in der Adresse bleibt Konto der erste Abschnitt
+  assert.equal(wirksamerAbschnitt({ offen: true, abschnitt: null }, abschnitteFuer({ rolle: "mitglied" }), true), "konto");
+});
+
 test("Abschnitt Stimme: für jede Rolle da, in der Laborsicht nicht, mit eigenem Hash", () => {
   for (const rolle of ["admin", "mitglied", null] as const) {
     assert.ok(abschnitteFuer({ rolle }).some((a) => a.id === "stimme"), `Rolle ${rolle}`);
@@ -267,7 +287,7 @@ test("Erste Schritte: für jede Rolle direkt nach Konto, in der Laborsicht nicht
     assert.equal(liste.indexOf("start"), liste.indexOf("konto") + 1, `Rolle ${rolle}`);
   }
   const start = ABSCHNITTE.find((a) => a.id === "start");
-  assert.deepEqual({ titel: start?.titel, kurz: start?.kurz }, { titel: "Erste Schritte", kurz: "Prüfliste und Updates" });
+  assert.deepEqual({ titel: start?.titel, kurz: start?.kurz }, { titel: "Erste Schritte", kurz: "Modellzugang, Installer, Prüfliste und Updates" });
   assert.equal(start?.nurAdmin, undefined);
   for (const rolle of ["admin", "mitglied", null] as const) {
     assert.equal(abschnitteFuer({ rolle, labor: true }).some((a) => a.id === "start"), false, `Labor ${rolle}`);

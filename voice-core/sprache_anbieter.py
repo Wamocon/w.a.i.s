@@ -3,7 +3,8 @@
 Wahl je Baustein, in dieser Reihenfolge:
   1. WAMO_STT_ANBIETER bzw. WAMO_TTS_ANBIETER (soniox | haus), wenn gesetzt: gilt für alle Sitzungen dieses Kerns,
      z. B. für Tests oder um bei einer Störung im Haus alle auf Soniox zu stellen.
-  2. die Wahl des Profils (Modellzugang, Felder stt und tts; Profile ohne Claude-Konto laufen später ganz im Haus).
+  2. die Wahl des Profils (Modellzugang, Felder stt und tts). Soniox gilt für alle Profile, unabhängig vom Modellzugang
+     (Entscheidung D3 in docs/ausrollen-neue-nutzer.md): auch ein Profil ohne Claude-Zugang hört und spricht über Soniox.
   3. sonst soniox.
 
 Im Haus geht alles über das LiteLLM-Gateway (LITELLM_BASE_URL, LITELLM_API_KEY), nie direkt an die Knoten:
