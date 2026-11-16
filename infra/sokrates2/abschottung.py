@@ -3,7 +3,7 @@
 Aufruf (durch wamo-job.sh; installiert als /srv/wamo/app/waechter/abschottung.py, in der Sandbox
 /opt/wamo/waechter/abschottung.py):
 
-    python3 -I abschottung.py --sperrports 22,5432,11434 -- befehl [argumente ...]
+    python3 -I abschottung.py --sperrports 22,5432,11434 --entwicklungsports 20100-20199 -- befehl [argumente ...]
     python3 -I abschottung.py --seccomp-bpf [aarch64|x86_64] > seccomp.bpf     (bei der Installation)
 
 Das Netz bleibt an (Claude-API, GitHub, npm), aber zwei Wege zu Diensten auf dem Host werden zu:
@@ -14,8 +14,12 @@ Das Netz bleibt an (Claude-API, GitHub, npm), aber zwei Wege zu Diensten auf dem
   * Abstrakte Unix-Sockets außerhalb der Sandbox (zum Beispiel @/tmp/.X11-unix/X1 einer Desktop-Sitzung)
     und Signale an Prozesse außerhalb.
 
-Das Binden eigener TCP-Ports ist nur im Bereich 20000-20999 erlaubt (eigene Entwicklungsserver, M3), sonst
-gesperrt. Bind auf Port 0 (Quellport, zufälliger Lauscher) bleibt frei, connect bindet implizit Port 0.
+Entwicklungsports (Dispatcher 9, gleichzeitige Aufträge): Der Ausgangsfilter lässt auf Loopback 20000-20999 zu, alle Aufträge laufen
+als derselbe Benutzer im selben Netz-Namensraum. Jeder Auftrag bekommt deshalb mit --entwicklungsports den Teil dieses Bereichs, der
+zu seinem Platz gehört (höchstens 100 Ports). Nur dort darf er binden (eigene Entwicklungsserver, M3) und verbinden; jeder andere Port
+von 20000 bis 20999 gehört gleichzeitig laufenden Aufträgen und ist für bind und connect gesperrt. Außerhalb dieses Bereichs gilt
+connect wie bisher (alles außer den gesperrten Ports), bind ist gesperrt. Bind auf Port 0 (Quellport, zufälliger Lauscher) bleibt frei,
+connect bindet implizit Port 0; ein solcher Lauscher liegt außerhalb von 20000-20999 und ist über den Ausgangsfilter nicht erreichbar.
 
 Fail-closed: Ohne Landlock ab ABI 6 (Kernel 6.12) startet der Befehl nicht (Exit 126). UDP (DNS) bleibt frei;
 der Ausgangsfilter (nft) begrenzt sie auf DNS. Nur Standardbibliothek (ctypes).
@@ -39,7 +43,8 @@ LANDLOCK_SCOPE_SIGNAL = 1 << 1
 PR_SET_NO_NEW_PRIVS = 38
 MIN_ABI = 6
 EXIT_FEHLER = 126
-BIND_MIN, BIND_MAX = 20000, 20999  # M3: nur diese Ports darf ein Auftrag binden (eigene Entwicklungsserver)
+BIND_MIN, BIND_MAX = 20000, 20999  # M3: Entwicklungsbereich; ein Auftrag bindet und verbindet darin nur seinen eigenen Teil
+BEREICH_MAX_PORTS = 100  # so groß ist der Teil eines Platzes (wamo-job.sh platz_ports, Dispatcher PORTS_JE_PLATZ)
 
 
 class RulesetAttr(ctypes.Structure):
@@ -69,6 +74,21 @@ def erlaubte_ports(gesperrt: set[int]) -> list[int]:
     return [p for p in range(1, 65536) if p not in gesperrt]
 
 
+def parse_bereich(text: str) -> range:
+    """'20100-20199' -> range(20100, 20200): genau zwei fünfstellige Zahlen, innerhalb von BIND_MIN..BIND_MAX, aufsteigend, höchstens
+    BEREICH_MAX_PORTS Ports. Unsinn wirft ValueError (fail-closed)."""
+    teile = text.split("-")
+    if len(teile) != 2 or not all(len(t) == 5 and t.isascii() and t.isdigit() and t[0] != "0" for t in teile):
+        raise ValueError("Entwicklungsports: Form VON-BIS mit zwei fünfstelligen Zahlen")
+    von, bis = int(teile[0]), int(teile[1])
+    if not BIND_MIN <= von <= bis <= BIND_MAX or bis - von + 1 > BEREICH_MAX_PORTS:
+        raise ValueError(f"Entwicklungsports: höchstens {BEREICH_MAX_PORTS} Ports aus {BIND_MIN}-{BIND_MAX}")
+    # genau der Teil eines Platzes (ab einem Vielfachen von BEREICH_MAX_PORTS, volle Breite): nie über die Grenze zweier Plätze
+    if (von - BIND_MIN) % BEREICH_MAX_PORTS or bis - von + 1 != BEREICH_MAX_PORTS:
+        raise ValueError("Entwicklungsports: genau der Teil eines Platzes (Beginn auf einer Platzgrenze, volle Breite)")
+    return range(von, bis + 1)
+
+
 def _libc():
     libc = ctypes.CDLL(None, use_errno=True)
     libc.syscall.restype = ctypes.c_long
@@ -88,23 +108,27 @@ def abi_version() -> int:
                         ctypes.c_uint32(LANDLOCK_CREATE_RULESET_VERSION))
 
 
-def port_zugriff(gesperrt: set[int]) -> dict[int, int]:
-    """Je Port der erlaubte Zugriff: CONNECT für alle nicht gesperrten Ports, BIND nur für BIND_MIN..BIND_MAX.
-    Ports ohne Zugriff kommen nicht vor (connect dorthin und bind sonst wo sind damit gesperrt). Bind auf Port 0
-    (Quellport, zufälliger Lauscher) lässt Landlock ohnehin immer zu, connect bindet implizit Port 0."""
+def port_zugriff(gesperrt: set[int], eigene: range) -> dict[int, int]:
+    """Je Port der erlaubte Zugriff. Im Entwicklungsbereich BIND_MIN..BIND_MAX nur die eigenen Ports des Platzes: BIND immer, CONNECT, wenn
+    der Port nicht gesperrt ist (ein Dienst des Hosts lauscht dort). Jeder andere Port des Bereichs gehört einem gleichzeitigen Auftrag:
+    kein Zugriff. Außerhalb des Bereichs CONNECT für alle nicht gesperrten Ports, BIND nie. Ports ohne Zugriff kommen nicht vor (connect
+    dorthin und bind sonst wo sind damit gesperrt). Bind auf Port 0 (Quellport, zufälliger Lauscher) lässt Landlock ohnehin immer zu."""
+    if eigene.step != 1 or not BIND_MIN <= eigene.start <= eigene.stop - 1 <= BIND_MAX or len(eigene) > BEREICH_MAX_PORTS:
+        raise ValueError("eigene Entwicklungsports außerhalb des Bereichs")
     zugriff: dict[int, int] = {}
     for p in range(1, 65536):
         acc = 0
-        if p not in gesperrt:
-            acc |= LANDLOCK_ACCESS_NET_CONNECT_TCP
         if BIND_MIN <= p <= BIND_MAX:
-            acc |= LANDLOCK_ACCESS_NET_BIND_TCP
+            if p in eigene:
+                acc = LANDLOCK_ACCESS_NET_BIND_TCP | (0 if p in gesperrt else LANDLOCK_ACCESS_NET_CONNECT_TCP)
+        elif p not in gesperrt:
+            acc = LANDLOCK_ACCESS_NET_CONNECT_TCP
         if acc:
             zugriff[p] = acc
     return zugriff
 
 
-def abschotten(gesperrt: set[int]) -> None:
+def abschotten(gesperrt: set[int], eigene: range) -> None:
     libc = _libc()
     abi = abi_version()
     if abi < MIN_ABI:
@@ -115,7 +139,7 @@ def abschotten(gesperrt: set[int]) -> None:
                              ctypes.c_size_t(ctypes.sizeof(attr)), ctypes.c_uint32(0)), "create_ruleset")
     try:
         rule = NetPortAttr(0, 0)
-        for port, acc in port_zugriff(gesperrt).items():
+        for port, acc in port_zugriff(gesperrt, eigene).items():
             rule.allowed_access = acc
             rule.port = port
             _check(libc.syscall(ctypes.c_long(SYS_LANDLOCK_ADD_RULE), ctypes.c_int(fd),
@@ -248,14 +272,16 @@ def seccomp_bpf(arch: str | None = None) -> bytes:
     return b"".join(struct.pack("<HBBI", *ins) for ins in seccomp_programm(arch))
 
 
-def parse_args(argv: list[str]) -> tuple[set[int], list[str]]:
+def parse_args(argv: list[str]) -> tuple[set[int], range, list[str]]:
+    """Genau --sperrports LISTE --entwicklungsports VON-BIS -- befehl ...: ohne den eigenen Bereich startet nichts (fail-closed)."""
+    aufruf = "Aufruf: abschottung.py --sperrports LISTE --entwicklungsports VON-BIS -- befehl ..."
     if "--" not in argv:
-        raise ValueError("Aufruf: abschottung.py --sperrports LISTE -- befehl ...")
+        raise ValueError(aufruf)
     i = argv.index("--")
     opts, cmd = argv[:i], argv[i + 1:]
-    if len(opts) != 2 or opts[0] != "--sperrports" or not cmd:
-        raise ValueError("Aufruf: abschottung.py --sperrports LISTE -- befehl ...")
-    return parse_ports(opts[1]), cmd
+    if len(opts) != 4 or opts[0] != "--sperrports" or opts[2] != "--entwicklungsports" or not cmd:
+        raise ValueError(aufruf)
+    return parse_ports(opts[1]), parse_bereich(opts[3]), cmd
 
 
 def pdeathsig_setzen() -> None:
@@ -279,9 +305,9 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_FEHLER
         return 0
     try:
-        gesperrt, cmd = parse_args(argv)
+        gesperrt, eigene, cmd = parse_args(argv)
         pdeathsig_setzen()
-        abschotten(gesperrt)
+        abschotten(gesperrt, eigene)
     except (OSError, ValueError) as e:
         print(f"WAMO-Abschottung fehlgeschlagen, Auftrag startet nicht: {e}", file=sys.stderr)
         return EXIT_FEHLER

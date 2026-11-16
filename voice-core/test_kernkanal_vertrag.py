@@ -303,8 +303,8 @@ def _zeilen_im_muster(muster: str, quelle: str) -> list[str]:
 def test_i3_genau_eine_zeile_passt_zum_muster_von_schalter():
     muster = _muster_von_schalter()
     assert muster == "^SCHRANKEN_VERSION = [1-9][0-9]*$"
-    assert _zeilen_im_muster(muster, EB_QUELLE) == ["SCHRANKEN_VERSION = 2"]
-    assert eb.SCHRANKEN_VERSION == 2
+    assert _zeilen_im_muster(muster, EB_QUELLE) == ["SCHRANKEN_VERSION = 3"]  # 3: gleichzeitige Aufträge (Dispatcher 9)
+    assert eb.SCHRANKEN_VERSION == 3
     assert "\r" not in (VOICE_CORE / "entwicklung_betrieb.py").read_bytes().decode("utf-8"), "ein Zeilenende mit CR bricht das $ im grep"
 
 
@@ -336,12 +336,14 @@ I2_STANDARD = {"KANAL": "zu", "MAX_TURNS": "40", "MAX_BUDGET_USD": "2.00", "MAX_
                "MAX_LAUFZEIT_TAG_S": "14400", "MAX_FOLGEN": "5", "MIN_ABSTAND_S": "60", "MIN_PLATZ_MB": "2048",
                "MAX_VERSUCH_STUNDE": "60",  # Versuche je Stunde, nur nach unten einstellbar (20 bis Dispatcher 7)
                # Dispatcher 8: Grenzen je Profil
-               "MAX_NEU_STUNDE_PROFIL": "3", "MAX_NEU_TAG_PROFIL": "8", "MAX_VERSUCH_STUNDE_PROFIL": "10", "MAX_LAUFZEIT_TAG_S_PROFIL": "7200"}
+               "MAX_NEU_STUNDE_PROFIL": "3", "MAX_NEU_TAG_PROFIL": "8", "MAX_VERSUCH_STUNDE_PROFIL": "10", "MAX_LAUFZEIT_TAG_S_PROFIL": "7200",
+               # Dispatcher 9: gleichzeitige Aufträge gesamt und je Person (Entscheidung von Niko 16.11.2026)
+               "MAX_PARALLEL": "6", "MAX_PARALLEL_PROFIL": "3"}
 I2_ABLAUF_TAGE = 30
 I2_BEREICHE = {"MAX_TURNS": (1, 200), "MAX_START_STUNDE": (1, 60), "MAX_START_TAG": (1, 200), "MAX_LAUFZEIT_TAG_S": (60, 86400),
                "MAX_FOLGEN": (0, 20), "MIN_ABSTAND_S": (0, 3600), "MIN_PLATZ_MB": (100, 1000000), "MAX_VERSUCH_STUNDE": (1, 60),
                "MAX_NEU_STUNDE_PROFIL": (1, 60), "MAX_NEU_TAG_PROFIL": (1, 200), "MAX_VERSUCH_STUNDE_PROFIL": (1, 60),
-               "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400)}
+               "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400), "MAX_PARALLEL": (1, 6), "MAX_PARALLEL_PROFIL": (1, 6)}
 I2_SCHLUESSEL = {"KANAL", "ABLAUF", "ARTEN", "REPOS", "DIENSTE", "MAX_BUDGET_USD", *I2_BEREICHE}
 
 
@@ -367,7 +369,12 @@ def test_i2_der_dispatcher_kennt_dieselben_schluessel_und_bereiche():
 def test_i2_die_standardwerte_des_dispatchers_gleichen_denen_des_skripts():
     standard = K.Konfig()
     assert standard.kanal is None  # fehlt der Schlüssel, gilt der Kanal als zu
+    # Ausnahme mit Absicht (Dispatcher 9, Befund des Sicherheitsreviews): fehlen MAX_PARALLEL und MAX_PARALLEL_PROFIL in der Datei, gilt einer
+    # gleichzeitig; die Standards 6 und 3 schreibt das Skript (schluessel, kanal) ausdrücklich
+    assert (standard.max_parallel, standard.max_parallel_profil) == (1, 1)
     for schluessel in I2_BEREICHE:
+        if schluessel in ("MAX_PARALLEL", "MAX_PARALLEL_PROFIL"):
+            continue
         assert str(getattr(standard, schluessel.lower())) == I2_STANDARD[schluessel], schluessel
     assert standard.max_budget_usd == I2_STANDARD["MAX_BUDGET_USD"]
 
@@ -385,7 +392,8 @@ def test_i2_die_angelegte_datei_wird_vom_dispatcher_angenommen():
     werte = {"KANAL": std["KANAL"], "ABLAUF": ablauf, "ARTEN": "", "REPOS": "", "DIENSTE": "",
              **{schluessel: std[schluessel] for schluessel in (*I2_BEREICHE, "MAX_BUDGET_USD")}}
     konfig = K.konfig_lesen("/t/kernkanal.conf", jetzt=jetzt, lesen=_attrappe("\n".join(f"{k}={v}" for k, v in werte.items()) + "\n"))
-    assert konfig == K.Konfig(kanal="zu", ablauf=date(2026, 12, 11))
+    # Dispatcher 9: das Skript schreibt die Standards 6 und 3 ausdrücklich (fehlende Schlüssel hießen einer)
+    assert konfig == K.Konfig(kanal="zu", ablauf=date(2026, 12, 11), max_parallel=6, max_parallel_profil=3)
     zustand = K.kanal_zustand(K.Pfade(konfig=Path("/t/kernkanal.conf"), notaus=Path("/t/notaus")), jetzt=jetzt,
                               lesen=_attrappe("\n".join(f"{k}={v}" for k, v in werte.items()) + "\n"), vorhanden=lambda p: False)
     assert zustand.grund == "kanal_zu" and zustand.tage_rest == 30
@@ -835,7 +843,9 @@ def test_p5_der_buero_auftrag_traegt_die_kennung_der_zulassung():
 def test_p5_grenze_profil_hat_im_kern_einen_satz_und_belegt_den_satz_der_einfachen_warteschlange():
     assert "grenze_profil" in K.KANAL_GRUENDE and eb.GRUND_SAETZE["grenze_profil"].endswith(".")
     assert eb.ablehn_grund(4, {"belegt": {"grund": "Es läuft schon ein Auftrag"}}) == eb.SATZ_ANDERER_AUFTRAG
-    assert D.PARALLEL_MAX == 1  # ein Auftrag gleichzeitig (Entscheidung N13)
+    # Dispatcher 9: belegt trägt die erreichte Grenze, der Satz "anderer Auftrag" gilt nur noch für ein Ereignis ohne Code (Dispatcher bis Version 8)
+    assert eb.ablehn_grund(4, {"belegt": {"grund": "Es laufen schon 6 Aufträge", "grenze": "gesamt", "max": 6}}) != eb.SATZ_ANDERER_AUFTRAG
+    assert D.PARALLEL_MAX == K.PARALLEL_HART == 6  # sechs gesamt (Entscheidung von Niko 16.11.2026)
 
 
 def test_p5_das_skript_verlangt_fuer_mitglieder_die_schranken_version_des_kerns():
@@ -865,7 +875,8 @@ def test_p5_die_grenzen_je_profil_liegen_unter_den_gesamtgrenzen_und_das_skript_
         assert re.search(rf'{option}\) optionswert "\$@"; GRENZE\[{schluessel}\]="\$2"; pruefe_zahl "\$1" "\$2" {klein} {gross};', SKRIPT), option
 
 
-def test_p5_skript_und_rauchtest_verlangen_dispatcher_8():
-    assert re.search(r"^MIN_DISPATCHER=8\b", SKRIPT, flags=re.M) and D.VERSION == "8"
-    assert ">= 8" in (INFRA / "wamo_job_kern_rauchtest.py").read_text(encoding="utf-8")
+def test_p5_skript_und_rauchtest_verlangen_dispatcher_9():
+    assert re.search(r"^MIN_DISPATCHER=9\b", SKRIPT, flags=re.M) and D.VERSION == "9"
+    assert ">= 9" in (INFRA / "wamo_job_kern_rauchtest.py").read_text(encoding="utf-8")
+    assert re.search(r"^PARALLEL_HART=6\b", SKRIPT, flags=re.M) and K.PARALLEL_HART == 6
     assert "grenze_profil" in K.KANAL_GRUENDE  # das Skript prüft das installierte Modul auf diesen Code

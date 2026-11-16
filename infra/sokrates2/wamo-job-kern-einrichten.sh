@@ -13,8 +13,10 @@
 #   wamo-job-kern-einrichten.sh kanal --arten A,B --repos O/N[,O/N] [--dienste D[,D]] [--max-turns N] [--max-budget-usd X]
 #                               [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N] [--max-versuch-stunde N]
 #                               [--max-neu-stunde-profil N] [--max-neu-tag-profil N] [--max-versuch-stunde-profil N]
-#                               [--max-laufzeit-tag-s-profil N]
+#                               [--max-laufzeit-tag-s-profil N] [--max-parallel N] [--max-parallel-profil N]
 #       Ein Aufruf ersetzt Arten, Repos und Dienste vollständig (was fehlt, ist danach nicht mehr erlaubt); die Grenzen ohne Option bleiben.
+#       --max-parallel (1 bis 6, Standard 6) und --max-parallel-profil (1 bis 6, Standard 3, nie über --max-parallel): gleichzeitig laufende
+#       Aufträge gesamt und je Person (Dispatcher 9, Entscheidung von Niko 16.11.2026); 1 und 1 heißt ein Auftrag gleichzeitig wie früher.
 #   wamo-job-kern-einrichten.sh kanal zu
 #       Regeln des Kern-Kanals öffnen oder schließen. Öffnen und Ändern nur ohne laufenden Kern-Auftrag, GitHub-Arten nur, wenn
 #       claude --help (als wamo) --max-turns und --max-budget-usd kennt. kanal zu geht immer.
@@ -73,11 +75,18 @@ STD_MAX_NEU_STUNDE_PROFIL=3
 STD_MAX_NEU_TAG_PROFIL=8
 STD_MAX_VERSUCH_STUNDE_PROFIL=10
 STD_MAX_LAUFZEIT_TAG_S_PROFIL=7200
+# gleichzeitige Aufträge gesamt (nie über PARALLEL_HART, wie im Modul des Kern-Kanals) und je Person (Dispatcher 9)
+STD_MAX_PARALLEL=6
+STD_MAX_PARALLEL_PROFIL=3
+PARALLEL_HART=6
 STD_KOSTEN_AUFTRAG_USD=3
 STD_KOSTEN_TAG_USD=10
 STD_MITGLIEDER=aus
 MIN_SCHRANKEN_MITGLIEDER=2   # erst ab dieser SCHRANKEN_VERSION kennt der Kern WAMO_ENTWICKLUNG_MITGLIEDER und die Grenzen der Mitglieder
-MIN_DISPATCHER=8             # erst Dispatcher 8 kennt die Kennung des Profils und die Schlüssel MAX_*_PROFIL in kernkanal.conf
+# Dispatcher 9 lässt Aufträge gleichzeitig laufen: erst ein Kern ab dieser SCHRANKEN_VERSION prüft und bucht Starts je Profil hintereinander
+# (sonst überschritten zwei gleichzeitige Starts die Tagesgrenze gemeinsam) und kennt die Sätze je Grenze im Ereignis belegt
+MIN_SCHRANKEN_PARALLEL=3
+MIN_DISPATCHER=9             # Dispatcher 8: Kennung des Profils und MAX_*_PROFIL; 9: MAX_PARALLEL und MAX_PARALLEL_PROFIL, Plätze mit Portbereich
 MAX_PROFILE=20               # wie MAX_PROFILE in voice-core/entwicklung_betrieb.py
 
 KERN_IP=192.168.178.136
@@ -112,7 +121,7 @@ HAUS_KERN_RE='^ENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 KONFIG_SCHLUESSEL=(KANAL ABLAUF ARTEN REPOS DIENSTE MAX_TURNS MAX_BUDGET_USD MAX_START_STUNDE MAX_START_TAG MAX_LAUFZEIT_TAG_S MAX_FOLGEN
   MIN_ABSTAND_S MIN_PLATZ_MB MAX_VERSUCH_STUNDE MAX_NEU_STUNDE_PROFIL MAX_NEU_TAG_PROFIL MAX_VERSUCH_STUNDE_PROFIL
-  MAX_LAUFZEIT_TAG_S_PROFIL)
+  MAX_LAUFZEIT_TAG_S_PROFIL MAX_PARALLEL MAX_PARALLEL_PROFIL)
 COREENV=/usr/local/sbin/wamo-core-env
 SLOTS=(bash "$HERE/wamo-core-slots.sh")
 PYTHON3=/usr/bin/python3
@@ -129,7 +138,7 @@ aufruf() {
   echo "Aufruf: schluessel [--trocken] [--ablauf JJJJMMTT] [--hostfingerabdruck SHA256:...] | kanal --arten A,B --repos O/N[,O/N]" \
     "[--dienste D] [--max-turns N] [--max-budget-usd X] [--max-start-stunde N] [--max-start-tag N] [--max-laufzeit-tag-s N]" \
     "[--max-versuch-stunde N] [--max-neu-stunde-profil N] [--max-neu-tag-profil N] [--max-versuch-stunde-profil N]" \
-    "[--max-laufzeit-tag-s-profil N] | kanal zu | schalter an|aus <release> [--profil <user_id>]" \
+    "[--max-laufzeit-tag-s-profil N] [--max-parallel N] [--max-parallel-profil N] | kanal zu | schalter an|aus <release> [--profil <user_id>]" \
     "[--kosten-auftrag X] [--kosten-tag X] [--mitglieder an|aus] [--haus an|aus] [--trocken] | notaus-aufheben | status" >&2
   exit 2
 }
@@ -373,7 +382,8 @@ konfig_standard() {
      [MAX_START_TAG]="$STD_MAX_START_TAG" [MAX_LAUFZEIT_TAG_S]="$STD_MAX_LAUFZEIT_TAG_S" [MAX_FOLGEN]="$STD_MAX_FOLGEN"
      [MIN_ABSTAND_S]="$STD_MIN_ABSTAND_S" [MIN_PLATZ_MB]="$STD_MIN_PLATZ_MB" [MAX_VERSUCH_STUNDE]="$STD_MAX_VERSUCH_STUNDE"
      [MAX_NEU_STUNDE_PROFIL]="$STD_MAX_NEU_STUNDE_PROFIL" [MAX_NEU_TAG_PROFIL]="$STD_MAX_NEU_TAG_PROFIL"
-     [MAX_VERSUCH_STUNDE_PROFIL]="$STD_MAX_VERSUCH_STUNDE_PROFIL" [MAX_LAUFZEIT_TAG_S_PROFIL]="$STD_MAX_LAUFZEIT_TAG_S_PROFIL")
+     [MAX_VERSUCH_STUNDE_PROFIL]="$STD_MAX_VERSUCH_STUNDE_PROFIL" [MAX_LAUFZEIT_TAG_S_PROFIL]="$STD_MAX_LAUFZEIT_TAG_S_PROFIL"
+     [MAX_PARALLEL]="$STD_MAX_PARALLEL" [MAX_PARALLEL_PROFIL]="$STD_MAX_PARALLEL_PROFIL")
 }
 
 KONFIG_FEHLER=""
@@ -452,6 +462,9 @@ case "$KOMMANDO" in
           --max-neu-tag-profil) optionswert "$@"; GRENZE[MAX_NEU_TAG_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 200; shift 2 ;;
           --max-versuch-stunde-profil) optionswert "$@"; GRENZE[MAX_VERSUCH_STUNDE_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 60; shift 2 ;;
           --max-laufzeit-tag-s-profil) optionswert "$@"; GRENZE[MAX_LAUFZEIT_TAG_S_PROFIL]="$2"; pruefe_zahl "$1" "$2" 60 86400; shift 2 ;;
+          # gleichzeitige Aufträge (Dispatcher 9): gesamt und je Person, nie über PARALLEL_HART
+          --max-parallel) optionswert "$@"; GRENZE[MAX_PARALLEL]="$2"; pruefe_zahl "$1" "$2" 1 "$PARALLEL_HART"; shift 2 ;;
+          --max-parallel-profil) optionswert "$@"; GRENZE[MAX_PARALLEL_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 "$PARALLEL_HART"; shift 2 ;;
           *) aufruf "unbekannte Option für kanal: $1" ;;
         esac
       done
@@ -656,7 +669,7 @@ cmd_kanal() {
   fi
   [ -f "$KERN_DATEI" ] || vorbedingung "${KERN_DATEI#"$WURZEL"} fehlt (erst schluessel)"
   [ ! -e "$NOTAUS" ] || vorbedingung "die Sperrdatei ${NOTAUS#"$WURZEL"} besteht (erst notaus-aufheben, dann schluessel)"
-  dispatcher_pruefen   # die Datei bekommt die Schlüssel MAX_*_PROFIL, die erst Dispatcher 8 kennt
+  dispatcher_pruefen   # die Datei bekommt die Schlüssel MAX_*_PROFIL und MAX_PARALLEL*, die erst Dispatcher 9 kennt
   ruhe_pruefen
   konfig_lesen_hart
   [[ "${K[ABLAUF]}" =~ ^[0-9]{8}$ ]] && tage="$(tage_bis "${K[ABLAUF]}")" || vorbedingung "ABLAUF in kernkanal.conf ist ungültig (schluessel --ablauf)"
@@ -676,6 +689,8 @@ cmd_kanal() {
   [ -z "$MAX_LAUFZEIT" ] || K[MAX_LAUFZEIT_TAG_S]="$MAX_LAUFZEIT"
   local g
   for g in "${!GRENZE[@]}"; do K[$g]="${GRENZE[$g]}"; done
+  [ "${K[MAX_PARALLEL_PROFIL]}" -le "${K[MAX_PARALLEL]}" ] \
+    || vorbedingung "MAX_PARALLEL_PROFIL ${K[MAX_PARALLEL_PROFIL]} liegt über MAX_PARALLEL ${K[MAX_PARALLEL]} (je Person nie mehr als gesamt)"
   K[KANAL]=offen
   konfig_schreiben
   echo "Kanal offen für: ${K[ARTEN]}${K[REPOS]:+ mit Repos ${K[REPOS]}}. Ablauf ${K[ABLAUF]} ($tage Tage)."
@@ -727,6 +742,13 @@ schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
     [ -n "$version" ] && [ "$version" -ge "$MIN_SCHRANKEN_MITGLIEDER" ] \
       || vorbedingung "das Release $RELEASE kennt die Schranken der Mitglieder nicht (SCHRANKEN_VERSION ${version:-?}, nötig ab $MIN_SCHRANKEN_MITGLIEDER): ein altes Release ließe --mitglieder an wirkungslos"
     dispatcher_pruefen
+  fi
+  local dv sv
+  dv="$(dispatcher_version "$APP/bin/wamo-job-dispatch")"
+  if [ -n "$dv" ] && [ "$dv" -ge 9 ]; then
+    sv="$(schranken_version "$ziel")"
+    [ -n "$sv" ] && [ "$sv" -ge "$MIN_SCHRANKEN_PARALLEL" ] \
+      || vorbedingung "der Dispatcher $dv lässt Aufträge gleichzeitig laufen, das Release $RELEASE kennt das nicht (SCHRANKEN_VERSION ${sv:-?}, nötig ab $MIN_SCHRANKEN_PARALLEL): zwei gleichzeitige Starts könnten die Tagesgrenze gemeinsam überschreiten"
   fi
   if "$COREENV" liste 2>/dev/null | grep -q '^WAMO_ENTWICKLUNG'; then
     vorbedingung "core.env enthält ein WAMO_ENTWICKLUNG*: es hätte vor dem Drop-in Vorrang (wamo-core-env loeschen)"

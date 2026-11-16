@@ -1401,7 +1401,7 @@ und auf dem Server steht kein Zugangswert im Klartext.
 
 **Was bleibt gesperrt:** Selbständerung (`SELF_REPOS = ("wamo", "w.a.i.s")` mit `ist_eigenes_repo` im Kern, im Dispatcher und im Kern-Kanal,
 im Dispatcher zusätzlich die GitHub-ID `SELF_REPO_IDS`, dazu die Fork-Prüfung), Supabase und `deployment` in der Sandbox, der Befehl `pruefen` im Kern-Kanal (auch mit
-`WAMO_PRUEFEN=an`), Jira und Vercel, bis ein enges Konto in `DIENSTE` steht. `PARALLEL_MAX = 1` gilt für beide Kanäle.
+`WAMO_PRUEFEN=an`), Jira und Vercel, bis ein enges Konto in `DIENSTE` steht. Die Plätze für gleichzeitige Aufträge gelten für beide Kanäle zusammen (seit Dispatcher 9 bis zu sechs, 18.2).
 
 ### 18.1 Mitglieder und Trennung je Profil (Dispatcher 8, Ausrollen P5, vorbereitet am 15.11.2026)
 
@@ -1417,8 +1417,8 @@ in `kernkanal.conf` mit Standard und Bereich: `MAX_NEU_STUNDE_PROFIL` (3, 1 bis 
 ersten Start, `MAX_VERSUCH_STUNDE_PROFIL` (10, 1 bis 60) gilt nicht für Folgen eines eigenen Auftrags (die begrenzt `MAX_FOLGEN`), `MAX_LAUFZEIT_TAG_S_PROFIL`
 (7200, 60 bis 86400). Die Gesamtgrenze der Versuche (`MAX_VERSUCH_STUNDE`) liegt seit Dispatcher 8 fest bei höchstens 60 (Standard 60, nur nach unten): zwei
 Personen mit je ihrer Grenze sperren den Admin nicht mehr aus. Ein bestehendes `kernkanal.conf` behält seine Werte (auch `MAX_VERSUCH_STUNDE=20`), bis `kanal`
-sie ändert. `PARALLEL_MAX = 1` bleibt; meldet der Dispatcher einen anderen laufenden Auftrag, sagt der Kern "Ein anderer Auftrag läuft gerade. Bitte versuche es
-in ein paar Minuten noch einmal." (einfache Form der Warteschlange).
+sie ändert. Bis Dispatcher 8 lief genau ein Auftrag gleichzeitig (einfache Form der Warteschlange: "Ein anderer Auftrag läuft gerade. Bitte versuche es in ein
+paar Minuten noch einmal."); seit Dispatcher 9 laufen bis zu sechs gleichzeitig, je Person drei (18.2).
 
 **Mitglieder.** Aufträge nur mit `WAMO_ENTWICKLUNG_MITGLIEDER=an` im Drop-in und mit ihrer `user_id` in `WAMO_ENTWICKLUNG_PROFILE` (jede Kurzkennung nur einmal,
 höchstens 20 Profile), Laborprofile nie. Für sie gelten dieselben Kostengrenzen aus dem Drop-in wie für Admins (Entscheidung von Niko am 16.11.2026: keine
@@ -1444,6 +1444,62 @@ bleiben). (4) `schalter an <release> --profil <niko>,<pilot> --kosten-auftrag 3 
 Reihenfolge: zuerst `notaus` (oder `kanal zu`), dann den Kern zurück (`rueckweg-kern`), dann Dispatcher 7 aus dem vorigen Stand mit `wamo-job-einrichten.sh`,
 und erst danach `kernkanal.conf` ohne die Schlüssel `MAX_*_PROFIL` (Sicherung unter `/var/backups/wamo-job-kern/`), `notaus-aufheben`, `schluessel`, `kanal`.
 Bleibt Dispatcher 8 stehen, während der Kern zurück auf `SCHRANKEN_VERSION 1` geht, enden alle Starts mit `projekt` (fail closed).
+
+### 18.2 Gleichzeitige Aufträge (Dispatcher 9, Entscheidung von Niko am 16.11.2026: sechs gesamt, je Person drei)
+
+**Grenzen.** `PARALLEL_MAX = 6` im Dispatcher und `PARALLEL_HART = 6` im Modul des Kern-Kanals sind die harte Obergrenze. In `kernkanal.conf` senken
+`MAX_PARALLEL` (1 bis 6, Standard 6) und `MAX_PARALLEL_PROFIL` (1 bis 6, Standard 3, nie über `MAX_PARALLEL`) sie; `kanal --max-parallel N --max-parallel-profil N`
+setzt beide, 1 und 1 heißt ein Auftrag gleichzeitig wie früher. Ohne gültige `kernkanal.conf` gilt höchstens einer (fail closed), ebenso, wenn die Datei die
+beiden Schlüssel nicht enthält: Dispatcher 9 allein schaltet nichts frei, die Standards 6 und 3 schreibt erst `schluessel` oder `kanal`. Person heißt: im Kern-Kanal die
+Kennung des Profils, der PC-Kanal zusammen (`pc`), lokale Aufrufe zusammen (`lokal`); alle zählen gegen die Gesamtgrenze. Plätze und Personen sind Sperren
+(`platz-<n>`, `person-<Person>-<n>`), gezählt unter der kurzen Sperre `plaetze`. Ein Start an einer Grenze endet mit dem Ereignis `belegt`, Feld `grenze`
+(`auftrag`, `projekt`, `gesamt`, `profil`) und `max`; der Kern sagt dann genau diese Grenze ("Alle sechs Plätze für Entwicklungsaufträge sind belegt" oder "Es
+laufen schon drei Aufträge von dir"), den Satz "Ein anderer Auftrag läuft gerade" nur noch bei einem älteren Dispatcher ohne Code.
+
+**Trennung gleichzeitiger Sandboxes.** Alle Aufträge laufen als `wamo` im Netz-Namensraum des Hosts. Jeder Platz `n` bekommt einen eigenen Teil der
+Entwicklungsports, `20000 + n*100` bis `20000 + n*100 + 99` (`wamo-job.sh --platz`, in der Sandbox `WAMO_PORT_VON` und `WAMO_PORT_BIS`, Hinweis im Systemprompt);
+Landlock erlaubt Binden und Verbinden im Bereich 20000 bis 20999 nur dort. Der Selbsttest vor jedem Lauf prüft den eigenen Lauscher und den Bereich des nächsten
+Platzes (connect und bind zu). UDP auf Loopback weist der Ausgangsfilter ab, abstrakte Unix-Sockets und Signale sperrt Landlock je Domäne, PID-, IPC- und
+UTS-Namensraum, `/tmp`, `/dev/shm` und Zustand sind je Sandbox eigen. Nicht getrennt: `/proc/net` zeigt die Sockets des gemeinsamen Netz-Namensraums
+(Portnummern, keine Inhalte), CPU, Speicher und Platte teilen sich alle (Grenzen je Einheit). Ein eigener Netz-Namensraum je Auftrag bleibt ein Folgepaket.
+Der allgemeine Rauchtest (`wamo_job_rauchtest.py`) nimmt Platz 9 (20900 bis 20999), den der Dispatcher nie vergibt, und prüft, dass ein fremder Teil gesperrt ist.
+Der Name jeder Einheit trägt den Platz (`wamo-job-<job>-<zusatz>-p<n>-<zeit>.scope`): Wer einen Platz belegt, beendet zuerst alle Reste darauf
+(`platz_reste_beenden`), etwa die Sandbox eines hart beendeten Dispatchers (SIGKILL, OOM), die sonst den Portbereich weiter nutzte. Der Selbsttest verlangt,
+dass `net.ipv4.ip_local_port_range` die Entwicklungsports nicht schneidet (Standard 32768 bis 60999), sonst könnte `bind(0)` einen fremden Teil belegen.
+
+**Kosten und Laufzeit.** Im Kern laufen Prüfung und Anlegen eines Starts je Profil hintereinander (`start_sperre`, je Kern-Prozess); ein laufender Auftrag zählt
+mit seiner Auftragsgrenze, zwei gleichzeitige Starts überschreiten die Tagesgrenze so nicht gemeinsam. Zwei Kern-Prozesse zugleich (Slots a und b beim
+Umschalten) schützt das nicht: dort bleibt die Tagesgrenze um höchstens einen Auftrag überschreitbar. Im Kanal laufen zweite Prüfung und Buchen des Starts unter der
+Sperre `kernkanal`, laufende Aufträge reservieren in der Laufzeit je Tag (gesamt und je Profil) ihr Zeitlimit. Der Proxy der Hausmodelle bleibt bei zwei
+gleichzeitigen Anfragen (`PARALLEL_MAX = 2`): weitere Aufträge warten dort oder bekommen nach der Wartezeit 429 (Claude Code wiederholt). Jeder Lauf hat sein eigenes
+Auftragstoken.
+
+**Notaus.** `wamo-job-kern-rueckweg.sh notaus` beendet alle laufenden Kern-Aufträge (sucht wiederholt, bis keiner mehr läuft); ein Start, der nach dem Vorbereiten
+eine Abbruchdatei findet, startet nicht mehr.
+
+**Versionspaar und Reihenfolge.** Kern `SCHRANKEN_VERSION = 3` gehört zu Dispatcher 9. (1) Kern-Release mit `SCHRANKEN_VERSION = 3` über die Slots. (2) Gleich danach
+bei Ruhe `wamo-job-einrichten.sh` (Dispatcher 9, Modul, Abschottung, `wamo-job.sh`). Mit der vorhandenen `kernkanal.conf` (ohne die neuen Schlüssel) läuft
+weiter einer gleichzeitig. (3)
+`wamo-job-kern-einrichten.sh schluessel --trocken`, dann `schluessel --ablauf <JJJJMMTT> --hostfingerabdruck <SHA256:...>` (neuer Rauchtest, Schlüssel
+`MAX_PARALLEL` und `MAX_PARALLEL_PROFIL` mit den Standards 6 und 3: ab hier laufen Aufträge gleichzeitig), dann `wamo-job-kern-rauchtest --produktiv` und
+`wamo_job_rauchtest.py`. (4) Für mehrere Personen die Gesamtgrenzen anheben (sonst bremsen sie die Plätze: Standard `MAX_START_STUNDE` 4, `MAX_START_TAG` 8,
+`MAX_LAUFZEIT_TAG_S` 14400, und jeder laufende Auftrag reserviert sein Zeitlimit), etwa `kanal --arten recherche --max-start-stunde 12 --max-start-tag 40
+--max-laufzeit-tag-s 28800 --max-versuch-stunde 60 --max-parallel 6 --max-parallel-profil 3`. `schluessel`, `kanal` und `schalter ... --mitglieder an` verlangen Dispatcher 9; steht Dispatcher 9, verlangt
+`schalter an` ein Kern-Release ab `SCHRANKEN_VERSION 3`.
+
+**Rückweg.** Sofort, auch mit laufenden Aufträgen: `notaus`. Ohne laufenden Kern-Auftrag (`kanal` verlangt Ruhe): `kanal ... --max-parallel 1
+--max-parallel-profil 1` (wieder einer gleichzeitig, ohne Neustart). Ganz zurück: erst `notaus` oder Grenzen auf 1, dann den Kern zurück (`rueckweg-kern`), dann
+Dispatcher 8 aus dem vorigen Stand mit `wamo-job-einrichten.sh`, dann `kernkanal.conf` ohne `MAX_PARALLEL` und `MAX_PARALLEL_PROFIL` aus der Sicherung unter
+`/var/backups/wamo-job-kern/` (Dispatcher 8 läse die Schlüssel als Fehler), dann `notaus-aufheben`, `schluessel` und `kanal` mit dem Skript des vorigen Stands
+(das neue verlangt Dispatcher 9). Ein Kern mit `SCHRANKEN_VERSION 2` neben Dispatcher 9 prüft Starts desselben Profils nicht hintereinander; deshalb vor dem
+Rückweg des Kerns die Grenzen auf 1 setzen.
+
+**Offen (aus dem Sicherheitsreview, Verfügbarkeit, keine Trennung zwischen Personen):** (1) Der Proxy der Hausmodelle hat zwei Plätze ohne Grenze je
+Person; drei Haus-Aufträge einer Person können andere warten lassen (Vorschlag: höchstens ein Platz je Profil). (2) Sechs Sandboxes teilen sich Speicher,
+CPU und Platte ohne gemeinsame Obergrenze (je Einheit 8 GB, 400 % CPU; Vorschlag: Eltern-Slice `wamo-jobs.slice` mit Gesamtgrenzen und eine Plattenquote).
+(3) `MIN_ABSTAND_S` (60 s) gilt für alle Profile zusammen: zwei Starts verschiedener Personen in derselben Minute scheitern an `abstand`. (4) Der Kern
+startet je Sitzung einen Auftrag; drei gleichzeitige Aufträge einer Person brauchen drei Sitzungen. (5) Ein Start, dessen Ende nie gebucht wurde,
+reserviert seine Laufzeit bis zu einem Tag (fail closed, ohne Werkzeug zum Bereinigen).
 
 ## 19. Labor-Dienst (Test-Jira des Testlabors, Betrieb, vorbereitet am 12.11.2026, noch nicht ausgerollt)
 

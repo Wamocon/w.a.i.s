@@ -23,10 +23,12 @@ Der Release-Nachweis steht in der Zeile SCHRANKEN_VERSION unten (das Skript auf 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import os
 import re
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -35,7 +37,8 @@ from loguru import logger
 
 from memory import ENTWICKLUNGSAUFTRAG, KOSTEN_JE_ZEILE_MAX, normalize_uuid
 
-SCHRANKEN_VERSION = 2
+# 3: gleichzeitige Aufträge (Start je Profil hintereinander, Sätze je Grenze im Ereignis belegt). Die Zeile darunter bleibt ohne Kommentar.
+SCHRANKEN_VERSION = 3
 
 ENV_SCHALTER = "WAMO_ENTWICKLUNG_BUERO"
 ENV_ORT = "WAMO_ENTWICKLUNG_ORT"
@@ -429,8 +432,42 @@ GRUND_UNBEKANNT = "Der Kanal hat den Auftrag abgewiesen."
 GRUENDE_DAUERHAFT = frozenset({"notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "herkunft_unklar"})
 KANAL_SPERRE_SECS = 120.0
 SATZ_BELEGT = "Es läuft schon ein Auftrag. Bitte warte, bis er fertig ist."
-# Der Dispatcher führt genau einen Auftrag gleichzeitig aus (PARALLEL_MAX = 1, gemeinsames Loopback): einfache Form der Warteschlange
+# Ein Dispatcher bis Version 8 führte genau einen Auftrag gleichzeitig aus (PARALLEL_MAX = 1) und meldete belegt ohne Code: dann war die
+# Gesamtgrenze wirklich erreicht. Ab Dispatcher 9 nennt das Ereignis belegt die Grenze (BELEGT_SAETZE), dieser Satz gilt nur noch für ältere.
 SATZ_ANDERER_AUFTRAG = "Ein anderer Auftrag läuft gerade. Bitte versuche es in ein paar Minuten noch einmal."
+# Gleichzeitige Aufträge (Dispatcher 9, Entscheidung von Niko 16.11.2026: sechs gesamt, je Person drei). Schlüssel: die Codes im Feld grenze
+# des Ereignisses belegt (BELEGT_GRENZEN im Modul des Kern-Kanals, test_kernkanal_vertrag.py hält beide gleich). {n} ist die Zahl der Grenze
+# aus dem Feld max, als Wort; ohne gültige Zahl gilt der Satz ohne Zahl.
+BELEGT_SAETZE: dict[str, str] = {
+    "auftrag": "Dieser Auftrag läuft bereits. Bitte warte, bis er fertig ist.",
+    "projekt": "In diesem Projekt läuft schon ein Auftrag. Bitte warte, bis er fertig ist.",
+    "gesamt": "Alle {n} Plätze für Entwicklungsaufträge sind belegt. Bitte versuche es in ein paar Minuten noch einmal.",
+    "profil": "Es laufen schon {n} Aufträge von dir, mehr gehen gleichzeitig nicht. Bitte warte, bis einer fertig ist.",
+}
+_BELEGT_EINS = {"gesamt": "Der Platz für Entwicklungsaufträge ist belegt. Bitte versuche es in ein paar Minuten noch einmal.",
+                "profil": "Es läuft schon ein Auftrag von dir, mehr gehen gleichzeitig nicht. Bitte warte, bis er fertig ist."}
+_BELEGT_OHNE_ZAHL = {"gesamt": "Alle Plätze für Entwicklungsaufträge sind belegt. Bitte versuche es in ein paar Minuten noch einmal.",
+                     "profil": "Es laufen schon so viele Aufträge von dir, wie gleichzeitig gehen. Bitte warte, bis einer fertig ist."}
+_ZAHLWORT = {2: "zwei", 3: "drei", 4: "vier", 5: "fünf", 6: "sechs"}
+
+
+def belegt_satz(ereignis: object) -> str:
+    """Der Satz zu einem Ereignis belegt des Dispatchers: nach grenze (Dispatcher 9) mit der Zahl aus max, ohne grenze der alte Satz für
+    die einzige Grenze eines Dispatchers bis Version 8, sonst SATZ_BELEGT. Werte aus dem Ereignis gehen nie in den Satz, nur die Zahl 1 bis 6."""
+    ev = ereignis if isinstance(ereignis, dict) else {}
+    grenze, n, grund = ev.get("grenze"), ev.get("max"), ev.get("grund")
+    if grenze is None:
+        anderer = isinstance(grund, str) and grund.startswith(("Es läuft schon ein Auftrag", "Es laufen schon"))
+        return SATZ_ANDERER_AUFTRAG if anderer else SATZ_BELEGT
+    if not isinstance(grenze, str) or grenze not in BELEGT_SAETZE:
+        return SATZ_BELEGT
+    if grenze not in _BELEGT_EINS:
+        return BELEGT_SAETZE[grenze]
+    if type(n) is int and n == 1:
+        return _BELEGT_EINS[grenze]
+    if type(n) is int and n in _ZAHLWORT:
+        return BELEGT_SAETZE[grenze].format(n=_ZAHLWORT[n])
+    return _BELEGT_OHNE_ZAHL[grenze]
 SATZ_PROBLEM = "Der Auftrag startet nicht: Die Einstellungen für Entwicklungsaufträge sind nicht in Ordnung."
 SATZ_UNBEKANNT = "Dieser Auftrag ist nicht mehr bekannt. Bitte stelle ihn neu."
 SATZ_KEIN_ZUGANG = "Für dieses Profil ist kein Claude-Zugang hinterlegt, bitte in der Karte Modellzugang eintragen."
@@ -473,11 +510,8 @@ def ablehn_grund(returncode: int | None, ereignisse: dict, stderr: str = "") -> 
     if "kanal_gesperrt" in ereignisse:
         ev = ereignisse["kanal_gesperrt"]
         return grund_satz(ev.get("grund") if isinstance(ev, dict) else None)
-    if "belegt" in ereignisse:  # der Dispatcher nennt im Grund, was belegt ist (wamo_job_dispatch.cmd_start)
-        ev = ereignisse["belegt"]
-        grund = ev.get("grund") if isinstance(ev, dict) else None
-        anderer = isinstance(grund, str) and grund.startswith(("Es läuft schon ein Auftrag", "Es laufen schon"))
-        return SATZ_ANDERER_AUFTRAG if anderer else SATZ_BELEGT
+    if "belegt" in ereignisse:  # der Dispatcher nennt die erreichte Grenze (wamo_job_dispatch.belegt_melden)
+        return belegt_satz(ereignisse["belegt"])
     if "zugang_ungueltig" in ereignisse:
         return "Der Claude-Zugang wurde nicht angenommen, bitte in der Karte Modellzugang neu hinterlegen."
     if "keine_zugangsdaten" in ereignisse:
@@ -540,6 +574,19 @@ def auftrag_ergebnis(job: str, art: str, projekt: str, repo: str | None, status:
     return ergebnis
 
 
+# Je Ereignisschleife und Profil eine Sperre für den Start (AuftragsBuch.beginnen). asyncio.Lock gehört zu genau einer Schleife; eine neue
+# Schleife (Neustart, Tests mit asyncio.run) bekommt neue Sperren, die alten verschwinden mit ihrer Schleife. Schützt innerhalb eines
+# Kern-Prozesses. Zwei Kern-Prozesse zugleich (Slots a und b beim Umschalten) schützt sie nicht: dort bleibt die Tagesgrenze im Rand um
+# höchstens einen Auftrag überschreitbar (die Prüfung zählt laufende Zeilen der Datenbank mit der Auftragsgrenze).
+_START_SPERREN: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = weakref.WeakKeyDictionary()
+
+
+def start_sperre(user_id: str) -> asyncio.Lock:
+    """Die Sperre für Starts dieses Profils in der laufenden Ereignisschleife."""
+    sperren = _START_SPERREN.setdefault(asyncio.get_running_loop(), {})
+    return sperren.setdefault(user_id, asyncio.Lock())
+
+
 @runtime_checkable
 class AuftragsSpeicher(Protocol):
     """Was die Buchführung vom Gedächtnis braucht (memory.MemoryStore erfüllt es, die Tests nutzen eine Attrappe)."""
@@ -570,7 +617,15 @@ class AuftragsBuch:
         """Vor dem Start: veraltete running-Zeilen schließen (sie zählen mit der Auftragsgrenze), Tagesgrenze prüfen, die Zeile anlegen
         und freigeben (pending, approved) und auf running setzen. Liefert (aktion_id, None) oder (None, Satz für die Quittung).
         abbruch fragt nach jedem Warten auf die Datenbank, ob die Sitzung inzwischen beendet ist (close): dann entsteht keine Zeile
-        mehr oder die angelegte wird zurückgezogen. Eine unerwartete Ausnahme lässt nie eine offene Zeile zurück und geht weiter."""
+        mehr oder die angelegte wird zurückgezogen. Eine unerwartete Ausnahme lässt nie eine offene Zeile zurück und geht weiter.
+        Gleichzeitige Aufträge (Dispatcher 9): Prüfen und Anlegen laufen je Profil hintereinander (start_sperre). Ein zweiter Start desselben
+        Profils, auch aus einer anderen Sitzung, sieht so die laufende Zeile des ersten, die mit der Auftragsgrenze zählt; zwei Starts
+        überschreiten die Tagesgrenze nicht gemeinsam. Verschiedene Profile warten nicht aufeinander."""
+        async with start_sperre(self._zulassung.user_id):
+            return await self._beginnen(job, art, projekt, repo, schreibend, abbruch)
+
+    async def _beginnen(self, job: str, art: str, projekt: str, repo: str | None, schreibend: bool,
+                        abbruch: Callable[[], bool] | None) -> tuple[str | None, str | None]:
         auftrag_grenze, tag_grenze = kosten_auftrag(self._zulassung), kosten_tag(self._zulassung)  # für alle aus dem Drop-in
         if auftrag_grenze is None or tag_grenze is None:
             return None, SATZ_PROBLEM

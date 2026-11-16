@@ -55,7 +55,7 @@ KOPF_START = {"auftrag": "Rauchtest, darf nie laufen", "system": "", "zugang": "
 PROJEKT_RAUCH = f"kern-{KOPF_START['profil']}-rauchtest"
 PROJEKT_FREMDE_KENNUNG = "kern-11111111-rauchtest"
 UEBERGAENGE = ("Absturz-Neustart am freien Slot (systemctl kill, dann warte_auf_slot)", "Rückweg auf ein älteres Release (Entwicklung aus)",
-               "PC und Kern gleichzeitig (belegt in beide Richtungen)", "ein PC über WireGuard landet nie im Kern-Kanal",
+               "PC und Kern gleichzeitig (Plätze gesamt und je Person, Dispatcher 9)", "ein PC über WireGuard landet nie im Kern-Kanal",
                "Notaus mit laufendem Kern-Auftrag")
 
 # Sandbox-Eigenschaften der Unit, die der Test für den ssh-Aufruf übernimmt (nur einfache Werte; Exec*, Pfade und Zähler nie)
@@ -231,7 +231,7 @@ def urteil(probe: Probe, returncode: int | None, stdout: str, stderr: str = "", 
     if probe.ja:
         try:
             antwort = json.loads(stdout.strip().splitlines()[-1])
-            ok = (returncode == 0 and antwort.get("ok") is True and antwort.get("kanal") == "kern" and int(str(antwort.get("version"))) >= 8)
+            ok = (returncode == 0 and antwort.get("ok") is True and antwort.get("kanal") == "kern" and int(str(antwort.get("version"))) >= 9)
         except (ValueError, IndexError, AttributeError, TypeError):
             ok = False
         return ok, f"Exit {returncode}"

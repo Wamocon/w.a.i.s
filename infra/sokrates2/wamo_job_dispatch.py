@@ -42,7 +42,9 @@ gibt die Limits des Max-Abos aus den rate_limit_event von Claude Code weiter (nu
 Ablauf je Lauf:
 
     1. Auftragsordner /srv/wamo/jobs/<job> anlegen bzw. prüfen (Projekt und Art sind an den Auftrag gebunden).
-    2. Sperren: ein Lauf je Auftrag, ein Auftrag je Projekt, höchstens PARALLEL_MAX gleichzeitig.
+    2. Sperren: ein Lauf je Auftrag, ein Auftrag je Projekt, dann ein Platz je Person und ein Platz gesamt (plaetze_belegen: höchstens
+       MAX_PARALLEL_PROFIL je Person und MAX_PARALLEL gesamt aus kernkanal.conf, nie über PARALLEL_MAX). Der Platz bestimmt den eigenen
+       Teil der Entwicklungsports (platz_ports), den wamo-job.sh mit --platz an Landlock gibt. Belegt: Ereignis belegt mit grenze.
     3. Freigaben aus freigaben.json (außerhalb der Sandbox) als schreibgeschützte approvals.json für
        diesen Lauf bereitstellen; Anfragen des letzten Laufs nach angefragt.jsonl übernehmen.
        Projektordner entschärfen: .claude/settings*.json, .mcp.json, Git-Hooks weg, .git/config nur
@@ -70,7 +72,7 @@ Umgebung nur die Basisumgebung plus Git-Hooks aus (wamo-job.sh --modus pruefen),
 WAMO_PRUEFEN=an in geheim.env (jeder andere Wert, auch ein Tippfehler im Namen, sperrt) wird jeder Aufruf abgewiesen. Die erste
 stdin-Zeile ist {"argv": [...]}: genau dieses Feld, höchstens 8 KiB. Der Dispatcher prüft argv erneut gegen die Allowlist
 (abnahme_befehl.py, der Kern ist nicht vertrauenswürdig), dann mit dem Wächter (decide wie ein Bash-Aufruf), und nimmt das Projekt
-nur aus auftrag.json. Sperren wie bei start (ein Lauf je Auftrag, ein Auftrag je Projekt, höchstens PARALLEL_MAX gleichzeitig),
+nur aus auftrag.json. Sperren wie bei start (ein Lauf je Auftrag, ein Auftrag je Projekt, Platz je Person und gesamt; Person pc oder lokal),
 höchstens 40 Aufrufe je Auftrag, vorher Projekt entschärfen und den Selbsttest im Modus pruefen (Netz zu). stdin bleibt als
 Lebenslinie offen (EOF beendet den Lauf), cancel und das Zeitlimit beenden die Einheit. Antwort: eine JSON-Zeile
 {"v":1,"ok","exit","abgebrochen","grund","dauer_s","ausgabe","gekuerzt"} (Ausgabe: das Ende, höchstens 2048 Byte, geschwärzt, nur
@@ -93,6 +95,13 @@ nur eigene Aufträge (auftrag.json mit kanal=kern), Namensraum kern-, nur zugang
 Kosten je Lauf als Flags von Claude Code, Starts, Laufzeit, Folgen, Abstand, Platz); eine Notaus-Datei lässt nur ping und status zu.
 Version 8 trennt die Profile: Projektname kern-<Kennung>-<Name> mit der Kennung aus profil, die Kennung steht in auftrag.json, ein
 Projektordner eines anderen Profils ist gesperrt (projekt), dazu feste Grenzen je Profil (grenze_profil).
+Version 9 lässt Aufträge gleichzeitig laufen (Entscheidung von Niko 16.11.2026: sechs gesamt, je Person drei): PARALLEL_MAX ist die harte
+Obergrenze, MAX_PARALLEL und MAX_PARALLEL_PROFIL in kernkanal.conf senken sie (ohne gültige Datei höchstens einer, wie bis Version 8). Person:
+im Kern-Kanal das Profil, der PC-Kanal zusammen (pc), lokale Aufrufe zusammen (lokal); alle zählen gegen die Gesamtgrenze. Ein Start an einer
+Grenze endet mit dem Ereignis belegt, Feld grenze aus BELEGT_GRENZEN (auftrag, projekt, gesamt, profil) und max (die Zahl der Grenze), Exit 4.
+Jeder Platz hat seinen Teil der Entwicklungsports (Landlock, siehe wamo-job.sh). Im Kern-Kanal laufen die zweite Prüfung und das Buchen des
+Starts unter der Sperre kernkanal (gleichzeitige Starts prüfen nie denselben Stand), laufende Aufträge reservieren in der Laufzeit je Tag ihr
+Zeitlimit (lauf_zeitlimit_s).
 Die Regeln stehen in wamo_job_kernkanal.py, hier nur die Einhängepunkte. Jeder Verstoß: {"type": "wamo", "ereignis":
 "kanal_gesperrt", "grund": <Code>} und Exit 2. ping meldet kanal und kernkanal, dazu haus (Schalter an und Ordner des Proxys bereit).
 
@@ -127,9 +136,10 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+# 9: gleichzeitige Aufträge (Plätze gesamt und je Person, eigene Entwicklungsports je Platz, Laufzeit mit Reserve laufender Aufträge).
 # 8: Trennung je Profil im Kern-Kanal (Projektname kern-<Kennung>-<Name>, Kennung in auftrag.json, Grenzen je Profil). Die Zeile darunter
 # bleibt genau so (ohne Kommentar am Ende): wamo-job-kern-einrichten.sh liest die Zahl daraus.
-VERSION = "8"
+VERSION = "9"
 
 HEIM = Path("/srv/wamo")
 APP = Path("/opt/wamo")  # root-eigen; Programme in bin/, Wächter in waechter/ (in der Sandbox derselbe Pfad)
@@ -149,9 +159,17 @@ SELF_REPOS = ("wamo", "w.a.i.s")
 SELF_REPO = SELF_REPOS[0]  # Alias für ältere Verweise, nie zum Vergleichen
 # GitHub-ID des eigenen Repos: bleibt bei jeder Umbenennung gleich, geprüft an jeder Antwort von GitHub zu Token und Installation
 SELF_REPO_IDS = frozenset({1425139508})
-PARALLEL_MAX = 1  # Aufträge teilen sich Loopback (kein eigener Netz-Namensraum): nur einer gleichzeitig
+# Harte Obergrenze gleichzeitiger Aufträge aller Kanäle (wie PARALLEL_HART im Modul des Kern-Kanals); kernkanal.conf kann sie nur senken.
+# Die Aufträge teilen sich Benutzer und Loopback (kein eigener Netz-Namensraum): jeder Platz bekommt deshalb seinen eigenen Teil der
+# Entwicklungsports (platz_ports), Landlock lässt binden und verbinden im Bereich 20000-20999 nur dort zu.
+PARALLEL_MAX = 6
 LAN_PROBE = "192.168.178.1"  # Ziel der Firewall-Probe im Selbsttest (Router, Port 443)
 ENTWICKLUNGS_PORTS = range(20000, 21000)  # 127.0.0.1:20000-20999 lässt der Ausgangsfilter für eigene Server zu
+PORTS_JE_PLATZ = 100  # Platz n: 20000 + n*100 bis 20000 + n*100 + 99 (wamo-job.sh platz_ports, abschottung.py BEREICH_MAX_PORTS)
+PLAETZE_SPERRE = "plaetze"  # Sperre, unter der ein Start die Plätze zählt und einen belegt (kurz, nie während eines Laufs gehalten)
+PLAETZE_WARTEN_S = 10.0  # so lange wartet ein Start höchstens auf diese Sperre, danach gilt er als belegt (fail closed)
+PERSON_RE = re.compile(r"[0-9a-f]{8}|pc|lokal")  # wie PERSON_RE im Modul des Kern-Kanals: Kennung des Profils, PC-Kanal oder lokal
+BELEGT_GRENZEN = ("auftrag", "projekt", "gesamt", "profil")  # wie BELEGT_GRENZEN im Modul des Kern-Kanals (Feld grenze im Ereignis belegt)
 MAX_OFFENE_FREIGABEN = 10  # Karten je Auftrag
 ZUGANG_TOOL = "WAMO-Zugang"  # Freigabe-Anfrage für mehr Zugänge als frühere Läufe im Projekt
 WAMO_REPO_GESPERRT = "Das WAMO-Repo selbst ist für Aufträge gesperrt"
@@ -1467,6 +1485,119 @@ def sperren_ordner() -> Path:
     return path
 
 
+def _sperre_freigeben(sperre: object) -> None:
+    """Gibt eine gehaltene Sperre sofort frei (die Datei schließen beendet den flock). Wirft nie."""
+    datei = getattr(sperre, "datei", None)
+    if datei is not None:
+        try:
+            datei.close()
+        except OSError:
+            pass
+        sperre.datei = None
+
+
+# ---------------------------------------------------------------- Plätze: gleichzeitige Aufträge (Dispatcher 9)
+def platz_ports(platz: int) -> range:
+    """Der eigene Teil der Entwicklungsports eines Platzes (wie platz_ports in wamo-job.sh)."""
+    if type(platz) is not int or not 0 <= platz < len(ENTWICKLUNGS_PORTS) // PORTS_JE_PLATZ:
+        raise ValueError("Platz ungültig")
+    von = ENTWICKLUNGS_PORTS.start + platz * PORTS_JE_PLATZ
+    return range(von, von + PORTS_JE_PLATZ)
+
+
+def port_hinweis(platz: int) -> str:
+    """Hinweis für Claude Code im Systemprompt: der eigene Portbereich dieses Laufs (Landlock sperrt jeden anderen im Bereich 20000-20999)."""
+    ports = platz_ports(platz)
+    return (f"Eigene Entwicklungsserver und Tests nur auf 127.0.0.1 mit einem Port von {ports.start} bis {ports.stop - 1} (in der Sandbox "
+            "WAMO_PORT_VON und WAMO_PORT_BIS). Die übrigen Ports von 20000 bis 20999 gehören gleichzeitig laufenden Aufträgen und sind "
+            "gesperrt.")
+
+
+def parallel_grenzen() -> tuple[int, int]:
+    """(gesamt, je Person) aus kernkanal.conf, nie über PARALLEL_MAX. Fehlt das Modul, ist es defekt oder die Datei fehlerhaft oder
+    fehlend: höchstens ein Auftrag gleichzeitig wie bis Version 8 (fail closed)."""
+    try:
+        gesamt, je_person = kern_modul().parallel_grenzen(kern_zustand(), PARALLEL_MAX)
+    except Exception:  # noqa: BLE001 (Modul fehlt oder ist defekt)
+        return 1, 1
+    gesamt = max(1, min(PARALLEL_MAX, int(gesamt)))
+    return gesamt, max(1, min(gesamt, int(je_person)))
+
+
+def person_schluessel(profil: str | None) -> str | None:
+    """Wer für die Grenze je Person zählt (siehe person_schluessel im Modul des Kern-Kanals): Kern-Kanal die Kennung des Profils, PC-Kanal pc,
+    lokal lokal. Ohne Modul gilt das für pc und lokal genauso, der Kern-Kanal arbeitet ohnehin nie ohne das Modul."""
+    try:
+        return kern_modul().person_schluessel(KANAL, profil)
+    except Exception:  # noqa: BLE001
+        return KANAL if KANAL in ("pc", "lokal") else None
+
+
+def _belegen_aus(pfade: list[Path], grenze: int) -> tuple[object | None, int | None]:
+    """Versucht jede Sperre der Liste und zählt die belegten. Unter der Grenze: (die erste freie, ihre Nummer), alle übrigen sofort wieder
+    frei. Sonst (None, None) und nichts gehalten. Der Aufrufer hält dabei die Sperre plaetze (sonst zählten zwei Starts gleichzeitig)."""
+    frei: list[tuple[int, object]] = []
+    belegt = 0
+    for nummer, pfad in enumerate(pfade):
+        sperre = Sperre(pfad)
+        if sperre.versuchen():
+            frei.append((nummer, sperre))
+        else:
+            belegt += 1
+    if belegt >= grenze or not frei:
+        for _, sperre in frei:
+            _sperre_freigeben(sperre)
+        return None, None
+    for _, sperre in frei[1:]:
+        _sperre_freigeben(sperre)
+    return frei[0][1], frei[0][0]
+
+
+def plaetze_belegen(sperren: Path, person: str | None, gesamt: int, je_person: int) -> tuple[list, int | None, str | None]:
+    """Belegt einen Platz je Person (Sperren person-<Person>-<n>) und einen Platz gesamt (platz-<n>), n von 0 bis PARALLEL_MAX - 1.
+    Gezählt wird unter der Sperre plaetze; belegt sind Plätze, deren Sperre ein laufender Dispatcher hält (auch über einer gesenkten
+    Grenze). Liefert (gehaltene Sperren, Platznummer, None) oder ([], None, Code): profil (die Person hat je_person Aufträge laufen), gesamt
+    (gesamt Aufträge laufen oder die Sperre plaetze kam nicht rechtzeitig). Eine ungültige Person ist Abgewiesen (fail closed)."""
+    if not isinstance(person, str) or not PERSON_RE.fullmatch(person):
+        raise Abgewiesen("Person für die Plätze unbekannt")
+    zaehlen = Sperre(sperren / PLAETZE_SPERRE)
+    ende = time.monotonic() + PLAETZE_WARTEN_S
+    while not zaehlen.versuchen():
+        if time.monotonic() > ende:
+            return [], None, "gesamt"
+        time.sleep(0.05)
+    try:
+        eigen, _ = _belegen_aus([sperren / f"person-{person}-{n}" for n in range(PARALLEL_MAX)], min(je_person, PARALLEL_MAX))
+        if eigen is None:
+            return [], None, "profil"
+        platz_sperre, platz = _belegen_aus([sperren / f"platz-{n}" for n in range(PARALLEL_MAX)], min(gesamt, PARALLEL_MAX))
+        if platz_sperre is None:
+            _sperre_freigeben(eigen)
+            return [], None, "gesamt"
+        return [eigen, platz_sperre], platz, None
+    finally:
+        _sperre_freigeben(zaehlen)
+
+
+def belegt_text(grenze: str, n: int | None = None) -> str:
+    """Der Grund im Ereignis belegt (für Protokoll und ältere Kerne; der Kern wählt seinen Satz nach grenze und max)."""
+    if grenze == "auftrag":
+        return "Dieser Auftrag läuft bereits"
+    if grenze == "projekt":
+        return "Im Projekt läuft schon ein anderer Auftrag"
+    if grenze == "profil":
+        return "Grenze je Person: ein eigener Auftrag läuft schon" if n == 1 else f"Grenze je Person: {n} eigene Aufträge laufen schon"
+    return "Es läuft schon ein Auftrag (der einzige Platz ist belegt)" if n == 1 else f"Es laufen schon {n} Aufträge (alle Plätze belegt)"
+
+
+def belegt_melden(grenze: str, n: int | None = None) -> None:
+    """Ereignis belegt mit grund, grenze (aus BELEGT_GRENZEN) und bei gesamt und profil max (die Zahl der erreichten Grenze)."""
+    if grenze not in BELEGT_GRENZEN:
+        raise ValueError("Grenze unbekannt")
+    log(f"belegt grenze={grenze}" + (f" max={n}" if n is not None else ""))
+    wamo_event("belegt", grund=belegt_text(grenze, n), grenze=grenze, **({"max": n} if n is not None else {}))
+
+
 def job_laeuft(job: str) -> bool:
     lock = JOBS / job / ".lauf"
     if not lock.exists():
@@ -2307,7 +2438,8 @@ def cmd_ping() -> int:
     emit({"ok": True, "version": VERSION, "runner": RUNNER.is_file(), "waechter": (WAECHTER / "dev_guard.py").is_file(),
           "github": github_status(), "serverzugang": serverzugang_erlaubt(geheim),
           "kontingent": kontingent_modul() is not None, "pruefen": pruefen_aktiv(geheim), "haus": haus_aktiv(geheim),
-          "abnahme_befehl_sha256": modul_sha256("abnahme_befehl"), "kanal": KANAL, "kernkanal": kernkanal_ping()})
+          "abnahme_befehl_sha256": modul_sha256("abnahme_befehl"), "kanal": KANAL, "kernkanal": kernkanal_ping(),
+          "parallel": dict(zip(("gesamt", "profil"), parallel_grenzen()), hart=PARALLEL_MAX)})
     return EXIT_OK
 
 
@@ -2355,6 +2487,19 @@ def cmd_approve(job: str, fp: str) -> int:
     return EXIT_OK
 
 
+def platz_reste_beenden(platz: int) -> None:
+    """Beendet alle Einheiten auf diesem Platz (wamo-job-<job>-<zusatz>-p<platz>-<zeit>.scope). Nur wer die Sperre platz-<platz> hält, ruft
+    das auf: dann läuft dort kein lebender Dispatcher mehr, und was noch läuft, ist der Rest eines hart beendeten Vorgängers (SIGKILL, OOM),
+    dessen Sandbox sonst bis zu ihrem Zeitlimit den Portbereich des Platzes weiter nutzen könnte (Befund des Sicherheitsreviews)."""
+    if type(platz) is not int or not 0 <= platz < len(ENTWICKLUNGS_PORTS) // PORTS_JE_PLATZ:
+        raise ValueError("Platz ungültig")
+    try:
+        subprocess.run(["/usr/bin/systemctl", "--user", "stop", f"wamo-job-*-p{platz}-*.scope"],
+                       env=basis_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def stop_units(job: str) -> None:
     """Beendet alle systemd-Einheiten des Auftrags (Sandbox samt Kindprozessen)."""
     try:
@@ -2391,22 +2536,40 @@ def ziel(host, port, proto=0, timeout=4):
         return "fehler-" + errno.errorcode.get(e.errno, str(e.errno))
     except Exception as e: return "fehler-" + type(e).__name__
     finally: s.close()
-probe, bruecke, lan = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+def lauscher(port):
+    try:
+        s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("127.0.0.1", port)); s.listen(1)
+    except PermissionError: return None, "zu"
+    except OSError as e: return None, "fehler-" + errno.errorcode.get(e.errno, str(e.errno))
+    return s, "ok"
+def eigener(port):
+    s, r = lauscher(port)
+    if s is None: return r
+    try: return ziel("127.0.0.1", port)
+    finally: s.close()
+def fremd_binden(port):
+    s, r = lauscher(port)
+    if s is not None: s.close()
+    return r
+probe, bruecke, lan, eigen, fremd = int(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
 werte = [("landlock", ziel("127.0.0.1", probe)), ("lo9", ziel("127.0.0.1", 9)), ("lo9mptcp", ziel("127.0.0.1", 9, 262)),
          ("netz10", ziel("10.255.255.254", 9)), ("netz10mptcp", ziel("10.255.255.254", 9, 262)),
          ("bruecke", ziel(bruecke, 9)), ("lan", ziel(lan, 443)),
+         ("platz_eigen", eigener(eigen)), ("platz_fremd", ziel("127.0.0.1", fremd)), ("platz_fremd_bind", fremd_binden(fremd)),
          ("github", ziel("github.com", 443, timeout=10))]
 print("wamo-netz " + " ".join("%s=%s" % w for w in werte), file=sys.stderr)
 """
+# platz_eigen: ein eigener Lauscher im eigenen Teil der Entwicklungsports ist erreichbar. platz_fremd: ein Port eines anderen Platzes ist für
+# connect zu (Landlock, EACCES; ohne die Sperre käme ECONNREFUSED oder offen), platz_fremd_bind: dort binden geht nicht.
 NETZ_ERWARTET = {"landlock": "zu", "lo9": "zu", "lo9mptcp": "zu", "netz10": "zu", "netz10mptcp": "zu",
-                 "bruecke": "zu", "lan": "zu", "github": "offen"}
+                 "bruecke": "zu", "lan": "zu", "platz_eigen": "offen", "platz_fremd": "zu", "platz_fremd_bind": "zu", "github": "offen"}
 # Modus pruefen: kein Netz (eigener Netz-Namensraum), also ist alles zu. Das Internet wird per IP geprüft (ein Name ergäbe
 # einen DNS-Fehler statt "zu"), auch GitHub, das im Lauf-Modus offen sein muss. Im leeren Netz-Namensraum ist Loopback an: Port 9
 # dort ist "zu" oder "fehler-ECONNREFUSED" (es lauscht nichts); ein Rest-Zugang zum Host zeigte sich an internet und an
 # /proc/net/dev (PRUEFEN_PRUEFUNGEN).
 NETZPROBE_PRUEFEN = NETZPROBE.replace('("github", ziel("github.com", 443, timeout=10))', '("internet", ziel("1.1.1.1", 443, timeout=10))')
 NETZ_ERWARTET_PRUEFEN = {**{k: ("zu",) for k in NETZ_ERWARTET if k != "github"}, "internet": ("zu",),
-                         "lo9": ("zu", "fehler-ECONNREFUSED")}
+                         "lo9": ("zu", "fehler-ECONNREFUSED"), "platz_eigen": ("offen",)}  # Loopback im eigenen Namensraum, Landlock wie im Lauf
 # Zusätzliche Grenzen, die nur im Modus pruefen gelten: nichts von Claude, kein Zustand des Auftrags, keine Token in der Umgebung,
 # keine Netzschnittstelle außer lo, Git-Hooks aus
 PRUEFEN_PRUEFUNGEN = [
@@ -2419,10 +2582,12 @@ PRUEFEN_PRUEFUNGEN = [
 ]
 
 
-def probe_lauscher() -> socket.socket:
-    """Lauschender Socket auf 127.0.0.1 im Bereich ENTWICKLUNGS_PORTS (zufällig, erster freier)."""
+def probe_lauscher(platz: int) -> socket.socket:
+    """Lauschender Socket auf 127.0.0.1 im eigenen Teil der Entwicklungsports des Platzes (zufällig, erster freier), nie auf dem letzten Port
+    (den nimmt die Netzprobe für den eigenen Lauscher). Er lauscht auf dem Host, wenn wamo-job.sh startet: Landlock muss ihn wie jeden Dienst
+    des Hosts sperren, obwohl er im eigenen Bereich liegt."""
     import random
-    ports = list(ENTWICKLUNGS_PORTS)
+    ports = list(platz_ports(platz))[:-1]
     random.shuffle(ports)
     for port in ports[:50]:
         s = socket.socket()
@@ -2449,13 +2614,40 @@ def docker_bruecke() -> str | None:
     return None
 
 
-def selbsttest(job: str, projekt: str, modus: str = "lauf") -> tuple[bool, str]:
+EPHEMERE_PORTS = Path("/proc/sys/net/ipv4/ip_local_port_range")
+
+
+def ephemere_ports_getrennt(pfad: Path = EPHEMERE_PORTS) -> bool:
+    """Liegt der Bereich der ephemeren Ports (bind auf Port 0, ausgehende Verbindungen) außerhalb der Entwicklungsports 20000-20999? Sonst
+    könnte ein Auftrag über bind(0) einen Port im Teil eines anderen Platzes belegen (Befund des Sicherheitsreviews). Unlesbar heißt nein
+    (fail closed); nur außerhalb von Linux (Tests unter Windows) gibt es die Datei nicht, dort gilt ja."""
+    try:
+        teile = pfad.read_text(encoding="ascii").split()
+    except FileNotFoundError:
+        return not sys.platform.startswith("linux")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if len(teile) != 2 or not all(t.isascii() and t.isdigit() for t in teile):
+        return False
+    von, bis = int(teile[0]), int(teile[1])
+    return bis < ENTWICKLUNGS_PORTS.start or von > ENTWICKLUNGS_PORTS.stop - 1
+
+
+def selbsttest(job: str, projekt: str, modus: str = "lauf", platz: int | None = None) -> tuple[bool, str]:
     """Führt den Hook-Befehl aus managed-settings.json in der Sandbox mit einem Sperrfall aus und prüft
     nebenbei die Grenzen. Bestanden nur, wenn der Wächter wirklich lief und genau mit der erwarteten
     Begründung ablehnt (ein Absturz mit Exit 2 sperrt im Betrieb auch, zählt hier aber nicht).
     modus "pruefen" läuft in der Sandbox des Befehls pruefen (wamo-job.sh --modus pruefen): kein Netz, nichts von Claude, kein
-    Zustand, keine Token; erwartet wird dort überall "zu" und es gelten die zusätzlichen Prüfungen in PRUEFEN_PRUEFUNGEN."""
+    Zustand, keine Token; erwartet wird dort überall "zu" und es gelten die zusätzlichen Prüfungen in PRUEFEN_PRUEFUNGEN.
+    platz: der Platz, den der Aufrufer hält (Pflicht): die Sandbox des Selbsttests bekommt denselben Teil der Entwicklungsports wie der
+    Lauf, die Netzprobe prüft ihn (eigener Lauscher erreichbar, Port des nächsten Platzes für connect und bind zu)."""
     pruefen = modus == "pruefen"
+    try:
+        eigen, fremd = platz_ports(platz)[-1], platz_ports((platz + 1) % PARALLEL_MAX)[-1]
+    except (ValueError, TypeError):
+        return False, "kein gültiger Platz für den Selbsttest"
+    if not ephemere_ports_getrennt():
+        return False, "der Bereich der ephemeren Ports überschneidet die Entwicklungsports 20000-20999 (net.ipv4.ip_local_port_range)"
     try:
         hook = json.loads(MANAGED.read_text(encoding="utf-8"))["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     except (OSError, ValueError, KeyError, IndexError, TypeError):
@@ -2487,18 +2679,18 @@ def selbsttest(job: str, projekt: str, modus: str = "lauf") -> tuple[bool, str]:
     # Nur rename(2), nie mv: mv kopiert bei EXDEV und löscht danach die Quelle, im Projektordner also dessen Inhalt
     umbenennen = "umbenennen() { /usr/bin/python3 -I -c 'import os,sys; os.rename(sys.argv[1], sys.argv[2])' \"$1\" \"$2\" 2>/dev/null; }"
     teile = ["f=0", umbenennen] + [f"if {bed}; then echo 'wamo-pruefung: {text}' >&2; f=1; fi" for bed, text in pruefungen]
-    # Probe-Lauscher im Bereich, den der Ausgangsfilter auf Loopback zulässt: nur Landlock darf ihn sperren
-    probe = probe_lauscher()
+    # Probe-Lauscher im eigenen Bereich, den der Ausgangsfilter auf Loopback zulässt: nur Landlock darf ihn sperren (Dienst des Hosts)
+    probe = probe_lauscher(platz)
     port = probe.getsockname()[1]
     bruecke = docker_bruecke()  # N1: None heißt ip fehlt oder keine Bridge -> Fehler, kein stummes Überspringen
     if bruecke is None:
         probe.close()
         return False, "Docker-Bridge nicht ermittelbar (ip fehlt oder keine Bridge); Netzprobe nicht möglich"
     netzprobe = NETZPROBE_PRUEFEN if pruefen else NETZPROBE
-    teile += [f"/usr/bin/python3 -I -c '{netzprobe}' {port} {bruecke} {LAN_PROBE}",
+    teile += [f"/usr/bin/python3 -I -c '{netzprobe}' {port} {bruecke} {LAN_PROBE} {eigen} {fremd}",
               f"( {hook} ); c=$?; echo \"wamo-selbsttest code=$c fehler=$f\" >&2"]
-    argv = [str(RUNNER), "--auftrag", job, "--projekt", projekt, "--zeitlimit", "60", "--einheit-zusatz", "pruefung",
-            *(["--modus", "pruefen"] if pruefen else []), "--", "/bin/sh", "-c", "; ".join(teile)]
+    argv = [str(RUNNER), "--auftrag", job, "--projekt", projekt, "--platz", str(platz), "--zeitlimit", "60", "--einheit-zusatz",
+            "pruefung", *(["--modus", "pruefen"] if pruefen else []), "--", "/bin/sh", "-c", "; ".join(teile)]
     try:
         p = subprocess.run(argv, input=json.dumps(SELFTEST_EVENT).encode(), capture_output=True,
                            env=pruefen_env() if pruefen else basis_env(), timeout=120, cwd="/")  # wie der echte Aufruf: Git-Hooks aus
@@ -2534,7 +2726,8 @@ def selbsttest(job: str, projekt: str, modus: str = "lauf") -> tuple[bool, str]:
 def aufraeumen() -> None:
     """Räumt als wamo alte Auftrags-Caches auf (N5: nicht als root über Sandbox-beschreibbare Ordner).
     npm/cache/plugin-daten nach 7 Tagen, claude/ nach 30 Tagen; Projektordner, Buchführung und Sperren bleiben.
-    Best effort; Fehler stören den Lauf nicht. Folgt keinem Link (ein Link als Cache-Ordner wird entfernt)."""
+    Best effort; Fehler stören den Lauf nicht. Folgt keinem Link (ein Link als Cache-Ordner wird entfernt). Jeden Auftrag nur unter seiner
+    Auftragssperre (.lauf): mit gleichzeitigen Aufträgen könnte ein anderer Dispatcher ihn sonst genau jetzt starten und seine Caches nutzen."""
     import shutil
     jetzt = time.time()
     alter = {"npm": 7 * 86400, "cache": 7 * 86400, "plugin-daten": 7 * 86400, "claude": 30 * 86400}
@@ -2543,19 +2736,26 @@ def aufraeumen() -> None:
     except OSError:
         return
     for job in jobs[:500]:
-        if job_laeuft(job):
+        sperre = Sperre(JOBS / job / ".lauf")
+        try:
+            if not sperre.versuchen():
+                continue  # läuft oder startet gerade
+        except OSError:
             continue
-        for teil, grenze in alter.items():
-            p = JOBS / job / teil
-            try:
-                st = p.lstat()
-            except OSError:
-                continue
-            if stat.S_ISLNK(st.st_mode):
-                p.unlink(missing_ok=True)
-                continue
-            if stat.S_ISDIR(st.st_mode) and jetzt - st.st_mtime > grenze:
-                shutil.rmtree(p, ignore_errors=True)
+        try:
+            for teil, grenze in alter.items():
+                p = JOBS / job / teil
+                try:
+                    st = p.lstat()
+                except OSError:
+                    continue
+                if stat.S_ISLNK(st.st_mode):
+                    p.unlink(missing_ok=True)
+                    continue
+                if stat.S_ISDIR(st.st_mode) and jetzt - st.st_mtime > grenze:
+                    shutil.rmtree(p, ignore_errors=True)
+        finally:
+            _sperre_freigeben(sperre)
 
 
 def _zeile_lesen(limit: int, was: str, fehler=Abgewiesen) -> bytes:
@@ -2843,7 +3043,8 @@ def kern_start_pruefen(job: str, projekt: str, art: str, kopf: Kopf, app_modus: 
         eigene = [i for i, e in enumerate(ereignisse) if e["ereignis"] == "versuch" and e["job"] == job]
         if eigene:
             del ereignisse[eigene[-1]]
-    grund = k.pruefe_start(anfrage, zustand, ereignisse=ereignisse, jetzt=time.time(), freier_platz_mb=k.freier_platz_mb(pfade.platz))
+    grund = k.pruefe_start(anfrage, zustand, ereignisse=ereignisse, jetzt=time.time(), freier_platz_mb=k.freier_platz_mb(pfade.platz),
+                           laufzeit_reserve_s=lauf_zeitlimit_s())  # laufende Aufträge zählen mit ihrem Zeitlimit (gleichzeitige Läufe)
     return grund, zustand.konfig
 
 
@@ -2870,24 +3071,39 @@ def kern_fork_grund(repo: str | None, token: str) -> str | None:
     return "fork" if status != 200 else kern_modul().fork_pruefen(obj, repo)
 
 
+KERN_SPERRE = "kernkanal"  # unter dieser Sperre prüft ein Start im Kern-Kanal und bucht Versuch bzw. Start (gleichzeitige Starts)
+
+
 @contextmanager
-def kern_buchung(job: str, profil: str | None = None):
-    """Im Kern-Kanal Start und Ende des Laufs in den Zähler schreiben (kernkanal.jsonl, mit der Kennung des Profils). Lässt sich der Start
-    nicht buchen, startet nichts (die Grenzen wären nicht mehr prüfbar). Das Ende wird auch bei einer Ausnahme oder einem Signal gebucht."""
+def kern_buchung(job: str, profil: str | None = None, pruefung=None):
+    """Im Kern-Kanal die zweite Prüfung (pruefung: liefert (Code oder None, Konfiguration)) und das Buchen des Starts unter der Sperre
+    kernkanal (kernkanal.jsonl, mit der Kennung des Profils): zwei gleichzeitige Starts prüfen so nie denselben Stand, jeder sieht den
+    gebuchten Start des anderen (Zählung, Reserve der Laufzeit). Liefert (Code, Konfiguration): mit einem Code ist nichts gebucht, der
+    Aufrufer weist ab. Lässt sich der Start nicht buchen, ist der Code grenze_start (die Grenzen wären nicht mehr prüfbar). Das Ende wird
+    auch bei einer Ausnahme oder einem Signal gebucht. In den anderen Kanälen: (None, None), nichts gebucht."""
     if KANAL != "kern":
-        yield
+        yield None, None
         return
     k = kern_modul()
     zaehler = (KERN_PFADE or k.PFADE).zaehler
-    beginn = time.time()
-    k.zaehler_schreiben(zaehler, job, "start", beginn, profil=profil)
+    beginn = None
     try:
-        yield
+        with exklusiv(sperren_ordner() / KERN_SPERRE):
+            grund, konfig = pruefung() if pruefung is not None else (None, None)
+            if grund is None:
+                jetzt = time.time()
+                try:
+                    k.zaehler_schreiben(zaehler, job, "start", jetzt, profil=profil)
+                    beginn = jetzt
+                except OSError:
+                    grund = "grenze_start"
+        yield grund, konfig
     finally:
-        try:
-            k.zaehler_schreiben(zaehler, job, "ende", time.time(), dauer_s=max(0, int(time.time() - beginn)), profil=profil)
-        except OSError:
-            log(f"kernkanal: Ende von {job} nicht gebucht")
+        if beginn is not None:
+            try:
+                k.zaehler_schreiben(zaehler, job, "ende", time.time(), dauer_s=max(0, int(time.time() - beginn)), profil=profil)
+            except OSError:
+                log(f"kernkanal: Ende von {job} nicht gebucht")
 
 
 def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> int:
@@ -2898,11 +3114,13 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
         if kern and str(e) == WAMO_REPO_GESPERRT:
             return kanal_abweisen("repo")
         raise
-    if kern:  # erste Prüfung: vor Geheimnissen, Sperren und Selbsttest
-        grund, _konfig = kern_start_pruefen(job, projekt, art, kopf, app_modus=True)
+    if kern:  # erste Prüfung: vor Geheimnissen, Sperren und Selbsttest; Prüfen und Buchen des Versuchs unter der Sperre kernkanal
+        with exklusiv(sperren_ordner() / KERN_SPERRE):
+            grund, _konfig = kern_start_pruefen(job, projekt, art, kopf, app_modus=True)
+            gebucht = grund is None and kern_versuch_buchen(job, kopf.profil)
         if grund is not None:
             return kanal_abweisen(grund)
-        if not kern_versuch_buchen(job, kopf.profil):  # ohne Zähler lassen sich die Grenzen nicht erzwingen
+        if not gebucht:  # ohne Zähler lassen sich die Grenzen nicht erzwingen
             return kanal_abweisen("grenze_start")
     elif KANAL == "pc" and projekt.startswith(KERN_PRAEFIX):
         raise Abgewiesen("Projektnamen mit kern- sind dem Kern-Kanal vorbehalten")
@@ -2929,24 +3147,26 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
     # Eine Sperre gilt, solange ihr Objekt lebt (offene Datei): deshalb alle bis zum Ende festhalten.
     gehalten = [Sperre(jobdir / ".lauf")]
     if not gehalten[0].versuchen():
-        wamo_event("belegt", grund="Dieser Auftrag läuft bereits")
+        belegt_melden("auftrag")
         return EXIT_BELEGT
     vorbereiten(jobdir, job, projekt, art, repo, KANAL, kopf.profil)
     gehalten.append(Sperre(sperren / f"projekt-{projekt}"))
     if not gehalten[-1].versuchen():
-        wamo_event("belegt", grund="Im Projekt läuft schon ein anderer Auftrag")
+        belegt_melden("projekt")
         return EXIT_BELEGT
-    platz = next((s for s in (Sperre(sperren / f"platz-{i}") for i in range(PARALLEL_MAX)) if s.versuchen()), None)
-    if platz is None:
-        wamo_event("belegt", grund="Es läuft schon ein Auftrag" if PARALLEL_MAX == 1 else f"Es laufen schon {PARALLEL_MAX} Aufträge")
+    gesamt, je_person = parallel_grenzen()
+    plaetze, platz, grenze = plaetze_belegen(sperren, person_schluessel(kopf.profil), gesamt, je_person)
+    if grenze is not None:
+        belegt_melden(grenze, je_person if grenze == "profil" else gesamt)
         return EXIT_BELEGT
-    gehalten.append(platz)
+    gehalten += plaetze
+    platz_reste_beenden(platz)  # Reste eines hart beendeten Vorgängers auf diesem Platz
     sessions = read_json(jobdir / "sessions.json", [])
     if session is not None and (not isinstance(sessions, list) or session not in sessions):
         raise Abgewiesen("Session gehört nicht zu diesem Auftrag")
     lauf_vorbereiten(jobdir, projekt)
 
-    ok, grund = selbsttest(job, projekt)
+    ok, grund = selbsttest(job, projekt, "lauf", platz)
     log(f"selbsttest {job} {'ok' if ok else 'FEHLER'}: {grund[:300]}", pflicht=True)
     if not ok:
         wamo_event("selbsttest_fehlgeschlagen", grund=grund[:300])
@@ -2988,18 +3208,19 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
     github = "-" if werkzeugkarte().github_stufe(art) is None else "app" if app is not None else "token"
     if github == "app":
         system = f"{system}\n{github_hinweis(repo)}"
-    grenzen = None
-    if kern:  # zweite Prüfung unmittelbar vor der Token-Erzeugung: eine Notaus-Datei oder eine neue Konfiguration seit der ersten greift noch
-        grund, konfig = kern_start_pruefen(job, projekt, art, kopf, app_modus=app is not None, eigener_versuch=True)
-        if grund is not None:
-            return kanal_abweisen(grund)
-        grenzen = (str(konfig.max_turns), konfig.max_budget_usd)  # nur aus kernkanal.conf, die Kopfzeile kann nichts steuern
-    claude = claude_argv(system, modell, session, grenzen, haus=haus)
-    argv = [str(RUNNER), "--auftrag", job, "--projekt", projekt, "--", *claude]
+    system = f"{system}\n{port_hinweis(platz)}"
+
+    def zweite_pruefung():  # unmittelbar vor der Token-Erzeugung: eine Notaus-Datei oder eine neue Konfiguration seit der ersten greift noch
+        return kern_start_pruefen(job, projekt, art, kopf, app_modus=app is not None, eigener_versuch=True)
     # Ab hier lebt ggf. ein GitHub-Token: SIGTERM und SIGHUP werden zur Ausnahme, damit Sandbox-Stopp und Widerruf
     # (finally in github_token_fuer_lauf) sicher laufen. SIGKILL lässt sich nicht abfangen: dann läuft das Token
-    # nach spätestens einer Stunde ab.
-    with _signale(_als_ausnahme), kern_buchung(job, kopf.profil):
+    # nach spätestens einer Stunde ab. Im Kern-Kanal prüft kern_buchung zum zweiten Mal und bucht den Start unter einer Sperre.
+    with _signale(_als_ausnahme), kern_buchung(job, kopf.profil, zweite_pruefung if kern else None) as (grund, konfig):
+        if grund is not None:
+            return kanal_abweisen(grund)
+        grenzen = (str(konfig.max_turns), konfig.max_budget_usd) if kern else None  # nur aus kernkanal.conf, nie aus der Kopfzeile
+        claude = claude_argv(system, modell, session, grenzen, haus=haus)
+        argv = [str(RUNNER), "--auftrag", job, "--projekt", projekt, "--platz", str(platz), "--", *claude]
         try:
             with github_token_fuer_lauf(job, art, repo, app) as gh_token:
                 if gh_token is not None:
@@ -3062,6 +3283,11 @@ def _status(jobdir: Path, job: str, projekt: str, art: str, **fields) -> None:
 
 
 def _ausfuehren(argv: list[str], env: dict, auftrag: str, jobdir: Path, job: str, projekt: str, art: str) -> int:
+    if (jobdir / "abbruch").exists():  # cancel nach dem Vorbereiten (zum Beispiel der Notaus, der alle Aufträge beendet): nichts mehr starten
+        _status(jobdir, job, projekt, art, ende=int(time.time()), ergebnis="abgebrochen", code=None)
+        log(f"ende {job} abgebrochen vor dem Start (cancel)")
+        wamo_event("ende", ergebnis="abgebrochen", code=None)
+        return EXIT_ABGEBROCHEN
     start = time.time()
     _status(jobdir, job, projekt, art, start=int(start), ende=None, ergebnis="läuft", code=None)
     log_pfad = jobdir / "lauf.log"
@@ -3265,21 +3491,23 @@ def _pruefen_waechter(argv: list[str], projektdir: Path) -> None:
         raise Abgewiesen(f"Der Wächter verlangt eine Freigabe, das läuft nie automatisch: {str(grund)[:200]}")
 
 
-def _pruefen_sperren(jobdir: Path, projekt: str) -> tuple[list, str | None]:
-    """Sperren wie bei start: ein Lauf je Auftrag, ein Auftrag je Projekt, höchstens PARALLEL_MAX gleichzeitig. Liefert
-    (gehaltene Sperren, Grund für belegt oder None). Die Sperren gelten, solange die Liste lebt."""
+def _pruefen_sperren(jobdir: Path, projekt: str) -> tuple[list, str | None, int | None]:
+    """Sperren wie bei start: ein Lauf je Auftrag, ein Auftrag je Projekt, ein Platz je Person (pruefen kommt nur aus dem PC-Kanal oder
+    lokal: Person pc bzw. lokal) und gesamt. Liefert (gehaltene Sperren, Grund für belegt oder None, Platz). Die Sperren gelten, solange die
+    Liste lebt."""
     sperren = sperren_ordner()
     gehalten = [Sperre(jobdir / ".lauf")]
     if not gehalten[0].versuchen():
-        return gehalten, "belegt: Dieser Auftrag läuft gerade"
+        return gehalten, "belegt: Dieser Auftrag läuft gerade", None
     gehalten.append(Sperre(sperren / f"projekt-{projekt}"))
     if not gehalten[-1].versuchen():
-        return gehalten, "belegt: Im Projekt läuft schon ein anderer Auftrag"
-    platz = next((s for s in (Sperre(sperren / f"platz-{i}") for i in range(PARALLEL_MAX)) if s.versuchen()), None)
-    if platz is None:
-        return gehalten, "belegt: Es läuft schon ein Auftrag" if PARALLEL_MAX == 1 else f"belegt: Es laufen schon {PARALLEL_MAX} Aufträge"
-    gehalten.append(platz)
-    return gehalten, None
+        return gehalten, f"belegt: {belegt_text('projekt')}", None
+    gesamt, je_person = parallel_grenzen()
+    plaetze, platz, grenze = plaetze_belegen(sperren, person_schluessel(None), gesamt, je_person)
+    if grenze is not None:
+        return gehalten, f"belegt: {belegt_text(grenze, je_person if grenze == 'profil' else gesamt)}", None
+    platz_reste_beenden(platz)  # Reste eines hart beendeten Vorgängers auf diesem Platz
+    return gehalten + plaetze, None, platz
 
 
 def _pruefen_zaehlen(jobdir: Path, aufrufe_max: int) -> None:
@@ -3396,18 +3624,18 @@ def _pruefen_nachher_entschaerfen(plog, job: str, projekt: str, projektdir: Path
 
 
 def _pruefen_ausfuehren(pm, sauber, plog, ersetzungen, job: str, projekt: str, jobdir: Path, projektdir: Path,
-                        argv: list[str]) -> tuple[int, dict]:
+                        argv: list[str], platz: int) -> tuple[int, dict]:
     """Selbsttest, Lauf und Antwort. cancel kann den Lauf nur beenden, solange eine Einheit läuft: Eine abbruch-Datei, die zwischen
     der letzten Prüfung und dem Start der Einheit entsteht, macht das Ergebnis nach dem Lauf nicht erfüllt (Rest: höchstens die
-    120 Sekunden dieses Laufs). cancel wirkt jobweit (abbruch-Datei, alle Einheiten des Auftrags)."""
-    lauf = pm.Lauf([str(RUNNER), "--auftrag", job, "--projekt", projekt, "--modus", "pruefen", "--zeitlimit", str(pm.ZEITLIMIT_S),
-                    "--einheit-zusatz", "pruefen", "--", *argv], pruefen_env(), lambda: stop_units(job),
+    120 Sekunden dieses Laufs). cancel wirkt jobweit (abbruch-Datei, alle Einheiten des Auftrags). platz: der gehaltene Platz (Ports)."""
+    lauf = pm.Lauf([str(RUNNER), "--auftrag", job, "--projekt", projekt, "--platz", str(platz), "--modus", "pruefen", "--zeitlimit",
+                    str(pm.ZEITLIMIT_S), "--einheit-zusatz", "pruefen", "--", *argv], pruefen_env(), lambda: stop_units(job),
                    zeitlimit_s=pm.ZEITLIMIT_S, cwd="/")
     lebenslinie_beobachten(lambda: lauf.stoppen("verlassen"))  # schon während des Selbsttests: Auflegen verhindert den Start
     try:
         with _signale(_als_ausnahme):
             vorher = time.monotonic()
-            ok, grund = selbsttest(job, projekt, "pruefen")
+            ok, grund = selbsttest(job, projekt, "pruefen", platz)
             plog(f"selbsttest {job} pruefen {'ok' if ok else 'FEHLER'} dauer={time.monotonic() - vorher:.1f}s: {grund}")
             if lauf.gestoppt:  # Auflegen während des Selbsttests (die Einheit des Selbsttests wurde dabei beendet)
                 return EXIT_ABGEBROCHEN, pm.antwort_leer(lauf.grund or "verlassen", abgebrochen=True)
@@ -3447,13 +3675,13 @@ def _pruefen(job: str) -> tuple[int, dict]:
     argv, projekt, jobdir, projektdir = _pruefen_aufruf(pm, plog, job)
     if abnahme_modul().braucht_venv(argv) and not pm.venv_vorhanden(projektdir):
         return EXIT_ABGEWIESEN, pm.antwort_leer(pm.KEIN_VENV)
-    gehalten, belegt = _pruefen_sperren(jobdir, projekt)  # die Sperren gelten, bis diese Funktion endet
+    gehalten, belegt, platz = _pruefen_sperren(jobdir, projekt)  # die Sperren gelten, bis diese Funktion endet
     if belegt:
         return EXIT_BELEGT, pm.antwort_leer(belegt)
     vorweg = _pruefen_vorweg(pm, plog, job, projekt, jobdir, projektdir, argv)
     if vorweg is not None:
         return vorweg
-    ergebnis = _pruefen_ausfuehren(pm, sauber, plog, ersetzungen, job, projekt, jobdir, projektdir, argv)
+    ergebnis = _pruefen_ausfuehren(pm, sauber, plog, ersetzungen, job, projekt, jobdir, projektdir, argv, platz)
     del gehalten  # erst jetzt frei (Prozessende gibt sie ohnehin frei)
     return ergebnis
 

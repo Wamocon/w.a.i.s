@@ -4,7 +4,11 @@
 # Ressourcengrenzen. Installiert als /opt/wamo/bin/wamo-job.sh (root:wamo 0750, /opt/wamo gehört root).
 #
 # Aufruf (durch wamo-job-dispatch oder den Rauchtest, immer als wamo):
-#   wamo-job.sh --auftrag <job> --projekt <name> [--modus lauf|pruefen] [--zeitlimit <s>] [--einheit-zusatz <wort>] -- befehl ...
+#   wamo-job.sh --auftrag <job> --projekt <name> --platz <0-9> [--modus lauf|pruefen] [--zeitlimit <s>] [--einheit-zusatz <wort>] -- befehl ...
+#
+# --platz (Pflicht, Dispatcher 9): der Platz, den der Dispatcher für diesen Lauf hält (Sperre platz-<n>). Er bestimmt den eigenen Teil der
+# Entwicklungsports: 20000 + n*100 bis 20000 + n*100 + 99 (platz_ports). Nur dort darf der Lauf binden und verbinden (Landlock); in der
+# Sandbox stehen die Grenzen in WAMO_PORT_VON und WAMO_PORT_BIS (nur im Auftragslauf; im Modus pruefen gibt es kein Netz).
 #
 # Modus pruefen (Befehl pruefen des Dispatchers, ein Befehl der Abnahme im Projekt): dieselbe Sandbox, nur ENGER. Eigener
 # Netz-Namensraum ohne Netz (nichts hinein, nichts hinaus, auch nicht zum Loopback des Hosts), kein Claude (weder die
@@ -44,15 +48,21 @@
 #
 # Netz: bleibt an (Claude-API, GitHub, npm), aber ohne Wege ins Innere:
 #   * Ausgangsfilter (wamo-egress.nft, Tabelle inet wamo_egress für uid wamo): Internet nur auf TCP 80 und 443,
-#     DNS an 127.0.0.53, auf Loopback nur 127.0.0.1:20000-20999 (Entwicklungsserver des Auftrags) und 127.0.0.1:18090
+#     DNS an 127.0.0.53, auf Loopback nur 127.0.0.1:20000-20999 (Entwicklungsserver der Aufträge) und 127.0.0.1:18090
 #     (Proxy der Hausmodelle, für Landlock nur bei Zugangsart haus offen); IPv6, LAN,
-#     Docker-Netze, private Netze und eigene Adressen sind abgewiesen.
+#     Docker-Netze, private Netze und eigene Adressen sind abgewiesen. UDP nur zu 127.0.0.53:53.
 #   * Landlock (abschottung.py): kein TCP zu Ports, auf denen der Host beim Start lauscht, und zu
-#     NETZ_SPERRPORTS; keine abstrakten Unix-Sockets außerhalb (X11).
+#     NETZ_SPERRPORTS; im Bereich 20000-20999 binden und verbinden nur im eigenen Teil des Platzes (--platz);
+#     keine abstrakten Unix-Sockets und keine Signale außerhalb der eigenen Landlock-Domäne (X11, andere Aufträge).
 #   * seccomp (abschottung.py --seccomp-bpf, Pflicht): socket() mit MPTCP oder SCTP (umgingen Landlock) sowie
 #     AF_PACKET, AF_VSOCK, AF_ALG; io_uring, keyctl, bpf, perf_event_open, userfaultfd, process_vm_*, mount und
 #     Verwandte, unshare, setns, kexec, Kernelmodule; TCP Fast Open (MSG_FASTOPEN). clone3 bekommt ENOSYS.
-#   Aufträge teilen sich Loopback; deshalb läuft höchstens einer gleichzeitig (Dispatcher).
+#   Gleichzeitige Aufträge (Dispatcher 9, bis zu sechs, auch verschiedener Personen) teilen sich Benutzer und Netz-Namensraum. Getrennt
+#   sind sie so: jeder Platz hat einen eigenen Teil der Entwicklungsports (Landlock, siehe oben; der Ausgangsfilter kennt nur die uid);
+#   UDP auf Loopback weist der Ausgangsfilter ab; abstrakte Unix-Sockets und Signale sperrt Landlock (Scope je Domäne); eigene PID-,
+#   IPC-, UTS-Namensräume; /tmp, /dev/shm (in /dev) und /srv/wamo sind je Sandbox eigene tmpfs; Zustand, Projekt und Caches je Auftrag.
+#   Nicht getrennt: /proc/net zeigt die Sockets des gemeinsamen Netz-Namensraums (Portnummern, keine Inhalte), CPU, Speicher und Platte
+#   teilen sich alle (Grenzen je Einheit, siehe unten).
 #   Im Modus pruefen gilt das alles nicht: dort gibt es kein Netz (eigener Netz-Namensraum, siehe oben).
 #
 # Grenzen (systemd-run --user, Lingering für wamo): MemoryMax, MemorySwapMax=0, TasksMax, CPUQuota,
@@ -154,11 +164,19 @@ pruefen_grenzen() {
   ZEITLIMIT_PRUEFEN_S=$(kleiner_zahl "$ZEITLIMIT_PRUEFEN_S" "$ZEITLIMIT_MAX_S") || exit 70
 }
 
-JOB="" PROJEKT="" ZEIT="" ZUSATZ="" MODUS="lauf"
+# Der eigene Teil der Entwicklungsports eines Platzes (0 bis 9, je 100 Ports): setzt PORT_VON und PORT_BIS
+platz_ports() {
+  [[ $1 =~ ^[0-9]$ ]] || fehler "Platz ungültig (0 bis 9)"
+  PORT_VON=$((20000 + $1 * 100))
+  PORT_BIS=$((PORT_VON + 99))
+}
+
+JOB="" PROJEKT="" ZEIT="" ZUSATZ="" MODUS="lauf" PLATZ=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --auftrag) JOB=${2-}; shift 2 ;;
     --projekt) PROJEKT=${2-}; shift 2 ;;
+    --platz) PLATZ=${2-}; shift 2 ;;
     --modus) MODUS=${2-}; shift 2 ;;
     --zeitlimit) ZEIT=${2-}; shift 2 ;;
     --einheit-zusatz) ZUSATZ=${2-}; shift 2 ;;
@@ -170,6 +188,7 @@ done
 [[ $JOB =~ ^[0-9a-f]{16,32}$ ]] || fehler "Auftrags-ID ungültig"
 [[ $PROJEKT =~ ^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$ && $PROJEKT != *--* && $PROJEKT != wamo ]] || fehler "Projektname ungültig"
 [[ $MODUS =~ ^(lauf|pruefen)$ ]] || fehler "Modus ungültig (lauf oder pruefen)"
+platz_ports "$PLATZ"
 ZUSATZ=${ZUSATZ:-$MODUS}
 [[ $ZUSATZ =~ ^[a-z]{1,12}$ ]] || fehler "Einheit ungültig"
 for zahl in "$TMP_MB" "$HEIM_TMP_MB" "$DATEI_MAX_MB" "$OFFENE_DATEIEN" "$PROZESSE_MAX" "$ZEITLIMIT_S" "$ZEITLIMIT_MAX_S"; do
@@ -361,6 +380,7 @@ SETENV_LAUF=(
   --setenv CLAUDE_CONFIG_DIR "$HEIM/.claude" --setenv DISABLE_AUTOUPDATER 1
   --setenv GIT_TERMINAL_PROMPT 0 --setenv GH_PROMPT_DISABLED 1 --setenv NO_UPDATE_NOTIFIER 1
   --setenv npm_config_update_notifier false
+  --setenv WAMO_PORT_VON "$PORT_VON" --setenv WAMO_PORT_BIS "$PORT_BIS"
   --unsetenv XDG_RUNTIME_DIR
 )
 SETENV_PRUEFEN=(
@@ -379,10 +399,12 @@ fi
 
 INNEN=()
 if [ "$ABSCHOTTUNG" = an ]; then
-  INNEN=(/usr/bin/python3 -I "$WAECHTER_INNEN/abschottung.py" --sperrports "$SPERRPORTS" --)
+  INNEN=(/usr/bin/python3 -I "$WAECHTER_INNEN/abschottung.py" --sperrports "$SPERRPORTS" --entwicklungsports "$PORT_VON-$PORT_BIS" --)
 fi
 
-EINHEIT="wamo-job-$JOB-$ZUSATZ-$(date +%s%N)"
+# Der Platz steht im Namen (p<n>): ein Dispatcher, der den Platz belegt, beendet damit Reste eines hart beendeten Vorgängers auf diesem Platz
+# (wamo_job_dispatch.platz_reste_beenden), die sonst den Portbereich des Platzes weiter nutzen könnten
+EINHEIT="wamo-job-$JOB-$ZUSATZ-p$PLATZ-$(date +%s%N)"
 # --as=unlimited: der Dispatcher begrenzt seinen eigenen Adressraum (weiche Grenze); Claude Code braucht mehr
 exec /usr/bin/systemd-run --user --scope --quiet --collect --unit="$EINHEIT" \
   -p MemoryMax="$SPEICHER_MAX" -p MemorySwapMax=0 -p TasksMax="$PROZESSE_MAX" \

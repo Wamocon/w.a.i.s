@@ -1587,13 +1587,15 @@ class SeccompTests(unittest.TestCase):
             A.seccomp_bpf("riscv64")
 
     def test_landlock_bind_nur_entwicklungsports(self):
-        z = A.port_zugriff({22, 55322, 20500})
+        z = A.port_zugriff({22, 55322, 20550}, range(20500, 20600))  # Platz 5
         self.assertEqual(z[443], A.LANDLOCK_ACCESS_NET_CONNECT_TCP)  # connect offen
         self.assertNotIn(22, z)  # Host-Port: kein Zugriff (connect gesperrt, bind nicht erlaubt)
         self.assertNotIn(55322, z)
-        self.assertEqual(z[20000], A.LANDLOCK_ACCESS_NET_BIND_TCP | A.LANDLOCK_ACCESS_NET_CONNECT_TCP)
-        self.assertEqual(z[20999], A.LANDLOCK_ACCESS_NET_BIND_TCP | A.LANDLOCK_ACCESS_NET_CONNECT_TCP)
-        self.assertEqual(z[20500], A.LANDLOCK_ACCESS_NET_BIND_TCP)  # für connect gesperrt, bind erlaubt
+        self.assertEqual(z[20500], A.LANDLOCK_ACCESS_NET_BIND_TCP | A.LANDLOCK_ACCESS_NET_CONNECT_TCP)
+        self.assertEqual(z[20599], A.LANDLOCK_ACCESS_NET_BIND_TCP | A.LANDLOCK_ACCESS_NET_CONNECT_TCP)
+        self.assertEqual(z[20550], A.LANDLOCK_ACCESS_NET_BIND_TCP)  # für connect gesperrt, bind erlaubt
+        self.assertNotIn(20000, z)  # Ports der anderen Plätze: weder binden noch verbinden (gleichzeitige Aufträge)
+        self.assertNotIn(20999, z)
         self.assertNotIn(80, [p for p, a in z.items() if a & A.LANDLOCK_ACCESS_NET_BIND_TCP])  # bind 80 gesperrt
         self.assertNotIn(21000, [p for p, a in z.items() if a & A.LANDLOCK_ACCESS_NET_BIND_TCP])
 
@@ -2125,10 +2127,11 @@ class PersoenlicherZugangStartTests(unittest.TestCase):
         ping = self.ereignisse[-1]
         self.assertIs(ping["serverzugang"], False)
         self.assertIs(ping["kontingent"], True)
-        self.assertEqual(ping["version"], "8")  # 8: Trennung je Profil (7: Kern-Kanal, 6: Befehl pruefen, standardmäßig aus)
+        self.assertEqual(ping["version"], "9")  # 9: gleichzeitige Aufträge (8: Trennung je Profil, 7: Kern-Kanal, 6: Befehl pruefen)
         self.assertIs(ping["pruefen"], False)  # ohne WAMO_PRUEFEN=an
         self.assertEqual(ping["kanal"], "lokal")  # I7: kanal und kernkanal, nie ein Wert aus geheim.env
         self.assertEqual(set(ping["kernkanal"]), {"strikt", "offen", "grund", "arten", "repos", "ablauf", "tage_rest"})
+        self.assertEqual(ping["parallel"], {"gesamt": 1, "profil": 1, "hart": 6})  # ohne kernkanal.conf: einer wie bis Version 8
 
     @unittest.skipUnless(LINUX, "Prozess mit /bin/sh nur unter Linux")
     def test_ausgabe_log_und_dateien_ohne_zugangswert_und_kontingent_nur_aus_der_allowlist(self):
@@ -2615,15 +2618,17 @@ class AbschottungTests(unittest.TestCase):
         self.assertEqual(len(erlaubt), 65535 - 2)
 
     def test_args(self):
-        self.assertEqual(A.parse_args(["--sperrports", "1,2", "--", "claude", "-p"]), ({1, 2}, ["claude", "-p"]))
-        for bad in (["--", "x"], ["--sperrports", "1"], ["--sperrports", "1", "--"], ["--egal", "1", "--", "x"]):
+        self.assertEqual(A.parse_args(["--sperrports", "1,2", "--entwicklungsports", "20100-20199", "--", "claude", "-p"]),
+                         ({1, 2}, range(20100, 20200), ["claude", "-p"]))
+        for bad in (["--", "x"], ["--sperrports", "1"], ["--sperrports", "1", "--"], ["--egal", "1", "--", "x"],
+                    ["--sperrports", "1", "--", "x"]):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 A.parse_args(bad)
 
     def test_fail_closed_without_landlock(self):
         with mock.patch.object(A, "abschotten", side_effect=OSError("kein Landlock")), \
              mock.patch.object(A.os, "execvp") as execvp, mock.patch("sys.stderr"):
-            self.assertEqual(A.main(["--sperrports", "22", "--", "claude"]), A.EXIT_FEHLER)
+            self.assertEqual(A.main(["--sperrports", "22", "--entwicklungsports", "20000-20099", "--", "claude"]), A.EXIT_FEHLER)
         execvp.assert_not_called()
 
 
@@ -2864,8 +2869,9 @@ class KernKanalDispatchTests(unittest.TestCase):
         with mock.patch.object(D, "github_status", return_value="token"), mock.patch.object(D, "KANAL", "kern"):
             D.cmd_ping()
         ping = self.ereignisse[-1]
-        self.assertEqual(ping["version"], "8")
+        self.assertEqual(ping["version"], "9")
         self.assertEqual(ping["kanal"], "kern")
+        self.assertEqual(ping["parallel"], {"gesamt": 1, "profil": 1, "hart": 6})  # Datei ohne die Schlüssel MAX_PARALLEL*: einer (Review)
         kk = ping["kernkanal"]
         self.assertTrue(kk["strikt"] and kk["offen"])
         self.assertEqual((kk["grund"], kk["arten"], kk["repos"]), (None, ["recherche", "review", "analyse", "sicherheit"], ["acme/test-repo"]))
@@ -3364,8 +3370,8 @@ class KernKanalDispatchTests(unittest.TestCase):
     def test_selbstschutz_und_parallelitaet_bleiben_und_das_modul_wird_erst_bei_bedarf_geladen(self):
         self.assertEqual(D.SELF_REPOS, ("wamo", "w.a.i.s"))
         self.assertEqual(D.SELF_REPO, "wamo")  # nur noch Alias
-        self.assertEqual(D.PARALLEL_MAX, 1)
-        self.assertEqual(D.VERSION, "8")
+        self.assertEqual(D.PARALLEL_MAX, 6)  # harte Obergrenze (Dispatcher 9); kernkanal.conf senkt sie, ohne die Datei gilt einer
+        self.assertEqual(D.VERSION, "9")
         import ast
         baum = ast.parse((INFRA / "wamo_job_dispatch.py").read_text(encoding="utf-8"))
         oben = {a.name for n in baum.body if isinstance(n, ast.Import) for a in n.names}
