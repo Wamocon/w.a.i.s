@@ -51,7 +51,7 @@ export const ABSCHNITTE: readonly Abschnitt[] = [
   // (lib/einrichtungSchritte.ts, lib/installer.ts, lib/einrichtung.ts); Kennung "start", weil es "einrichtung" schon als Block in
   // "Geräte und PC" gibt. Für jede Rolle, nie in der Laborsicht.
   { id: "start", titel: "Erste Schritte", kurz: "Modellzugang, Installer, Prüfliste und Updates" },
-  { id: "modellzugang", titel: "Modellzugang", kurz: "API-Schlüssel, Token, Modus und Stimme" },
+  { id: "modellzugang", titel: "Modellzugang", kurz: "API-Schlüssel, Token, Modelle und Stimme" },
   { id: "verbrauch", titel: "Verbrauch", kurz: "Kontingent deines Claude-Abos", nurAdmin: true, auchMitToken: true },
   { id: "sprache", titel: "Sprache und Ton", kurz: "Mikrofon, Hören und Stimme", laborSicht: true, laborKurz: "Mikrofon wählen" },
   { id: "stimme", titel: "Stimme", kurz: "Eigene Stimme erkennen und einlernen" },

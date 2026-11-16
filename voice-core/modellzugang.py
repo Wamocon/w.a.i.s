@@ -26,6 +26,14 @@ Sitzung (Zugang.stt, Zugang.tts) und baut danach Spracherkennung und Sprachausga
 wählt die Person beides selbst (stimme_setzen, Aktion "stimme", Migration 0023), Soniox bleibt Standard; jede Wahl steht
 als Zeile in actions (Werkzeug stimme_wahl, nur die Werte). Laborprofile erreichen die Wahl nie und hören immer über Soniox.
 
+Seit Migration 0024 (Wunsch von Niko vom 16.11.2026) wählt die Person auch ihre Modelle: je Bereich Gespräch, Bildschirm und Bilder,
+Lernen und Zusammenfassung "automatisch" oder ein Modell aus der festen Liste (modellwahl.py), dazu die Stimme im Haus (eine der neun
+freigegebenen Stimmen, sprache_anbieter.HAUS_STIMMEN). Der Kern prüft jede Wahl selbst (Aktion "modell" und "haus_stimme"): ein Hausprofil bekommt
+nie ein Claude-Modell, eine Claude-Wahl prüft eine kleine Anfrage mit dem eigenen Schlüssel, ein vom Admin festgelegtes Profil ist für
+die Modellwahl gesperrt (die Stimme bleibt wählbar), ein vom Admin gesetztes Claude-Modell ist das einzige Claude-Modell. Jede Wahl
+steht als Zeile in actions (Werkzeug modell_wahl bzw. stimme_wahl) und gilt ab der nächsten Sitzung (Zugang.modell_wahl,
+Zugang.tts_stimme). Beim Laden prüft der Kern die gespeicherten Werte noch einmal; was nicht mehr in der Liste steht, gilt nicht.
+
 Kommandozeile für den Betrieb (im Ordner voice-core/, mit der Umgebung des Kerns):
   uv run python modellzugang.py kek-erzeugen          # neuer Hauptschlüssel für WAMO_SCHLUESSEL_KEK
   uv run python modellzugang.py hinterlegen --user-id <uuid> [--workspace wrkspc_...]   # liest den Schlüssel verdeckt
@@ -43,13 +51,14 @@ import os
 import re
 import sys
 import time
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field, replace
 
 import anthropic
 import asyncpg
 from loguru import logger
 
+import modellwahl as mw
 from llm_anbieter import STANDARD_CLAUDE, Zugang, lesbarer_modellname
 from memory import DB_ERRORS, Database, DatabaseUnavailable, admin_database, normalize_uuid, shared_database
 from schluessel import CODE_TOKEN, SCHLUESSEL, SchluesselFehler, Tresor, ende, format_pruefen, token_format_pruefen
@@ -64,15 +73,24 @@ SCHLUESSELARTEN = ("api", "code")
 STIMMEN = ("soniox", "haus")  # Werte für stt und tts (wie sprache_anbieter.ANBIETER und der check in Migration 0010)
 STIMME_WERKZEUG = "stimme_wahl"  # Zeile in actions, wenn die Person Hören und Stimme wählt
 STIMME_JE_FENSTER = 10  # Wechsel von Hören und Stimme je Profil und Zeitfenster (schützt actions vor Fluten)
-AKTIONEN = ("hinterlegen", "loeschen", "status", "modus", "stimme")
+MODELL_WERKZEUG = "modell_wahl"  # Zeile in actions, wenn die Person ein Modell wählt
+WAHL_JE_FENSTER = 10  # Modellwahlen je Profil und Zeitfenster (schützt actions und die Testanfragen bei Anthropic)
+STANDARD_STIMME = "standard"  # Aktion haus_stimme: zurück auf die Stimme des Kerns
+AKTIONEN = ("hinterlegen", "loeschen", "status", "modus", "stimme", "modell", "haus_stimme")
+SATZ_FESTGELEGT = "Ein Admin hat dein Profil auf Hausmodelle festgelegt. Die Modellwahl ist gesperrt."
+SATZ_NICHT_FREI = ("Die eigene Wahl ist in dieser Datenbank noch nicht freigeschaltet; die Wahl gilt bis dahin automatisch. "
+                   "Bitte an den Admin wenden")
 _WORKSPACE = re.compile(r"wrkspc_[A-Za-z0-9]{6,60}")
 _SPALTEN_ALT = ("nur_haus, claude_schluessel, claude_schluessel_ende, claude_workspace, claude_modell, "
                 "claude_geprueft_at, stt, tts")
 # Ab Migration 0011: Wahl der Person und Angaben zum Claude-Code-Token (das Chiffrat selbst liest nur
 # claude_code_zugang_fuer, nie diese Abfrage)
-_SPALTEN = _SPALTEN_ALT + ", modell_modus, claude_code_token_ende, claude_code_token_at"
+_SPALTEN_0011 = _SPALTEN_ALT + ", modell_modus, claude_code_token_ende, claude_code_token_at"
+# Ab Migration 0024: Modellwahl je Bereich und Stimme im Haus
+_SPALTEN = _SPALTEN_0011 + ", " + ", ".join(mw.SPALTEN.values()) + ", tts_stimme"
 _versuche: dict[str, list[float]] = {}
 _stimme_versuche: dict[str, list[float]] = {}
+_wahl_versuche: dict[str, list[float]] = {}
 
 
 class ZugangFehler(Exception):
@@ -97,13 +115,23 @@ class Stand:
     code_ende: str | None = None
     code_gesetzt: str | None = None
     stimme_haus: str = "bereit"  # "bereit" oder ein Satz, warum Hören und Stimme im Haus in diesem Kern nicht gehen
+    # Modellwahl (0024): je Bereich {"wahl": "automatisch" | Modell, "optionen": [...], "hinweis"?}; modell_sperre: warum gesperrt
+    modelle: dict[str, dict] = field(default_factory=dict)
+    modell_sperre: str | None = None
+    haus_stimme: str | None = None  # Wahl der Person, None: Standard des Kerns
+    haus_stimme_standard: str | None = None
 
     def nachricht(self, *, fehler: str | None = None, aktion: str = "status") -> dict:
+        from sprache_anbieter import STIMMEN_HINWEIS, haus_stimmen  # spät, wie in stand_laden
+
         n = {"type": "modellzugang", "aktion": aktion, "art": self.art, "quelle": self.quelle,
              "hinterlegt": self.hinterlegt, "ende": self.ende, "geprueft": self.geprueft,
              "festgelegt": self.festgelegt, "modell": self.modell, "stt": self.stt, "tts": self.tts,
              "modus": self.modus, "code_hinterlegt": self.code_hinterlegt, "code_ende": self.code_ende,
-             "code_gesetzt": self.code_gesetzt, "stimme_haus": self.stimme_haus, "wirksam": "ab der nächsten Sitzung"}
+             "code_gesetzt": self.code_gesetzt, "stimme_haus": self.stimme_haus, "wirksam": "ab der nächsten Sitzung",
+             "modelle": self.modelle, "modell_sperre": self.modell_sperre, "haus_stimme": self.haus_stimme,
+             "haus_stimme_standard": self.haus_stimme_standard, "haus_stimmen": haus_stimmen(),
+             "haus_stimmen_hinweis": STIMMEN_HINWEIS}
         if fehler:
             n["fehler"] = fehler
         return n
@@ -116,14 +144,27 @@ def kern_zuordnung(user_id: str) -> bool:
     return bool(ziel) and ziel == normalize_uuid(user_id) and bool((os.getenv("ANTHROPIC_API_KEY") or "").strip())
 
 
+# Fehlt eine Migration, gilt der Stand davor: der Kern darf deshalb nie alle Profile auf Hausmodelle werfen. Je Stufe die Spalten und der
+# Hinweis, der einmal je Prozess ins Log geht (nicht bei jeder Abfrage)
+_STUFEN = (
+    (_SPALTEN, "model_access ohne Migration 0024: Modellwahl und Stimme im Haus der Person stehen nicht zur Verfügung"),
+    (_SPALTEN_0011, "model_access ohne Migration 0011: Wahl der Person und Claude-Code-Token stehen nicht zur Verfügung"),
+    (_SPALTEN_ALT, ""),
+)
+_gemeldet: set[str] = set()
+
+
 async def _zeile(db: Database, user_id: str):
-    try:
-        return await db.fetchrow(f"select {_SPALTEN} from {db.t('model_access')} where user_id = $1::uuid", user_id)
-    except asyncpg.UndefinedColumnError:
-        # Migration 0011 fehlt noch in diesem Schema: der Kern darf deshalb nicht alle Profile auf Hausmodelle
-        # werfen. Ohne die Spalten gilt der Stand von 0010 (keine Wahl der Person, kein Claude-Code-Token).
-        logger.warning("model_access ohne Migration 0011: Wahl der Person und Claude-Code-Token stehen nicht zur Verfügung")
-        return await db.fetchrow(f"select {_SPALTEN_ALT} from {db.t('model_access')} where user_id = $1::uuid", user_id)
+    for spalten, hinweis in _STUFEN:
+        try:
+            return await db.fetchrow(f"select {spalten} from {db.t('model_access')} where user_id = $1::uuid", user_id)
+        except asyncpg.UndefinedColumnError:
+            if not hinweis:
+                raise
+            if hinweis not in _gemeldet:
+                _gemeldet.add(hinweis)
+                logger.warning(hinweis)
+    return None  # nicht erreichbar: die letzte Stufe gibt zurück oder wirft
 
 
 def _verletzt(fehler: Exception, constraint: str) -> bool:
@@ -159,6 +200,29 @@ async def zugang_laden(user_id: str, *, db: Database | None = None, tresor: Tres
         except (DatabaseUnavailable, *DB_ERRORS) as e:
             logger.error("Modellzugang für Profil {} nicht lesbar ({}): nur Hausmodelle", uid[:8], type(e).__name__)
             return Zugang.haus(uid, "fehler", "Modellzugang nicht lesbar")
+    zugang = _zugang_aus_zeile(uid, zeile, tresor, labor_art)
+    return zugang if labor_art in LABOR_ARTEN else _wahl_anhaengen(zugang, zeile)
+
+
+def _wahl_anhaengen(zugang: Zugang, zeile) -> Zugang:
+    """Modellwahl und Stimme im Haus der Person (0024) an den Zugang hängen, beide noch einmal gegen die feste Liste geprüft: ein
+    Hausprofil bekommt nie ein Claude-Modell, ein vom Admin gesetztes Claude-Modell ist das einzige, unbekannte Werte gelten nicht.
+    Nie für Laborprofile (zugang_laden ruft es für sie gar nicht auf, Quelle labor zusätzlich hier) und nie bei einem Fehler."""
+    if not zeile or zugang.quelle in ("labor", "fehler"):
+        return zugang
+    from sprache_anbieter import stimme_normal
+
+    claude = zugang.art == "claude"
+    # Hat ein Admin das Profil festgelegt, gilt keine Modellwahl der Person (auch keine von vor der Sperre); die Stimme bleibt (D3)
+    wahl = () if zugang.quelle == "festgelegt" else tuple(
+        (b, w) for b in mw.BEREICHE
+        if (w := zeile.get(mw.SPALTEN[b])) and mw.gueltig(b, w, claude=claude, claude_fest=zugang.claude_modell))
+    stimme = stimme_normal(zeile.get("tts_stimme"))
+    return replace(zugang, modell_wahl=wahl, tts_stimme=stimme) if wahl or stimme else zugang
+
+
+def _zugang_aus_zeile(uid: str, zeile, tresor: Tresor | None, labor_art: str | None) -> Zugang:
+    """Zugang ohne Wahl der Person (zugang_laden hängt sie danach an)."""
     stt = zeile["stt"] if zeile else "soniox"
     tts = zeile["tts"] if zeile else "soniox"
     if zeile and zeile["nur_haus"]:
@@ -219,31 +283,67 @@ async def stand_laden(user_id: str, *, db: Database | None = None) -> Stand:
     geprueft = zeitpunkt.isoformat(timespec="minutes") if zeitpunkt else None
     code = _hat_code_token(zeile)
     code_zeit = zeile.get("claude_code_token_at") if zeile else None
-    from sprache_anbieter import anzeige_grund, haus_problem_statisch  # spät: zieht Pipecat nach, die Kommandozeile braucht es nicht
+    from sprache_anbieter import anzeige_grund, haus_problem_statisch, haus_stimme_standard, stimme_normal  # spät, wie bisher
 
+    modelle = _modelle_stand(zeile, art == "claude", (zeile["claude_modell"] if zeile else None) or None, gesperrt=festgelegt)
+    gespraech = modelle["gespraech"]["wahl"]
+    stimme = zeile.get("tts_stimme") if zeile else None
     return Stand(
         art=art,
         quelle=("festgelegt" if festgelegt else "wahl" if wahl_haus else "profil" if hinterlegt
                 else "zuordnung" if zuordnung else "keiner"),
         hinterlegt=hinterlegt, ende=zeile["claude_schluessel_ende"] if hinterlegt else None, geprueft=geprueft,
-        festgelegt=festgelegt, modell=lesbarer_modellname(modell) if art == "claude" else "Hausmodelle",
+        festgelegt=festgelegt,
+        modell=(mw.anzeige(gespraech) if gespraech != mw.AUTOMATISCH
+                else lesbarer_modellname(modell) if art == "claude" else "Hausmodelle"),
         stt=zeile["stt"] if zeile else "soniox", tts=zeile["tts"] if zeile else "soniox",
         modus=modus, code_hinterlegt=code, code_ende=zeile["claude_code_token_ende"] if code else None,
         code_gesetzt=code_zeit.isoformat(timespec="minutes") if code and code_zeit else None,
         stimme_haus=anzeige_grund(haus_problem_statisch()) or "bereit",
+        modelle=modelle, modell_sperre=SATZ_FESTGELEGT if festgelegt else None,
+        haus_stimme=stimme_normal(stimme), haus_stimme_standard=haus_stimme_standard(),
     )
+
+
+def _modelle_stand(zeile: Mapping[str, object] | None, claude: bool, claude_fest: str | None, *,
+                   gesperrt: bool = False) -> dict[str, dict[str, object]]:
+    """Je Bereich die wählbaren Modelle für diesen Zugang und die gültige Wahl. Ein gespeicherter Wert, der gerade nicht gilt (etwa
+    Claude im Modus Nur Hausmodelle, oder jede Wahl, solange ein Admin das Profil festgelegt hat: gesperrt), erscheint als automatisch,
+    mit einem Satz warum."""
+    stand: dict[str, dict[str, object]] = {}
+    for bereich in mw.BEREICHE:
+        optionen = mw.optionen(bereich, claude=claude, claude_fest=claude_fest)
+        gespeichert = zeile.get(mw.SPALTEN[bereich]) if zeile else None
+        gilt = not gesperrt and isinstance(gespeichert, str) and any(o.id == gespeichert for o in optionen)
+        eintrag: dict[str, object] = {"wahl": gespeichert if gilt else mw.AUTOMATISCH, "optionen": [o.daten() for o in optionen]}
+        if isinstance(gespeichert, str) and gespeichert and not gilt:
+            warum = "Solange ein Admin dein Profil festgelegt hat" if gesperrt else "Mit deinem Zugang gilt das gerade nicht"
+            eintrag["hinweis"] = f"Gespeichert ist {mw.anzeige(gespeichert)}. {warum}, deshalb wählt W.A.I.S. automatisch."
+        stand[bereich] = eintrag
+    return stand
 
 
 async def schluessel_testen(schluessel: str, workspace: str | None = None) -> str | None:
     """Kurze Testanfrage (ein Ausgabe-Token mit Haiku). None, wenn der Schlüssel funktioniert; sonst ein Grund
     für die Person, ohne Schlüssel."""
+    return await _testanfrage(schluessel, workspace, os.getenv("CLAUDE_MODEL_FAST") or STANDARD_CLAUDE)
+
+
+async def modell_testen(schluessel: str, workspace: str | None, modell: str) -> str | None:
+    """Darf der Schlüssel der Person dieses Claude-Modell nutzen? Eine Anfrage mit einem Ausgabe-Token (kostet fast nichts).
+    None, wenn ja; sonst ein Grund für die Person, ohne Schlüssel."""
+    return await _testanfrage(schluessel, workspace, modell)
+
+
+async def _testanfrage(schluessel: str, workspace: str | None, modell: str) -> str | None:
     kopf = {"anthropic-workspace-id": workspace} if workspace else None
     client = anthropic.AsyncAnthropic(api_key=schluessel, default_headers=kopf, max_retries=0,
                                       timeout=anthropic.Timeout(TEST_TIMEOUT_SECS, connect=3.0))
     try:
-        await client.messages.create(model=os.getenv("CLAUDE_MODEL_FAST") or STANDARD_CLAUDE, max_tokens=1,
-                                     messages=[{"role": "user", "content": "ping"}])
+        await client.messages.create(model=modell, max_tokens=1, messages=[{"role": "user", "content": "ping"}])
         return None
+    except anthropic.NotFoundError:
+        return "Anthropic bietet dieses Modell für deinen Schlüssel nicht an (404)"
     except anthropic.AuthenticationError:
         return ("Anthropic lehnt den Schlüssel ab (401): Er ist ungültig, widerrufen oder gehört zu einem anderen "
                 "Konto. Bitte in der Anthropic-Konsole prüfen oder einen neuen erzeugen")
@@ -261,24 +361,27 @@ async def schluessel_testen(schluessel: str, workspace: str | None = None) -> st
         await client.close()
 
 
-def _stimme_erlaubt(uid: str, jetzt: float | None = None) -> bool:
+def _bremse(speicher: dict[str, list[float]], uid: str, grenze: int, jetzt: float | None = None) -> bool:
+    """Höchstens grenze Versuche je Profil im Zeitfenster (je Prozess, im Speicher). True: dieser Versuch zählt und ist erlaubt."""
     jetzt = time.monotonic() if jetzt is None else jetzt
-    liste = [t for t in _stimme_versuche.get(uid, []) if jetzt - t < VERSUCHE_FENSTER_SECS]
-    if len(liste) >= STIMME_JE_FENSTER:
-        _stimme_versuche[uid] = liste
+    liste = [t for t in speicher.get(uid, []) if jetzt - t < VERSUCHE_FENSTER_SECS]
+    if len(liste) >= grenze:
+        speicher[uid] = liste
         return False
-    _stimme_versuche[uid] = [*liste, jetzt]
+    speicher[uid] = [*liste, jetzt]
     return True
+
+
+def _stimme_erlaubt(uid: str, jetzt: float | None = None) -> bool:
+    return _bremse(_stimme_versuche, uid, STIMME_JE_FENSTER, jetzt)
+
+
+def _wahl_erlaubt(uid: str, jetzt: float | None = None) -> bool:
+    return _bremse(_wahl_versuche, uid, WAHL_JE_FENSTER, jetzt)
 
 
 def _versuch_erlaubt(uid: str, jetzt: float | None = None) -> bool:
-    jetzt = time.monotonic() if jetzt is None else jetzt
-    liste = [t for t in _versuche.get(uid, []) if jetzt - t < VERSUCHE_FENSTER_SECS]
-    if len(liste) >= VERSUCHE_JE_FENSTER:
-        _versuche[uid] = liste
-        return False
-    _versuche[uid] = [*liste, jetzt]
-    return True
+    return _bremse(_versuche, uid, VERSUCHE_JE_FENSTER, jetzt)
 
 
 async def hinterlegen(user_id: str, schluessel_roh: object, workspace_roh: object = None, *,
@@ -481,6 +584,116 @@ async def _stimme_protokollieren(db: Database, uid: str, stt: str, tts: str, vor
         logger.warning("Wahl von Hören und Stimme für Profil {} nicht protokolliert ({})", uid[:8], type(e).__name__)
 
 
+ModellPruefer = Callable[[str, str | None, str], Awaitable[str | None]]
+
+
+async def modell_setzen(user_id: str, bereich_roh: object, wert_roh: object, *, db: Database | None = None,
+                        tresor: Tresor | None = None, testen: ModellPruefer = modell_testen) -> Stand:
+    """Die Person wählt das Modell eines Bereichs (gespraech, bilder, hintergrund): "automatisch" oder ein Modell aus der festen Liste
+    (modellwahl.py) für ihren Zugang. Gilt ab der nächsten Sitzung. Gesperrt, wenn ein Admin das Profil auf Hausmodelle festgelegt hat.
+    Ein Claude-Modell nur mit Claude-Zugang und erst nach einer kleinen Anfrage mit dem eigenen Schlüssel (der Kernschlüssel nur für das
+    zugeordnete Profil). Jede Änderung steht als Zeile in actions (Werkzeug modell_wahl, nur Bereich und Werte). Laborprofile erreichen
+    diese Funktion nie (labor.py sperrt Pfad und Nachricht, modellzugang_api.py lehnt zusätzlich ab)."""
+    uid = normalize_uuid(user_id)
+    if uid is None:
+        raise ZugangFehler("Profil ungültig")
+    if not (isinstance(bereich_roh, str) and bereich_roh in mw.BEREICHE):
+        raise ZugangFehler("Unbekannter Bereich (gespraech, bilder oder hintergrund)")
+    if not isinstance(wert_roh, str) or not wert_roh:
+        raise ZugangFehler("Unbekanntes Modell")
+    db = db or shared_database()
+    if not db.configured:
+        raise ZugangFehler("Keine Datenbank: die Wahl kann nicht gespeichert werden")
+    zeile = await _zeile(db, uid)
+    if zeile and zeile["nur_haus"]:
+        raise ZugangFehler(SATZ_FESTGELEGT)
+    zugang = await zugang_laden(uid, db=db, tresor=tresor)
+    if zugang.quelle == "fehler":
+        raise ZugangFehler("Der Modellzugang ist gerade nicht lesbar; die Wahl ist erst danach möglich")
+    claude = zugang.art == "claude"
+    wert = None if wert_roh == mw.AUTOMATISCH else wert_roh
+    if wert is not None and not mw.gueltig(bereich_roh, wert, claude=claude, claude_fest=zugang.claude_modell):
+        raise ZugangFehler("Dieses Modell ist für dein Profil nicht wählbar"
+                           + ("" if claude or not wert.startswith("claude-") else " (Claude nur mit eigenem API-Schlüssel)"))
+    spalte = mw.SPALTEN[bereich_roh]  # aus der festen Liste, nie aus der Anfrage
+    vorher = (zeile.get(spalte) if zeile else None) or None
+    if vorher == wert:
+        return await stand_laden(uid, db=db)  # nichts geändert: kein Schreiben, keine Zeile in actions
+    if not _wahl_erlaubt(uid):
+        raise ZugangFehler("Zu viele Wechsel, bitte in zehn Minuten noch einmal")
+    if wert is not None and wert.startswith("claude-"):
+        if grund := await testen(zugang.claude_schluessel or "", zugang.claude_workspace, wert):
+            raise ZugangFehler(grund)
+    await _spalte_schreiben(db, uid, spalte, wert)
+    logger.info("Modellwahl für Profil {}: {} = {}", uid[:8], bereich_roh, wert or mw.AUTOMATISCH)
+    await _protokollieren(db, uid, MODELL_WERKZEUG,
+                          {"bereich": bereich_roh, "modell": wert or mw.AUTOMATISCH, "vorher": vorher or mw.AUTOMATISCH},
+                          "Modell selbst gewählt, gilt ab der nächsten Sitzung")
+    return await stand_laden(uid, db=db)
+
+
+async def haus_stimme_setzen(user_id: str, stimme_roh: object, *, db: Database | None = None) -> Stand:
+    """Die Person wählt die Stimme der Sprachausgabe im Haus: eine der freigegebenen Stimmen (sprache_anbieter.HAUS_STIMMEN, eine
+    Konstante) oder "standard". Die Standardstimme selbst wird als "standard" gespeichert (NULL). Gilt ab der nächsten Sitzung und nur, wenn
+    die Sprachausgabe im Haus läuft. Der Zwang des Admins auf Hausmodelle sperrt sie nicht (wie Hören und Stimme, D3). Jede Änderung steht
+    als Zeile in actions (Werkzeug stimme_wahl). Jeder Wert außerhalb der Liste wird abgelehnt."""
+    from sprache_anbieter import HAUS_STIMMEN_IDS, haus_stimme_standard
+
+    uid = normalize_uuid(user_id)
+    if uid is None:
+        raise ZugangFehler("Profil ungültig")
+    if not (isinstance(stimme_roh, str) and (stimme_roh in HAUS_STIMMEN_IDS or stimme_roh == STANDARD_STIMME)):
+        raise ZugangFehler(f"Unbekannte Stimme (erlaubt: {', '.join(HAUS_STIMMEN_IDS)} oder {STANDARD_STIMME})")
+    db = db or shared_database()
+    if not db.configured:
+        raise ZugangFehler("Keine Datenbank: die Wahl kann nicht gespeichert werden")
+    wert = None if stimme_roh in (STANDARD_STIMME, haus_stimme_standard()) else stimme_roh
+    zeile = await _zeile(db, uid)
+    from sprache_anbieter import stimme_normal
+
+    vorher = stimme_normal(zeile.get("tts_stimme") if zeile else None)
+    if vorher == wert:
+        return await stand_laden(uid, db=db)
+    if not _stimme_erlaubt(uid):
+        raise ZugangFehler("Zu viele Wechsel, bitte in zehn Minuten noch einmal")
+    await _spalte_schreiben(db, uid, "tts_stimme", wert)
+    logger.info("Stimme im Haus für Profil {}: {}", uid[:8], wert or STANDARD_STIMME)
+    await _protokollieren(db, uid, STIMME_WERKZEUG, {"haus_stimme": wert, "vorher": vorher},
+                          "Stimme im Haus selbst gewählt, gilt ab der nächsten Sitzung")
+    return await stand_laden(uid, db=db)
+
+
+async def _spalte_schreiben(db: Database, uid: str, spalte: str, wert: str | None) -> None:
+    """Upsert genau einer Spalte aus 0024 für das Profil der Anfrage. spalte kommt nur aus festen Listen (mw.SPALTEN, tts_stimme)."""
+    if spalte not in (*mw.SPALTEN.values(), "tts_stimme"):
+        raise ValueError(f"Spalte {spalte!r} ist nicht erlaubt")
+    try:
+        await db.execute(
+            f"insert into {db.t('model_access')} (user_id, {spalte}) values ($1::uuid, $2) "
+            f"on conflict (user_id) do update set {spalte} = excluded.{spalte}",
+            uid, wert,
+        )
+    except (asyncpg.UndefinedColumnError, asyncpg.InsufficientPrivilegeError) as e:
+        logger.error("Wahl für Profil {}: {} nicht schreibbar ({}; Migration 0024 fehlt?)", uid[:8], spalte, type(e).__name__)
+        raise ZugangFehler(SATZ_NICHT_FREI) from None
+    except asyncpg.CheckViolationError:
+        raise ZugangFehler("Die Datenbank hat die Wahl abgelehnt") from None
+
+
+async def _protokollieren(db: Database, uid: str, werkzeug: str, params: dict, grund: str) -> None:
+    """Zeile in actions (Risiko change, Status done), nur mit den Werten. Wirft nie: der Eintrag ist Protokoll, die Wahl ist schon
+    gespeichert."""
+    try:
+        await db.execute(
+            f"insert into {db.t('actions')} (user_id, tool, params, reason, risk, status, result, finished_at) "
+            f"values ($1::uuid, $2, $3::text::jsonb, $4, 'change'::{db.t('risk_class')}, 'done'::{db.t('action_status')}, "
+            "'{}'::jsonb, now())",
+            uid, werkzeug, json.dumps(params), grund,
+        )
+    except (DatabaseUnavailable, *DB_ERRORS) as e:
+        logger.warning("Wahl ({}) für Profil {} nicht protokolliert ({})", werkzeug, uid[:8], type(e).__name__)
+
+
 async def claude_code_zugang_fuer(user_id: str, *, db: Database | None = None,
                                   tresor: Tresor | None = None) -> dict[str, str] | None:
     """Der Zugang des Profils für GENAU EINEN Lauf eines Entwicklungsauftrags mit Claude Code, entschlüsselt:
@@ -530,9 +743,10 @@ Pruefer = Callable[[str, str | None], Awaitable[str | None]]
 
 async def modellzugang_nachricht(user_id: str, data: dict, senden: Callable[[dict], Awaitable[None]], *,
                                  db: Database | None = None, tresor: Tresor | None = None,
-                                 testen: Pruefer = schluessel_testen) -> None:
+                                 testen: Pruefer = schluessel_testen, testen_modell: ModellPruefer = modell_testen) -> None:
     """Klick aus der Oberfläche (RTVI-Nachricht "modellzugang"). Aktionen: status, modus (Wahl der Person),
-    stimme (Hören und Stimme der Person, Felder stt und tts), hinterlegen und loeschen (mit schluesselart api oder code).
+    stimme (Hören und Stimme der Person, Felder stt und tts, getrennt wählbar), modell (Felder bereich und modell), haus_stimme
+    (Feld stimme), hinterlegen und loeschen (mit schluesselart api oder code).
     Die Antwort enthält nie einen Schlüssel oder Token; der Inhalt der Nachricht wird nie geloggt."""
     aktion = data.get("aktion") if data.get("aktion") in AKTIONEN else "status"
     art = data.get("schluesselart") if data.get("schluesselart") in SCHLUESSELARTEN else "api"
@@ -541,6 +755,11 @@ async def modellzugang_nachricht(user_id: str, data: dict, senden: Callable[[dic
             stand = await modus_setzen(user_id, data.get("modus"), db=db)
         elif aktion == "stimme":
             stand = await stimme_setzen(user_id, data.get("stt"), data.get("tts"), db=db)
+        elif aktion == "modell":
+            stand = await modell_setzen(user_id, data.get("bereich"), data.get("modell"), db=db, tresor=tresor,
+                                        testen=testen_modell)
+        elif aktion == "haus_stimme":
+            stand = await haus_stimme_setzen(user_id, data.get("stimme"), db=db)
         elif aktion == "hinterlegen" and art == "code":
             stand = await code_token_hinterlegen(user_id, data.get("schluessel"), db=db, tresor=tresor)
         elif aktion == "hinterlegen":
