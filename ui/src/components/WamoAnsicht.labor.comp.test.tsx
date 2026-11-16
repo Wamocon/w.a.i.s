@@ -375,6 +375,7 @@ describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
       "Sprache und Ton",
       "Stimme",
       "Gedächtnis",
+      "Neue Mitglieder",
       "Darstellung",
       "Geräte und PC",
       "Fernzugriff",

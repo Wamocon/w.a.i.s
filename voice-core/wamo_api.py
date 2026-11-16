@@ -34,7 +34,7 @@ from auth_gate import AccessGate, Identity
 PRAEFIX = "/wamo/api"
 ROUTEN_MODULE = ("geraet_api", "hinweise_api", "teilen_api", "geraete_api", "einwilligung_api", "modellzugang_api",
                  "geraete_admin_api", "rd_api", "release_api", "buero_api", "vorgaenge_api", "gedaechtnis_api",
-                 "einrichtung_api")
+                 "einrichtung_api", "mitglieder_admin_api")
 MAX_JSON_BYTES = 64 * 1024
 
 _gate: AccessGate | None = None

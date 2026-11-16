@@ -6,6 +6,15 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Admin-Übersicht „Neue Mitglieder“ (Paket P7, `docs/ausrollen-neue-nutzer.md`): je Profil der letzten 90 Tage ohne
+  Laborprofile (Daten nur als Datum, nie als Uhrzeit), wie weit die Einrichtung ist (angemeldet, zweiter Faktor, Passwort gewechselt, Laptop, Stimmabdruck, Art des Modellzugangs). Migration
+  `0022_neue_mitglieder` mit der Lesefunktion `neue_mitglieder(p_admin)` (SECURITY DEFINER, nur `wamo_core`, nur Stände, nie
+  Geheimnisse), Kern-Route `GET /wamo/api/admin/neue-mitglieder`, Abschnitt `mitglieder` in den Einstellungen.
+- Weg für die Codesignatur des Installers (Entscheidung N8): `npm run dist:signiert` verlangt die Signatur, `npm run dist:codesign`
+  prüft Installer und `WAMO.exe` (Authenticode, Herausgeber „WAMOCON GmbH“). Ohne Zertifikat baut `npm run dist` wie bisher.
+
 ## [0.3.0] - 2026-11-15
 
 ### Hinzugefügt
