@@ -572,6 +572,35 @@ class SandboxAusnahme(unittest.TestCase):
                 self.assertIn("nur für den Proxy der Hausmodelle", ausgabe)
 
     @unittest.skipUnless(_bash(), "bash fehlt")
+    def test_attrappe_nur_auf_dem_rauchtest_platz(self):
+        # Der Rauchtest (wamo_job_rauchtest.py) lässt Claude Code gegen eine Attrappe im eigenen Portbereich von Platz 9 laufen;
+        # jeder andere Platz, jeder Port außerhalb des Bereichs und jede andere Schreibweise bricht ab wie bisher
+        platz9 = {"PLATZ": "9", "PORT_VON": "20900", "PORT_BIS": "20999"}
+        code, ausgabe = self._sperrports("http://127.0.0.1:20980", ANTHROPIC_API_KEY="sk-ant-api03-" + "x" * 40,
+                                         ANTHROPIC_DEFAULT_HAIKU_MODEL=MODELL, **platz9)
+        self.assertEqual(code, 0, ausgabe)
+        ports, modell = ausgabe.split(" ")
+        self.assertIn("18090", ports.split(","))  # kein Haus: der Proxy-Port bleibt zu, Modellnamen fürs Haus fallen weg
+        self.assertEqual(modell, "ohne_modell")
+        for url, zusatz in (("http://127.0.0.1:20380", {"PLATZ": "3", "PORT_VON": "20300", "PORT_BIS": "20399"}),
+                            ("http://127.0.0.1:21000", platz9), ("http://127.0.0.1:20899", platz9),
+                            ("http://127.0.0.1:20380", platz9), ("http://localhost:20980", platz9),
+                            ("http://127.0.0.1:20980/", platz9), ("https://127.0.0.1:20980", platz9),
+                            ("http://127.0.0.1:20980", {})):
+            with self.subTest(url=url, platz=zusatz.get("PLATZ")):
+                code, ausgabe = self._sperrports(url, ANTHROPIC_API_KEY=TOKEN, **zusatz)
+                self.assertEqual(code, 70)
+                self.assertIn("nur für den Proxy der Hausmodelle", ausgabe)
+
+    def test_rauchtest_platz_vergibt_der_dispatcher_nie(self):
+        import re
+        rauchtest = (INFRA / "wamo_job_rauchtest.py").read_text(encoding="utf-8")
+        dispatch = (INFRA / "wamo_job_dispatch.py").read_text(encoding="utf-8")
+        platz = int(re.search(r"^RAUCHTEST_PLATZ = (\d+)$", rauchtest, re.M).group(1))
+        self.assertIn(f"\nRAUCHTEST_PLATZ={platz}\n", self.runner)
+        self.assertGreaterEqual(platz, int(re.search(r"^PARALLEL_MAX = (\d+)$", dispatch, re.M).group(1)))
+
+    @unittest.skipUnless(_bash(), "bash fehlt")
     def test_haus_nur_mit_auftragstoken(self):
         url = "http://127.0.0.1:18090"
         for zusatz in ({}, {"ANTHROPIC_API_KEY": "sk-ant-api03-" + "x" * 40}, {"ANTHROPIC_API_KEY": TOKEN + "0"},

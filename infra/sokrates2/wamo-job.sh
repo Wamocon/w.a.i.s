@@ -241,10 +241,20 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # lauscht); der Ausgangsfilter (wamo-egress.nft) lässt ihn immer zu, ohne Auftragstoken antwortet der Proxy nur mit 401.
 HAUS_PROXY_PORT=18090
 HAUS_PROXY_URL="http://127.0.0.1:$HAUS_PROXY_PORT"
+# Einzige zweite Ausnahme: der Rauchtest (wamo_job_rauchtest.py, RAUCHTEST_PLATZ) lässt Claude Code auf Platz 9 gegen eine Attrappe in
+# der Sandbox laufen, genau http://127.0.0.1:<Port> im eigenen Portbereich dieses Platzes. Platz 9 vergibt der Dispatcher nie
+# (PARALLEL_MAX 6); die Attrappe lauscht nur in der Sandbox selbst, ein Weg nach außen entsteht dadurch nicht.
+RAUCHTEST_PLATZ=9
 HAUS=aus
 if [ -n "${ANTHROPIC_BASE_URL-}" ]; then
-  [ "$ANTHROPIC_BASE_URL" = "$HAUS_PROXY_URL" ] || fehler "ANTHROPIC_BASE_URL ist nur für den Proxy der Hausmodelle erlaubt"
-  HAUS=an
+  if [ "$ANTHROPIC_BASE_URL" = "$HAUS_PROXY_URL" ]; then
+    HAUS=an
+  elif [ "${PLATZ-}" = "$RAUCHTEST_PLATZ" ] && [[ $ANTHROPIC_BASE_URL =~ ^http://127\.0\.0\.1:([0-9]{5})$ ]] \
+    && [ "${BASH_REMATCH[1]}" -ge "${PORT_VON:-1}" ] && [ "${BASH_REMATCH[1]}" -le "${PORT_BIS:-0}" ]; then
+    :
+  else
+    fehler "ANTHROPIC_BASE_URL ist nur für den Proxy der Hausmodelle erlaubt"
+  fi
 fi
 # Zweite Sicherung neben dem Dispatcher: mit dem Proxy nur das Auftragstoken, nie ein Claude-Zugang; ohne Proxy keine Modellnamen fürs Haus
 if [ "$HAUS" = an ]; then
