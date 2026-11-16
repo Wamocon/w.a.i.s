@@ -1,5 +1,12 @@
 # Folgepaket 1: Veröffentlichung durch den Dispatcher, Freigabe-Beleg, Auftragsdienst, Aufräumen und Ablauf in sshd
 
+> **Stand und Status (Vermerk 16.11.2026).** Dieses Planpapier steht auf dem Stand vom 11.11.2026 und wurde am 16.11.2026 auf Nikos Entscheidung als
+> Dokument übernommen, damit es gesichert ist. Die Zweitprüfung des überarbeiteten Plans („mit Änderungen freigeben“, 14 Befunde, unter anderem
+> Ausstellungsliste unterdrückbar, `profil` phasiert einführen, Klon mit `protocol.file.allow`, Vermerk je Lauf jeder Art, Repo-Bindung und
+> Ausgangsregel für FP1-18) ist **noch nicht eingearbeitet**. Seit dem 11.11. hat sich die Basis stark verändert (Dispatcher 9 mit gleichzeitigen
+> Aufträgen, Kennung je Profil, Hausmodelle, Mitglieder). Vor jeder Umsetzung wird das Papier gegen den aktuellen Stand von `main` geprüft und
+> überarbeitet. FP1-1 (F7, `expiry-time` in der Schlüsselzeile) liegt gebaut im Zweig `feat/fp1-1-expiry-time` und folgt nach dem Labortag.
+
 Planpapier, Stand 11.11.2026 nach Sicherheitsreview, Basis `origin/main` 013a357 (Zweig `docs/folgepaket-1-plan`). Dieses Papier ändert weder Code noch Server. Es setzt Nikos Entscheidungen vom
 11.11.2026 um (Abschnitt 1, dazu „Stand nach Review“ und Abschnitt 6) und baut auf `docs/entwicklung-im-betrieb.md` (Abschnitt 4 Sicherheitsmodell, Abschnitt 9 Folgestufen) und
 `docs/entwicklung-im-betrieb-arbeitsliste.md` (Schnittstellen I1 bis I10, Abschnitte 5 bis 8) auf. Kennzeichnung: **B** belegt (Datei:Zeile im Arbeitsbaum der Basis),
