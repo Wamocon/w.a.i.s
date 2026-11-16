@@ -14,6 +14,7 @@ const installiert = () =>
     resourcesPath: "C:\\Users\\x\\AppData\\Local\\Programs\\wamo-desktop\\resources",
     verzeichnis: "C:\\Users\\x\\AppData\\Local\\Programs\\wamo-desktop\\resources\\app.asar",
     userData: "C:\\Users\\x\\AppData\\Roaming\\WAMO",
+    lokaleDaten: "C:\\Users\\x\\AppData\\Local",
   });
 
 const entwickler = (existiert = () => true) =>
@@ -31,6 +32,7 @@ test("Entwickler: alles kommt aus dem Repository über desktop/", () => {
   assert.equal(p.lokalerKernMoeglich, true);
   assert.equal(p.hostUmgebungVerwalten, false);
   assert.equal(p.uvDatei, null);
+  assert.equal(p.updateOrdner, null); // Updates gibt es nur in der installierten App (update.js)
 });
 
 test("Entwickler ohne voice-core/bot.py: kein lokaler Kern möglich", () => {
@@ -84,4 +86,18 @@ test("Betriebsart: ohne lokalen Kern immer Büro, im Entwicklermodus gilt der Wu
   assert.equal(wirksameBetriebsart("unterwegs", dev), "unterwegs");
   assert.equal(wirksameBetriebsart("quatsch", dev), "unterwegs");
   assert.equal(wirksameBetriebsart("unterwegs", entwickler(() => false)), "buero");
+});
+
+test("Installiert: Updates landen lokal unter %LOCALAPPDATA%/WAMO/updates, nie in Roaming oder im Programmordner", () => {
+  const p = installiert();
+  assert.equal(p.updateOrdner, path.join("C:\\Users\\x\\AppData\\Local", "WAMO", "updates"));
+  assert.ok(!p.updateOrdner.includes("Roaming"));
+  assert.ok(!p.updateOrdner.startsWith(p.ressourcen));
+});
+
+test("Installiert ohne lokaleDaten: Abbruch statt Ordner im Nirgendwo", () => {
+  assert.throws(
+    () => loeseAuf({ istPaketiert: true, resourcesPath: "C:\\r", verzeichnis: "C:\\r\\app.asar", userData: "C:\\u" }),
+    /lokaleDaten/,
+  );
 });

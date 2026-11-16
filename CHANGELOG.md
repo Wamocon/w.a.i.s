@@ -6,6 +6,21 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.3.0] - 2026-11-15
+
+### Hinzugefügt
+
+- Prüfliste "Erste Schritte" und signierte Updates der App (Paket P3, `docs/ausrollen-neue-nutzer.md` 4.2 und 4.3): Die Desktop-App
+  meldet ihre Version (`window.wamoDesktop.version`) und den Stand der Python-Umgebung des Hosts, prüft ein vom Kern angebotenes Update
+  mit Ed25519 gegen die fest eingebauten Schlüssel (`desktop/update.js`, `desktop/update-schluessel.json`) und installiert es nur mit
+  steigender Version, nach Rückfrage und mit passender SHA-256. Signiert wird beim Bau mit `scripts/wamo-dist-signieren.cjs`. Neue
+  Kern-Route `GET /wamo/api/einrichtung/stand` (`voice-core/einrichtung_api.py`) und Abschnitt `start` in den Einstellungen.
+
+### Behoben
+
+- Verteilen der Oberfläche setzt die Zeit des Verteilens statt 0 (Test zuerst)
+- Anzeigename immer der volle Name, nie der Teil der E-Mail vor dem @ (Test zuerst)
+
 ## [0.2.0] - 2026-11-15
 
 ### Geändert
@@ -749,6 +764,7 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.2.0...HEAD
+[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Wamocon/w.a.i.s/releases/tag/v0.1.0

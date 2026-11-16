@@ -5,7 +5,8 @@
 //                Teil liefern
 //   signieren    die Herausforderung des Kerns mit dem Geräteschlüssel signieren (feste Nachricht, nie freie Daten)
 //   aktivieren   die Antwort des Kerns streng prüfen, known_hosts und geraet.json schreiben, den Tunnel starten
-//   status       eingerichtet? Tunnel verbunden? (liest tunnel.status des Überwachers)
+//   status       eingerichtet? Tunnel verbunden? (liest tunnel.status des Überwachers) Und ist die Python-Umgebung des Hosts
+//                bereit (opt.hostStatus, host-umgebung.js)? Für die Prüfliste "Erste Schritte" der Oberfläche.
 // Dazu ein Wächter, der die geplante Aufgabe "WAMO Tunnel" neu anstößt, wenn der Überwacher nicht mehr schreibt.
 //
 // Der private Schlüssel liegt im OpenSSH-Format unter %USERPROFILE%\.ssh (ssh.exe liest ihn direkt) und verlässt
@@ -28,6 +29,7 @@ const SKRIPT_FRIST_MS = 120_000; // Einrichtungsskript
 const KURZ_FRIST_MS = 30_000; // whoami, icacls, schtasks
 const WAECHTER_ABSTAND_MS = 30_000;
 const STATUS_FRISCH_MS = 60_000; // tunnel.status ist frisch, wenn ts höchstens so alt ist
+const HOST_STAENDE = ["bereit", "fehlt", "fehler", "entwickler"];
 const NEUSTART_ABSTAND_MS = 120_000; // die Aufgabe frühestens nach 2 Minuten erneut anstoßen
 
 const RE_HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
@@ -342,6 +344,8 @@ function erzeugeGeraet(opt = {}) {
   const jetzt = opt.jetzt ?? Date.now;
   const log = opt.log ?? (() => {});
   const rechnername = opt.hostname ?? os.hostname;
+  // Stand der Python-Umgebung des Hosts: installiert aus host-umgebung.js, im Entwicklermodus verwaltet sie niemand
+  const hostStatus = opt.hostStatus ?? (() => "entwickler");
   const erwartet = erwartetesZiel(opt, env);
 
   const sshOrdner = path.join(home, ".ssh");
@@ -591,15 +595,29 @@ function erzeugeGeraet(opt = {}) {
     });
   }
 
-  /** { eingerichtet, kennung, stufe, tunnel }: tunnel nach tunnel.status des Überwachers (siehe tunnelZustand). */
+  /** "bereit" | "fehlt" | "fehler" | "entwickler"; alles andere (oder ein Fehler beim Lesen) gilt als "fehler". */
+  function hostUmgebung() {
+    try {
+      const wert = hostStatus();
+      return HOST_STAENDE.includes(wert) ? wert : "fehler";
+    } catch {
+      return "fehler";
+    }
+  }
+
+  /**
+   * { eingerichtet, kennung, stufe, tunnel, hostUmgebung }: tunnel nach tunnel.status des Überwachers (siehe tunnelZustand),
+   * hostUmgebung nach host-umgebung.js (startet nichts, liest nur).
+   */
   function status() {
     const g = liesGeraet();
-    if (!g) return { eingerichtet: false, kennung: null, stufe: null, tunnel: "unbekannt" };
+    if (!g) return { eingerichtet: false, kennung: null, stufe: null, tunnel: "unbekannt", hostUmgebung: hostUmgebung() };
     return {
       eingerichtet: true,
       kennung: g.kennung,
       stufe: STUFEN.includes(g.stufe) ? g.stufe : null,
       tunnel: tunnelZustand(liesJson(tunnelStatusDatei), jetzt()),
+      hostUmgebung: hostUmgebung(),
     };
   }
 
