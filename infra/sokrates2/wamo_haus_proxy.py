@@ -383,6 +383,10 @@ class Proxy:
         felder: dict = {}
         if self._offen >= self._verbindungen_max:
             self._log("zu_viele_verbindungen")
+            try:  # erst den Kopf abnehmen (kurz, begrenzt), dann antworten: eine Antwort vor der Anfrage endet beim Client oft als RST
+                await asyncio.wait_for(r.readuntil(b"\r\n\r\n"), 2)
+            except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError, ConnectionError):
+                pass
             await self._antwort(w, 429, "zu viele offene Verbindungen", {"Retry-After": "5"})
             return await self._schliesse(w)
         self._offen += 1
