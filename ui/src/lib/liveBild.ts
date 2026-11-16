@@ -10,6 +10,15 @@
 
 const BILD_KANTE_MAX = 4096;
 
+/**
+ * Darf dieses Profil das Live-Bild anbieten? Admins und, seit dem 16.11.2026 (Entscheidung Niko), Mitglieder, die der Kern für die
+ * PC-Steuerung ihres eigenen Laptops freigeschaltet hat (betrieb.pc_stufe "mitglied", voice-core/rechte.py). Laborkonten bekommen nie
+ * eine Stufe. Maßgeblich bleiben der Kern (voice-core/bildstrom.py) und der Laptop (Einwilligung, Schalter, roter Rahmen).
+ */
+export function liveBildFuerProfil(rolle: string | undefined, pcStufe: "admin" | "mitglied" | null | undefined): boolean {
+  return rolle === "admin" || pcStufe === "mitglied";
+}
+
 /** Zeichnet ein Bild auf die Fläche der Ansicht (das Bild wird danach geschlossen, nicht aufheben). */
 export type Zeichner = (bild: ImageBitmap) => void;
 
@@ -74,7 +83,7 @@ export function restZeit(sekunden: number): string {
 export const GRUND_TEXT: Record<string, string> = {
   hinweis_fehlt: "Der rote Hinweis am Laptop ist nicht sichtbar. Ohne ihn gibt es kein Bild.",
   abgelaufen: "Die Zeit des Live-Bilds am Laptop ist abgelaufen. Die Person am Laptop schaltet es erneut ein.",
-  nicht_erlaubt: "Das Live-Bild gibt es nur für Admins an ihrem eigenen Laptop, wenn die PC-Steuerung an ist.",
+  nicht_erlaubt: "Das Live-Bild gibt es nur am eigenen Laptop, wenn die PC-Steuerung an ist.",
   schalter_aus: "Am Laptop ist das Live-Bild aus. Du kannst den Laptop hier um das Live-Bild bitten oder es dort im Tray-Menü von W.A.I.S. einschalten.",
   angefordert: "Die Anfrage ging an den Laptop. Ich warte, bis er das Live-Bild einschaltet.",
   fern_abgelehnt: "Die Anfrage ist nicht möglich.",

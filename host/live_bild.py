@@ -8,10 +8,11 @@ Oberfläche), und zwar bei jedem einzelnen Bild:
     prüft sie selbst und schaltet nur bei vorhandener Einwilligung ein). Standard ist AUS. Kein Werkzeug des Hosts schreibt
     diese Datei, PowerShell-Befehle, die sie nennen,
     sind gesperrt (wamo_host.BLOCKED_PATTERNS), und die Fenster der Desktop-App bedient der Host nie. Ein verschleierter
-    Befehl, den ein Admin auf einer Freigabekarte bestätigt, könnte die Datei trotzdem schreiben (Restrisiko). Darum
+    Befehl, den jemand auf einer Freigabekarte bestätigt, könnte die Datei trotzdem schreiben (Restrisiko). Darum
     zählt der Host zusätzlich selbst die Hinweisfenster der App (windows_control.hinweisfenster_zahl).
-  * Der Schalter gilt nur, wenn Kennung und Besitzer in der Datei zu geraet.json passen und die Stufe dort "admin" ist
-    (ein Mitglieder-Laptop liefert nie ein Bild), die Einwilligung erteilt ist, "bis" nicht abgelaufen ist (höchstens
+  * Der Schalter gilt nur, wenn Kennung und Besitzer in der Datei zu geraet.json passen und die Stufe dort "admin" oder, seit
+    dem 16.11.2026 (Entscheidung Niko zu N10), "mitglied" ist (ob ein Mitglied das Live-Bild bekommt, entscheidet der Kern mit der
+    Freischaltung je Person, voice-core/rechte.py), die Einwilligung erteilt ist, "bis" nicht abgelaufen ist (höchstens
     eine Stunde je Einschalten) und der Hinweis am Laptop lebt: Die App erneuert alle 2 s einen Herzschlag und meldet,
     ob der rote Rahmen sichtbar ist. Ist der Hinweis ausgefallen, verdeckt oder weggeblendet (Vollbild), gibt es kein Bild.
   * Höchstens ein Zuschauer je Laptop, höchstens MIN_ABSTAND_SECS zwischen zwei Bildern und BILDER_JE_MINUTE je Minute.
@@ -33,7 +34,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 DATEI_NAME = "live-bild.json"
-# Fernanfrage (Entscheidung Niko 04.11.2026): Der Admin bittet vom Handy aus, mit frischem Code, das Live-Bild am eigenen Laptop
+# Fernanfrage (Entscheidung Niko 04.11.2026): Die Person bittet vom Handy aus, mit frischem Code, das Live-Bild am eigenen Laptop
 # einzuschalten. Der Host schreibt dafür NUR diese Anfragedatei (neben geraet.json); den Schalter live-bild.json schreibt weiterhin
 # allein die Desktop-App, und zwar erst nach eigener Prüfung (Einwilligung am Laptop liegt vor, Besitzer, Alter, roter Rahmen).
 ANFRAGE_DATEI_NAME = "live-bild-anfrage.json"
@@ -48,12 +49,13 @@ BILDER_JE_MINUTE = 150
 ZUSCHAUER_FREI_SECS = 12.0  # so lange blockiert ein Zuschauer, der nicht mehr abruft, den Platz
 ZUSCHAUER_RE = re.compile(r"[0-9a-f]{16,32}")
 BILD_KANTE_MAX = 1280
+STUFEN = ("admin", "mitglied")  # Stufen aus geraet.json, mit denen ein Live-Bild möglich ist (seit 16.11.2026 auch mitglied)
 BILD_BYTES_MAX = 110_000
 
 # Gründe (stabile Codes für Kern und Oberfläche) und ihre Meldungen für Menschen
 GRUENDE = {
     "nicht_eingerichtet": "Dieser Laptop ist nicht für das Live-Bild eingerichtet.",
-    "stufe": "Dieser Laptop gehört keinem Admin. Ein Live-Bild gibt es hier nie.",
+    "stufe": "Dieser Laptop hat keine gültige Stufe. Ein Live-Bild gibt es hier nie.",
     "schalter_aus": "Am Laptop ist das Live-Bild aus. Die Person am Laptop schaltet es im Tray-Menü von W.A.I.S. ein.",
     "keine_einwilligung": "Die Einwilligung am Laptop fehlt noch. Die Person am Laptop muss sie erst geben.",
     "abgelaufen": "Die Zeit des Live-Bilds am Laptop ist abgelaufen. Die Person am Laptop schaltet es erneut ein.",
@@ -88,7 +90,7 @@ class Live:
         if gerat is None:
             return {"ok": False, "grund": "nicht_eingerichtet"}
         kennung, besitzer, stufe = gerat
-        if stufe != "admin":
+        if stufe not in STUFEN:
             return {"ok": False, "grund": "stufe"}
         if self.schalter()["bereit"]:
             return {"ok": True, "grund": "schon_an"}
@@ -129,7 +131,7 @@ class Live:
         if gerat is None:
             return self._nein("nicht_eingerichtet")
         kennung, besitzer, stufe = gerat
-        if stufe != "admin":
+        if stufe not in STUFEN:
             return self._nein("stufe")
         d = self._datei_lesen()
         if d is None or d.get("v") != 1 or d.get("an") is not True:

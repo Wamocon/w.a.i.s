@@ -26,8 +26,13 @@ HIER = pathlib.Path(__file__).parent
 # 15.11.2026 (Paket P4, PC-Steuerung für Mitglieder, docs/ausrollen-neue-nutzer.md 4.5): pc_freigaben.py kennt Freigaben des Kerns (Aktion
 # aendern, kern_vormerken, nur Mitglieder nach Fremdinhalt); pc_host.py hat LLM_TOOLS_MITGLIED und filtert den Host-Client nach der Stufe;
 # darf_pc_freigeben fragt rechte.pc_stufe statt is_admin. Laborprofile bekommen weiter nie eine Stufe (Tests unten).
-HASH_PC_FREIGABEN = "65e626fcbfacae978a4ffd99ce84b4cad12cfab4663c2d9ae5c257e73ec074ce"
-HASH_PC_HOST = "703b800738260487e4c26bcde33cf45a36548178e9dd60fbd6cecdbf6e9d2475"
+# 16.11.2026 (Entscheidung Niko zu N10, Mitglieder bekommen für ihren eigenen Laptop dieselben PC-Werkzeuge wie Admins): pc_host.py hat
+# keine eigene Liste LLM_TOOLS_MITGLIED mehr (werkzeuge_fuer gibt beiden Stufen LLM_TOOLS); pc_freigaben.py führt Freigaben des Kerns für
+# Werkzeuge, die der Kern selbst ausführt (auf_bildschirm_klicken, canvas_exportieren), über kern_ausfuehrer aus und warnt bei Mitgliedern
+# nach Fremdinhalt auf jeder Karte (fremd_warnung). darf_pc_freigeben bleibt unverändert, Laborprofile bekommen weiter nie eine Stufe, kein
+# Bildschirm, kein Live-Bild und kein Office (Tests unten).
+HASH_PC_FREIGABEN = "f7d8cb1feb0627ce86b3593f9376863929384202bdea445e0283f5325ad0929e"
+HASH_PC_HOST = "bfdab8be2dd3e875b575291d668726dd513941f852dd4d94dc3a468ede9be6f7"
 HASH_DARF_PC_FREIGEBEN = "f2e90ef81b444e26b95408748e0158c298188332e1df46496dee83024b00252a"
 
 DUMMY_ENV = {"SONIOX_API_KEY": "dummy-soniox", "ANTHROPIC_API_KEY": "dummy-anthropic", "WAMO_DATABASE_URL": "",
@@ -123,11 +128,41 @@ async def test_laborprofil_mit_freischaltung_bekommt_weder_stufe_noch_zugang_noc
 
 
 def test_laborprompt_und_laborwerkzeuge_kennen_keine_pc_werkzeuge_der_mitglieder():
-    """Die Laborsitzung baut ihren eigenen Prompt und ihre Erlaubnisliste (labor.WERKZEUGE_BASIS): kein Werkzeug der Mitglieder darin."""
+    """Die Laborsitzung baut ihren eigenen Prompt und ihre Erlaubnisliste (labor.WERKZEUGE_BASIS): kein PC-Werkzeug darin, weder des Hosts
+    noch des Kerns (Bildschirm, Office, Outlook, Teams, OneNote)."""
     import labor
     import pc_host
+    import pc_mitglied
 
-    assert not set(pc_host.LLM_TOOLS_MITGLIED) & set(labor.WERKZEUGE_BASIS)
+    assert not set(pc_host.LLM_TOOLS) & set(labor.WERKZEUGE_BASIS)
+    assert not pc_mitglied.WERKZEUGE_MITGLIED & set(labor.WERKZEUGE_BASIS)
+
+
+@pytest.mark.parametrize("art", ["platz", "schaufenster", "unbekannt"])
+async def test_laborprofil_mit_freischaltung_bekommt_weder_office_noch_live_bild(ohne_freischaltung, art):
+    """16.11.2026: Mitglieder mit Freischaltung bekommen Bildschirm, Live-Bild und Office. Ein Laborprofil bekommt nichts davon, auch mit
+    seiner user_id in WAMO_PC_MITGLIEDER_PROFILE und mit allen Teilen von WAMO_OFFICE."""
+    from types import SimpleNamespace
+
+    import bild_fern
+    import office_werkzeuge
+    import onenote_werkzeuge
+    import outlook_werkzeuge
+    import teams_werkzeuge
+
+    ohne_freischaltung.setenv("WAMO_PC_MITGLIEDER_PROFILE", MITGLIED.user_id)
+    ohne_freischaltung.setenv("WAMO_OFFICE", "dateien,outlook,teams,onenote")
+    labor = LaborIdentity(MITGLIED.user_id, "Gast", "mitglied", "du", labor_art=art)
+    for modul in (office_werkzeuge, onenote_werkzeuge, outlook_werkzeuge, teams_werkzeuge):
+        assert not modul.fuer_sitzung(labor), modul.__name__
+    assert office_werkzeuge.fuer_sitzung(MITGLIED)  # zum Vergleich: dasselbe Profil ohne Laborart bekommt es
+
+    class Tor:
+        async def authorize(self, _token):
+            return SimpleNamespace(identity=labor, status=200, reason="", erstanmeldung="erledigt")
+
+    pruefen = bild_fern.pruefer(MITGLIED.user_id, lambda: Tor())
+    assert await pruefen("a" * 10 + "." + "b" * 10 + "." + "c" * 10) == bild_fern.TEXT_FALSCH
 
 
 def test_ein_admin_ohne_labor_hat_kein_labor_werkzeug_und_keine_labor_freigabe():

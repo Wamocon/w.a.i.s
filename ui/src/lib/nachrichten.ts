@@ -44,13 +44,13 @@ export type Betrieb = {
   modellHinweis?: string;
   /** warum Entwicklungsaufträge im Büro aus sind; Admins bekommen den ganzen Grund, Mitglieder nur ihre Sätze (entwicklung_betrieb.anzeige_grund) */
   entwicklungGrund?: string;
-  /** Dateiformate, in denen das Canvas jetzt am PC gespeichert werden kann (nur Admins mit PC-Steuerung, voice-core/office_werkzeuge.py) */
+  /** Dateiformate, in denen das Canvas jetzt am PC gespeichert werden kann (nur mit PC-Steuerung, voice-core/office_werkzeuge.py) */
   office?: OfficeFormat[];
-  /** Mail über Outlook am PC geht jetzt (nur Admins mit PC-Steuerung, voice-core/outlook_werkzeuge.py): Knopf "Als E-Mail" */
+  /** Mail über Outlook am PC geht jetzt (nur mit PC-Steuerung, voice-core/outlook_werkzeuge.py): Knopf "Als E-Mail" */
   mail?: boolean;
-  /** ob der Knopf "Als OneNote-Seite" gehen kann (nur Admins mit PC-Steuerung und OneNote am PC, voice-core/onenote_werkzeuge.py) */
+  /** ob der Knopf "Als OneNote-Seite" gehen kann (nur mit PC-Steuerung und OneNote am PC, voice-core/onenote_werkzeuge.py) */
   onenote?: boolean;
-  /** Teams-Nachrichten am PC gehen jetzt (nur Admins mit PC-Steuerung, voice-core/teams_werkzeuge.py): Knopf "Als Teams-Nachricht" */
+  /** Teams-Nachrichten am PC gehen jetzt (nur mit PC-Steuerung, voice-core/teams_werkzeuge.py): Knopf "Als Teams-Nachricht" */
   teams?: boolean;
 };
 

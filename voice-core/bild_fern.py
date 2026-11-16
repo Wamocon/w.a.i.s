@@ -1,11 +1,12 @@
 """Prüfung der Fernanfrage für das Live-Bild (Entscheidung Niko 04.11.2026).
 
-Der Admin bittet in der Oberfläche, zum Beispiel am Handy, den eigenen Laptop um das Live-Bild. Die Oberfläche schickt dafür das
-Zugangstoken mit, das sie nach der Eingabe eines FRISCHEN Codes der Authenticator-App bekommen hat. Der Kern prüft hier, bevor er
-den Host bittet:
+Die Person bittet in der Oberfläche, zum Beispiel am Handy, den eigenen Laptop um das Live-Bild (Admins und, seit dem 16.11.2026,
+freigeschaltete Mitglieder). Die Oberfläche schickt dafür das Zugangstoken mit, das sie nach der Eingabe eines FRISCHEN Codes der
+Authenticator-App bekommen hat. Der Kern prüft hier, bevor er den Host bittet:
 
   * das Token ist gültig und kommt durch dieselbe Zugangskontrolle wie jede Anfrage (Signatur, zweiter Faktor, aktives Profil),
-  * es gehört zum Profil dieser Sitzung (kein fremdes Token aus einer anderen Anmeldung) und das Profil ist Admin,
+  * es gehört zum Profil dieser Sitzung (kein fremdes Token aus einer anderen Anmeldung) und das Profil hat eine Stufe der
+    PC-Steuerung (rechte.pc_stufe: Admin oder freigeschaltetes Mitglied, nie ein Laborprofil),
   * der letzte Code des zweiten Faktors ist höchstens 120 Sekunden alt (wie beim Fernzugriff auf die Sparks).
 
 Das Token wird nie geloggt, gespeichert oder weitergereicht. Der Rest (Einwilligung am Laptop, Besitzer, roter Rahmen, Ablauf) wird
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+import rechte
 from auth_gate import erstanmeldung_sperre
 from geraete_admin_api import aal2_frisch, aal2_zeit
 
@@ -39,7 +41,7 @@ def pruefer(user_id: str, gate: Callable[[], object | None]) -> Callable[[object
         if erstanmeldung_sperre(entscheidung) is not None:  # zweite Sicherung, auch bei einem fremden Tor
             return TEXT_FALSCH
         ich = getattr(entscheidung, "identity", None)
-        if ich is None or ich.user_id != user_id or not ich.is_admin:
+        if ich is None or ich.user_id != user_id or rechte.pc_stufe(ich) is None:
             return TEXT_FALSCH
         if not aal2_frisch(aal2_zeit(token)):
             return TEXT_ALT

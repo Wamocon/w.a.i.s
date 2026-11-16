@@ -2,11 +2,20 @@
 // Ansicht. Ausführen im Ordner ui/:  npm test
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bildAnzeigen, liveBildLoeschen, restZeit, zeichnerSetzen } from "./liveBild.ts";
+import { bildAnzeigen, liveBildFuerProfil, liveBildLoeschen, restZeit, zeichnerSetzen } from "./liveBild.ts";
 import { LIVE_BILD_B64_MAX, parseServerMessage } from "./nachrichten.ts";
 import { applyServerMessage, initialState, LIVE_BILD_AUS, resetWamo, wamo } from "./wamo.ts";
 
 const JPEG = "/9j/" + "A".repeat(60);
+
+test("Live-Bild für Admins und für freigeschaltete Mitglieder (Entscheidung 16.11.2026), sonst nie", () => {
+  assert.equal(liveBildFuerProfil("admin", "admin"), true);
+  assert.equal(liveBildFuerProfil("admin", undefined), true);
+  assert.equal(liveBildFuerProfil("mitglied", "mitglied"), true);
+  assert.equal(liveBildFuerProfil("mitglied", undefined), false); // ohne Freischaltung meldet der Kern keine Stufe
+  assert.equal(liveBildFuerProfil("mitglied", null), false);
+  assert.equal(liveBildFuerProfil(undefined, "admin"), false);
+});
 const frame = (extra: Record<string, unknown> = {}) => ({
   type: "bild",
   seq: 3,

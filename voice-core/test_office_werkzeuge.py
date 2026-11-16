@@ -163,7 +163,7 @@ def test_standard_ist_aus(monkeypatch):
 def test_nur_admin_nie_labor(monkeypatch):
     monkeypatch.setenv("WAMO_OFFICE", "dateien")
     assert ow.fuer_sitzung(ADMIN)
-    assert not ow.fuer_sitzung(MITGLIED)
+    assert not ow.fuer_sitzung(MITGLIED)  # Mitglied ohne Freischaltung (WAMO_PC_MITGLIEDER_PROFILE)
     for art in ("platz", "schaufenster", "unbekannt"):  # auch eine Laboridentität mit Admin-Rolle bekommt nichts
         assert not ow.fuer_sitzung(LaborIdentity(UID, "Gast", "admin", "du", labor_art=art))
     with pytest.raises(ValueError):
@@ -266,15 +266,55 @@ def host(monkeypatch):
     return h
 
 
-def office(memory=None, darf=True):
+def office(memory=None, darf=True, identitaet=ADMIN, knapp=False):
     gesendet: list[dict] = []
 
     async def senden(d):
         gesendet.append(d)
 
-    o = ow.OfficeDateien(ADMIN, memory or Memory([DOK]), client=lambda: object(), darf=lambda: darf, senden=senden)
+    o = ow.OfficeDateien(identitaet, memory or Memory([DOK]), client=lambda: object(), darf=lambda: darf, senden=senden, knapp=knapp)
     o.gesendet = gesendet
     return o
+
+
+def test_freigeschaltetes_mitglied_bekommt_office_dateien(monkeypatch):
+    """Entscheidung Niko vom 16.11.2026: Mitglieder mit Freischaltung (WAMO_PC_MITGLIEDER_PROFILE) auch für Office, nur mit Schalter."""
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER_PROFILE", UID)
+    monkeypatch.setenv("WAMO_OFFICE", "dateien")
+    assert ow.pc_person(MITGLIED) and ow.fuer_sitzung(MITGLIED)
+    ow.OfficeDateien(MITGLIED, Memory(), client=lambda: object(), darf=lambda: True, senden=None)
+    for art in ("platz", "schaufenster"):  # ein Laborprofil auch dann nicht, wenn seine user_id in der Liste steht
+        labor = LaborIdentity(UID, "Gast", "mitglied", "du", labor_art=art)
+        assert not ow.pc_person(labor) and not ow.fuer_sitzung(labor)
+        with pytest.raises(ValueError):
+            ow.OfficeDateien(labor, Memory(), client=lambda: object(), darf=lambda: True, senden=None)
+    monkeypatch.setenv("WAMO_OFFICE", "")
+    assert not ow.fuer_sitzung(MITGLIED)  # ohne Schalter am Server nichts
+
+
+async def test_mitglied_ohne_dateinamen_in_actions(host, monkeypatch):
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER_PROFILE", UID)
+    m = Memory([DOK])
+    o = office(m, identitaet=MITGLIED, knapp=True)
+    await o.schemas()
+    p = Params(format="word")
+    await o._werkzeug(p)
+    assert p.ergebnis["status"] == "success" and p.ergebnis["datei"] == "2026-11-14 Angebot.docx"  # das Modell nennt die Datei
+    _sql, werte = m.db.geschrieben[-1]
+    assert json.loads(werte[7]) == {"status": "success", "groesse": 1234, "sha256": "ab" * 8}  # kein Titel in actions
+    assert "Angebot" not in json.dumps(werte, default=str)
+
+
+async def test_nach_freigabe_derselbe_weg_mit_satz_fuer_das_modell(host, monkeypatch):
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER_PROFILE", UID)
+    o = office(Memory([DOK]), identitaet=MITGLIED, knapp=True)
+    await o.schemas()
+    ergebnis = await o.nach_freigabe({"format": "word"})
+    assert ergebnis["status"] == "success" and ergebnis["gespeichert"] is True
+    assert ergebnis["summary"] == "2026-11-14 Angebot.docx im Ordner Dokumente\\WAIS gespeichert und geöffnet"
+    assert [n for n, _a in host.aufrufe].count("office_datei_erstellen") == 1
+    abgelehnt = await o.nach_freigabe({"format": "exe"})
+    assert abgelehnt["status"] == "rejected" and "gespeichert" not in abgelehnt
 
 
 async def test_schema_mit_den_formaten_des_hosts(host):
@@ -559,7 +599,8 @@ def test_bot_baut_office_nur_fuer_admin_ohne_labor():
     zeile = next(z for z in BOT.splitlines() if "OfficeDateien(" in z)
     block = BOT[BOT.index(zeile) - 400: BOT.index(zeile) + 400]
     assert "office_werkzeuge.fuer_sitzung(identity)" in block
-    assert "is_admin" in block and "not labor_sitzung" in block and "pc_teile and is_admin" in block
+    assert "pc_person" in block and "not labor_sitzung" in block and "pc_teile and pc_person" in block
+    assert "is_admin" not in block  # die Stufe der PC-Steuerung entscheidet, nicht die Rolle allein
     # pc_teile: mit Client oder solange der Zugang zum Laptop nachgeholt werden kann (pc_nachverbinden.py), sonst nie
     assert "pc_teile = pc_client is not None or pc_nachholen" in BOT
     assert "darf=pc_allowed" in block

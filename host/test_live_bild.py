@@ -79,10 +79,21 @@ class SchalterTests(LiveTestBasis):
                      live_bild.Live(self.datei, FesteBindung(stufe=None))):
             self.assertEqual(live.schalter()["grund"], "nicht_eingerichtet")
 
-    def test_mitglied_nie(self):
-        self.schreibe()
+    def test_mitglied_mit_einwilligung_ist_bereit(self):
+        """Entscheidung Niko vom 16.11.2026: auch der Laptop eines Mitglieds (ob es das Live-Bild bekommt, entscheidet der Kern mit der
+        Freischaltung je Person); Einwilligung, Schalter und Hinweis am Laptop gelten genauso."""
         self.neu(FesteBindung(stufe="mitglied"))
-        self.assertEqual(self.live.schalter()["grund"], "stufe")
+        self.schreibe()
+        self.assertTrue(self.live.schalter()["bereit"])
+        self.schreibe(einwilligung=None)
+        self.assertEqual(self.live.schalter()["grund"], "keine_einwilligung")
+
+    def test_unbekannte_stufe_nie(self):
+        self.schreibe()
+        for stufe in ("gast", "ADMIN", "root"):
+            with self.subTest(stufe=stufe):
+                self.neu(FesteBindung(stufe=stufe))
+                self.assertEqual(self.live.schalter()["grund"], "stufe")
 
     def test_fremdes_geraet_oder_profil_nie(self):
         for aenderung in ({"kennung": "pc-anderer"}, {"besitzer": "99999999-2222-3333-4444-555555555555"}):
@@ -150,8 +161,8 @@ class FernanfrageTests(LiveTestBasis):
         self.takt.t += live_bild.ANFRAGE_ABSTAND_SECS + 1
         self.assertTrue(self.live.anfrage_stellen()["ok"])
 
-    def test_nie_fuer_mitglieder_ungebundene_oder_ohne_datei(self):
-        self.neu(FesteBindung(stufe="mitglied"))
+    def test_nie_fuer_unbekannte_stufe_ungebundene_oder_ohne_datei(self):
+        self.neu(FesteBindung(stufe="gast"))
         self.assertEqual(self.live.anfrage_stellen()["grund"], "stufe")
         self.neu(FesteBindung(stufe=None))
         self.assertEqual(self.live.anfrage_stellen()["grund"], "nicht_eingerichtet")
@@ -288,8 +299,8 @@ class WerkzeugTests(LiveTestBasis):
         self.assertNotIn("jpeg_base64", e)
         self.aufnahme.assert_not_called()
 
-    def test_mitglied_und_fremdes_geraet_nie(self):
-        self.live._bindung = FesteBindung(stufe="mitglied")
+    def test_unbekannte_stufe_und_fremdes_geraet_nie(self):
+        self.live._bindung = FesteBindung(stufe="gast")
         self.assertEqual(self.holen()["grund"], "stufe")
         self.live._bindung = FesteBindung(kennung="pc-fremd")
         self.assertEqual(self.holen()["status"], "aus")

@@ -7,7 +7,9 @@
 //  * Vor dem ersten Einschalten (und nach jeder neuen Bindung des Laptops) fragt ein Dialog nach der Einwilligung mit
 //    Inhalt, Zweck, Dauer und Datenschutz (EINWILLIGUNG_TEXT). Ohne Zustimmung bleibt alles aus.
 //  * Der Schalter ist eine Datei, %LOCALAPPDATA%\WAMO\live-bild.json (neben geraet.json). Sie gilt nur für DIESEN Laptop
-//    (Kennung und Besitzer aus geraet.json) und nur, wenn dort die Stufe "admin" steht. Der Host (host/live_bild.py) liest sie
+//    (Kennung und Besitzer aus geraet.json), auf dem Laptop eines Admins und seit dem 16.11.2026 (Entscheidung Niko) auch eines
+//    Mitglieds: ob ein Mitglied das Live-Bild bekommt, entscheidet der Kern mit der Freischaltung je Person (voice-core/rechte.py),
+//    ob der Laptop ein Bild liefert, allein die Person hier mit Einwilligung und Schalter. Der Host (host/live_bild.py) liest sie
 //    bei jedem Bild selbst und prüft zusätzlich Ablauf ("bis", höchstens eine Stunde), einen Herzschlag (alle 2 s erneuert)
 //    und "sichtbar": der rote Hinweis am Laptop muss leben. Fällt die App aus oder ist der Hinweis verdeckt oder weggeblendet,
 //    kommt kein Bild mehr.
@@ -172,7 +174,7 @@ function erzeugeLiveBild(opt) {
   function tick() {
     if (!an) return;
     const g = geraet();
-    if (jetzt() >= bis || !g || g.stufe !== "admin" || g.kennung !== gebunden?.kennung || g.besitzer !== gebunden?.besitzer) {
+    if (jetzt() >= bis || !g || g.kennung !== gebunden?.kennung || g.besitzer !== gebunden?.besitzer) {
       ausschalten("Zeit abgelaufen oder Gerät geändert");
       return;
     }
@@ -186,10 +188,9 @@ function erzeugeLiveBild(opt) {
     }
   }
 
-  /** Verfügbar nur auf einem eingerichteten Laptop eines Admins. */
+  /** Verfügbar auf jedem eingerichteten Laptop (Admin oder Mitglied); ob jemand zusehen darf, entscheidet der Kern. */
   function verfuegbar() {
-    const g = geraet();
-    return Boolean(g && g.stufe === "admin");
+    return Boolean(geraet());
   }
 
   /** optionen.anfrage: Einschalten auf Anfrage vom Handy des Besitzers (anfrageVerarbeiten). Dann gibt es keinen Dialog: Die
@@ -198,7 +199,6 @@ function erzeugeLiveBild(opt) {
     if (an) return { ok: true, schonAn: true };
     const g = geraet();
     if (!g) return { ok: false, grund: "Dieser Laptop ist noch nicht eingerichtet." };
-    if (g.stufe !== "admin") return { ok: false, grund: "Das Live-Bild gibt es nur auf dem Laptop eines Admins." };
     if (frage) return { ok: false, grund: "Die Einwilligungsfrage ist schon offen." };
     if (!hatEinwilligung(g) && optionen.anfrage === true) {
       return { ok: false, grund: "Am Laptop fehlt die Einwilligung. Die Person am Laptop schaltet das Live-Bild einmal im Tray-Menü ein." };
@@ -257,7 +257,7 @@ function erzeugeLiveBild(opt) {
   /**
    * Fernanfrage vom Handy (Entscheidung Niko 04.11.2026): Der Host legt live-bild-anfrage.json ab, nachdem der Kern einen frischen
    * Code des zweiten Faktors des Besitzers geprüft hat. Diese Funktion (main.js ruft sie alle 2 s) prüft selbst noch einmal und
-   * schaltet nur ein, wenn ALLES stimmt: Datei von diesem Laptop (Kennung) und seinem Besitzer, höchstens 60 s alt, Stufe admin,
+   * schaltet nur ein, wenn ALLES stimmt: Datei von diesem Laptop (Kennung) und seinem Besitzer, höchstens 60 s alt,
    * Einwilligung am Laptop liegt vor (nie eine Frage per Fernanfrage), nicht schon an. Die Datei wird in jedem Fall zuerst
    * gelöscht (einmalig). Der rote Rahmen am Laptop und die Meldung (opt.melden) zeigen, dass jemand zusieht; Dauer wie sonst.
    */

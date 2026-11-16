@@ -1,4 +1,4 @@
-// Tests für den Schalter am Laptop (livebild.js): Standard aus, Einwilligung, nur Admin-Laptop, Herzschlag, Ablauf.
+// Tests für den Schalter am Laptop (livebild.js): Standard aus, Einwilligung, Laptop eines Admins oder Mitglieds, Herzschlag, Ablauf.
 // Ausführen im Ordner desktop/:  npm test
 "use strict";
 
@@ -114,8 +114,25 @@ test("die Datei enthält alles, was der Host prüft", async () => {
   }
 });
 
-test("Mitglieder-Laptop und nicht eingerichteter Laptop: nie", async () => {
-  for (const opt of [{ stufe: "mitglied" }, { geraetJson: false }]) {
+test("Laptop eines Mitglieds: mit Einwilligung wie beim Admin (Entscheidung 16.11.2026)", async () => {
+  const u = umgebung({ stufe: "mitglied" });
+  try {
+    assert.equal(u.live.status().verfuegbar, true);
+    u.zustand.antwort = false; // ohne Einwilligung bleibt alles aus
+    assert.equal((await u.live.einschalten()).ok, false);
+    assert.equal(fs.existsSync(path.join(u.ordner, "live-bild.json")), false);
+    u.zustand.antwort = true;
+    assert.equal((await u.live.einschalten()).ok, true);
+    assert.equal(u.datei().an, true);
+    assert.deepEqual(u.protokoll.hinweis[0], [true, u.uhr.t + DAUER_MS]); // der rote Rahmen erscheint wie beim Admin
+    assert.equal(u.protokoll.fragen, 2);
+  } finally {
+    u.aufraeumen();
+  }
+});
+
+test("nicht eingerichteter Laptop: nie", async () => {
+  for (const opt of [{ geraetJson: false }]) {
     const u = umgebung(opt);
     try {
       const r = await u.live.einschalten();
@@ -175,11 +192,11 @@ test("neue Bindung (anderer Besitzer) verlangt die Einwilligung neu und beendet 
   }
 });
 
-test("Stufe wird zum Mitglied: sofort aus", async () => {
-  const u = umgebung();
+test("geraet.json fehlt oder wird ungültig: sofort aus", async () => {
+  const u = umgebung({ stufe: "mitglied" });
   try {
     await u.live.einschalten();
-    fs.writeFileSync(path.join(u.ordner, "geraet.json"), JSON.stringify({ v: 1, kennung: "pc-test", besitzer: BESITZER, stufe: "mitglied" }));
+    fs.writeFileSync(path.join(u.ordner, "geraet.json"), JSON.stringify({ v: 1, kennung: "PC TEST", besitzer: BESITZER, stufe: "mitglied" }));
     u.live.tick();
     assert.equal(u.live.status().an, false);
   } finally {
@@ -350,12 +367,17 @@ test("Fernanfrage: zu alt, aus der Zukunft, fremdes Gerät, fremder Besitzer, ka
   }
 });
 
-test("Fernanfrage: nie auf dem Laptop eines Mitglieds, nie ohne geraet.json, nichts zu tun ohne Datei", async () => {
+test("Fernanfrage: auf dem Laptop eines Mitglieds nur mit Einwilligung, nie ohne geraet.json, nichts zu tun ohne Datei", async () => {
   const m = umgebung({ stufe: "mitglied" });
   try {
     anfrageSchreiben(m);
-    assert.equal((await m.live.anfrageVerarbeiten()).ok, false);
+    assert.equal((await m.live.anfrageVerarbeiten()).ok, false); // ohne Einwilligung am Laptop nie
     assert.equal(m.live.status().an, false);
+    await mitEinwilligung(m);
+    anfrageSchreiben(m, { id: "cd".repeat(8) }); // eine neue Anfrage: dieselbe zählt nur einmal
+    assert.equal((await m.live.anfrageVerarbeiten()).ok, true);
+    assert.equal(m.live.status().an, true);
+    assert.equal(m.protokoll.fragen, 0, "per Fernanfrage nie eine Frage");
   } finally {
     m.aufraeumen();
   }

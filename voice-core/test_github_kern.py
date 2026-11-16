@@ -28,6 +28,10 @@ def test_anlegen_wird_zur_freigabekarte_mit_name_organisation_und_sichtbarkeit()
 def test_nur_das_anlegen_liefert_eine_karte():
     assert activity.freigabe_anfrage("git_klonen", {}, ANFRAGE) is None
     assert activity.freigabe_anfrage("websuche", {}, ANFRAGE) is None
+    # Mitglieder (16.11.2026): git_klonen bekommt nur die Karte des Kerns nach Fremdinhalt (Aktion aendern), nie eine andere
+    kern = json.dumps({**json.loads(ANFRAGE), "aktion": "aendern", "grund": "Änderung am Laptop nach Inhalten von außen"})
+    assert activity.freigabe_anfrage("git_klonen", {}, kern)["aktion"] == "aendern"
+    assert activity.freigabe_anfrage("canvas_exportieren", {}, ANFRAGE) is None
 
 
 def test_werkzeuge_sind_fuers_modell_sichtbar_und_die_zeitleiste_zeigt_das_ziel():

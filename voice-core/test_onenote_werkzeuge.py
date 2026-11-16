@@ -83,8 +83,17 @@ def test_nur_mit_schalter(wert, erwartet, monkeypatch):
     assert onw.fuer_sitzung(ADMIN) is erwartet
 
 
+def test_freigeschaltetes_mitglied_bekommt_onenote(monkeypatch):
+    monkeypatch.setenv("WAMO_OFFICE", "onenote")
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER_PROFILE", UID)
+    assert onw.fuer_sitzung(MITGLIED) is True
+    onw.OneNoteSeiten(MITGLIED, Memory(), client=lambda: object(), darf=lambda: True, senden=None)
+    assert onw.fuer_sitzung(LaborIdentity(UID, "Gast", "mitglied", "du")) is False
+
+
 def test_nur_admin_nie_labor(monkeypatch):
     monkeypatch.setenv("WAMO_OFFICE", "onenote")
+    monkeypatch.delenv("WAMO_PC_MITGLIEDER_PROFILE", raising=False)
     assert onw.fuer_sitzung(MITGLIED) is False
     assert onw.fuer_sitzung(LaborIdentity(UID, "Gast", "admin", "du")) is False
     for identitaet in (MITGLIED, LaborIdentity(UID, "Gast", "admin", "du")):
@@ -269,7 +278,8 @@ def test_bot_baut_onenote_nur_fuer_admin_ohne_labor_und_haengt_das_schema_an():
     zeile = next(z for z in BOT.splitlines() if "OneNoteSeiten(" in z)
     block = BOT[BOT.index(zeile) - 400: BOT.index(zeile) + 400]
     assert "onenote_werkzeuge.fuer_sitzung(identity)" in block
-    assert "is_admin" in block and "not labor_sitzung" in block and "pc_teile and is_admin" in block
+    assert "pc_person" in block and "not labor_sitzung" in block and "pc_teile and pc_person" in block
+    assert "is_admin" not in block  # die Stufe der PC-Steuerung entscheidet, nicht die Rolle allein
     # pc_teile: mit Client oder solange der Zugang zum Laptop nachgeholt werden kann (pc_nachverbinden.py), sonst nie
     assert "pc_teile = pc_client is not None or pc_nachholen" in BOT and "darf=pc_allowed" in block
     assert "onenote.register(llm)" in BOT and "await onenote.schemas()" in BOT

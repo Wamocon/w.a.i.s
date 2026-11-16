@@ -81,3 +81,15 @@ def test_auch_eine_falsch_gebaute_identitaet_mit_laborart_bekommt_nichts(monkeyp
 def test_liste_liest_nur_die_umgebung_des_kerns():
     with mock.patch.dict(os.environ, {"WAMO_PC_MITGLIEDER_PROFILE": f" {MITGLIED_ID} "}):
         assert rechte.pc_mitglieder_profile() == frozenset({MITGLIED_ID})
+
+
+def test_mit_stufe_dieselben_werkzeuge_wie_ein_admin(monkeypatch):
+    """Entscheidung Niko vom 16.11.2026: Mitglieder mit Stufe bekommen für ihren eigenen Laptop dieselben Werkzeuge des Hosts wie Admins
+    (pc_host.werkzeuge_fuer); ohne Stufe, auch als Laborprofil, keine."""
+    import pc_host
+
+    monkeypatch.setenv("WAMO_PC_MITGLIEDER_PROFILE", MITGLIED_ID)
+    admin = pc_host.werkzeuge_fuer(rechte.pc_stufe(ident(ADMIN_ID, "admin")))
+    assert pc_host.werkzeuge_fuer(rechte.pc_stufe(ident(MITGLIED_ID, "mitglied"))) == admin == pc_host.LLM_TOOLS
+    assert pc_host.werkzeuge_fuer(rechte.pc_stufe(ident(ANDERES_ID, "mitglied"))) == []
+    assert pc_host.werkzeuge_fuer(rechte.pc_stufe(ident(MITGLIED_ID, "mitglied", "platz"))) == []

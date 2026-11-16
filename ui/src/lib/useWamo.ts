@@ -13,7 +13,7 @@ import { aktiverSlot, startUrl } from "@/lib/kernSlot";
 import { pcAutoLesen, rolleGemerktLesen, rolleGemerktSetzen, stillStartLesen } from "@/lib/einstellungen";
 import { einstellungenOeffnen } from "@/lib/einstellungenHash";
 import type { GeraetBruecke } from "@/lib/geraet";
-import { bildAnzeigen, liveBildLoeschen } from "@/lib/liveBild";
+import { bildAnzeigen, liveBildFuerProfil, liveBildLoeschen } from "@/lib/liveBild";
 import { nutzerLesen, useNutzerHalten } from "@/lib/nutzer";
 import { klickWeg, pcAdmin, PC_EIN_LEER, PC_WUNSCH_NEU, stillNeinHinweis, wunschSchritt, type PcWunsch } from "@/lib/pcSchalter";
 import { StillMedienManager } from "@/lib/stillMedien";
@@ -152,9 +152,9 @@ export type WamoAktionen = {
   vergessen: (memo: Memo) => void;
   /** Entwicklungsauftrag starten oder verwerfen; true, wenn gesendet */
   entscheideAuftrag: (a: Auftrag, ja: boolean) => boolean;
-  /** PC-Steuerung dieser Sitzung an- oder ausschalten (nur admin); true, wenn gesendet */
+  /** PC-Steuerung dieser Sitzung an- oder ausschalten (Admin oder freigeschaltetes Mitglied); true, wenn gesendet */
   pcSteuerung: (an: boolean) => boolean;
-  /** Live-Bild des eigenen Laptops (nur admin, voice-core/bildstrom.py): Ansicht öffnen, schließen, Monitor wählen;
+  /** Live-Bild des eigenen Laptops (Admin oder freigeschaltetes Mitglied, voice-core/bildstrom.py): Ansicht öffnen, schließen, Monitor wählen;
    *  true, wenn gesendet. Optional, damit die Vorschau ohne Kern auskommt. */
   liveBild?: LiveBildAktionen;
   /** Text an WAMO schicken wie eine gesprochene Bitte (nur mit Verbindung, höchstens eine Sendung zugleich, Schlüssel
@@ -1219,7 +1219,7 @@ export function useWamo(): WamoAktionen {
     const sende = (data: { aktion: "an" | "aus" | "monitor" | "anfordern"; monitor?: number; token?: string }) => {
       const client = clientRef.current;
       const s = wamo.get();
-      if (!client || !istOnline(s) || s.profil?.rolle !== "admin") return false;
+      if (!client || !istOnline(s) || !liveBildFuerProfil(s.profil?.rolle, s.betrieb?.pcStufe)) return false;
       try {
         senden(client, { type: "bildstrom", data });
         return true;

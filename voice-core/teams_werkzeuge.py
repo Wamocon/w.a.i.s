@@ -4,7 +4,8 @@ und der Klick teams_vorbereiten.
 Entscheidung (Niko, 15.11.2026): Teams öffnet den Chat vorbefüllt per Deep Link, die Person drückt selbst Enter. W.A.I.S. sendet in
 Teams nie selbst, und geöffnet wird erst nach der Freigabe in W.A.I.S. (Karte mit Empfängern und Text, Job pc, Aktion teams).
 
-Wer: nur admin, nie in einer Laborsitzung, nur mit WAMO_OFFICE (Teil "teams", Standard leer = aus, unbekannte Teile zählen nicht), nur
+Wer: nur mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder, seit dem 16.11.2026, freigeschaltetes Mitglied am eigenen Laptop;
+office_werkzeuge.pc_person), nie in einer Laborsitzung, nur mit WAMO_OFFICE (Teil "teams", Standard leer = aus, unbekannte Teile zählen nicht), nur
 bei eingeschalteter PC-Steuerung mit gehaltener Sperre (darf) und nur, wenn der Host Teams öffnen kann (office_faehigkeiten meldet
 teams). Registriert wird nach werkzeuge_absichern: das Stimmabdruck-Gate gilt, das Werkzeug steht nicht in OFFENE_WERKZEUGE.
 
@@ -27,10 +28,9 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
-import labor
 from activity import freigabe_anfrage
 from canvas_quelle import CanvasNichtErreichbar, canvas_lesen
-from office_werkzeuge import office_teile
+from office_werkzeuge import office_teile, pc_person
 from outlook_werkzeuge import WARNUNG, _als_liste
 from pc_host import call_host_tool, pc_freigabe_entscheiden
 from persona import clean_inline
@@ -54,8 +54,8 @@ def teams_an(wert: str | None = None) -> bool:
 
 
 def fuer_sitzung(identity) -> bool:
-    """Bekommt diese Sitzung Teams-Nachrichten? Nur admin, nie ein Laborprofil, nur mit Schalter."""
-    return bool(getattr(identity, "is_admin", False)) and not labor.ist_labor(identity) and teams_an()
+    """Bekommt diese Sitzung Teams-Nachrichten? Nur mit Stufe der PC-Steuerung, nie ein Laborprofil, nur mit Schalter."""
+    return pc_person(identity) and teams_an()
 
 
 def schema() -> FunctionSchema:
@@ -115,8 +115,8 @@ class TeamsNachricht:
 
     def __init__(self, identity, memory, *, client: Callable[[], object], darf: Callable[[], bool],
                  senden: Callable[[dict], Awaitable[None]] | None, fremd: Callable[[], bool]):
-        if not getattr(identity, "is_admin", False) or labor.ist_labor(identity):
-            raise ValueError("Teams-Nachrichten gibt es nur für Admins und nie im Labor")
+        if not pc_person(identity):
+            raise ValueError("Teams-Nachrichten gibt es nur mit PC-Steuerung am eigenen Laptop und nie im Labor")
         self.identity, self.memory = identity, memory
         self._client, self._darf, self._senden, self._fremd = client, darf, senden, fremd
         self.karte_anlegen: Callable[[dict], dict | None] | None = None

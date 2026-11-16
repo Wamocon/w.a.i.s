@@ -11,7 +11,8 @@ untrusted: auch Text aus Websuche, Mails oder Dateien kann im Modell als Anweisu
   read      sofort                (system_info, powershell_lesen mit reinen Get-/Test-Befehlen)
   change    sofort, protokolliert (webseite_oeffnen, programm_oeffnen, dark_mode, git_klonen; nur für den Kern:
             office_datei_erstellen und office_datei_oeffnen, Dateien nur in Dokumente\\WAIS, Schalter office.aus)
-  critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung durch einen Admin in der UI (auch github_repo_anlegen und,
+  critical  nur Freigabe-Anfrage; ausgeführt erst nach Bestätigung in der UI durch die Person, deren Sitzung diesen Laptop steuert
+            (Admin oder, seit dem 16.11.2026, freigeschaltetes Mitglied am eigenen Laptop; auch github_repo_anlegen und,
             nur für den Kern, outlook_mail_anfragen: Senden über das klassische Outlook ist critical, ein Entwurf im neuen Outlook
             ist change, kommt aber ebenso erst nach der Karte; teams_chat_anfragen: Teams-Chat mit Text im Eingabefeld, W.A.I.S.
             sendet dort nie selbst; Schalter office.aus; nur für den Kern auch onenote_seite_anfragen)
@@ -662,8 +663,8 @@ def webseite_oeffnen(url: str, browser: str = "chrome", neuer_tab: bool = False)
         return _anfrage(
             "webseite_oeffnen", "webseite", {"url": safe_url, "browser": browser_name, "neuer_tab": neu}, "webseite",
             "Webseite mit sehr langer Suchanfrage öffnen", safe_url, browser_name,
-            "Sehr lange Such-Parameter könnten Gesprächsinhalte nach außen tragen. Ein Admin muss das in der "
-            "Oberfläche freigeben; bis dahin passiert nichts.",
+            "Sehr lange Such-Parameter könnten Gesprächsinhalte nach außen tragen. Bitte gib das in der "
+            "Oberfläche frei; bis dahin passiert nichts.",
             {"url": safe_url[:200], "tab": TAB_NEU if neu else TAB_AKTUELL})
     if weg == WEG_UIA:  # Fenster nach vorn und Enter: wie jede Eingabe, bei offener Freigabe ruht sie
         if vorab := _eingabe_vorab("webseite_oeffnen"):
@@ -965,7 +966,7 @@ def _same_target(target: dict) -> None:
 
 
 SENDEN_HINWEIS = ("Senden in Mail- und Messenger-Fenstern braucht eine Freigabe. Die Anfrage liegt als Karte in "
-                  "der Oberfläche; erst nach dem Klick eines Admins wird gesendet.")
+                  "der Oberfläche; erst nach deinem Klick dort wird gesendet.")
 
 
 def _jetzt() -> float:
@@ -1148,7 +1149,7 @@ def tasten_druecken(kombination: str, fenster: str = "") -> dict:
 def powershell_lesen(command: str, reason: str) -> dict:
     """Liest Informationen per PowerShell (nur Get-/Test-Befehle, optional mit | Select/Where/Sort/
     Format/Measure). Alles, was etwas veraendert, wird NICHT ausgefuehrt, sondern als Freigabe-
-    Anfrage gestellt (status=needs_approval), die ein Admin freigeben muss. `reason` = wofür,
+    Anfrage gestellt (status=needs_approval), die in der Oberfläche freigegeben werden muss. `reason` = wofür,
     wird protokolliert."""
     command = expand_safe_vars(command)  # fest eingesetzt: geprüft und ausgeführt wird dieselbe Zeichenfolge
     risk = classify(command)
@@ -1163,7 +1164,7 @@ def powershell_lesen(command: str, reason: str) -> dict:
         return _anfrage(
             "powershell_lesen", "powershell", {"command": command}, "powershell", "PowerShell-Befehl ausführen",
             command, f"PowerShell auf {platform.node()}",
-            "Dieser Befehl ließ sich nicht sicher als reines Lesen einstufen. Ein Admin muss ihn in der Oberfläche freigeben; "
+            "Dieser Befehl ließ sich nicht sicher als reines Lesen einstufen. Bitte gib ihn in der Oberfläche frei; "
             "bis dahin passiert nichts.",
             {"befehl": str(command)[:300]}, anlass=anlass)
     result = _powershell(command)
@@ -1340,7 +1341,7 @@ async def bild_holen(zuschauer: str, monitor: int = 1) -> dict:
 @mcp.tool()
 def live_bild_anfordern() -> dict:
     """Nur für den Voice-Core (nie für das Gesprächsmodell): bittet die Desktop-App am Laptop, das Live-Bild einzuschalten
-    (Fernanfrage des Admins vom Handy, der Kern hat vorher einen frischen Code des zweiten Faktors geprüft). Der Host schreibt
+    (Fernanfrage der Person vom Handy, der Kern hat vorher einen frischen Code des zweiten Faktors geprüft). Der Host schreibt
     nur die Anfragedatei; den Schalter setzt die App erst nach eigener Prüfung (Einwilligung am Laptop, roter Rahmen)."""
     if locked := _gesperrt("live_bild_anfordern"):
         return locked
@@ -1350,7 +1351,7 @@ def live_bild_anfordern() -> dict:
         None: "Die Anfrage ging an den Laptop.",
         "schon_an": "Das Live-Bild ist am Laptop schon eingeschaltet.",
         "zu_schnell": "Die letzte Anfrage ist erst Sekunden her. Bitte kurz warten.",
-        "stufe": "Dieser Laptop gehört keinem Admin.",
+        "stufe": "Dieser Laptop ist für das Live-Bild nicht freigeschaltet.",
         "nicht_eingerichtet": "Dieser Laptop ist nicht für das Live-Bild eingerichtet.",
         "schreibfehler": "Die Anfrage ließ sich am Laptop nicht ablegen.",
     }
@@ -1470,7 +1471,7 @@ SYSTEMFENSTER_EXES = {"systempropertiesadvanced.exe", "systempropertiesprotectio
 SYSTEMFENSTER_TITEL = re.compile(r"(umgebungsvariablen|environment variables|systemeigenschaften|system properties)",
                                  re.IGNORECASE)
 UIA_SYSTEM_KARTE = ("Das ändert Einstellungen des PCs (zum Beispiel Umgebungsvariablen, die später Programme "
-                    "beeinflussen). Ein Admin muss es in der Oberfläche freigeben; bis dahin passiert nichts.")
+                    "beeinflussen). Bitte gib es in der Oberfläche frei; bis dahin passiert nichts.")
 
 
 def _systemfenster(ziel: dict) -> bool:
@@ -1487,8 +1488,8 @@ def _uia_freigabepflichtig(ziel: dict, knoten: "uia_control.Knoten | None" = Non
     if SENSIBLER_NAME.search(knoten.name) or SENSIBLER_NAME.search(knoten.aid):
         return True
     return not knoten.name.strip() and knoten.typ in ("Schaltfläche", "Link", "Menüeintrag", "Teilungsschaltfläche")
-UIA_KARTE = ("Dieser Klick kann etwas senden, bezahlen, löschen oder veröffentlichen. Ein Admin muss ihn in der "
-             "Oberfläche freigeben; bis dahin passiert nichts.")
+UIA_KARTE = ("Dieser Klick kann etwas senden, bezahlen, löschen oder veröffentlichen. Bitte gib ihn in der "
+             "Oberfläche frei; bis dahin passiert nichts.")
 
 
 def _uia_fenster(fenster: object, schreiben: str = "") -> dict:
@@ -2015,7 +2016,7 @@ async def git_klonen(repo: str) -> dict:
     return await asyncio.to_thread(_git_klonen_ausfuehren, repo)
 
 
-GITHUB_KARTE = ("Das legt ein neues Repository bei GitHub an. Ein Admin muss es in der Oberfläche freigeben; bis dahin "
+GITHUB_KARTE = ("Das legt ein neues Repository bei GitHub an. Bitte gib es in der Oberfläche frei; bis dahin "
                 "passiert nichts.")
 
 
@@ -2266,7 +2267,7 @@ def office_datei_oeffnen(kennung: str) -> dict:
 MAIL_PRO_STUNDE = 10
 MAIL_VERZOEGERUNG_SECS = office_outlook.VERZOEGERUNG_SECS
 FREIGABE_DETAIL_MAX_MAIL = office_outlook.KARTE_MAX
-MAIL_KARTE = ("Die Mail liegt als Karte in der Oberfläche. Erst nach dem Klick eines Admins sendet W.A.I.S. sie (klassisches Outlook, "
+MAIL_KARTE = ("Die Mail liegt als Karte in der Oberfläche. Erst nach deinem Klick dort sendet W.A.I.S. sie (klassisches Outlook, "
               "30 Sekunden zurückholbar) oder öffnet den fertigen Entwurf (neues Outlook).")
 MAIL_ZU_LANG = "Zu lang für die Karte: als Anhang schicken oder kürzen."
 _VERSAND: office_outlook_com.Versandliste | None = None
@@ -2442,11 +2443,11 @@ def outlook_versand_status(versand_id: str) -> dict:
 # ---------- OneNote-Seite aus dem Canvas (office_onenote.py) ----------
 # Nur für den Kern, nie in LLM_TOOLS: Das Sprachmodell ruft onenote_seite im Kern, der Kern liest das eigene Canvas-Element und schickt
 # hierher nur dessen feste Struktur. Der Host prüft selbst (Inhalt, Titel, Länge, Zeichen), liest nur das Standard-Notizbuch und legt eine
-# Freigabe-Anfrage an (critical, Art onenote). Die Seite entsteht erst nach dem Klick eines Admins (freigabe_entscheiden), genau einmal.
+# Freigabe-Anfrage an (critical, Art onenote). Die Seite entsteht erst nach dem Klick auf die Karte (freigabe_entscheiden), genau einmal.
 # Fehlt OneNote für den Desktop oder ist es nicht bereit, gibt es keine Karte, sondern rueckfall "word" (der Kern speichert dann eine
 # Word-Datei). office.aus sperrt auch dieses Werkzeug. Das Audit nennt Notizbuch, Abschnitt und Seitenkennung, Titel und Inhalt nur als
 # Prüfsumme.
-ONENOTE_KARTE = ("Das legt eine Seite in deinem OneNote an. Ein Admin muss sie in der Oberfläche freigeben; bis dahin passiert "
+ONENOTE_KARTE = ("Das legt eine Seite in deinem OneNote an. Bitte gib sie in der Oberfläche frei; bis dahin passiert "
                  "nichts.")
 ONENOTE_FEHLT = "OneNote für den Desktop ist an diesem PC nicht installiert oder nicht per COM erreichbar."
 ONENOTE_ZU_LANG = (f"Das ist zu lang für die Freigabekarte (höchstens rund {FREIGABE_DETAIL_MAX} Zeichen). Bitte kürzer fassen oder "
@@ -2527,7 +2528,7 @@ def _onenote_ausfuehren(eintrag: dict) -> dict:
 # baut die Karte mit genau dem Inhalt des Links und hält die Anfrage. Nach dem Klick öffnet er den Chat in der Teams-App (msteams:) oder im
 # Browser; der Text steht im Eingabefeld, senden muss die Person selbst. Audit nur mit Anzahl und Prüfsummen.
 TEAMS_PRO_STUNDE = 20
-TEAMS_KARTE = ("Die Teams-Nachricht liegt als Karte in der Oberfläche. Erst nach dem Klick eines Admins öffnet W.A.I.S. den Chat mit dem "
+TEAMS_KARTE = ("Die Teams-Nachricht liegt als Karte in der Oberfläche. Erst nach deinem Klick dort öffnet W.A.I.S. den Chat mit dem "
                "Text im Eingabefeld; senden muss die Person in Teams selbst.")
 
 

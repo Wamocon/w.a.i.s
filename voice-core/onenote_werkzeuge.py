@@ -1,7 +1,8 @@
 """OneNote-Seite aus dem Canvas (Paket 4 von docs/office-und-versand.md, Teil OneNote): Werkzeug onenote_seite und der Klick
 "Als OneNote-Seite" im Canvas (Client-Nachricht onenote_seite).
 
-Wer: nur admin, nie in einer Laborsitzung (fuer_sitzung, dazu prüft der Konstruktor selbst), nur mit WAMO_OFFICE (Teil "onenote",
+Wer: nur mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder, seit dem 16.11.2026, freigeschaltetes Mitglied am eigenen Laptop;
+office_werkzeuge.pc_person), nie in einer Laborsitzung (fuer_sitzung, dazu prüft der Konstruktor selbst), nur mit WAMO_OFFICE (Teil "onenote",
 Standard leer = aus), nur bei eingeschalteter PC-Steuerung mit gehaltener Sperre (darf) und nur, wenn der Host das Werkzeug kennt
 (office_faehigkeiten meldet "onenote"). Das Werkzeug wird am LLM registriert, nachdem werkzeuge_absichern das Stimmabdruck-Gate
 eingehängt hat; es steht nicht in OFFENE_WERKZEUGE.
@@ -10,7 +11,7 @@ Was: Der Kern liest das eigene Canvas-Element (canvas_quelle.py) und schickt dem
 (onenote_seite_anfragen, nie in LLM_TOOLS). Der Host prüft selbst, bestimmt das OneDrive der Firma und das Notizbuch W.A.I.S. darin
 und legt eine Freigabe-Anfrage an (needs_approval, Aktion onenote). Per Sprache macht activity.py daraus die Karte, per Klick dieses
 Modul über karte (pc_freigaben.PcFreigaben.anfrage); beide Wege zeigen Konto, Notizbuch, Abschnitt, Titel und den ganzen Inhalt.
-Angelegt wird erst nach dem Klick eines Admins auf die Karte (pc_freigaben.py, freigabe_entscheiden im Host), genau einmal; fehlt das
+Angelegt wird erst nach dem Klick der Person auf die Karte (pc_freigaben.py, freigabe_entscheiden im Host), genau einmal; fehlt das
 Notizbuch, legt der Host es erst dann an.
 
 Rückfall: Fehlt OneNote für den Desktop, gibt es kein eindeutiges OneDrive der Firma oder ist OneNote nicht bereit (Fähigkeiten oder
@@ -32,11 +33,10 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
-import labor
 from activity import APPROVAL_ID_RE, freigabe_anfrage
 from canvas_quelle import CanvasNichtErreichbar, canvas_lesen, kennung_gueltig
 from office_werkzeuge import (CANVAS_NICHT_ERREICHBAR, ERSTELLEN_TIMEOUT_SECS, FAEHIGKEITEN_TIMEOUT_SECS, KEIN_CANVAS, PC_AUS,
-                              OfficeDateien, dateien_an, office_teile)
+                              OfficeDateien, dateien_an, office_teile, pc_person)
 from pc_host import call_host_tool, pc_freigabe_entscheiden
 from persona import clean_inline
 
@@ -59,8 +59,8 @@ KEINE_KARTE = "Die Freigabekarte ließ sich nicht anzeigen. Am PC ist nichts pas
 
 
 def fuer_sitzung(identity) -> bool:
-    """Bekommt diese Sitzung OneNote-Seiten? Nur admin, nie ein Laborprofil, nur mit WAMO_OFFICE=onenote."""
-    return bool(getattr(identity, "is_admin", False)) and not labor.ist_labor(identity) and TEIL in office_teile()
+    """Bekommt diese Sitzung OneNote-Seiten? Nur mit Stufe der PC-Steuerung, nie ein Laborprofil, nur mit WAMO_OFFICE=onenote."""
+    return pc_person(identity) and TEIL in office_teile()
 
 
 def schema() -> FunctionSchema:
@@ -87,8 +87,8 @@ class OneNoteSeiten:
 
     def __init__(self, identity, memory, *, client: Callable[[], object], darf: Callable[[], bool],
                  senden: Callable[[dict], Awaitable[None]] | None, karte: Callable[[dict], dict | None] | None = None):
-        if not getattr(identity, "is_admin", False) or labor.ist_labor(identity):
-            raise ValueError("OneNote-Seiten gibt es nur für Admins und nie im Labor")
+        if not pc_person(identity):
+            raise ValueError("OneNote-Seiten gibt es nur mit PC-Steuerung am eigenen Laptop und nie im Labor")
         self.memory, self._client, self._darf, self._senden, self._karte_fuer = memory, client, darf, senden, karte
         self._dateien = OfficeDateien(identity, memory, client=client, darf=darf, senden=senden)  # nur für den Rückfall
         self.onenote = self.word = False

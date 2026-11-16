@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { useJetzt } from "@/components/kommando/useJetzt";
 import { codeBestaetigen } from "@/lib/geraeteVerwaltungApi";
-import { GRUND_TEXT, liveBildLoeschen, restZeit, zeichnerSetzen } from "@/lib/liveBild";
+import { GRUND_TEXT, liveBildFuerProfil, liveBildLoeschen, restZeit, zeichnerSetzen } from "@/lib/liveBild";
 import { accessToken } from "@/lib/supabase";
 import { useSelect } from "@/lib/store";
 import type { LiveBildAktionen } from "@/lib/useWamo";
@@ -18,9 +18,16 @@ const fokusAufTitel = () => requestAnimationFrame(() => document.getElementById(
 const LUPE_KANTE = 168; // Pixel der Lupe auf dem Bildschirm
 const LUPE_FAKTOR = 2.5;
 
-/** Darf diese Sitzung das Live-Bild überhaupt anbieten? Nur Admin mit laufender PC-Steuerung am gebundenen Laptop. */
+/** Darf diese Sitzung das Live-Bild überhaupt anbieten? Admin oder freigeschaltetes Mitglied mit laufender PC-Steuerung am gebundenen Laptop. */
 export const useLiveBildErlaubt = () =>
-  useSelect(wamo, (s) => istOnline(s) && s.profil?.rolle === "admin" && s.betrieb?.pcSteuerung === "an" && (s.betrieb.pc === "verbunden" || s.betrieb.pc === "gesperrt"));
+  useSelect(
+    wamo,
+    (s) =>
+      istOnline(s) &&
+      liveBildFuerProfil(s.profil?.rolle, s.betrieb?.pcStufe) &&
+      s.betrieb?.pcSteuerung === "an" &&
+      (s.betrieb.pc === "verbunden" || s.betrieb.pc === "gesperrt"),
+  );
 
 /**
  * Ansicht des eigenen Laptops (Live-Bild). Die Bilder kommen einzeln vom Kern, nur wenn die Person am Laptop den Schalter
@@ -53,7 +60,7 @@ export const BildschirmAnsicht = memo(function BildschirmAnsicht({ aktionen }: {
 });
 
 /**
- * Fernanfrage (Entscheidung Niko 04.11.2026): Am Handy gibt es keinen Tray. Hier bittet der Admin seinen eigenen Laptop um das
+ * Fernanfrage (Entscheidung Niko 04.11.2026): Am Handy gibt es keinen Tray. Hier bittet die Person ihren eigenen Laptop um das
  * Live-Bild, mit einem frischen Code der Authenticator-App. Der Kern prüft Token und Code, die Desktop-App am Laptop schaltet nur
  * ein, wenn dort die Einwilligung schon vorliegt, und zeigt den roten Rahmen. Das Token geht nur in diese eine Nachricht.
  */

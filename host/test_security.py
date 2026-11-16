@@ -1233,5 +1233,20 @@ class SystemeigenschaftenTests(unittest.TestCase):
             host.wc.pick_start_app("Code Editor", [{"Name": "Kaffee", "AppID": "k"}])
 
 
+class FreigabeTexteTests(unittest.TestCase):
+    """Entscheidung Niko vom 16.11.2026: Mitglieder geben am eigenen Laptop selbst frei. Kein Text des Hosts sagt mehr, dass ein Admin
+    freigeben muss; die Prüfung selbst (Karte, zweites Geheimnis, genau einmal) bleibt unverändert."""
+
+    def test_kein_text_verlangt_einen_admin(self):
+        quelle = (Path(__file__).with_name("wamo_host.py")).read_text(encoding="utf-8")
+        for alt in ("Ein Admin muss", "eines Admins", "keinem Admin", "die ein Admin freigeben muss"):
+            self.assertNotIn(alt, quelle)
+        for karte in (host.UIA_KARTE, host.UIA_SYSTEM_KARTE, host.GITHUB_KARTE, host.ONENOTE_KARTE):
+            self.assertIn("Bitte gib", karte)
+            self.assertIn("bis dahin passiert nichts", karte)
+        for text in (host.SENDEN_HINWEIS, host.MAIL_KARTE, host.TEAMS_KARTE):
+            self.assertIn("deinem Klick", text)
+
+
 if __name__ == "__main__":
     unittest.main()

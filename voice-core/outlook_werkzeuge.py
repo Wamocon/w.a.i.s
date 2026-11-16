@@ -1,7 +1,8 @@
 """Mail über Outlook am PC aus dem Canvas (Paket 2 von docs/office-und-versand.md): Werkzeug outlook_senden und die Klicks mail_vorbereiten
 und mail_zurueckholen.
 
-Wer: nur admin, nie in einer Laborsitzung (das Labor hat eigene Werkzeuge wie mail_senden; dieses heißt bewusst anders), nur mit
+Wer: nur mit Stufe der PC-Steuerung (rechte.pc_stufe: Admin oder, seit dem 16.11.2026, freigeschaltetes Mitglied am eigenen Laptop;
+office_werkzeuge.pc_person), nie in einer Laborsitzung (das Labor hat eigene Werkzeuge wie mail_senden; dieses heißt bewusst anders), nur mit
 WAMO_OFFICE (Teil "outlook", Standard leer = aus), nur bei eingeschalteter PC-Steuerung mit gehaltener Sperre (darf) und nur, wenn der
 Host Mails vorbereiten kann (office_faehigkeiten meldet mail). Registriert wird nach werkzeuge_absichern: das Stimmabdruck-Gate gilt, das
 Werkzeug steht nicht in OFFENE_WERKZEUGE.
@@ -33,11 +34,10 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
-import labor
 from activity import freigabe_anfrage
 from canvas_quelle import kennung_gueltig
 from memory import DB_ERRORS
-from office_werkzeuge import FORMATE, office_teile
+from office_werkzeuge import FORMATE, office_teile, pc_person
 from pc_host import call_host_tool, freigabe_schluessel, pc_freigabe_entscheiden
 from persona import clean_inline
 
@@ -66,8 +66,8 @@ def outlook_an(wert: str | None = None) -> bool:
 
 
 def fuer_sitzung(identity) -> bool:
-    """Bekommt diese Sitzung Mails über Outlook? Nur admin, nie ein Laborprofil, nur mit Schalter."""
-    return bool(getattr(identity, "is_admin", False)) and not labor.ist_labor(identity) and outlook_an()
+    """Bekommt diese Sitzung Mails über Outlook? Nur mit Stufe der PC-Steuerung, nie ein Laborprofil, nur mit Schalter."""
+    return pc_person(identity) and outlook_an()
 
 
 def schema(formate: tuple[str, ...]) -> FunctionSchema:
@@ -124,8 +124,8 @@ class OutlookMail:
                  senden: Callable[[dict], Awaitable[None]] | None, fremd: Callable[[], bool],
                  melden: Callable[[str], Awaitable[None]] | None = None, exportieren: Callable[..., Awaitable[dict]] | None = None,
                  formate: Callable[[], tuple[str, ...]] = lambda: ()):
-        if not getattr(identity, "is_admin", False) or labor.ist_labor(identity):
-            raise ValueError("Mail über Outlook gibt es nur für Admins und nie im Labor")
+        if not pc_person(identity):
+            raise ValueError("Mail über Outlook gibt es nur mit PC-Steuerung am eigenen Laptop und nie im Labor")
         self.identity, self.memory = identity, memory
         self._client, self._darf, self._senden, self._melden_llm = client, darf, senden, melden
         self._fremd, self._exportieren, self._formate = fremd, exportieren, formate

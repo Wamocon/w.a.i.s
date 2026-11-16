@@ -1,12 +1,17 @@
-"""PC-Steuerung für Mitglieder (Paket P4, Plan docs/ausrollen-neue-nutzer.md 4.5, 6.1 P4, Befund H1, Entscheidung N10, Befund S15).
+"""PC-Steuerung für Mitglieder (Paket P4, Plan docs/ausrollen-neue-nutzer.md 4.5, 6.1 P4, Befund H1, Entscheidung N10, Befund S15;
+Entscheidung Niko vom 16.11.2026: Mitglieder bekommen für ihren eigenen Laptop dieselben PC-Werkzeuge wie Admins).
 
 Geprüft wird:
   * die Pflichtstufe der Stimme (stimme_gate.StimmGate.pflicht_grund): ohne Abdruck nur getippt, in jedem Modus, und nur bis wieder
     gesprochen wird; mit bereiter Prüfung dieselbe Regel wie sonst,
-  * der Schutz vor jedem PC-Werkzeug eines Mitglieds (pc_mitglied.MitgliedSchutz): Liste, Stimme, Karte nach Fremdinhalt,
+  * die Werkzeugliste: dieselbe wie bei Admins (pc_host.werkzeuge_fuer), dazu die PC-Werkzeuge des Kerns (Bildschirm, Office),
+  * der Schutz vor jedem PC-Werkzeug eines Mitglieds (pc_mitglied.MitgliedSchutz): Liste, Stimme, Karte nach Fremdinhalt, auch für die
+    Werkzeuge des Kerns (kern_werkzeuge_absichern),
   * die Freigabe des Kerns (pc_freigaben.PcFreigaben.kern_vormerken): Karte über activity.py, Ausführung erst nach dem Ja, genau einmal,
-  * die Sitzung (bot.py): ein freigeschaltetes Mitglied bekommt genau LLM_TOOLS_MITGLIED (auch nachgeholt), keinen Bildschirm, den Prompt
-    für Mitglieder und eigene Freigabekarten; ohne Freischaltung bleibt der Schalter aus.
+    für Werkzeuge des Kerns über ihren Ausführer,
+  * die Sitzung (bot.py): ein freigeschaltetes Mitglied bekommt dieselben Werkzeuge wie ein Admin (auch nachgeholt), Bildschirm, Office
+    und Live-Bild nur mit den Schaltern am Server, den Prompt der Admins mit dem Zusatz für Mitglieder und eigene Freigabekarten; ohne
+    Freischaltung bleibt der Schalter aus.
 
 Ausführen:  python -m pytest -q test_pc_mitglied.py   (im Ordner voice-core/)
 """
@@ -47,7 +52,11 @@ from test_pc_nachverbinden import (  # noqa: F401 (buero ist eine Fixture)
     pc_zugang_test,
 )
 
-ADMIN_WERKZEUGE_NIE = ("powershell_lesen", "git_klonen", "github_repo_anlegen", "bildschirm_ansehen", "auf_bildschirm_klicken")
+# Werkzeuge des Hosts, die nur der Kern selbst aufruft (nie das Modell, auch nicht bei Admins), und Unbekanntes
+NUR_KERN = ("maus_klicken", "freigabe_entscheiden", "bild_holen", "office_datei_erstellen", "outlook_mail_anfragen",
+            "teams_chat_anfragen", "onenote_seite_anfragen", "live_bild_anfordern", "bildschirmfoto", "unbekannt")
+ADMIN_WERKZEUGE = ("powershell_lesen", "git_klonen", "github_repo_anlegen", "bildschirm_ansehen", "auf_bildschirm_klicken")
+OFFICE_WERKZEUGE = ("canvas_exportieren", "outlook_senden", "teams_nachricht", "onenote_seite")
 
 
 class Uhr:
@@ -129,12 +138,51 @@ def schutz(fremd: bool = False, ok: bool = True, mit_gate: bool = True):
     return s, v, g
 
 
-@pytest.mark.parametrize("werkzeug", ["powershell_lesen", "git_klonen", "github_repo_anlegen", "bildschirm_ansehen",
-                                      "auf_bildschirm_klicken", "maus_klicken", "freigabe_entscheiden", "unbekannt"])
+@pytest.mark.parametrize("werkzeug", NUR_KERN)
 async def test_nur_die_werkzeuge_der_mitglieder(werkzeug):
     s, v, _g = schutz()
     ergebnis = await s.vorab(werkzeug, {})
     assert ergebnis["status"] == "blocked" and v.aufrufe == []
+
+
+def test_mitglieder_bekommen_dieselben_werkzeuge_wie_admins():
+    """Entscheidung Niko vom 16.11.2026: die Liste der Admins, keine eigene engere Liste mehr."""
+    assert pc_host.werkzeuge_fuer("mitglied") == pc_host.werkzeuge_fuer("admin") == pc_host.LLM_TOOLS
+    assert not hasattr(pc_host, "LLM_TOOLS_MITGLIED")
+    assert pc_mitglied.WERKZEUGE_MITGLIED == frozenset(pc_host.LLM_TOOLS) | pc_mitglied.KERN_WERKZEUGE
+    for name in ADMIN_WERKZEUGE + OFFICE_WERKZEUGE:
+        assert name in pc_mitglied.WERKZEUGE_MITGLIED, name
+    assert not set(NUR_KERN) & pc_mitglied.WERKZEUGE_MITGLIED
+
+
+def test_kern_werkzeuge_heissen_wie_in_den_modulen():
+    import office_werkzeuge
+    import onenote_werkzeuge
+    import outlook_werkzeuge
+    import screen
+    import teams_werkzeuge
+
+    namen = {s.name for s in screen.SCHEMAS} | {office_werkzeuge.WERKZEUG, outlook_werkzeuge.WERKZEUG, teams_werkzeuge.WERKZEUG,
+                                                onenote_werkzeuge.WERKZEUG}
+    assert pc_mitglied.KERN_WERKZEUGE == namen
+    assert not pc_mitglied.KERN_WERKZEUGE & set(pc_host.LLM_TOOLS)
+
+
+def test_einteilung_lesen_eigene_karte_aendern():
+    lesen, eigene, aendern = pc_mitglied.LESEN_MITGLIED, pc_mitglied.EIGENE_KARTE, pc_mitglied.AENDERN_MITGLIED
+    assert lesen | eigene | aendern == pc_mitglied.WERKZEUGE_MITGLIED
+    assert not lesen & eigene and not lesen & aendern and not eigene & aendern
+    assert {"powershell_lesen", "bildschirm_ansehen"} <= lesen  # PowerShell: nur reines Lesen, sonst Karte des Hosts
+    assert eigene == {"github_repo_anlegen", "outlook_senden", "teams_nachricht", "onenote_seite"}
+    assert {"git_klonen", "auf_bildschirm_klicken", "canvas_exportieren"} <= aendern
+
+
+def test_kern_erlaubt_nur_mit_ausfuehrer_fuer_werkzeuge_des_kerns():
+    ohne = pc_mitglied.kern_erlaubt([])
+    assert ohne == pc_mitglied.AENDERN_MITGLIED - pc_mitglied.KERN_WERKZEUGE
+    assert "git_klonen" in ohne and "auf_bildschirm_klicken" not in ohne and "canvas_exportieren" not in ohne
+    mit = pc_mitglied.kern_erlaubt(["auf_bildschirm_klicken", "canvas_exportieren", "bildschirm_ansehen", "maus_klicken"])
+    assert mit == pc_mitglied.AENDERN_MITGLIED  # lesende oder fremde Namen öffnen nichts zusätzlich
 
 
 async def test_ohne_gate_geht_nichts():
@@ -152,12 +200,13 @@ async def test_gesprochen_ohne_abdruck_wird_gesperrt():
 
 async def test_ohne_fremdinhalt_ohne_karte():
     s, v, _g = schutz(fremd=False)
-    for werkzeug in pc_host.LLM_TOOLS_MITGLIED:
+    for werkzeug in sorted(pc_mitglied.WERKZEUGE_MITGLIED):
         assert await s.vorab(werkzeug, {}) is None
     assert v.aufrufe == []
 
 
 async def test_nach_fremdinhalt_karte_fuer_jedes_aendernde_werkzeug():
+    assert {"git_klonen", "auf_bildschirm_klicken", "canvas_exportieren", "tastatur_tippen"} <= pc_mitglied.AENDERN_MITGLIED
     for werkzeug in sorted(pc_mitglied.AENDERN_MITGLIED):
         s, v, _g = schutz(fremd=True)
         ergebnis = await s.vorab(werkzeug, {"text": "Hallo\nWelt", "zahl": 3})
@@ -171,11 +220,20 @@ async def test_nach_fremdinhalt_karte_fuer_jedes_aendernde_werkzeug():
 
 
 async def test_lesende_werkzeuge_brauchen_auch_nach_fremdinhalt_keine_karte():
-    assert pc_mitglied.LESEN_MITGLIED <= set(pc_host.LLM_TOOLS_MITGLIED)
-    assert pc_mitglied.AENDERN_MITGLIED | pc_mitglied.LESEN_MITGLIED == set(pc_host.LLM_TOOLS_MITGLIED)
+    assert pc_mitglied.LESEN_MITGLIED <= pc_mitglied.WERKZEUGE_MITGLIED
     for werkzeug in pc_mitglied.LESEN_MITGLIED:
         s, v, _g = schutz(fremd=True)
         assert await s.vorab(werkzeug, {}) is None and v.aufrufe == []
+
+
+async def test_werkzeuge_mit_eigener_karte_bekommen_keine_zweite():
+    """github_repo_anlegen ist beim Host critical, Mail, Teams und OneNote legen ihre Karte immer an: davor keine Karte des Kerns."""
+    for werkzeug in pc_mitglied.EIGENE_KARTE:
+        s, v, g = schutz(fremd=True)
+        assert await s.vorab(werkzeug, {"name": "x"}) is None and v.aufrufe == [], werkzeug
+        g.uhr.t += 1
+        g.gesprochen()  # die Pflichtstufe der Stimme gilt trotzdem
+        assert (await s.vorab(werkzeug, {}))["status"] == "blocked", werkzeug
 
 
 async def test_zu_lang_oder_voll_heisst_nicht_ausgefuehrt():
@@ -205,7 +263,7 @@ async def test_waehrend_eine_karte_wartet_ruhen_alle_pc_werkzeuge():
     g = gate()
     g.getippt()
     s = pc_mitglied.MitgliedSchutz(gate=g, fremd=lambda: False, vormerken=Vormerken(), karte_offen=lambda: True)
-    for werkzeug in pc_host.LLM_TOOLS_MITGLIED:
+    for werkzeug in sorted(pc_mitglied.WERKZEUGE_MITGLIED):
         assert (await s.vorab(werkzeug, {}))["status"] == "wartet", werkzeug
 
 
@@ -260,7 +318,7 @@ AID = "00112233aabbccdd"
 
 
 class Aufbau:
-    def __init__(self, monkeypatch, antwort=None):
+    def __init__(self, monkeypatch, antwort=None, ausfuehrer=None):
         self.host = Host(antwort)
         monkeypatch.setattr(pc_host, "call_host_tool", self.host)
         self.client = Client()
@@ -278,7 +336,8 @@ class Aufbau:
 
         self.freigaben = PcFreigaben(self.gedaechtnis, client=lambda: self.client, darf=lambda: True, melden=melden,
                                      fremdinhalt=lambda: None, senden=senden, von="Erika", uhr=lambda: self.uhr[0],
-                                     kern_erlaubt=pc_mitglied.AENDERN_MITGLIED, knapp=True)
+                                     kern_erlaubt=pc_mitglied.kern_erlaubt(ausfuehrer or {}), kern_ausfuehrer=ausfuehrer,
+                                     knapp=True)
 
     def karte(self, werkzeug="programm_oeffnen", argumente=None):
         argumente = argumente if argumente is not None else {"name": "notepad"}
@@ -361,7 +420,8 @@ async def test_verlangt_der_host_danach_selbst_eine_freigabe_gibt_es_eine_zweite
 
 async def test_nur_erlaubte_werkzeuge_und_tief_kopiert(monkeypatch):
     t = Aufbau(monkeypatch)
-    for werkzeug in ("powershell_lesen", "maus_klicken", "browser_lesen", "git_klonen"):
+    for werkzeug in ("powershell_lesen", "maus_klicken", "browser_lesen", "github_repo_anlegen", "outlook_senden",
+                     "auf_bildschirm_klicken"):
         assert not t.freigaben.kern_vormerken(AID, werkzeug, {})  # nur die ändernden Werkzeuge der Mitglieder
     argumente = {"text": {"teil": "Hallo"}}
     assert t.freigaben.kern_vormerken(AID, "element_text_setzen", argumente)
@@ -377,17 +437,158 @@ async def test_ohne_erlaubte_werkzeuge_gibt_es_keine_freigabe_des_kerns(monkeypa
     assert not admin.kern_vormerken(AID, "programm_oeffnen", {})
 
 
+class Ausfuehrer:
+    """Attrappe für ein Werkzeug, das der Kern selbst ausführt (Klick auf den Bildschirm, Office-Datei)."""
+
+    def __init__(self, antwort=None):
+        self.aufrufe: list[dict] = []
+        self.antwort = antwort or {"status": "success", "summary": "geklickt"}
+
+    async def __call__(self, argumente):
+        self.aufrufe.append(argumente)
+        return dict(self.antwort)
+
+
+async def test_werkzeug_des_kerns_laeuft_nach_dem_ja_ueber_seinen_ausfuehrer(monkeypatch):
+    klick = Ausfuehrer()
+    t = Aufbau(monkeypatch, ausfuehrer={"auf_bildschirm_klicken": klick})
+    karte = t.karte("auf_bildschirm_klicken", {"ziel": "Senden-Knopf"})
+    assert "Senden-Knopf" in karte["items"][0]["detail"]
+    assert klick.aufrufe == [] and t.host.aufrufe == []  # vor dem Klick passiert am Laptop nichts
+    await t.freigaben.entscheiden({"job": "pc", "id": AID, "entscheidung": "ja"})
+    await t.freigaben.entscheiden({"job": "pc", "id": AID, "entscheidung": "ja"})  # Doppelklick
+    assert klick.aufrufe == [{"ziel": "Senden-Knopf"}] and t.host.aufrufe == []  # genau einmal, nicht am Host vorbei
+    assert "freigegeben" in t.meldungen[-1] and "geklickt" in t.meldungen[-1]
+    assert t.gedaechtnis.protokoll[0]["params"] == {"approval_id": AID, "aktion": "aendern", "werkzeug": "auf_bildschirm_klicken"}
+
+
+async def test_nach_fremdinhalt_traegt_jede_karte_eines_mitglieds_einen_hinweis(monkeypatch):
+    """Sicherheitsreview 16.11.2026 (HIGH): auch Karten des Hosts (PowerShell, GitHub, Klick) warnen nach Inhalten von außen."""
+    t = Aufbau(monkeypatch)
+    lage = {"fremd": True}
+    t.freigaben._fremd_warnung = lambda: lage["fremd"]
+    host = {"status": "needs_approval", "approval_id": "cccccccccccccccc", "aktion": "powershell", "grund": "PowerShell",
+            "detail": "Remove-Item x", "ziel": "PowerShell", "gueltig_s": 300}
+    karte = t.freigaben.anfrage(activity.freigabe_anfrage("powershell_lesen", {}, host))
+    assert karte["items"][0]["warnung"] == pc_freigaben.WARNUNG_FREMD
+    lage["fremd"] = False
+    ohne = t.freigaben.anfrage(activity.freigabe_anfrage("powershell_lesen", {}, dict(host, approval_id="dddddddddddddddd")))
+    assert "warnung" not in ohne["items"][0]
+    lage["fremd"] = True
+    kern = t.karte()  # die Karte des Kerns nennt den Grund schon selbst
+    assert "warnung" not in kern["items"][0]
+
+
+async def test_werkzeug_des_kerns_ohne_ausfuehrer_bekommt_keine_karte(monkeypatch):
+    t = Aufbau(monkeypatch)  # kein Ausführer: Bildschirm oder Office gibt es in dieser Sitzung nicht
+    assert not t.freigaben.kern_vormerken(AID, "auf_bildschirm_klicken", {"ziel": "x"})
+    assert not t.freigaben.kern_vormerken(AID, "canvas_exportieren", {"format": "word"})
+    assert t.freigaben.kern_vormerken(AID, "git_klonen", {"repo": "beispiel"})
+
+
+async def test_nein_ruft_den_ausfuehrer_nicht(monkeypatch):
+    datei = Ausfuehrer({"status": "success", "summary": "gespeichert"})
+    t = Aufbau(monkeypatch, ausfuehrer={"canvas_exportieren": datei})
+    t.karte("canvas_exportieren", {"format": "word"})
+    await t.freigaben.entscheiden({"job": "pc", "id": AID, "entscheidung": "nein"})
+    assert datei.aufrufe == [] and t.host.aufrufe == []
+
+
+async def test_verlangt_der_host_beim_klick_des_kerns_eine_freigabe_gibt_es_eine_zweite_karte(monkeypatch):
+    zweite = "bbbbbbbbbbbbbbbb"
+    klick = Ausfuehrer({"status": "needs_approval", "approval_id": zweite, "aktion": "klicken", "grund": "Klick", "detail": "Senden",
+                        "ziel": "Mail", "gueltig_s": 120})
+    t = Aufbau(monkeypatch, ausfuehrer={"auf_bildschirm_klicken": klick})
+    t.karte("auf_bildschirm_klicken", {"ziel": "Senden-Knopf"})
+    ergebnis = await t.freigaben.entscheiden({"job": "pc", "id": AID, "entscheidung": "ja"})
+    assert ergebnis["status"] == "wartet"
+    assert [k["items"][0]["id"] for k in t.karten if k.get("type") == "freigaben"] == [zweite]
+
+
+async def test_ausfuehrer_mit_ausnahme_heisst_klares_ergebnis(monkeypatch):
+    async def kaputt(_argumente):
+        raise RuntimeError("weg")
+
+    t = Aufbau(monkeypatch, ausfuehrer={"canvas_exportieren": kaputt})
+    t.karte("canvas_exportieren", {"format": "word"})
+    ergebnis = await t.freigaben.entscheiden({"job": "pc", "id": AID, "entscheidung": "ja"})
+    assert ergebnis["status"] == "error" and t.host.aufrufe == []
+
+
+# ---------- Werkzeuge des Kerns (pc_mitglied.kern_werkzeuge_absichern) ----------
+class FakeLlm:
+    def __init__(self):
+        self.funktionen: dict = {}
+
+    def register_function(self, name, handler, *args, **kwargs):
+        self.funktionen[name] = handler
+
+
+async def aufrufen(handler, name: str, argumente: dict | None = None) -> list:
+    ergebnisse = []
+
+    async def merken(ergebnis, **_kw):
+        ergebnisse.append(ergebnis)
+
+    await handler(types.SimpleNamespace(function_name=name, arguments=argumente or {}, result_callback=merken, tool_call_id="c"))
+    return ergebnisse
+
+
+async def test_werkzeuge_des_kerns_fragen_den_schutz_der_mitglieder():
+    llm, aufrufe = FakeLlm(), []
+    s, v, g = schutz(fremd=True)
+    pc_mitglied.kern_werkzeuge_absichern(llm, lambda: s, lambda: True)
+
+    async def original(params):
+        aufrufe.append(params.function_name)
+        await params.result_callback({"status": "success"})
+
+    for name in ("bildschirm_ansehen", "auf_bildschirm_klicken", "canvas_exportieren", "outlook_senden", "aktuelle_zeit"):
+        llm.register_function(name, original)
+    assert llm.funktionen["aktuelle_zeit"] is original  # andere Werkzeuge bleiben, wie sie sind
+    assert await aufrufen(llm.funktionen["bildschirm_ansehen"], "bildschirm_ansehen", {"frage": "x"}) == [{"status": "success"}]
+    klick = await aufrufen(llm.funktionen["auf_bildschirm_klicken"], "auf_bildschirm_klicken", {"ziel": "Senden"})
+    assert klick[0]["status"] == "needs_approval" and v.aufrufe[0][1:] == ("auf_bildschirm_klicken", {"ziel": "Senden"})
+    datei = await aufrufen(llm.funktionen["canvas_exportieren"], "canvas_exportieren", {"format": "word"})
+    assert datei[0]["status"] == "needs_approval"
+    assert await aufrufen(llm.funktionen["outlook_senden"], "outlook_senden") == [{"status": "success"}]  # eigene Karte
+    assert aufrufe == ["bildschirm_ansehen", "outlook_senden"]
+    g.uhr.t += 1
+    g.gesprochen()  # gesprochen ohne Abdruck: auch Bildschirm und Office nur getippt
+    gesperrt = await aufrufen(llm.funktionen["bildschirm_ansehen"], "bildschirm_ansehen")
+    assert gesperrt[0]["status"] == "blocked" and "Stimmabdruck" in gesperrt[0]["grund"]
+    assert aufrufe == ["bildschirm_ansehen", "outlook_senden"]
+
+
+async def test_werkzeuge_des_kerns_ohne_schutz_oder_bei_pc_aus_gehen_nicht():
+    llm, aufrufe, lage = FakeLlm(), [], {"an": False}
+    pc_mitglied.kern_werkzeuge_absichern(llm, lambda: None, lambda: lage["an"])
+
+    async def original(params):
+        aufrufe.append(params.function_name)
+
+    llm.register_function("canvas_exportieren", original)
+    assert (await aufrufen(llm.funktionen["canvas_exportieren"], "canvas_exportieren"))[0]["status"] == "rejected"  # PC-Steuerung aus
+    lage["an"] = True
+    assert (await aufrufen(llm.funktionen["canvas_exportieren"], "canvas_exportieren"))[0]["status"] == "blocked"  # kein Schutz
+    assert aufrufe == []
+
+
 # ---------- Prompt ----------
-def test_prompt_eines_mitglieds_nennt_keine_werkzeuge_der_admins():
+def test_prompt_eines_mitglieds_ist_der_der_admins_mit_dem_zusatz():
+    zusatz = persona._fill(persona.PC_MITGLIED_ZUSATZ, {"name": "Erika", "anrede": "du"})
     for schalter in (True, False):
-        text = persona.build_system_prompt("Erika", "du", pc_werkzeuge=True, pc_stufe="mitglied", rueckfragen=schalter,
-                                           pc_ordner=schalter, browser=schalter, tab=schalter)
-        for name in ADMIN_WERKZEUGE_NIE + ("bildschirm_senden", "office_", "outlook_", "teams_", "live_bild"):
-            assert name not in text, name
-        assert "Stimmabdruck" in text and "elemente_auflisten" in text
+        kw = {"pc_werkzeuge": True, "rueckfragen": schalter, "pc_ordner": schalter, "browser": schalter, "tab": schalter}
+        admin = persona.build_system_prompt("Erika", "du", pc_stufe="admin", **kw)
+        text = persona.build_system_prompt("Erika", "du", pc_stufe="mitglied", **kw)
+        assert text.count(zusatz) == 1 and text.replace(zusatz, "", 1) == admin  # nur der Zusatz kommt dazu
+        for name in ("powershell_lesen", "bildschirm_ansehen", "auf_bildschirm_klicken"):
+            assert name in text, name
+        assert "Stimmabdruck" in text and "Stimmabdruck" not in admin
+        assert "nicht freigeschaltet" not in text  # die alte Absage für PowerShell, Bildschirm und Office gibt es nicht mehr
     admin = persona.build_system_prompt("Niko", "du", pc_werkzeuge=True, pc_stufe="admin")
-    assert "powershell_lesen" in admin and "bildschirm_ansehen" in admin
     assert persona.build_system_prompt("Niko", "du", pc_werkzeuge=True) == admin  # ohne Stufe wie bisher
+    assert zusatz not in persona.build_system_prompt("Erika", "du", pc_werkzeuge=False, pc_stufe="mitglied")
 
 
 # ---------- Die Sitzung (bot.py) ----------
@@ -402,8 +603,11 @@ def mitglied(uid: str = USER) -> Identity:
     return Identity(uid, "Erika", "mitglied", "sie")
 
 
+BILDSCHIRM = {"bildschirm_ansehen", "auf_bildschirm_klicken"}
+
+
 def pc_namen(stufen) -> set[str]:
-    return kontext_namen(stufen) & (set(pc_host.LLM_TOOLS) | {"bildschirm_ansehen", "auf_bildschirm_klicken"})
+    return kontext_namen(stufen) & (set(pc_host.LLM_TOOLS) | BILDSCHIRM)
 
 
 @pytest.fixture
@@ -412,22 +616,98 @@ def freigeschaltet(buero):  # noqa: F811
     return buero
 
 
-async def test_freigeschaltetes_mitglied_bekommt_genau_seine_liste(freigeschaltet):
+async def test_freigeschaltetes_mitglied_bekommt_dieselben_werkzeuge_wie_ein_admin(freigeschaltet):
+    namen = {}
+    for rolle in ("admin", "mitglied"):
+        zugang = pc_zugang_test()
+        zugang.stufe = rolle
+        Lage(freigeschaltet, [zugang])
+        freigeschaltet.setattr(bot, "host_tools", mock.AsyncMock(return_value=alle_host_werkzeuge()))
+        session, stufen, llm = await bauen(Identity(USER, "Erika", rolle, "sie"))
+        namen[rolle] = (pc_namen(stufen), {n for n in llm._functions if n in pc_mitglied.WERKZEUGE_MITGLIED})
+        assert betrieb(session)["pc_stufe"] == rolle
+        await klick(session, True)
+        assert betrieb(session)["pc_steuerung"] == "an"
+        await session.cleanup()
+    assert namen["mitglied"] == namen["admin"]
+    assert namen["mitglied"][0] == set(pc_host.LLM_TOOLS) | BILDSCHIRM
+    assert BILDSCHIRM <= namen["mitglied"][1]
+
+
+@pytest.mark.parametrize("office", ["dateien,outlook,teams,onenote", ""])
+async def test_office_fuer_mitglieder_nur_mit_dem_schalter_am_server(freigeschaltet, office):
+    freigeschaltet.setenv("WAMO_OFFICE", office)
     zugang = pc_zugang_test()
     zugang.stufe = "mitglied"
     Lage(freigeschaltet, [zugang])
-    freigeschaltet.setattr(bot, "host_tools", mock.AsyncMock(return_value=alle_host_werkzeuge()))
-    session, stufen, llm = await bauen(mitglied())
-    assert pc_namen(stufen) == set(pc_host.LLM_TOOLS_MITGLIED)
-    for name in ADMIN_WERKZEUGE_NIE:
-        assert name not in llm._functions, name
-    assert betrieb(session)["pc_stufe"] == "mitglied"
-    await klick(session, True)
-    assert betrieb(session)["pc_steuerung"] == "an"
+    session, _stufen, llm = await bauen(mitglied())
+    vorhanden = {n for n in OFFICE_WERKZEUGE if n in llm._functions}
+    assert vorhanden == (set(OFFICE_WERKZEUGE) if office else set())
     await session.cleanup()
 
 
-async def test_auch_nachgeholt_nur_die_liste_der_mitglieder(freigeschaltet):
+async def test_werkzeuge_des_kerns_eines_mitglieds_fragen_stimme_und_gate(freigeschaltet):
+    from stimme_gate import MARKE
+
+    freigeschaltet.setenv("WAMO_OFFICE", "dateien,outlook,teams,onenote")
+    zugang = pc_zugang_test()
+    zugang.stufe = "mitglied"
+    Lage(freigeschaltet, [zugang])
+    session, _stufen, llm = await bauen(mitglied())
+    await klick(session, True)
+    for name in sorted(BILDSCHIRM | set(OFFICE_WERKZEUGE)):
+        handler = llm._functions[name].handler
+        assert getattr(handler, MARKE, None) is session.stimme.gate, name  # außen das Gate der Stimmprüfung
+        ergebnis = await aufrufen(handler, name, {"frage": "x", "ziel": "x", "format": "word"})
+        assert ergebnis[0]["status"] == "blocked" and "Stimmabdruck" in ergebnis[0]["grund"], name  # gesprochen ohne Abdruck
+    await session.cleanup()
+
+
+async def test_klick_auf_den_bildschirm_nach_fremdinhalt_erst_nach_der_karte(freigeschaltet):
+    import screen
+
+    zugang = pc_zugang_test()
+    zugang.stufe = "mitglied"
+    Lage(freigeschaltet, [zugang])
+    klicks = []
+
+    async def klicken(_client, ziel, arguments, _zugang):
+        klicks.append(ziel)
+        return {"status": "success", "summary": "geklickt"}
+
+    freigeschaltet.setattr(screen, "_click", klicken)
+    session, stufen, llm = await bauen(mitglied())
+    await klick(session, True)
+    session.stimme.gate.getippt()
+    session.turn.taint()  # etwa eine Websuche im selben Zug
+    argumente = {"ziel": "Senden-Knopf"}
+    ergebnis = await aufrufen(llm._functions["auf_bildschirm_klicken"].handler, "auf_bildschirm_klicken", argumente)
+    assert ergebnis[0]["status"] == "needs_approval" and klicks == []
+    reporter = next(p for p in stufen if isinstance(p, activity.ActivityReporter))
+    karte = reporter.on_freigabe(activity.freigabe_anfrage("auf_bildschirm_klicken", argumente, ergebnis[0], "call-1"))
+    assert karte is not None and "Senden-Knopf" in karte["items"][0]["detail"]
+    await session.task.rtvi._call_event_handler("on_client_message", types.SimpleNamespace(
+        type="freigabe", data={"job": "pc", "id": ergebnis[0]["approval_id"], "entscheidung": "ja"}))
+    await abwarten()
+    assert klicks == ["Senden-Knopf"]
+    await session.cleanup()
+
+
+async def test_live_bild_fuer_freigeschaltete_mitglieder(freigeschaltet):
+    zugang = pc_zugang_test()
+    zugang.stufe = "mitglied"
+    Lage(freigeschaltet, [zugang])
+    session, _stufen, _llm = await bauen(mitglied())
+    await klick(session, True)
+    await session.task.rtvi._call_event_handler("on_client_message", types.SimpleNamespace(
+        type="bildstrom", data={"aktion": "an", "monitor": 1}))
+    await abwarten()
+    bildstrom = [m for m in gesendet(session) if m.get("type") == "bildstrom"]
+    assert bildstrom and all(m.get("grund") != "nicht_erlaubt" for m in bildstrom)  # die Ansicht wartet auf den Schalter am Laptop
+    await session.cleanup()
+
+
+async def test_auch_nachgeholt_dieselbe_liste_wie_bei_admins(freigeschaltet):
     zugang = pc_zugang_test()
     zugang.stufe = "mitglied"
     lage = Lage(freigeschaltet, [None, zugang])
@@ -436,7 +716,7 @@ async def test_auch_nachgeholt_nur_die_liste_der_mitglieder(freigeschaltet):
     assert betrieb(session)["pc"] == "verbindet"
     await klick(session, True)
     lage.host_client.assert_called_once_with(zugang)
-    assert pc_namen(stufen) == set(pc_host.LLM_TOOLS_MITGLIED)
+    assert pc_namen(stufen) == set(pc_host.LLM_TOOLS) | BILDSCHIRM
     assert betrieb(session)["pc_steuerung"] == "an"
     await session.cleanup()
 
@@ -446,10 +726,15 @@ async def test_ohne_freischaltung_bleibt_der_schalter_aus(buero):  # noqa: F811
     zugang = pc_zugang_test()
     zugang.stufe = "mitglied"  # selbst wenn ein Zugang käme: der Handler prüft die Stufe der Sitzung
     Lage(buero, [zugang])
-    session, _stufen, _llm = await bauen(mitglied())
+    session, _stufen, llm = await bauen(mitglied())
     await klick(session, True)
     assert betrieb(session)["pc_steuerung"] == "aus"
     assert "pc_stufe" not in betrieb(session)
+    assert not pc_mitglied.WERKZEUGE_MITGLIED & set(llm._functions)  # weder Bildschirm noch Office
+    await session.task.rtvi._call_event_handler("on_client_message", types.SimpleNamespace(
+        type="bildstrom", data={"aktion": "an", "monitor": 1}))
+    await abwarten()
+    assert [m.get("grund") for m in gesendet(session) if m.get("type") == "bildstrom"] == ["nicht_erlaubt"]
     await session.cleanup()
 
 

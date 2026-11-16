@@ -43,7 +43,7 @@ const BEISPIELE = [
   { name: "Diagramme", hint: "„Skizzier die Systemlandschaft von …“" },
   { name: "Code", hint: "„Zeig mir ein SQL-Statement mit JOIN“" },
   { name: "Websuche", hint: "„Wie wird das Wetter morgen?“" },
-  { name: "Am PC", hint: "„Öffne WhatsApp“ · „Klick auf Senden“", nurAdmin: true },
+  { name: "Am PC", hint: "„Öffne WhatsApp“ · „Klick auf Senden“", nurPc: true },
 ];
 
 /**
@@ -65,8 +65,8 @@ export const CanvasBereich = memo(function CanvasBereich({
   aktiv?: (canvasId: string | null) => void;
 }) {
   const items = useSelect(wamo, (s) => s.canvas);
-  // PC-Werkzeuge gibt es vorerst nur für admin; Mitgliedern den Hinweis darauf ersparen
-  const mitglied = useSelect(wamo, (s) => s.profil?.rolle === "mitglied");
+  // PC-Werkzeuge gibt es für Admins und für Mitglieder, die der Kern freigeschaltet hat (betrieb.pcStufe); den anderen den Hinweis ersparen
+  const ohnePc = useSelect(wamo, (s) => s.profil?.rolle === "mitglied" && s.betrieb?.pcStufe !== "mitglied");
   if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} mail={mail} teams={teams} aktiv={aktiv} />;
   return (
     <div className="canvas-empty">
@@ -74,7 +74,7 @@ export const CanvasBereich = memo(function CanvasBereich({
       <h2>Was W.A.I.S. dir hier zeigt</h2>
       <p>Ergebnisse, die man sehen muss, landen auf dieser Fläche statt in der Sprache.</p>
       <ul className="kinds">
-        {BEISPIELE.filter((k) => !k.nurAdmin || !mitglied).map((k) => (
+        {BEISPIELE.filter((k) => !k.nurPc || !ohnePc).map((k) => (
           <li key={k.name}>
             <strong>{k.name}</strong>
             <span>{k.hint}</span>
@@ -176,7 +176,8 @@ const SPEICHERN_FRIST_MS = 90_000;
 
 /**
  * "Als Word, Excel, PowerPoint, PDF speichern": nur für eigene, gespeicherte Elemente und nur in Formaten, die der Kern in betrieb.office
- * meldet (Admin, PC-Steuerung an, der Host kann es; voice-core/office_werkzeuge.py). Dazu "Als OneNote-Seite", wenn der Kern
+ * meldet (Admin oder freigeschaltetes Mitglied, PC-Steuerung an, der Host kann es; voice-core/office_werkzeuge.py). Dazu
+ * "Als OneNote-Seite", wenn der Kern
  * betrieb.onenote meldet (voice-core/onenote_werkzeuge.py): Der Klick legt nur die Freigabekarte an. Bis die Antwort kommt (Nachricht
  * "datei" oder "onenote"), sind die Knöpfe gesperrt: kein Doppelklick, keine zweite Datei.
  */
