@@ -5,6 +5,7 @@ echten Laptop: das Schreiben der .lnk-Datei über die Shell (COM), der echte Zer
 """
 from __future__ import annotations
 
+import errno
 import http.client
 import os
 import socket
@@ -194,6 +195,79 @@ def test_abruf_lehnt_fremde_adressen_ab(monkeypatch):
     assert aufrufe == []
 
 
+# ---------- TCP-Versuch der Netzprobe ----------
+
+class _Sockel:
+    """Ersatz für socket.socket: hält jeden Aufruf fest. Senden oder Lesen ist ein Fehler des Tests."""
+
+    def __init__(self, protokoll: list, verhalten: Exception | None) -> None:
+        self.protokoll, self.verhalten = protokoll, verhalten
+
+    def settimeout(self, wert):
+        self.protokoll.append(("settimeout", wert))
+
+    def connect(self, ziel):
+        self.protokoll.append(("connect", ziel))
+        if self.verhalten is not None:
+            raise self.verhalten
+
+    def close(self):
+        self.protokoll.append(("close",))
+
+    def __getattr__(self, name):
+        raise AssertionError(f"Die Netzprobe ruft socket.{name} auf (sie darf nur verbinden und schließen)")
+
+
+def _sockel_bauen(monkeypatch, verhalten: Exception | None) -> list:
+    import wamo_labor_platz_betrieb as be
+    protokoll: list = []
+    monkeypatch.setattr(be.socket, "socket", lambda *_a, **_k: _Sockel(protokoll, verhalten))
+    return protokoll
+
+
+def test_tcp_versuch_verbindet_sendet_nichts_und_schliesst_sofort(monkeypatch):
+    import wamo_labor_platz_betrieb as be
+    protokoll = _sockel_bauen(monkeypatch, None)
+    assert be.tcp_versuch_echt("192.168.178.75", 4000, 1.5) == "offen"
+    assert protokoll == [("settimeout", 1.5), ("connect", ("192.168.178.75", 4000)), ("close",)]
+
+
+@pytest.mark.parametrize("fehler,ergebnis", [
+    (socket.timeout("zu langsam"), "frist"), (TimeoutError(), "frist"), (ConnectionRefusedError(), "abgewiesen"),
+    (OSError(errno.EHOSTUNREACH, "kein Weg"), "unerreichbar"), (OSError(10065, "WSAEHOSTUNREACH"), "unerreichbar"),
+    (OSError(10051, "WSAENETUNREACH"), "unerreichbar"), (OSError(errno.EACCES, "verboten"), "fehler"), (OSError("ohne Nummer"), "fehler"),
+])
+def test_tcp_versuch_ordnet_fehler_ein_und_schliesst_immer(monkeypatch, fehler, ergebnis):
+    import wamo_labor_platz_betrieb as be
+    protokoll = _sockel_bauen(monkeypatch, fehler)
+    assert be.tcp_versuch_echt("192.168.178.1", 443, 1.5) == ergebnis
+    assert protokoll[-1] == ("close",)
+
+
+def test_tcp_versuch_ohne_sockel_ist_ein_fehler_und_nie_gesperrt(monkeypatch):
+    import wamo_labor_platz_betrieb as be
+
+    def kein_sockel(*_a, **_k):
+        raise OSError("keine Sockel mehr")
+
+    monkeypatch.setattr(be.socket, "socket", kein_sockel)
+    assert be.tcp_versuch_echt("192.168.178.1", 80, 1.5) == "fehler"
+
+
+def test_tcp_versuch_gegen_echten_anschluss_auf_loopback_kommt_ohne_daten_an():
+    """Mit dem echten Netzstapel, nur auf 127.0.0.1: Die Gegenseite sieht die Verbindung und danach nur das Ende, kein einziges Byte."""
+    import wamo_labor_platz_betrieb as be
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as lauscher:
+        lauscher.bind(("127.0.0.1", 0))
+        lauscher.listen(1)
+        lauscher.settimeout(3.0)
+        assert be.tcp_versuch_echt("127.0.0.1", lauscher.getsockname()[1], 1.5) == "offen"
+        verbindung, _ = lauscher.accept()
+        with verbindung:
+            verbindung.settimeout(3.0)
+            assert verbindung.recv(64) == b""
+
+
 # ---------- Prozess, Eingabe, Umgebung ----------
 
 def test_prozess_wird_ohne_shell_ohne_umgebung_und_abgekoppelt_gestartet(monkeypatch):
@@ -245,3 +319,4 @@ def test_echte_umgebung_ist_vollstaendig_und_nutzt_den_festen_port(monkeypatch, 
     assert umg.python.lower().endswith("python.exe") if os.name == "nt" else umg.python == sys.executable
     assert str(umg.lokal) == str(tmp_path / "echt" / "heim") and umg.profil.name == "wamo-chrome-labor"
     assert callable(umg.abruf) and callable(umg.verknuepfung) and callable(umg.token_eingabe)
+    assert umg.tcp_versuch is be.tcp_versuch_echt and (umg.netz_frist_s, umg.netz_gesamt_s) == (1.5, 10.0)

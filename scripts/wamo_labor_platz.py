@@ -4,7 +4,8 @@ Läuft ohne Administratorrechte im Kiosk-Konto, nur Standardbibliothek. Aufrufe 
   python wamo_labor_platz.py einrichten --platz 3 --kiosk-konto [--ca-datei PFAD]  # CA, Chrome-Richtlinien, Profil, Platzdatei, Verknüpfungen
   python wamo_labor_platz.py einrichten --platz 3 --trocken                         # nur der Plan, der Schalter --kiosk-konto ist dafür nicht nötig
   python wamo_labor_platz.py starten [--ohne-board]                                # Chrome mit zwei Fenstern: WAMO links, Board rechts
-  python wamo_labor_platz.py pruefen [--warten]                                    # Zertifikat, Richtlinien, Chrome, Adressen, Mikrofon, Uhr
+  python wamo_labor_platz.py pruefen [--warten] [--ohne-netzprobe]                 # Zertifikat, Richtlinien, Chrome, Adressen, Uhr,
+                                                                                   # Netztrennung (verbotene Ziele), Mikrofon
   python wamo_labor_platz.py rueckweg [--trocken] [--profil-loeschen]              # alles wieder zurücknehmen
   python wamo_labor_platz.py status                                                # nur lesen
 
@@ -360,9 +361,10 @@ def _parser() -> argparse.ArgumentParser:
     st = sub.add_parser("starten", help="Chrome mit zwei Fenstern starten: W.A.I.S. links, Board rechts")
     st.add_argument("--ohne-board", action="store_true", help="nur das W.A.I.S.-Fenster, ohne Platz-Token")
     st.add_argument("--warten", action="store_true", help="bei einem Fehler auf Enter warten (für die Verknüpfung)")
-    pr = sub.add_parser("pruefen", help="Zertifikat, Richtlinien, Chrome, Adressen, Mikrofon und Uhr prüfen, ändert nichts")
+    pr = sub.add_parser("pruefen", help="Zertifikat, Richtlinien, Chrome, Adressen, Uhr, Netztrennung und Mikrofon prüfen, ändert nichts")
     pr.add_argument("--ca-datei", metavar="PFAD", help="Datei der WAMO-CA für die TLS-Prüfung")
     pr.add_argument("--warten", action="store_true", help="am Ende auf Enter warten (für die Verknüpfung)")
+    pr.add_argument("--ohne-netzprobe", action="store_true", help="die Gegenprobe der Netztrennung (verbotene Ziele) auslassen")
     sub.add_parser("status", help="Stand zeigen, ändert nichts")
     return p
 
@@ -378,7 +380,7 @@ def _verteilen(umg: Umgebung, a: argparse.Namespace) -> int:
             umg.taste()
         return rc
     if a.befehl == "pruefen":
-        return cmd_pruefen(umg, a.ca_datei, a.warten)
+        return cmd_pruefen(umg, a.ca_datei, a.warten, not a.ohne_netzprobe)
     return cmd_status(umg)
 
 

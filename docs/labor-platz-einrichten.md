@@ -1,6 +1,6 @@
 # Platz-Skript: Laptops des Testlabors einrichten
 
-**Stand:** 13.11.2026. Gehört zum Paket P8 (`docs/testlabor-wamo.md`, Abschnitt 3.9). Das Skript richtet einen Windows-Laptop als Platz des W.A.I.S. Testlabors ein, startet die beiden Fenster (W.A.I.S. links, Board rechts), prüft den Platz und nimmt alles wieder zurück. Es läuft im Kiosk-Konto **ohne Administratorrechte**, braucht nur Python (Standardbibliothek) und nutzt weder PowerShell noch Zusatzpakete.
+**Stand:** 17.11.2026. Gehört zum Paket P8 (`docs/testlabor-wamo.md`, Abschnitt 3.9). Das Skript richtet einen Windows-Laptop als Platz des W.A.I.S. Testlabors ein, startet die beiden Fenster (W.A.I.S. links, Board rechts), prüft den Platz und nimmt alles wieder zurück. Es läuft im Kiosk-Konto **ohne Administratorrechte**, braucht nur Python (Standardbibliothek) und nutzt weder PowerShell noch Zusatzpakete.
 
 **Wichtig:** Die Chrome-Richtlinien stehen im Benutzerzweig (HKCU). Das ist Zusatzschutz und nicht die Grenze, denn ein Benutzer kann seinen eigenen Zweig ändern. Die Grenzen sind der Kern (Anmeldung, zweiter Faktor, Rechte) und das Netz (Segmentierung durch die Kollegen).
 
@@ -26,7 +26,7 @@ Die Richtlinien: Übersetzung, Passwortmanager, Adress- und Zahlungsdaten, Anmel
 - Windows 10 oder 11, **Kiosk-Konto als Standardbenutzer**, ohne Administratorrechte. Einrichten, Prüfen und Starten laufen in diesem Konto.
 - **Python 3.10 oder neuer** für alle Benutzer installiert (`python.exe`, nicht nur `pythonw.exe`). Die Verknüpfungen zeigen auf die Python-Datei, mit der eingerichtet wurde.
 - **Google Chrome** als Systeminstallation oder im Benutzerprofil (Edge wird nicht unterstützt).
-- Netz: Der Laptop erreicht `192.168.178.136` auf TCP 55443 bis 55445 und 55447. Die Netzsegmentierung ist Sache der Kollegen (Abschnitt 3.9 des Konzepts).
+- Netz: Der Laptop erreicht `192.168.178.136` auf TCP 55443 bis 55445 und 55447 sowie den UDP-Bereich des Kerns, sonst nichts im Büronetz. Die Netzsegmentierung ist Sache der Kollegen (Abschnitt 3.9 des Konzepts), `pruefen` macht die Gegenprobe (Abschnitt 4, Netztrennung).
 - Uhr per NTP abgleichen (mehr als 5 Minuten Abweichung bricht die Anmeldung mit Code und die TLS-Prüfung).
 - **Headset mit USB oder Klinke.** Bluetooth-Kopfhörer liefern im Freisprechprofil unter Windows oft nur Stille, `pruefen` warnt davor.
 
@@ -51,7 +51,7 @@ Alle Befehle im Kiosk-Konto (`N` ist die Platznummer 1 bis 16, Plätze 15 und 16
 
 1. **Plan ansehen, ändert nichts:** `python C:\WAMO\scripts\wamo_labor_platz.py einrichten --platz N --trocken`
 2. **Einrichten:** `python C:\WAMO\scripts\wamo_labor_platz.py einrichten --platz N --kiosk-konto`. Windows zeigt eine **Sicherheitswarnung** zum Zertifikat. Den angezeigten Fingerabdruck (SHA-1) mit der Zeile des Skripts und mit `infra/sokrates2/README.md`, Abschnitt 5.2, vergleichen und nur bei Übereinstimmung bestätigen. Das Skript prüft nach dem Import nach genau diesem Hash. Eine Wiederholung ist ungefährlich: Was schon stimmt, wird nicht angefasst ("nichts zu ändern").
-3. **Prüfen:** `python C:\WAMO\scripts\wamo_labor_platz.py pruefen`. Jede Zeile beginnt mit `[ok]`, `[WARNUNG]` oder `[FEHLER]`, Ausgang 1 gibt es nur bei einem Fehler.
+3. **Prüfen:** `python C:\WAMO\scripts\wamo_labor_platz.py pruefen`. Jede Zeile beginnt mit `[ok]`, `[WARNUNG]` oder `[FEHLER]`, Ausgang 1 gibt es nur bei einem Fehler. Mit `--ohne-netzprobe` entfällt die Gegenprobe der Netztrennung (dann eine Warnung "nicht geprüft").
 4. **Starten:** über die Verknüpfung **WAMO Labor starten** oder `python C:\WAMO\scripts\wamo_labor_platz.py starten`.
 
 Was `pruefen` meldet:
@@ -64,7 +64,16 @@ Was `pruefen` meldet:
 | Chrome | Pfad von `chrome.exe`. Sonst Chrome installieren |
 | Adresse (vier Zeilen) | Verbindung und **TLS-Prüfung gegen die WAMO-CA-Datei**. Jede HTTP-Antwort zählt als erreichbar, nur Verbindungs- und Zertifikatsfehler sind Fehler |
 | Uhr | Abweichung zum Kopf `Date` des Servers, höchstens 5 Minuten. Sonst Zeit abgleichen |
+| Netztrennung (zwölf Zeilen) | Gegenprobe: je verbotenem Ziel ein TCP-Verbindungsaufbau. `gesperrt` ist in Ordnung, `OFFEN` ist eine Warnung (siehe unten) |
 | Mikrofon | aktive Eingabegeräte aus der Registrierung (nur lesend). Warnung bei einem aktiven Bluetooth-Freisprechgerät, dann Headset mit USB oder Klinke nehmen. Das ist eine Heuristik: Welches Gerät Chrome benutzt, lässt sich von hier aus nicht sicher feststellen |
+
+**Netzprobe (Gegenprobe zur Netztrennung).** Die Adresszeilen zeigen, dass die erlaubten Ziele gehen. Die Zeilen `Netztrennung` zeigen, dass verbotene Ziele **nicht** gehen. Geprüft werden fest im Skript (`VERBOTENE_ZIELE` in `wamo_labor_platz_adressen.py`, Herkunft je Zeile): Sokrates-2 `192.168.178.136` auf TCP 22 (SSH), 55321 (Envoy), 55322 und 56543 (Datenbank-Pooler), 55446 (Remote-Desktop-Gateway) und 11434 (Ollama), Sokrates-1 `192.168.178.75` auf 4000 (zentrales LiteLLM-Gateway), Caesar `192.168.178.64` auf 4000, 11434 und 3389 sowie der Router `192.168.178.1` auf 80 und 443. Je Ziel ein Verbindungsaufbau mit 1,5 Sekunden Frist, alle gleichzeitig, zusammen höchstens 10 Sekunden. Gesendet wird nichts, eine zustande gekommene Verbindung wird sofort geschlossen. Ein offenes Ziel sieht also nur einen kurzen Verbindungsaufbau ohne Daten.
+
+- `gesperrt (keine Antwort)`, `gesperrt (abgewiesen)` oder `gesperrt (nicht erreichbar)`: Vom Platz kam keine Verbindung zustande. Das ist in Ordnung.
+- `ist OFFEN. Die Netztrennung fehlt noch`: Der Platz steht noch im Büronetz oder der Portfilter lässt dieses Ziel durch. Den Platz **nicht für Besucher freigeben**, den Kollegen die Zeile (Adresse und Port) zeigen, das Netz trennen lassen und danach `pruefen` wiederholen. Eine Warnung ändert den Ausgang nicht (0), deshalb die Zeilen lesen.
+- `nicht prüfbar`: Der Verbindungsaufbau scheiterte auf dem Laptop selbst (zum Beispiel eine lokale Sperre). Das Ziel gilt dann weder als gesperrt noch als offen, die Probe wiederholen.
+
+Grenzen: Die Liste ist eine Stichprobe mit den Servern, die in der Doku mit Adresse stehen, kein Beweis der vollständigen Trennung. Andere Geräte im Büronetz und UDP prüft die Probe nicht.
 
 ## 5. Am Labortag: Platz-Token und Besucherwechsel
 
@@ -108,6 +117,7 @@ Die Sicherung wird vor der ersten Änderung geschrieben und danach nie überschr
 | Das Zertifikat wurde nicht importiert | der Dialog wurde abgelehnt: `einrichten` wiederholen und bestätigen |
 | TLS-Prüfung gegen die WAMO-CA gescheitert | falsche oder fehlende CA-Datei, oder die Uhr geht falsch |
 | Die Uhr geht ... vor oder hinter der Serveruhr | Zeit per NTP abgleichen |
+| Netztrennung: ... ist OFFEN. Die Netztrennung fehlt noch | Der Platz erreicht ein verbotenes Ziel. Nicht für Besucher freigeben, Netz von den Kollegen trennen lassen (VLAN oder Portfilter), dann `pruefen` wiederholen |
 | Weiterleitung nicht abgeholt | Chrome hat die Startadresse nicht aufgerufen (Richtlinie, Port, Chrome-Start). Noch einmal starten, sonst `pruefen` |
 | Anschluss für die Weiterleitung ist belegt | anderes Programm auf Port 55489 beenden |
 | platz.json gehört nicht zu den festen Adressen | Datei wurde verändert: `einrichten --platz N` stellt sie wieder her |
@@ -124,4 +134,5 @@ Die Tests laufen mit Attrappen für Registrierung, Zertifikatsspeicher, Prozesse
 - die Fensterlage (zwei Hälften des Arbeitsbereichs, auch bei skalierter Anzeige) und dass das zweite Fenster im selben Chrome-Prozess mit eigener Größe öffnet,
 - der Weg des Tokens: Umleitung, Entfernen aus der Adresszeile durch die Seite, die Kopfzeile des Fensters bei einer Umleitung in einem App-Fenster, und dass `chrome://version` und der Task-Manager nur die Weiterleitungsadresse mit dem Zufallspfad zeigen, nie das Token,
 - die Mikrofon-Prüfung (Heuristik auf die Namen der Geräte in `MMDevices`) mit einem echten Bluetooth-Headset,
+- die Netzprobe im echten Netz: Im flachen Büronetz sollte sie vor der Trennung `OFFEN` melden (Probe der Probe), nach der Trennung durch die Kollegen in jeder Zeile `gesperrt`, während die vier Adresszeilen weiter `[ok]` sind,
 - die Verknüpfungen (Erstellung über die Shell wurde auf dem Entwicklungsrechner einmal in einem Testordner geprüft, nicht auf dem Kiosk-Konto).

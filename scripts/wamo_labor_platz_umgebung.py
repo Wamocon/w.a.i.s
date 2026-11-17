@@ -1,6 +1,6 @@
 """Alles, womit das Platz-Skript die Außenwelt berührt, an einer Stelle (nur Standardbibliothek).
 
-`Umgebung` bündelt Registrierung, certutil, Ordner, Prozessstart, Verknüpfungen, Netzabruf, Uhr, Eingabe und Ausgabe. Im Betrieb baut
+`Umgebung` bündelt Registrierung, certutil, Ordner, Prozessstart, Verknüpfungen, Netzabruf, Netzprobe, Uhr, Eingabe und Ausgabe. Im Betrieb baut
 wamo_labor_platz_betrieb.echte_umgebung() die echten Teile, die Tests setzen Attrappen ein. So kann kein Test versehentlich den echten
 Rechner ändern, und jede Außenwirkung ist an einer Stelle sichtbar.
 """
@@ -54,6 +54,7 @@ class Umgebung:
     warten: Callable[[float], None]
     arbeitsbereich: Callable[[], tuple[int, int, int, int]]  # x, y, Breite, Höhe ohne Taskleiste
     ausgabe: Callable[[str], None]
+    tcp_versuch: Callable[[str, int, float], str]  # Host, Port, Frist: "offen", "abgewiesen", "frist", "unerreichbar" oder "fehler"
     weiter_port: int = WEITER_PORT
     weiter_frist_s: float = 10.0
     chrome_wartezeit_s: float = 1.5
@@ -61,6 +62,8 @@ class Umgebung:
     ca_sha256: str = CA_SHA256  # die einzige CA, die das Skript zulässt (Tests setzen den Wert ihrer Test-CA)
     ca_sha1: str = CA_SHA1
     ist_admin: Callable[[], bool] = lambda: False  # Administratorrechte des Benutzers (IsUserAnAdmin)
+    netz_frist_s: float = 1.5  # Frist je Verbindungsversuch der Netzprobe
+    netz_gesamt_s: float = 10.0  # Obergrenze für die ganze Netzprobe (alle Versuche laufen gleichzeitig)
 
     @property
     def platz_ordner(self) -> Path:
