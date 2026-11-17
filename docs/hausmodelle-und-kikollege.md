@@ -12,12 +12,11 @@ sondern in der Oberfläche umschaltbar machen". Messung M7 steht in Abschnitt 2.
 Laborprofile hören immer über Soniox (F4). Die zwei Einträge im Gateway (2.5) sind seit 16.11.2026, 18:27 Uhr aktiv (Nikos Ja,
 eingetragen vom Koordinator); Migration 0023 und `core.env` folgen nach demselben Ja.
 
-Das Testlabor am 28.11.2026 hat Vorrang. Der Freeze für Kern, Migration, Oberfläche und Dienste am Server gilt seit So 15.11.2026 (`docs/testlabor-wamo.md:34`,
-Entscheidung E14, vorher Fr 20.11. nach E5), der Daten-Freeze am Fr 27.11. Jedes Paket dieses Papiers beginnt deshalb frühestens am Mo 30.11.2026.
+Das Testlabor am 28.11.2026 hat Vorrang. Der Freeze für Kern, Migration, Oberfläche und Dienste am Server gilt ab Mo 23.11.2026 früh (Entscheidung E1 im Restplan `docs/labor-restplan.md` vom 16.11.2026, der Freeze vom 15.11. ist überholt), der Daten-Freeze am Fr 27.11. um 12:00. Jedes Paket dieses Papiers, das Kern, Migration, Oberfläche oder Dienste am Server ändert, beginnt deshalb frühestens am Mo 30.11.2026, nach dem Labortag. Die Betriebsnotiz für das zentrale Gateway steht in `infra/sokrates1/gateway-wamo.md`. Sie gilt für alle Gateway-Änderungen aus diesem Papier (2.5 und 2.6).
 
 **Wunsch von Niko vom 15.11.2026 (wörtlich).** "Für die Zukunft müssen wir W.A.I.S. auch komplett auf die haueigenen Modelle in der UI umstellen können, also alles
 über Sokrates und seine Modelle! Dafür muss du die besten bestehenden Modelle auf den Sparks dafür finden oder neuen Modelle dafür installieren! Es gibt auch ein Projekt
-das heißt KiKollege von Erwin er hat schon Hermes eingebunden und viele Angenten, die Anbindung daran kannst du auch planen! Nutze dafür immer ECC und REA!"
+das heißt KiKollege von [Name des Verantwortlichen] er hat schon Hermes eingebunden und viele Angenten, die Anbindung daran kannst du auch planen! Nutze dafür immer ECC und REA!"
 
 ## Kurzfassung
 
@@ -54,7 +53,7 @@ das heißt KiKollege von Erwin er hat schon Hermes eingebunden und viele Angente
 | Sokrates-1 `192.168.178.75` | Ollama (systemweit) | `gemma4:31b` 19 GB, `qwen3.6:35b` 23 GB, `laaj-judge:v2` 36 GB, `sokrates-steuer:v0.1` 29 GB, `qwen3-embedding:8b` 4,7 GB, `all-minilm` (**B** `ollama list`) | Zum Zeitpunkt kein Modell geladen (`ollama ps` leer) |
 | Sokrates-1 | vLLM (Container `vllm-qwen3-asr`, :8101) | `Qwen/Qwen3-ASR-1.7B` als `qwen3-asr-1.7b`, `--gpu-memory-utilization 0.08`, `--max-model-len 8192` (**B** Prozessliste) | belegt rund 8,8 GB GPU-Speicher |
 | Sokrates-1 | Container `qwen3-tts` (:8102) | Qwen3-TTS, eigener Uvicorn-Dienst (**B** `docker ps`, Prozessliste) | rund 4,7 GB GPU-Speicher; API siehe 2.5 (**B**, 16.11.) |
-| Sokrates-1 | LiteLLM (Container `uaol-litellm`, :4000) | zentrales Gateway, Modellliste siehe 1.2 | Hausregel: alle Modellaufrufe nur hierüber |
+| Sokrates-1 | LiteLLM (Gateway-Container, :4000) | zentrales Gateway, Modellliste siehe 1.2 | Hausregel: alle Modellaufrufe nur hierüber |
 | Sokrates-2 `192.168.178.136` | Ollama | `qwen3.6:35b` 23 GB (geladen, 16k Kontext), `wamocon-coder:latest` 84 GB, `qwen3-coder-next:q8_0` 84 GB, `tr-legal-tuned-raw` 29 GB, `bge-m3`, `nomic-embed-text` (**B** `ollama list`, `ollama ps`) | Kern von W.A.I.S. läuft hier (`/opt/wamo-core/slots/a`) |
 | Sokrates-2 | vLLM (Container `ocr-dots`, :8300) | OCR-Modell `dots-mocr`, `--gpu-memory-utilization 0.20` (**B**) | rund 20 GB GPU-Speicher |
 | Caesar `192.168.178.64` | Ollama (Container `ollama`, :11434) | `qwen3.8:27b` 17 GB, `sokrates-qwen27-fable` 17 GB, `qwen3-coder-next:q8_0` 84 GB (**B** `docker exec ollama ollama list`) | Laufzeit von KiKollege (Hermes) nutzt `qwen3.8:27b` |
@@ -63,7 +62,7 @@ das heißt KiKollege von Erwin er hat schon Hermes eingebunden und viele Angente
 
 ### 1.2 Was das zentrale Gateway anbietet
 
-Auszug aus `/app/config.yaml` im Container `uaol-litellm`, nur die Zeilen `model_name`, `model` und `api_base` (**B**). Aliase anderer Projekte sind weggelassen
+Auszug aus `/app/config.yaml` im Gateway-Container, nur die Zeilen `model_name`, `model` und `api_base` (**B**). Aliase anderer Dienste sind weggelassen
 (Regel `WAMO_LLM_AUSBLENDEN`, `voice-core/llm_anbieter.py:24` bis `:26`).
 
 | Alias | Modell | Knoten |
@@ -231,7 +230,7 @@ das Gateway (Skript mit eingebetteten Sprechproben, nur Messwerte in der Ausgabe
    Schalter nennt die Folgen. Für echtes Streaming der Stimme bleibt Qwen3-TTS über vLLM-Omni \[50\] (neues Paket, Messung wie hier).
 
 **Einträge im Gateway (seit 16.11.2026, 18:27 Uhr aktiv).** Unter `model_list` der Konfiguration des zentralen Gateways (`/app/config.yaml`
-im Container `uaol-litellm`, Bindung an eine Datei im Home von `wamocon` auf Sokrates-1), neben `wamo-haus-coder`. Eingetragen ist es mit
+im Gateway-Container, Bindung an eine Datei im Home von `wamocon` auf Sokrates-1), neben `wamo-haus-coder`. Eingetragen ist es mit
 `api_base` auf `192.168.178.75` (gleichwertig zu `host.docker.internal`, beide aus dem Container geprüft) und bei `wamo-tts-haus` zusätzlich
 `extra_body: {language: German}`. Nach dem Quelltext von LiteLLM 1.92.0 erreicht `extra_body` den Dienst bei Speech nicht (siehe Punkt 3
 oben); die Messung über das Gateway entscheidet. Der Schlüssel des Kerns sieht beide Modelle in `/v1/models`. Sicherung der Datei:
@@ -261,7 +260,7 @@ oben); die Messung über das Gateway entscheidet. Der Schlüssel des Kerns sieht
 ```
 
 Rückweg: die Sicherung `litellm_config.yaml.vor-wamo-stimme.20261116-182624` zurückkopieren (oder die beiden Blöcke löschen) und
-`docker restart uaol-litellm`. Ohne die Einträge fällt der Kern von selbst auf Soniox zurück und nennt den Grund.
+Neustart des Gateway-Containers. Ohne die Einträge fällt der Kern von selbst auf Soniox zurück und nennt den Grund.
 Der Neustart unterbricht das Gateway für alle Nutzer kurz; deshalb außerhalb von Gesprächen und Läufen.
 
 ### 2.6 Gestreamte Sprachausgabe im Haus (16.11.2026, abends)
@@ -311,7 +310,7 @@ des Sprachmodells bis zum ersten Satzende. Vorab erzeugen, während der vorige S
 Satz, sobald der vorige erzeugt ist, und der Dienst ist rund 1,6-mal schneller als Echtzeit. Piper als schneller Rückfall für kurze
 Sätze: nicht nötig und eine zweite Stimme mitten in der Antwort. Kleineres Modell (0,6B) liegt nicht vor.
 
-**Vorschlag für das Gateway (nur mit Nikos Ja, Neustart von `uaol-litellm` nötig).** Unter `general_settings` der Konfiguration:
+**Vorschlag für das Gateway (mit #178 eingetragen, nur mit Nikos Ja; Neustart des Gateway-Containers nötig, Stand und Rückweg in `infra/sokrates1/gateway-wamo.md`).** Unter `general_settings` der Konfiguration:
 
 ```yaml
 general_settings:
@@ -440,7 +439,7 @@ nach M5. Bis dahin ist der Haus-Modus ein Datenschutzmodus mit spürbarem Qualit
 
 ### 4.1 Kurzbeschreibung
 
-KiKollege ist das Vorhaben "KI-Mitarbeiter" der WAMOCON (verantwortet von Erwin). Das Repository `Wamocon/kiKollege` (öffentlich, letzter Merge 13.11.2026, 3709191)
+KiKollege ist das Vorhaben "KI-Mitarbeiter" der WAMOCON (mit eigenem Verantwortlichen in der WAMOCON). Das Repository `Wamocon/kiKollege` (öffentlich, letzter Merge 13.11.2026, 3709191)
 enthält nur die Seiten des Vorhabens (Next.js, statischer Export, Daten aus `data/projektstand.json`), nicht die Laufzeit (**B**). Die Laufzeit steht auf Caesar.
 
 - **Prinzip:** "Ein KI-Mitarbeiter arbeitet zu. Ein Mensch entscheidet." Jeder KI-Mitarbeiter hat eine Akte (Auftrag, Haltung, Grenze als Dateien), ein eigenes Programm,
@@ -577,7 +576,7 @@ nur dieses Papier.
 | F4 | Gilt "Alles über Sokrates" auch für Laborprofile? | Nein. Das Labor bleibt bei seinem gemessenen Stand; eine Änderung dort nur mit eigener Messrunde |
 | F5 | Agent für Entwicklungsaufträge im Haus: Claude Code über das Gateway oder ein offener Agent? | Erst der Spike H6. Vorab neige ich zu OpenCode oder Qwen Code, weil Anthropic den Weg über fremde Modelle nicht unterstützt \[30\] und das Gateway beim Denken der Modelle offene Fehler hat \[34\]\[36\] |
 | F6 | Bleibt der Prüfer der Selbstüberarbeitung im Haus-Modus bei Claude? | Ja, als Betreiberfunktion ohne Personendaten, sichtbar im Abschnitt "Modelle im Betrieb". Eine Hausvariante erst nach H6 |
-| F7 | KiKollege: Variante V2 mit Erwin besprechen und nach seinem M2 umsetzen? | Ja. Zuerst ein Termin zur Abstimmung (Brücke, Auftraggeberliste, Update auf 0.23.1), dann K1 |
+| F7 | KiKollege: Variante V2 mit dem Verantwortlichen von KiKollege besprechen und nach seinem M2 umsetzen? | Ja. Zuerst ein Termin zur Abstimmung (Brücke, Auftraggeberliste, Update auf 0.23.1), dann K1 |
 | F8 | Streaming-STT im Haus (Voxtral, 16 GB auf Sokrates-2) installieren, auch wenn das Gateway Realtime nicht durchreicht? | Erst H5 mit Qwen3-ASR messen. H5b nur, wenn Niko die Stimme im Haus wirklich nutzen will; eine Ausnahme von der Hausregel nur für diesen einen Dienst |
 | F9 | Hinweise an KiKollege (Dashboard im LAN, offener Statusendpunkt) und an den Betreiber des OCR-Dienstes (Schlüssel in der Prozessliste) weitergeben? | Ja, mündlich oder per Mail, ohne Werte; keine Änderung durch W.A.I.S. |
 | F10 | Wie darf der Admin aus der Oberfläche `nur_haus`, Stimme und Modell eines Profils setzen, obwohl Migration 0010 das dem Kern bewusst verwehrt? | Eine `security definer`-Funktion in Migration 0021, die nur für ein Profil mit Rolle `admin` schreibt und jede Änderung protokolliert; Entscheidung als ADR, Review durch `database-reviewer` und `security-reviewer`. Keine pauschalen Spaltenrechte für `wamo_core` |

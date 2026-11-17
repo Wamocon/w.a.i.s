@@ -1,6 +1,6 @@
-# Lasttest für das Testlabor (Stand 13.11.2026, nicht am Server gelaufen)
+# Lasttest für das Testlabor (Stand 17.11.2026)
 
-Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8 gleichzeitigen Sitzungen verhält. Es setzt den Absatz "Last" in `docs/testlabor-wamo.md`, Abschnitt 3.7, um. Dieses Dokument beschreibt Ablauf, Voraussetzungen, Kosten, Abbruch, Auswertung und die Grenzen der Aussage. **Das Werkzeug wurde nur gegen Attrappen getestet.** Alles, was nur ein echter Lauf zeigt, steht im letzten Abschnitt.
+Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8 gleichzeitigen Sitzungen verhält. Es setzt den Absatz "Last" in `docs/testlabor-wamo.md`, Abschnitt 3.7, um. Dieses Dokument beschreibt Ablauf, Voraussetzungen, Kosten, Abbruch, Auswertung und die Grenzen der Aussage. **Vor dem Probelauf am Server wurde das Werkzeug nur gegen Attrappen getestet.** Am 16.11.2026 lief ein Probelauf mit einer Sitzung und drei Minuten am Server (Abschnitt 4). Der volle Lauf ist für Fr 20.11.2026 vorgesehen. Alles, was nur ein echter Lauf zeigt, steht im letzten Abschnitt.
 
 ## 1. Was der Lauf tut
 
@@ -23,10 +23,10 @@ Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8
 | Laborprofile `labor-01` bis `labor-08` angelegt, **zweiter Faktor eingerichtet** | `python scripts/wamo_labor_faktoren.py pruefen` (Seed je Profil ja oder nein) |
 | Umschlag-Datei mit den Zugängen und den TOTP-Seeds | `%USERPROFILE%\.wamo-labor\umschlag-labor.txt`, nie im Repo, nur Niko darf sie lesen (Konzept 3.7: nie im Chat). Das Werkzeug öffnet sie nur in der Vorprüfung und im Trockenlauf (dort nur "Seed vorhanden") |
 | Sprechproben | `python scripts/wamo_labor_last.py clips` erzeugt sie mit der Windows-Stimme Hedda in `%USERPROFILE%\.wamo-labor\last\clips` (A1, J1, Einwurf, acht Faktenfragen für G3) |
-| Labor-Dienst läuft, Plätze 1 bis 8 leer (kein offener Durchlauf, keine Tickets) | Die Vorprüfung meldet den ersten belegten Platz und startet nicht, damit nie Daten eines Besuchers gelöscht werden |
+| Labor-Dienst läuft, Plätze 1 bis 8 leer (kein offener Durchlauf, keine Tickets; Starttickets zählen als belegt, deshalb vorher mit „Daten löschen“ leeren) | Die Vorprüfung meldet den ersten belegten Platz und startet nicht, damit nie Daten eines Besuchers gelöscht werden |
 | Alle Laborprofile gesperrt, kein anderer Betrieb auf den Plätzen | Die Vorprüfung meldet ein freigeschaltetes Profil und startet nicht |
 
-Die Seeds sind nach dem Labortag zu erneuern: Am Mi 25.11. werden die Faktoren der Betreuer-Geräte neu eingerichtet, damit die Seeds des Mess-PCs ungültig sind (Konzept 3.9).
+Die Faktoren der Betreuer-Geräte werden am Fr 20.11. nachmittags neu eingerichtet, nach dem Lasttest (Entscheidung E2 im Restplan vom 16.11.2026). Danach sind die Seeds des Mess-PCs ungültig (Konzept 3.9).
 
 ## 3. Aufruf
 
@@ -53,15 +53,15 @@ Der **Trockenlauf** ist der Standard. Er zeigt Plan, Zahl der Profile und Plätz
 | `--kosten-obergrenze USD` | lehnt einen teureren Plan schon im Trockenlauf ab (braucht beide Preise) |
 | `--kerndaten-behalten` | die Gesprächstexte im Kern am Ende nicht löschen |
 | `--schema`, `--host` | Standard `wamo_dev`, `wamo-sokrates2` |
-| `--slot a\|b` | Kern-Slot vorgeben. Ohne die Option misst der Lasttest den aktiven Slot: Der Echtlauf fragt ihn vor allem anderen am Server ab (nur lesend, `systemctl is-active wamo-core@a.service wamo-core@b.service`, ohne sudo). Genau einer der beiden Slots muss laufen. Laufen beide (Auslaufzeit nach einem Kern-Wechsel, vor `ausleiten`) oder keiner, endet der Lauf mit Ausgang 2 und dem Grund, nichts wird angefasst. Der Trockenlauf fragt nie am Server, er nennt nur „der aktive Slot“ |
+| `--slot a\|b` | Kern-Slot vorgeben. Ohne die Option misst der Lasttest den aktiven Slot (seit #182 fragt er den Server ab, kein fester Slot b mehr): Der Echtlauf fragt ihn vor allem anderen am Server ab (nur lesend, `systemctl is-active wamo-core@a.service wamo-core@b.service`, ohne sudo). Genau einer der beiden Slots muss laufen. Laufen beide (Auslaufzeit nach einem Kern-Wechsel, vor `ausleiten`) oder keiner, endet der Lauf mit Ausgang 2 und dem Grund, nichts wird angefasst. Der Trockenlauf fragt nie am Server, er nennt nur „der aktive Slot“ |
 | `--ausgabe-ordner`, `--clips-ordner`, `--umschlag-datei` | Standard unter `%USERPROFILE%\.wamo-labor`, nie im Repo (das Werkzeug lehnt Orte im Repo ab) |
 
 Ausgänge: 0 bestanden (oder Trockenlauf), 1 durchgefallen, vorzeitig beendet oder Aufräumen gescheitert, 2 Eingabe falsch (nichts angefasst), 3 vollständig gelaufen, Urteil offen, 130 Strg+C.
 
-## 4. Empfohlene Reihenfolge am Di 24.11.
+## 4. Empfohlene Reihenfolge am Fr 20.11.
 
-1. Vorbereitung am Vortag: Sprechproben erzeugen, Trockenlauf, Ratenlimit und Preise aus der Konsole in den Aufruf eintragen.
-2. Kurzer Probelauf: `--sitzungen 1 --minuten 3` (Urteil bleibt "offen", der Umfang fehlt). Er prüft Anmeldung, Browser, Messung und Aufräumen, bevor die Stunden beginnen.
+1. Vorbereitung bis Do 19.11.: Sprechproben erzeugen, Trockenlauf. Ratenlimit und Preise aus der Konsole (N3, Mi 18.11.) in den Aufruf eintragen.
+2. Vormittags vor dem Lauf den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“). Dann kurzer Probelauf: `--sitzungen 1 --minuten 3` (Urteil bleibt "offen", der Umfang fehlt). Er prüft Anmeldung, Browser, Messung und Aufräumen, bevor die Stunden beginnen.
 3. Voller Lauf ohne Murmeln (Stufen 1, 2, 4, 8, etwa 1 Stunde 20 Minuten mit Vorbereitung und Aufräumen).
 4. Murmeln: entweder gleich im vollen Aufruf (`--murmeln 20,10,5`, etwa 2 Stunden 10 Minuten) oder danach allein (`--sitzungen 8 --murmeln 20,10,5`). Ein Lauf nur mit Murmelstufen bleibt "offen", weil ihm der Umfang fehlt, das ist gewollt: Die Murmelstufen ergänzen den vollen Lauf.
 5. Nikos Büro-Betrieb als parallele Last: Das Werkzeug erzeugt sie nicht. Nur wenn Niko während des Laufs arbeitet, sagt die Spitze der Anfragen je Minute etwas über das gemeinsame Ratenlimit (Konzept 3.7, Entscheidung Q4).

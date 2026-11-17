@@ -1,6 +1,6 @@
 # Testlabor 28.11.2026: Runbook für die Betreuer
 
-**Stand:** 13.11.2026, Entwurf für die Generalprobe am 26.11.2026. Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
+**Stand:** 17.11.2026, Entwurf für die Generalprobe am 26.11.2026. Nachtrag: Abschnitte 5.3, 5.4 und 6.1 auf Version 0.5.0 und die Abschaltung nach #181 gebracht. Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
 
 **So liest du es.** Jeder Ablauf besteht aus kurzen nummerierten Schritten. Mach sie in dieser Reihenfolge. Steht bei einem Schritt "Erwartet", vergleiche, bevor du weitermachst. Passt es nicht, höre auf und gehe zu Abschnitt 6 (Störungen) oder rufe die Leitung (Abschnitt 8). Ein Abbruch ist nie ein Fehler.
 
@@ -177,9 +177,11 @@ Die Befehle laufen im Repo-Hauptordner auf dem PC der Technik (Voraussetzungen i
 | 1 | B | alle Durchläufe beenden | Betreuer-Seite, **Durchlauf beenden** je Platz | Gespräche enden, Schreiben im Dienst wird abgewiesen | unter 5 Sekunden, Klicken etwa 1 Minute |
 | 2 | T | alle Laborprofile sperren | `python scripts/wamo_labor.py sperren --alle --ausfuehren` | laufende Gespräche enden, kein neues startet, Daten bleiben | rund 2 Minuten (Zwischenspeicher bis 60 s, Prüfung laufender Sitzungen jede Minute) |
 | 3 | T | Dienst abschalten (Board, Tickets, Betreuer-Seite) | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-rueckweg.sh"` | Container, Site und Firewall-Kette weg, Daten und Token bleiben, der Kern nimmt keine Sitzung mehr an | `[offen: Dauer messen in der Rückwegübung am 27.11.]`, das Skript nennt die Ausfalldauer |
-| 4 | T | Kern zurück auf die vorige Instanz | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh rueckweg-kern"` | neue Sitzungen gehen auf den vorigen Kern, der Laborprofile mit 403 abweist | unter 5 Minuten, nur solange der vorige Slot noch läuft (`status` zeigt es) |
+| 4 | T | Kern zurück auf die vorige Instanz | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh rueckweg-kern"` | neue Sitzungen gehen auf den vorigen Kern, der Laborprofile bedient (Releases ab 0.3.0) | unter 5 Minuten, nur solange der vorige Slot noch läuft (`status` zeigt es) |
 
 Läuft der vorige Slot nicht mehr (nach `ausleiten`), gibt es keinen schnellen Rückweg. Dann stellt T das vorige Release erneut bereit (`wamo-core-slots.sh release` und `umschalten-kern`). Das vorige Release muss eines mit Erstanmeldung sein (ab 0.3.0, Restplan Entscheidung E6), nie `c751d04` oder älter: Ein solcher Kern kennt `wamo_auth` nicht und ließe Mitglieder mit offenem Passwortwechsel in die App `[offen: Dauer ist nicht gemessen, die Rückwegübung am 27.11. misst sie]`.
+
+**Stand 17.11.2026:** Slot a läuft mit `v0.5.0-ddada3f`, Slot b ist inaktiv mit `v0.5.0-d12ba6f` (Rückweg-Ziel, mit Erstanmeldung). Stufe 4 wirkt damit nur, wenn `status` den vorigen Slot als aktiv zeigt. Meldet `ausleiten` einen Timeout, weil der Kern nicht rechtzeitig endet (#181), ruft das Skript danach `reset-failed` auf. Der Kern beendet sich dann nach etwa 13 Sekunden selbst.
 
 ### 5.4 Welche Stufe
 
@@ -210,7 +212,7 @@ Sofort (B):
 Danach (T, rund 5 Minuten):
 1. P prüft die Konsole des Sprachmodells: Ausgabenlimit, Guthaben, Störungsmeldung.
 2. Hausmodelle einschalten, je Laborprofil: `uv run python wamo_admin.py modellzugang-setzen --user-id <uuid> --nur-haus an` im Ordner `voice-core` (die UUIDs zeigt `uv run python wamo_admin.py profile`). Das gilt ab der nächsten Sitzung. Die Qualität mit Hausmodellen ist nicht gemessen `[offen: 3 Läufe aus der Messrunde]`.
-3. Oder Schlüsseltausch (9.6).
+3. Oder Schlüsseltausch (9.6). Er braucht kein neues Release. Ein Umschalten auf den Rückweg-Slot gilt nur für ein Release mit Erstanmeldung (ab 0.3.0). Meldet `ausleiten` dabei einen Timeout, beendet sich der Kern nach etwa 13 Sekunden selbst (Abschnitt 5.3).
 4. Nach dem Umschalten beendet der Besucher das Gespräch (Knopf "Beenden") und tippt neu auf "Gespräch starten". Der Durchlauf auf der Betreuer-Seite bleibt offen, das Board bleibt.
 5. Geht beides nicht: Rückfall Aufzeichnung (Abschnitt 7).
 

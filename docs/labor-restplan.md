@@ -1,5 +1,81 @@
 # Testlabor 28.11.2026: Restplan ab Montag, 16.11.2026
 
+## Nachtrag 17.11.2026: Live-Stand, Risiken und Fahrplan bis 11.12.
+
+**Stand:** 17.11.2026. Dieser Nachtrag steht über dem Plan vom 16.11. und ersetzt dessen Fahrplan (Abschnitt 4) ab Di 17.11. Die Abschnitte 1 bis 6 vom 16.11. bleiben als Grundlage stehen. Was offen ist, steht mit `[offen: ...]` im Text.
+
+### N.1 Live-Stand am 17.11.2026
+
+| Baustein | Stand | Beleg |
+| --- | --- | --- |
+| Kern | Version 0.5.0. Slot a `v0.5.0-ddada3f` aktiv, Slot b `v0.5.0-d12ba6f` inaktiv (Rückweg-Ziel, mit Erstanmeldung) | `wamo-core-slots.sh status` am Server |
+| Oberfläche | 0.5.0 (Commit `d12ba6f`) | `version.json` am Server |
+| Labor-Dienst | Labor-Rauchtest ohne Fehler | `wamo_labor_rauchtest.py` |
+| Installer | 0.5.0 von Niko signiert (SHA-256 `40a372e8…92d1`), am Server eingesetzt (aktuell 0.5.0, vorher 0.4.1), die Oberfläche bietet ihn an; GitHub-Release v0.5.0 mit Installer | `wamo_installer_sokrates2.py status`, Release v0.5.0 |
+
+Seit dem Restplan vom 16.11. am Nachmittag sind live:
+
+- #175: Stimmwächter strenger
+- #176: Marker-Regel, und `think` auf false für Hausmodelle
+- #177: Sprache im Haus umschaltbar (Migration 0023)
+- #178: Sprachausgabe mit Streaming. Eigene Instanz `wamo-qwen3-tts` auf Sokrates-1, Durchreiche im Gateway
+- #179: alle Modelle je Person umschaltbar (Migration 0024, Stimmen `sohee`, `uncle_fu` und `ono_anna`)
+- #181: geordnetes Abschalten des Kerns (`voice-core/abschaltung.py`). `ausleiten` meldet bei einem Timeout und ruft danach `reset-failed` auf
+- #182: Lasttest fragt den aktiven Slot am Server ab, kein fester Slot b mehr
+- Dazu entfernt: die Umgebungsvariable `WAMO_LLM_VISION_MODELL`
+
+### N.2 Entscheidungen von Niko, Ergänzung
+
+- Freeze Mo 23.11. früh (E1 bleibt).
+- Die zweiten Faktoren der Laborprofile werden am Fr 20.11. nach dem Lasttest neu eingerichtet, nicht am 25.11. (E2 präzisiert).
+- Der Lasttest läuft voll am Fr 20.11., nicht am 24.11.
+- Mitglieder bis Sa 21.11. (E4).
+- Jede neue Version bekommt einen Installer, den die Oberfläche anbietet.
+- Niko betreut das zentrale LiteLLM-Gateway auf Sokrates-1 selbst. Der frühere Betreuer ist nicht mehr im Betrieb. Die Betriebsnotiz dazu ist `infra/sokrates1/gateway-wamo.md`.
+
+### N.3 Risiken aus der Planung vom 16.11. abends
+
+| Nr | Risiko | Stand |
+| --- | --- | --- |
+| R1 | Der Stimmwächter kann kurze eigene Sätze neuer Mitglieder verwerfen. Regler `WAMO_STIMME_VERWERFEN_MIN_SECS` | offen |
+| R2 | Die Marker-Regel gilt auch im Labor, a1 steht bei 5 von 10 Läufen. Messrunde mit 20 weiteren Läufen | gemessen 17.11. auf Kern v0.5.0-ddada3f (20 Läufe, 420 Züge, 0,15 USD): a1 13 von 20, alle 7 Befunde sind Inhalt (eine Story mit nur einem Kriterium), kein Schweigen; w2 19, m1 19, j1 19, m2 19, s1 16 von 20 (4-mal unerwartet `canvas_zeigen`), w1, s2, i1, i2 je 20 von 20; erstes Token p50 0,51 s, p95 0,57 s. Die Karten mit erwartetem Fehler a3 und `m3_antwort` bleiben wie unter 0.4.1 bei 0 von 20 |
+| R3 | `think` auf false gilt für alle LiteLLM-Anfragen, nicht nur für Hausmodelle | offen |
+| R4 | Migrationen 0023 und 0024 in `wamo_dev` und `wamo_test` | geprüft: je zweimal angewendet, Test OK |
+| R5 | Die TTS-Instanz hat keine Speichergrenze, sie hat nur ein Lock | offen |
+| R6 | Gateway-Änderungen sind nur in unserem Repo dokumentiert | teilweise: Betriebsnotiz `infra/sokrates1/gateway-wamo.md` angelegt, Pflege beim Betreiber |
+| R7 | Geordnetes Abschalten des Kerns: Fristen, Timeout bei `ausleiten` | behoben mit #181 |
+| R8 | Lasttest nahm einen festen Slot b an | behoben mit #182 |
+| R9 | Ausweichweg Hausmodell `gemma4-31b` (3 Läufe am 17.11.): a1 bricht in 3 von 3 Läufen ab. Der erste Satz kommt nach 0,7 s, der Aufruf von `canvas_zeigen` mit den Stories kommt als Block und überschreitet die Lesefrist des Gesprächs von 20 s (`GESPRAECH_LESE_TIMEOUT_SECS`). Gilt auch im Büro für Nutzer mit Hausmodellen. Vorschlag: längere Lesefrist nur für Hausmodelle, Entscheidung durch Niko vor dem Freeze-Kandidaten | offen |
+| R10 | Büro-Fall I04 („Puh, das ist schwierig.“ soll warten): am 17.11. 4 von 17 Läufen bestanden (vor #176 4 von 5, danach 3 von 5). W.A.I.S. antwortet sofort mit einer freundlichen Rückfrage statt zu warten. Betrifft nur das Büro, das Labor hat diesen Fall nicht. Vorschlag: ein Beispiel in der Marker-Regel ergänzen und mit der Messrunde gegenprüfen, Entscheidung durch Niko | offen |
+
+### N.4 Fahrplan Di 17.11. bis Fr 11.12.
+
+| Wann | Was | Wer | Bedingung |
+| --- | --- | --- | --- |
+| Di 17.11. | Installer 0.5.0: Signatur durch Niko, danach Verteilung am Server und GitHub-Release v0.5.0 | Niko, W.A.I.S. | erledigt 07:00 |
+| Di 17.11. | Messrunde mit 20 weiteren Läufen (R2, Marker bei a1) | W.A.I.S. | erledigt 07:07, Ergebnis unter R2, Ausweichweg unter R9 |
+| Mi 18.11. | N3 bis N5 liefern: Preise und Ratenlimit, Fassung der Regeln, Büro-Adressen für die Ports 55446, 55322 und 56543 | Niko | Abschnitt 5 |
+| Do 19.11. | Erwartungswerte des Trainers zu W1 und W2 (N8) | Niko, Trainer | Pflicht vor dem Ausdruck |
+| Fr 20.11. vormittags | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen, mit Preisen, Ratenlimit und `--kosten-obergrenze`. Vorher den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“, Starttickets zählen als belegt) | W.A.I.S., Niko | Ja von Niko, N3, E5 |
+| Fr 20.11. nachmittags | Zweite Faktoren neu auf die Betreuer-Geräte (E2), zuerst ein Profil. Aufzeichnung des Schaufensters | W.A.I.S., Betreuer, Niko | Lasttest abgeschlossen |
+| Sa 21.11. | Letzte Freischaltungen der Mitglieder (E4). Puffer für Befunde aus dem Lasttest | Niko, W.A.I.S. | E4 |
+| So 22.11. abends | Freeze-Kandidat ist ausgerollt: Kern mit Bewährung, Oberfläche, Labor-Rauchtest, Lasttest-Probelauf mit einer Sitzung. Ab hier nur noch Sicherheitskorrekturen mit Nikos Ja | W.A.I.S. | E1 |
+| Mo 23.11. früh | **Freeze** (E1): Etikett `labor-freeze` auf den ausgerollten Stand. Platz-Skript auf einem echten Laptop im Kiosk-Konto und auf einem Ersatzgerät (`einrichten`, CA, `pruefen`, Board) | W.A.I.S., Niko, Kollegen | Geräte da |
+| Di 24.11. | Kartensatz drucken, Zahlen aus dem Lasttest ins Runbook | W.A.I.S., Niko | Lasttest-Ergebnis, W1, W2 |
+| Mi 25.11. | Betreuer-Token persönlich übergeben, Namen und Telefonnummern eintragen | Niko | N6, N7 |
+| Do 26.11. | Generalprobe, drei Stunden, vier Kollegen als Besucher, zwei Betreuer, acht Geräte | alle | Kartensatz gedruckt |
+| Fr 27.11. | Daten-Freeze 12:00. Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer. Ab 12:00 kein Neustart des Gateways bis Sa 28.11. abends (N10) | W.A.I.S., Betreuer, Niko | Morgencheckliste Teil A |
+| Sa 28.11. | Labortag. Kern-Kanal morgens sperren, kein Neustart des Gateways | alle | Morgencheckliste Teil B |
+| ab Mo 30.11. | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`). Messungen H0 und M3 (`docs/hausmodelle-und-kikollege.md`) | W.A.I.S. | Runbook Abschnitt 10 |
+| Mo 30.11. bis Fr 04.12. | Skript zum Löschen der Laborkonten und Widerrufen der Sitzungen (Trockenlauf als Standard, Bestätigungswort, Nachweis), mit Review | W.A.I.S. | Lücke 1 |
+| bis Fr 11.12. | Skript ausführen, Umschlag-Datei und Sicherungen löschen. Ab 12.12. Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
+
+### N.5 Offene Lieferungen
+
+Offen am 17.11.2026: N3 bis N8 und N10 (Abschnitt 5). N10 ist neu: Gateway ohne Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut das Gateway selbst (`infra/sokrates1/gateway-wamo.md`).
+
+---
+
 **Stand:** 16.11.2026, Nachmittag. Dieser Plan ersetzt die Fassung vom 13.11.2026. Der damalige Freeze am 15.11. ist überholt: Auf ausdrücklichen Auftrag von Niko liefen seitdem die Releases 0.2.0 bis 0.4.1 (Erstanmeldung, Werkzeuge und Entwicklungsaufträge für Mitglieder, Hausmodelle, gleichzeitige Aufträge). Der Plan entstand mit dem ECC-Planer (Regressionsanalyse) und REA (Analyse der ausgelieferten Oberfläche) und ist mit echten Läufen am Server belegt. Was belegt ist, steht mit Quelle im Text. Was nur ein Mensch klären oder ein echter Lauf zeigen kann, steht in Abschnitt 5 und 6.
 
 ## 1. Stand am 16.11. (gemessen)
@@ -37,7 +113,7 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | E4 | **Mitglieder bis Sa 21.11.** freigeschaltet und mit gewechseltem Passwort, wer es nicht schafft, kommt ab Mo 30.11. dran |
 | E6 | Rückweg-Ziel des Kerns ist immer ein Release mit Erstanmeldung (ab 0.3.0), nie `c751d04` oder älter. Ein solcher Kern kennt `wamo_auth` nicht und ließe Mitglieder mit offenem Passwortwechsel in die App |
 
-## 4. Fahrplan
+## 4. Fahrplan (Stand 16.11.; ab Di 17.11. gilt Nachtrag N.4)
 
 | Wann | Was | Wer | Bedingung |
 | --- | --- | --- | --- |
@@ -69,6 +145,7 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | N6 | Weg des Betreuer-Tokens | Mi 18.11. | Persönliche Übergabe am Gerät, nie Chat, Mail oder Ausdruck |
 | N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | vor der Generalprobe |
 | N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste |
+| N10 | Gateway (zentrales LiteLLM auf Sokrates-1): kein Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut es selbst, Betriebsnotiz `infra/sokrates1/gateway-wamo.md` | Fr 27.11. 12:00 | Keine Änderung am Gateway in dieser Zeit |
 | E5 | Kern-Kanal während Lasttest und Labortag sperren | Fr 20.11. | Ja, das Schaufenster zeigt nur die Aufzeichnung |
 
 ## 6. Lücken und Risiken
