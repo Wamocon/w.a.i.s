@@ -1,6 +1,6 @@
 [project]
 name = "wamo-voice-core"
-version = "0.5.0"
+version = "0.6.0"
 description = "WAMO Voice-Core: Pipecat + Soniox STT/TTS + Claude"
 requires-python = ">=3.11"
 dependencies = [
