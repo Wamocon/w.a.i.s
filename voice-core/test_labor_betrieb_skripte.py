@@ -411,7 +411,7 @@ class FirewallLaborTests(unittest.TestCase):
         if quellen is not None:
             (self.dir / "plaetze-adressen").write_text(quellen, encoding="utf-8")
         env = {"PATH": os.environ["PATH"], "WAMO_FW_CONF": str(self.dir / "gibt-es-nicht.conf"), "WAMO_FW_RD_ZIELE": str(self.dir / "ziele.toml"),
-               "WAMO_FW_LABOR_QUELLEN": str(self.dir / "plaetze-adressen")}
+               "WAMO_FW_LABOR_QUELLEN": str(self.dir / "plaetze-adressen"), "WAMO_FW_ADMIN_QUELLEN": str(self.dir / "admin-quellen")}
         r = subprocess.run([BASH, str(FIREWALL), "regeln"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r
@@ -425,8 +425,10 @@ class FirewallLaborTests(unittest.TestCase):
         self.assertIn("-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 55447 -j WAMO-FW-LABOR", out)
         for kette in ("WAMO-FW-LABOR", "WAMO-FW-LABAUS"):
             self.assertIn(f":{kette} - [0:0]", out)
-        for port in (55443, 55444, 55445, 55446, 55322, 56543):
+        for port in (55443, 55444, 55445):
             self.assertIn(f"-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport {port} -j WAMO-FW-LAN", out)
+        for port in (55446, 55322, 56543):  # Admin-Ports (Q13), eigene Kette, siehe FirewallAdminTests
+            self.assertIn(f"-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport {port} -j WAMO-FW-ADMIN", out)
         self.assertIn("--ctorigdstport 55321 -j WAMO-FW-HTTP", out)
         self.assertNotIn("--ctorigdstport 55447 -j WAMO-FW-LAN", out)  # eigene Kette: Die Adressliste der Plätze ist austauschbar (Frage Q13)
         self.assertEqual(out.count("55447"), 1)
@@ -487,8 +489,9 @@ class FirewallLaborTests(unittest.TestCase):
     def test_start_stop_und_status_kennen_die_neuen_ketten(self):
         text = code(FIREWALL)
         self.assertEqual(text.count('"$KETTE_LABOR" "$KETTE_LABAUS" "$KETTE_LABIN"'), 3)  # stop (leeren, löschen) und status
-        self.assertRegex(text, r"lies_labor_quellen\n\s+ipt -n -L DOCKER-USER")  # start liest die Adressliste vor dem Setzen
-        self.assertRegex(text, r"regeln\) .*lies_labor_quellen")  # auch der Probelauf
+        self.assertRegex(text, r"einlesen\(\) \{[^}]*lies_labor_quellen")  # einlesen liest die Adressliste ...
+        self.assertRegex(text, r"start\(\) \{\n\s+local k\n\s+einlesen\n\s+ipt -n -L DOCKER-USER")  # ... und start liest vor dem Setzen
+        self.assertRegex(text, r"regeln\) einlesen; regeln")  # auch der Probelauf
         self.assertIn('ipt -I INPUT 1 -s "$NETZ_LABOR_LOKAL" -j "$KETTE_LABIN"', text)
         self.assertIn('ipt -D INPUT -s "$NETZ_LABOR_LOKAL" -j "$KETTE_LABIN"', text)
     def test_kopf_nennt_die_adressliste_und_die_offene_frage(self):
@@ -536,6 +539,249 @@ class FirewallLaborTests(unittest.TestCase):
     def test_bash_n(self):
         r = subprocess.run([BASH, "-n", str(FIREWALL)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(r.returncode, 0, r.stderr)
+
+
+# ====================================================================================== Teil 2a: Firewall, Admin-Ports (Entscheidung Q13)
+FW_EINRICHTEN = SOKRATES2 / "wamo-firewall-einrichten.sh"
+FW_RUECKWEG = SOKRATES2 / "wamo-firewall-rueckweg.sh"
+ADMIN_VORLAGE = SOKRATES2 / "wamo-admin-quellen.beispiel"
+ADMIN_PORTS = (55446, 55322, 56543)
+OFFENE_LAN_PORTS = (55443, 55444, 55445)
+
+
+@unittest.skipUnless(BASH, "keine Bash vorhanden")
+class FirewallAdminTests(unittest.TestCase):
+    """55446 (Remote-Desktop-Gateway), 55322 und 56543 (Pooler) aus dem LAN nur von den Quellen in /etc/wamo/admin-quellen (Kette WAMO-FW-ADMIN).
+    Ohne Datei oder nur mit Kommentaren gilt das Büro-LAN wie vor Q13. Probeläufe ohne root und ohne iptables (regeln, start --trocken,
+    wamo-firewall-einrichten.sh --trocken); Befehle mit Wirkung sind Attrappen, die jeden Aufruf protokollieren."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="admin-fw-")
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.admin = self.dir / "admin-quellen"
+        self.log = self.dir / "aufrufe.log"
+
+    def env(self, admin: Path | None = None, attrappen: tuple[str, ...] = ()) -> dict:
+        pfad = os.environ["PATH"]
+        if attrappen:
+            ordner = self.dir / "bin"
+            for n in attrappen:
+                schreibe(ordner / n, f'#!/bin/sh\necho "{n} $*" >> "{posix(self.log)}"\nexit 1\n', ausfuehrbar=True)
+            pfad = f"{ordner}{os.pathsep}{system_pfad()}"
+        return {"PATH": pfad, "LC_ALL": "C.UTF-8", "WAMO_FW_CONF": str(self.dir / "gibt-es-nicht.conf"), "WAMO_FW_RD_ZIELE": str(self.dir / "ziele.toml"),
+                "WAMO_FW_LABOR_QUELLEN": str(self.dir / "plaetze-adressen"), "WAMO_FW_ADMIN_QUELLEN": str(admin or self.admin)}
+
+    def lauf(self, skript: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run([BASH, str(skript), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env or self.env(),
+                              timeout=60, stdin=subprocess.DEVNULL)
+
+    def regeln(self, admin_text: str | None = None, admin: Path | None = None) -> subprocess.CompletedProcess:
+        if admin_text is not None:
+            schreibe(self.admin, admin_text)
+        r = self.lauf(FIREWALL, "regeln", env=self.env(admin))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def aufrufe(self) -> str:
+        return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
+
+    @staticmethod
+    def quellen(ausgabe: str, kette: str = "WAMO-FW-ADMIN") -> list[str]:
+        return [z.split()[3] for z in FirewallLaborTests.kette(ausgabe, kette) if z.endswith("-j RETURN")]
+
+    @staticmethod
+    def ziel(ausgabe: str, port: int) -> str:
+        """Die Kette, in die WAMO-FW den Port schickt (genau ein Sprung je Port)."""
+        treffer = re.findall(rf"^-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport {port} -j (\S+)$", ausgabe, re.M)
+        assert len(treffer) == 1, (port, treffer)
+        return treffer[0]
+
+    @staticmethod
+    def ohne_admin_kette(ausgabe: str) -> list[str]:
+        return [z for z in ausgabe.splitlines() if not z.startswith("-A WAMO-FW-ADMIN ")]
+
+    def test_variablen_und_kette(self):
+        text = code(FIREWALL)
+        self.assertRegex(text, r'(?m)^LAN_PORTS="55443 55444 55445" ')
+        self.assertRegex(text, r'(?m)^LAN_PORTS_ADMIN="55446 55322 56543" ')
+        self.assertRegex(text, r"(?m)^KETTE_ADMIN=WAMO-FW-ADMIN ")
+        self.assertIn('ADMIN_QUELLEN_DATEI="${WAMO_FW_ADMIN_QUELLEN:-/etc/wamo/admin-quellen}"', text)
+
+    def test_ohne_datei_wie_vor_q13(self):
+        r = self.regeln()
+        out = r.stdout
+        self.assertIn(":WAMO-FW-ADMIN - [0:0]", out)
+        for port in OFFENE_LAN_PORTS:
+            self.assertEqual(self.ziel(out, port), "WAMO-FW-LAN")
+        for port in ADMIN_PORTS:
+            self.assertEqual(self.ziel(out, port), "WAMO-FW-ADMIN")
+        # Dieselben Regeln wie WAMO-FW-LAN (Loopback, Büro-LAN, LOG, DROP): Alle sechs Ports erreichen dieselben Quellen wie vorher
+        admin = FirewallLaborTests.kette(out, "WAMO-FW-ADMIN")
+        self.assertEqual([z.replace("-A WAMO-FW-ADMIN ", "-A WAMO-FW-LAN ", 1) for z in admin], FirewallLaborTests.kette(out, "WAMO-FW-LAN"))
+        self.assertEqual(self.quellen(out), ["127.0.0.0/8", "192.168.178.0/24"])
+        self.assertEqual(r.stderr, "")
+
+    def test_vorlage_hat_nur_kommentare_und_aendert_nichts(self):
+        for z in lies(ADMIN_VORLAGE).splitlines():
+            self.assertTrue(z == "" or z.startswith("#"), z)
+        ohne = self.regeln().stdout
+        mit = self.regeln(admin=ADMIN_VORLAGE)
+        self.assertEqual(mit.stdout, ohne)
+        self.assertEqual(mit.stderr, "")
+        text = lies(ADMIN_VORLAGE)
+        for soll in ("55446", "55322", "56543", "Q13", "16 bis 32", "RFC 1918", "172.16.0.0/12", "64", "Loopback", "WireGuard",
+                     "wamo-firewall start --trocken", "systemctl reload wamo-firewall"):
+            self.assertIn(soll, text)
+        # nur Beispieladressen (192.168.178.10 und .11) und die Netze aus der Erklärung, keine Adressen echter Geräte
+        self.assertEqual(set(re.findall(r"\b\d+\.\d+\.\d+\.\d+(?:/\d+)?", text)),
+                         {"192.168.178.0/24", "192.168.178.10", "192.168.178.11/32", "172.16.0.0/12"})
+
+    def test_zwei_quellen_nur_fuer_die_admin_ports(self):
+        ohne = self.regeln().stdout
+        r = self.regeln("# Admin-Geräte (Q13)\n192.168.178.10\n  192.168.178.11/32  # zweites Gerät\n\n")
+        out = r.stdout
+        self.assertEqual(r.stderr, "")
+        self.assertEqual(self.quellen(out), ["127.0.0.0/8", "192.168.178.10", "192.168.178.11/32"])
+        self.assertNotIn("-A WAMO-FW-ADMIN -s 192.168.178.0/24", out)
+        admin = FirewallLaborTests.kette(out, "WAMO-FW-ADMIN")
+        self.assertIn("-j LOG", admin[-2])
+        self.assertEqual(admin[-1], "-A WAMO-FW-ADMIN -j DROP")
+        for port in ADMIN_PORTS:
+            self.assertEqual(self.ziel(out, port), "WAMO-FW-ADMIN")
+        # 55443 bis 55445 unberührt: weiter Loopback und das ganze Büro-LAN; auch sonst ändert die Liste nur die Kette WAMO-FW-ADMIN
+        for port in OFFENE_LAN_PORTS:
+            self.assertEqual(self.ziel(out, port), "WAMO-FW-LAN")
+        self.assertEqual(self.quellen(out, "WAMO-FW-LAN"), ["127.0.0.0/8", "192.168.178.0/24"])
+        self.assertEqual(self.ohne_admin_kette(out), self.ohne_admin_kette(ohne))
+        self.assertIn("-A WAMO-FW-LABOR -s 192.168.178.0/24 -j RETURN", out)  # die Liste der Plätze (55447) ist eine andere Datei
+
+    def test_ungueltige_zeile_wird_gemeldet_und_ausgelassen(self):
+        r = self.regeln("192.168.178.10\n300.1.1.1\n172.20.0.5\n0.0.0.0/0\n1.2.3.4;reboot\n192.168.178.11\n")
+        self.assertEqual(self.quellen(r.stdout), ["127.0.0.0/8", "192.168.178.10", "192.168.178.11"])
+        self.assertEqual(r.stderr.count("ist ungültig und wird ausgelassen"), 4)
+        self.assertIn("Quelle '300.1.1.1' in ", r.stderr)
+        self.assertIn(self.admin.name, r.stderr)
+        self.assertNotIn("reboot", r.stdout)
+        self.assertNotIn("300.1.1.1", r.stdout)
+
+    def test_nur_ungueltige_eintraege_heisst_nur_loopback(self):
+        """Wie bei den Plätzen: Eine kaputte Liste öffnet nie das ganze Büro-LAN. Loopback bleibt, der Kern auf dem Server verliert nichts."""
+        r = self.regeln("0.0.0.0/0\n8.8.8.8\n")
+        self.assertEqual(self.quellen(r.stdout), ["127.0.0.0/8"])
+        self.assertEqual(self.quellen(r.stdout, "WAMO-FW-LAN"), ["127.0.0.0/8", "192.168.178.0/24"])
+        self.assertIn("ungültig", r.stderr)
+
+    def test_hoechstens_64_quellen(self):
+        r = self.regeln("".join(f"192.168.178.{n}\n" for n in range(1, 101)))
+        self.assertEqual(len(self.quellen(r.stdout)), 1 + 64)
+        self.assertIn("Mehr als 64 Quellen", r.stderr)
+
+    def test_start_trocken_zeigt_die_admin_quellen_und_setzt_nichts(self):
+        faelle = ((None, "aus: 192.168.178.0/24;"), ("192.168.178.10\n192.168.178.11/32\n", "aus: 192.168.178.10 192.168.178.11/32;"),
+                  ("0.0.0.0/0\n", "aus: nur Loopback;"))
+        for text, erwartet in faelle:
+            if text is not None:
+                schreibe(self.admin, text)
+            r = self.lauf(FIREWALL, "start", "--trocken", env=self.env(attrappen=("iptables", "iptables-restore", "iptables-save")))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            zeilen = r.stdout.splitlines()
+            self.assertEqual(len(zeilen), 1, r.stdout)
+            self.assertTrue(zeilen[0].startswith("WAMO-Firewall trocken (nichts gesetzt): HTTP 55321 nur intern: nein; LAN-Ports 55443 55444 55445; "), zeilen[0])
+            self.assertIn(f"Admin-Ports 55446 55322 56543 {erwartet}", zeilen[0])
+            self.assertIn("Labor-Dienst 55447 aus: 192.168.178.0/24", zeilen[0])
+        self.assertEqual(self.aufrufe(), "")
+        r = self.lauf(FIREWALL, "start", "--weiss-nicht")
+        self.assertEqual(r.returncode, 2)
+
+    def test_statuszeile_von_start_nennt_die_admin_quellen(self):
+        text = code(FIREWALL)
+        self.assertIn('echo "WAMO-Firewall aktiv: $(zusammenfassung)"', text)
+        self.assertRegex(text, r'zusammenfassung\(\) \{\n\s+echo "[^\n]*Admin-Ports \$LAN_PORTS_ADMIN aus: \$\{ADMIN_QUELLEN:-nur Loopback\}')
+        self.assertRegex(text, r"start\)\n\s+case \"\$\{2:-\}\" in\n\s+\"\"\) als_root; start ;;\n\s+--trocken\) trocken ;;")
+
+    def test_ein_leser_fuer_beide_listen(self):
+        text = code(FIREWALL)
+        self.assertEqual(text.count('quelle_gueltig "$wert"'), 1)
+        self.assertEqual(text.count('while IFS= read -r zeile || [ -n "$zeile" ]'), 1)
+        self.assertIn('lies_labor_quellen() { lies_quellen LABOR_QUELLEN "$LABOR_QUELLEN_DATEI"; }', text)
+        self.assertIn('lies_admin_quellen() { lies_quellen ADMIN_QUELLEN "$ADMIN_QUELLEN_DATEI"; }', text)
+        self.assertRegex(text, r"einlesen\(\) \{[^}]*lies_admin_quellen")
+
+    def test_stop_status_und_rueckweg_kennen_die_admin_kette(self):
+        self.assertEqual(code(FIREWALL).count('"$KETTE_LAN" "$KETTE_ADMIN"'), 3)  # stop (leeren, löschen) und status
+        self.assertEqual(code(FW_RUECKWEG).count("WAMO-FW-LAN WAMO-FW-ADMIN"), 2)  # Rückweg auch ohne installiertes Skript
+
+    def test_kopf_nennt_q13_datei_und_pruefung(self):
+        kopf = "\n".join(lies(FIREWALL).splitlines()[:70])
+        for soll in ("Q13", "LAN_PORTS_ADMIN", "WAMO-FW-ADMIN", "/etc/wamo/admin-quellen", "start --trocken", "Loopback", "DOCKER-USER"):
+            self.assertIn(soll, kopf)
+
+    def test_einrichten_legt_die_vorlage_nur_an_wenn_sie_fehlt(self):
+        text = code(FW_EINRICHTEN)
+        self.assertIn("ADMIN_QUELLEN=/etc/wamo/admin-quellen", text)
+        self.assertRegex(text, r'for f in wamo-firewall\.sh wamo-firewall\.service wamo-admin-quellen\.beispiel; do')  # Pflichtdatei
+        self.assertRegex(text, r'if \[ -e "\$ADMIN_QUELLEN" \]; then\n\s+echo "  \$ADMIN_QUELLEN vorhanden \(unverändert\)"\nelse\n'
+                               r'\s+install -m 644 -o root -g root "\$HERE/wamo-admin-quellen\.beispiel" "\$ADMIN_QUELLEN"')
+        # Sicherung wie die Regelstände (Zeitstempel, 0600), vor jeder Änderung; die Vorlage entsteht vor dem reload
+        sicherung = text.index('install -m 600 -o root -g root "$ADMIN_QUELLEN" "$SICHERUNG/admin-quellen-$zeit"')
+        vorlage = text.index('"$HERE/wamo-admin-quellen.beispiel" "$ADMIN_QUELLEN"')
+        self.assertLess(text.index('iptables-save > "$SICHERUNG/iptables-$zeit.rules"'), vorlage)
+        self.assertLess(sicherung, vorlage)
+        self.assertLess(vorlage, text.index("systemctl reload wamo-firewall.service"))
+
+    def test_rueckweg_entfernt_sie_nur_mit_entfernen_und_mit_sicherung(self):
+        text = code(FW_RUECKWEG)
+        vorher, block = text.split('if [ "${1:-}" = "--entfernen" ]; then', 1)
+        block = block.split("\nfi\n", 1)[0]
+        self.assertNotIn("rm -f", vorher)  # ohne --entfernen bleiben die Dateien
+        self.assertIn('for f in "$CONF" "$ADMIN_QUELLEN"; do', block)
+        self.assertIn('install -m 600 -o root -g root "$f" "$SICHERUNG/$(basename "$f")-$zeit"', block)
+        self.assertIn('rm -f /etc/systemd/system/wamo-firewall.service /usr/local/sbin/wamo-firewall "$CONF" "$ADMIN_QUELLEN"', block)
+        self.assertLess(block.index("install -m 600"), block.index("rm -f"))
+        self.assertIn("ADMIN_QUELLEN=/etc/wamo/admin-quellen", text)
+
+    def test_einrichten_trocken_aendert_nichts_und_zeigt_die_admin_quellen(self):
+        # Kopie in einem eigenen Ordner, damit der Herkunftsschutz des Skripts (Besitzer, keine Schreibrechte für Gruppe und alle) unabhängig von der
+        # umask des Arbeitsbaums greift
+        ablage = self.dir / "ablage"
+        hier = ablage / "sokrates2"
+        hier.mkdir(parents=True)
+        for f in (FW_EINRICHTEN, FIREWALL, SOKRATES2 / "wamo-firewall.service", ADMIN_VORLAGE):
+            ziel = hier / f.name
+            schreibe(ziel, lies(f), ausfuehrbar=f.suffix == ".sh")
+            if f.suffix != ".sh":
+                ziel.chmod(0o644)
+        for d in (ablage, hier):
+            d.chmod(0o755)
+        schreibe(self.admin, "192.168.178.10\n192.168.178.11/32\n300.1.1.1\n")
+        env = self.env(attrappen=("iptables", "iptables-save", "ip6tables-save", "iptables-restore", "systemctl", "install", "chown", "chmod", "mv"))
+        r = self.lauf(hier / FW_EINRICHTEN.name, "--trocken", env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        out = r.stdout
+        self.assertIn("Admin-Ports 55446 55322 56543 aus: 192.168.178.10 192.168.178.11/32;", out)
+        self.assertIn("Quelle '300.1.1.1'", r.stderr)
+        self.assertIn("/etc/wamo/admin-quellen", out)
+        self.assertIn("--ctorigdstport 55446 -j WAMO-FW-ADMIN", out)  # Regeln der neuen Fassung (als Liste oder als Unterschied)
+        self.assertTrue(out.rstrip().endswith("Probelauf beendet, nichts geändert."), out)
+        self.assertEqual(self.aufrufe(), "")  # kein Befehl mit Wirkung
+        self.assertEqual(sorted(p.name for p in hier.iterdir()), sorted([FW_EINRICHTEN.name, FIREWALL.name, "wamo-firewall.service", ADMIN_VORLAGE.name]))
+
+    def test_einrichten_ohne_trocken_braucht_root_und_kennt_nur_trocken(self):
+        r = self.lauf(FW_EINRICHTEN, "--weiss-nicht")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("[--trocken]", r.stderr)
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("läuft als root; der Abbruch ohne root ist hier nicht prüfbar")
+        r = self.lauf(FW_EINRICHTEN, env=self.env(attrappen=("iptables-save", "ip6tables-save", "systemctl", "install")))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("sudo", r.stderr)
+        self.assertEqual(self.aufrufe(), "")
+
+    def test_bash_n_fuer_einrichten_und_rueckweg(self):
+        for f in (FW_EINRICHTEN, FW_RUECKWEG):
+            r = subprocess.run([BASH, "-n", str(f)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            self.assertEqual(r.returncode, 0, f"{f.name}: {r.stderr}")
 
 
 # ====================================================================================== Werkstatt für die Probeläufe der Skripte

@@ -299,8 +299,8 @@ Der Aufwand war gering (eine Compose-Ergänzung, ein Zertifikat der WAMO-CA), de
 - WAMO verlangt `sslmode=verify-full`: asyncpg prüft das Zertifikat gegen `WAMO_CA_FILE` und die IP-Adresse.
 - Geprüft mit `openssl s_client -starttls postgres` (TLS 1.3) und den Integrationstests
   `voice-core/test_integration_db.py::PoolerTlsTests` (ohne WAMO-CA wird das Zertifikat abgelehnt).
-- Die Firewall begrenzt 55322 und 56543 zusätzlich auf das Büro-LAN. Ab Phase P3 läuft der Voice-Core auf
-  Sokrates-2 und braucht die Pooler-Ports im LAN nicht mehr.
+- Die Firewall begrenzt 55322 und 56543 zusätzlich auf die Admin-Quellen (ohne Liste das Büro-LAN, Abschnitt 6.1).
+  Ab Phase P3 läuft der Voice-Core auf Sokrates-2 und braucht die Pooler-Ports im LAN nicht mehr.
 
 ## 6. Firewall für die WAMO-Ports (eingerichtet am 19.10.2026)
 
@@ -314,8 +314,9 @@ Andere Ports und Dienste auf Sokrates-2 bleiben unberührt.
 | 55443 | API und Auth über HTTPS (Caddy) | 127.0.0.0/8, 192.168.178.0/24 | unverändert |
 | 55444 | WAMO-Kern über HTTPS (Caddy vor dem Unix-Socket, Abschnitt 10) | 127.0.0.0/8, 192.168.178.0/24 | unverändert |
 | 55445 | WAMO-Oberfläche über HTTPS (Caddy vor dem Container `wamo-ui`, Abschnitt 12) | 127.0.0.0/8, 192.168.178.0/24 | unverändert |
-| 55322 | Postgres Session (Supavisor, TLS) | 127.0.0.0/8, 192.168.178.0/24 | unverändert |
-| 56543 | Postgres Transaktion (Supavisor, TLS) | 127.0.0.0/8, 192.168.178.0/24 | unverändert |
+| 55446 | Remote-Desktop-Gateway über HTTPS (Caddy, Abschnitt 16) | 127.0.0.0/8 und die Admin-Quellen (Abschnitt 6.1), ohne Liste 192.168.178.0/24 | unverändert |
+| 55322 | Postgres Session (Supavisor, TLS) | 127.0.0.0/8 und die Admin-Quellen (Abschnitt 6.1), ohne Liste 192.168.178.0/24 | unverändert |
+| 56543 | Postgres Transaktion (Supavisor, TLS) | 127.0.0.0/8 und die Admin-Quellen (Abschnitt 6.1), ohne Liste 192.168.178.0/24 | unverändert |
 
 Alles andere wird verworfen und (begrenzt auf 6 je Minute) mit `WAMO-FW verworfen:` im Kernel-Log vermerkt.
 Andere Docker-Netze erreichen die WAMO-Ports nicht (die Pooler-Ports und 55443 bekommen Docker-Netze erst mit
@@ -339,10 +340,53 @@ ssh sokrates2 "sudo journalctl -k | grep 'WAMO-FW verworfen'"          # verworf
 | `/usr/local/sbin/wamo-firewall` | Regeln setzen, entfernen, anzeigen (`start`, `stop`, `status`, `regeln` als Probelauf). `start` legt `DOCKER-USER` bei Bedarf selbst an und hält den Sprung nach `WAMO-FW` genau einmal an Position 1 |
 | `/etc/systemd/system/wamo-firewall.service` | `Type=oneshot`, `Before=docker.service`, aktiviert für `multi-user.target` und `docker.service`: Die Regeln stehen beim Systemstart und bei jedem Start von Docker, bevor Docker Ports veröffentlicht. Ohne `Requires`/`PartOf`: Stoppt oder startet Docker neu, bleiben die Regeln stehen. Nur ein ausdrückliches `systemctl stop wamo-firewall` entfernt sie |
 | `/etc/wamo/firewall.conf` | `WAMO_FW_HTTP_NUR_INTERN=nein` (Stufe 1) oder `ja` (Stufe 2); andere Werte lehnt das Skript ab und ändert dann nichts |
-| `/var/backups/wamo-firewall/` | Sicherungen `iptables-save` und `ip6tables-save` mit Zeitstempel; die erste (`*-20261019-134351.rules`) ist der Stand vor der WAMO-Firewall |
+| `/etc/wamo/admin-quellen` | Quellen für die Admin-Ports 55446, 55322 und 56543 (Abschnitt 6.1); entsteht beim Einrichten aus `wamo-admin-quellen.beispiel` nur mit Kommentaren, eine vorhandene Datei bleibt |
+| `/var/backups/wamo-firewall/` | Sicherungen `iptables-save` und `ip6tables-save` mit Zeitstempel, dazu `admin-quellen-<Zeit>` vor jedem Einrichten; die erste (`*-20261019-134351.rules`) ist der Stand vor der WAMO-Firewall |
 
 Änderungen immer mit `systemctl reload wamo-firewall` übernehmen, nicht mit `restart`: `restart` entfernt die Regeln
 kurz, `reload` ersetzt sie in einem Schritt.
+
+### 6.1 Admin-Ports nur für freigegebene Quellen (Entscheidung Q13, 17.11.2026)
+
+Am Labortag sitzen Gäste-Laptops im selben flachen Büronetz. Deshalb haben 55446 (Remote-Desktop-Gateway), 55322 und
+56543 (Pooler) eine eigene Kette `WAMO-FW-ADMIN` (Variable `LAN_PORTS_ADMIN` in `wamo-firewall.sh`); `LAN_PORTS` mit
+55443 bis 55445 bleibt für das ganze Büro-LAN offen. Loopback gilt immer: Der Kern läuft auf dem Server und spricht den
+Pooler vom Host aus an, solche Pakete laufen nie durch `DOCKER-USER`. Docker- und Caddy-Netze haben dort wie in
+`WAMO-FW-LAN` keine eigene Freigabe (unverändert).
+
+**Datei und Format.** `/etc/wamo/admin-quellen` (root, 0644), eine Adresse (`192.168.178.10`, gilt als /32) oder ein Netz
+(`192.168.178.8/29`) je Zeile, Kommentare mit `#`, höchstens 64 Einträge. Prüfung und Leser sind dieselben wie bei
+`plaetze-adressen` (Abschnitt 19): nur private Bereiche nach RFC 1918 (10.x und 192.168.x) mit mindestens /16, nie
+172.16.0.0/12. Ungültige Zeilen meldet die Firewall und lässt sie aus.
+
+| Inhalt der Datei | Admin-Ports aus dem LAN erreichbar von |
+| --- | --- |
+| fehlt, oder nur Kommentare (die Vorlage) | ganzes Büro-LAN 192.168.178.0/24, wie vor Q13 |
+| gültige Einträge | nur diesen Quellen |
+| nur ungültige Einträge | niemandem (nur Loopback): eine kaputte Liste öffnet nie das ganze LAN |
+
+WireGuard-Clients der Fritzbox haben eine eigene Adresse im Büro-LAN. Wer unterwegs über das VPN auf 55446 oder den
+Pooler muss, braucht diese Adresse ebenfalls in der Liste.
+
+```bash
+# 1. neue Fassung verteilen (Ordner nach ~/wamo-infra, Abschnitt 0) und nur ansehen: Statuszeile mit den Admin-Quellen,
+#    Unterschied der Regeln zur installierten Fassung; ändert nichts
+ssh sokrates2 "sudo bash ~/wamo-infra/wamo-firewall-einrichten.sh --trocken"
+# 2. einrichten: Sicherung, Skript, Vorlage /etc/wamo/admin-quellen (nur Kommentare, also noch keine Änderung), reload
+ssh sokrates2 "sudo bash ~/wamo-infra/wamo-firewall-einrichten.sh"
+# 3. vorher die Verbindungsliste lesen (docs/testlabor-wamo.md, 2.3 Punkt 7; die Ports sind per DNAT veröffentlicht, ss auf
+#    dem Host zeigt diese Verbindungen nicht, conntrack schon), dann Quellen eintragen, prüfen und übernehmen
+ssh sokrates2 "sudoedit /etc/wamo/admin-quellen"
+ssh sokrates2 "sudo wamo-firewall start --trocken"     # zeigt: Admin-Ports 55446 55322 56543 aus: ...
+ssh sokrates2 "sudo systemctl reload wamo-firewall"    # atomar, ohne Lücke
+ssh sokrates2 "sudo iptables -S WAMO-FW-ADMIN"
+```
+
+**Rückweg.** Nur die Liste: alle Einträge in `/etc/wamo/admin-quellen` auskommentieren (oder die Datei löschen), dann
+`sudo systemctl reload wamo-firewall`; danach gilt wieder das ganze Büro-LAN. Die ganze Änderung: die vorige
+`wamo-firewall.sh` aus Git verteilen und `wamo-firewall-einrichten.sh` erneut ausführen. Die Kette `WAMO-FW-ADMIN` bleibt
+dann ohne Sprung stehen und wirkt nicht mehr; weg mit `sudo iptables -F WAMO-FW-ADMIN && sudo iptables -X WAMO-FW-ADMIN`.
+`wamo-firewall-rueckweg.sh --entfernen` löscht die Datei mit, nach einer Sicherung in `/var/backups/wamo-firewall/`.
 
 Hinweis für Phase P3: Ein Container im Netz `supabase-wamo_default` erreicht die eigenen veröffentlichten Ports über
 die Host-Adresse nicht (das blockiert ufw, unabhängig von dieser Firewall). Der Voice-Core nutzt dort die
@@ -367,7 +411,8 @@ Prüfen vom PC: `curl -s -m 5 http://192.168.178.136:55321/auth/v1/health` läuf
 
 | Was | Befehl |
 | --- | --- |
-| Firewall abschalten | `ssh sokrates2 "sudo bash ~/wamo-infra/wamo-firewall-rueckweg.sh"` (mit `--entfernen` auch Skript, Unit und Einstellung löschen) |
+| Firewall abschalten | `ssh sokrates2 "sudo bash ~/wamo-infra/wamo-firewall-rueckweg.sh"` (mit `--entfernen` auch Skript, Unit, `firewall.conf` und `admin-quellen` löschen, die beiden Dateien vorher gesichert) |
+| Admin-Ports wieder für das ganze Büro-LAN | Einträge in `/etc/wamo/admin-quellen` auskommentieren, `sudo systemctl reload wamo-firewall` (Abschnitt 6.1) |
 | TLS zurücknehmen | `ssh sokrates2 "bash ~/wamo-infra/wamo-tls-rueckweg.sh"`: GoTrue wieder auf HTTP, Pooler ohne TLS, Ports wieder auch auf `[::]` (ufw sperrt IPv6), `wamo-caddy` entfernt; CA und Zertifikate bleiben liegen |
 | Clients nach TLS-Rückweg | in `.env` `SUPABASE_URL=http://192.168.178.136:55321`, in beiden DSNs `?sslmode=verify-full` entfernen und `WAMO_CA_FILE` leeren, in `ui/.env.local` `NEXT_PUBLIC_SUPABASE_URL` entsprechend |
 | Sicherung der `.env` | `/home/wamocon/supabase-wamo/.env.vor-tls` gibt es nur während eines Laufs von `wamo-tls-einrichten.sh`; nach erfolgreicher Prüfung löscht das Skript sie. Bleibt sie nach einem Abbruch liegen, nach der Reparatur löschen |

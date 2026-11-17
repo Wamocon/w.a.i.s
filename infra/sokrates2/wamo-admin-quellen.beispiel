@@ -1,0 +1,18 @@
+# Quellen für die Admin-Ports der WAMO-Firewall (Entscheidung Q13): 55446 (Remote-Desktop-Gateway), 55322 und 56543 (Pooler).
+# Vorlage; wamo-firewall-einrichten.sh legt daraus /etc/wamo/admin-quellen an, wenn die Datei fehlt, und lässt eine vorhandene unverändert.
+#
+# Eine Adresse (a.b.c.d, gilt als /32) oder ein Netz (a.b.c.d/n, n von 16 bis 32) je Zeile, Kommentare mit #, höchstens 64 Einträge.
+# Erlaubt sind nur private Bereiche nach RFC 1918 (10.x und 192.168.x); 172.16.0.0/12 ist der Docker-Bereich und nie erlaubt.
+# Ungültige Zeilen meldet die Firewall und lässt sie aus.
+#
+# Ohne Einträge (wie hier) gilt das ganze Büro-LAN 192.168.178.0/24, also dasselbe wie vor Q13. Mit Einträgen erreichen aus dem LAN nur
+# diese Quellen die drei Ports; Loopback (der Server selbst und damit der Kern) gilt immer. Sind alle Einträge ungültig, bleibt nur
+# Loopback. Die Ports 55443 bis 55445 hängen nicht an dieser Liste. WireGuard-Clients der Fritzbox bekommen eine eigene Adresse im
+# Büro-LAN: Wer unterwegs über das VPN auf die Admin-Ports muss, braucht auch diese Adresse hier.
+#
+# Beispiel (ohne # am Zeilenanfang wirksam):
+# 192.168.178.10
+# 192.168.178.11/32
+#
+# Prüfen:      sudo wamo-firewall start --trocken    und    sudo wamo-firewall regeln
+# Übernehmen:  sudo systemctl reload wamo-firewall   (atomar, ohne Lücke)
