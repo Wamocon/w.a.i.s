@@ -361,6 +361,10 @@ def _status(code):
     (anthropic.AuthenticationError("x", response=_status(401), body=None), "Anthropic lehnt den Schlüssel ab"),
     (anthropic.PermissionDeniedError("x", response=_status(403), body=None), "Workspace oder Berechtigung"),
     (anthropic.RateLimitError("x", response=_status(429), body=None), "HTTP 429"),
+    # Befund 17.11.2026: Schlüssel ohne Workspace und ohne Workspace-ID ergaben nur "HTTP 400"
+    (anthropic.BadRequestError("This API key is not scoped to a workspace, so this request must include the "
+                               "anthropic-workspace-id header", response=_status(400), body=None), "keinem Workspace"),
+    (anthropic.BadRequestError("anderer Grund", response=_status(400), body=None), "(400)"),
     (anthropic.APIConnectionError(request=httpx.Request("POST", "https://a.invalid")), "nicht erreichbar"),
     (anthropic.APIError("x", request=httpx.Request("POST", "https://a.invalid"), body=None), "Anthropic-Fehler"),
 ])
