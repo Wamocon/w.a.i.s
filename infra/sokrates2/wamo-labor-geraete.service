@@ -2,10 +2,11 @@
 # Installiert durch infra/sokrates2/wamo-labor-geraete-einrichten.sh nach /etc/systemd/system/ (der Platzhalter __CADDY_DIR__ wird dort durch den Ordner von
 # wamo-caddy ersetzt, Standard /home/wamocon/wamo-tls/caddy). Der Zeitgeber wamo-labor-geraete.timer ruft ihn jede Minute auf.
 # Läuft als root: Der Aktualisierer schreibt die Site-Datei im Ordner etc/kern von wamo-caddy (Besitzer wamocon) und spricht über den Docker-Socket mit wamo-caddy (caddy adapt
-# im Wegwerf-Container, caddy reload). Gehärtet, soweit docker, nmblookup und avahi-resolve es zulassen: Das Dateisystem ist bis auf drei Orte schreibgeschützt (der Laufzeitordner
+# im Wegwerf-Container, caddy reload). Gehärtet, soweit docker, nmblookup, avahi-resolve und ip neigh es zulassen: Das Dateisystem ist bis auf drei Orte schreibgeschützt (der Laufzeitordner
 # /run/wamo-labor-geraete mit Sperre und Wegwerf-Ordner der Prüfung, der Zustandsordner /var/lib/wamo-labor-geraete mit dem Stand, und etc/kern von wamo-caddy mit der Site),
 # /home ist nur lesbar, /etc/wamo-labor wird nur gelesen (die Token dort sind für die Unit unsichtbar), keine neuen Rechte, nur drei Fähigkeiten (Besitzer und Rechte setzen,
-# fremde Dateien lesen und schreiben), keine neuen Namensräume, nur Unix-Sockets, IPv4, IPv6 und Netlink (die Namensauflösung im LAN braucht Netz). Das Journal trägt die
+# fremde Dateien lesen und schreiben), keine neuen Namensräume, nur Unix-Sockets, IPv4, IPv6 und Netlink (die Namensauflösung im LAN braucht Netz, die Probe der
+# mDNS-Adressen ein UDP-Paket ohne Sonderrechte und ip neigh Netlink). Das Journal trägt die
 # Kennung wamo-labor-geraete: Dort steht nur, was sich ändert (Name und Adresse), nie ein Token.
 [Unit]
 Description=WAMO Labor: Betreuer-Geräte über ihren Gerätenamen zulassen
@@ -20,7 +21,8 @@ RuntimeDirectory=wamo-labor-geraete
 StateDirectory=wamo-labor-geraete
 # der Ordner bleibt zwischen zwei Läufen bestehen: Die Sperrdatei darin (flock) hält auch einen Lauf von Hand und einen Lauf der Unit auseinander
 RuntimeDirectoryPreserve=yes
-# schlimmste Dauer eines Laufs: Auflösung von 16 Namen mit höchstens 4 gleichzeitig (4 mal 16 Sekunden), zwei Proben von 55443 bis 55446 (je 4 Ports mal 3 Versuche mal 7 Sekunden:
+# schlimmste Dauer eines Laufs: Auflösung von 16 Namen mit höchstens 4 gleichzeitig (4 mal 21 Sekunden: NetBIOS und mDNS je 8, die Probe der mDNS-Adressen mit dem
+# UDP-Paket und ip neigh je 2 und 1 Sekunde Wartezeit dazwischen), zwei Proben von 55443 bis 55446 (je 4 Ports mal 3 Versuche mal 7 Sekunden:
 # nach dem Laden und nach der Rücknahme) und die Prüfung der Site: unter 300 Sekunden, damit nie ein SIGTERM mitten in der Rücknahme kommt (ein Test rechnet nach)
 TimeoutStartSec=300
 Nice=5

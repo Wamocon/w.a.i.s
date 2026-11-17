@@ -13,6 +13,7 @@ INTERN="127.0.0.0/8 172.24.0.1/32 192.168.178.136/32"
 CADDY_PORTS="55443 55444 55445 55446"   # die Dienste hinter wamo-caddy, die ein Neuanlegen oder ein Fehler lahmlegen würde
 LAN_PRAEFIX="192.168.178."              # nur Adressen aus dem Büro-LAN 192.168.178.0/24 gelten für Betreuer-Geräte (Namensauflösung nie darüber hinaus)
 GERAETE_FRIST_S=43200                   # so lange (12 Stunden) bleibt die zuletzt gute Adresse eines Geräts zugelassen, das nicht mehr antwortet
+ERSATZ_FRIST_S=900                      # so lange (15 Minuten) bleibt eine bisherige Adresse zugelassen, wenn der Name ohne sie antwortet (mDNS antwortet teils abwechselnd)
 MAX_NAMEN=16                            # höchstens so viele Gerätenamen in betreuer-geraete
 ZEIT_TOLERANZ_S=300                     # ein Zeitpunkt im Stand, der höchstens so weit in der Zukunft liegt, zählt als jetzt, ein weiterer als abgelaufen
 NAME_MUSTER='^[A-Za-z0-9][A-Za-z0-9-]{0,14}$'   # ein Gerätename: 1 bis 15 Zeichen (NetBIOS-Länge), am Anfang kein Bindestrich

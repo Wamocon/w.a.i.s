@@ -18,7 +18,7 @@
 #   --trocken   Lesen und Prüfen wie sonst, aber jede Änderung (Dateien, systemctl, docker, Caddy) nur anzeigen
 #
 # Was einrichten tut (vor jeder Änderung eine Sicherung unter /var/backups/wamo-labor/<JJJJMMTT-HHMMSS>/ ohne Token und ohne Daten):
-#   Vorprüfung   Werkzeuge (docker, flock, timeout, nmblookup, avahi-resolve, systemctl, logger), wamo-caddy läuft, die Site wamo-labor.caddy besteht, die Dateien dieses Ordners
+#   Vorprüfung   Werkzeuge (docker, flock, timeout, nmblookup, avahi-resolve, ip, systemctl, logger), wamo-caddy läuft, die Site wamo-labor.caddy besteht, die Dateien dieses Ordners
 #                sind da, betreuer-geraete (Namen, streng) und betreuer-adressen sind gültig. avahi-daemon aus ist nur eine Warnung (NetBIOS antwortet dann allein).
 #   Installation /usr/local/sbin/wamo-labor-geraete-aktualisieren (root 0755), /usr/local/lib/wamo-labor-geraete/ mit der Bibliothek wamo-labor-site.sh und der Vorlage
 #                wamo-labor.caddy (root 0644), /etc/systemd/system/wamo-labor-geraete.service und .timer (root 0644, der Ordner von wamo-caddy eingesetzt),
@@ -32,7 +32,7 @@
 #
 # Probelauf ohne root (nur für Tests): WAMO_LABOR_GERAETE_WURZEL=/pfad/zu/einem/wegwerf/ordner stellt allen Pfaden unter /etc, /usr, /var und /run diesen Ordner voran
 # (WAMO_LABOR_CADDY_DIR nennt den Ordner von wamo-caddy). Die Prüfung ruft dann den installierten Aktualisierer direkt auf, statt die Unit über systemd zu starten.
-# docker, systemctl, nmblookup, avahi-resolve, flock, curl und logger stammen aus dem PATH (Attrappen).
+# docker, systemctl, nmblookup, avahi-resolve, ip, flock, curl und logger stammen aus dem PATH (Attrappen).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -117,7 +117,7 @@ dateien_pruefen() {
 vorpruefung() {
   echo "== Vorprüfung"
   local w namen fest plaetze
-  for w in docker flock timeout nmblookup avahi-resolve systemctl logger curl awk sort paste; do
+  for w in docker flock timeout nmblookup avahi-resolve ip sleep systemctl logger curl awk sort paste; do
     command -v "$w" >/dev/null 2>&1 || muss "$w fehlt (gebraucht für den Aktualisierer der Betreuer-Geräte)."
   done
   dateien_pruefen

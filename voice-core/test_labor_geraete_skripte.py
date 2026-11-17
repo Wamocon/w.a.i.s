@@ -41,6 +41,7 @@ NEUE_DATEIEN = [SITE_BIB, AKTUALISIERER, GERAETE_EINRICHTEN, DIENST, TIMER]
 NEUE_SKRIPTE = (SITE_BIB, AKTUALISIERER, GERAETE_EINRICHTEN)
 INTERN = "127.0.0.0/8 172.24.0.1/32 192.168.178.136/32"
 FRIST = 12 * 3600
+ERSATZ = 15 * 60  # so lange bleibt eine bisherige Adresse, wenn der Name ohne sie antwortet (ERSATZ_FRIST_S)
 GERAET = "WMC-H-04-NS"
 STAND_REL = "var/lib/wamo-labor-geraete/betreuer-geraete.stand"  # der Stand im Probelauf (relativ zur Wurzel): StateDirectory der Unit
 VERSUCH_REL = "var/lib/wamo-labor-geraete/betreuer-geraete.versuch"  # Zeitpunkt des letzten Versuchs, neue Zulassungen zu laden (auch nach Misserfolg)
@@ -109,9 +110,9 @@ class BibliothekTests(unittest.TestCase):
                               stdin=subprocess.DEVNULL)
 
     def test_laden_hat_keine_nebenwirkung_und_setzt_die_konstanten(self):
-        r = self.bash('echo "$INTERN|$LAN_PRAEFIX|$GERAETE_FRIST_S|$CADDY_PORTS"')
+        r = self.bash('echo "$INTERN|$LAN_PRAEFIX|$GERAETE_FRIST_S|$ERSATZ_FRIST_S|$CADDY_PORTS"')
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), f"{INTERN}|192.168.178.|{FRIST}|55443 55444 55445 55446")
+        self.assertEqual(r.stdout.strip(), f"{INTERN}|192.168.178.|{FRIST}|{ERSATZ}|55443 55444 55445 55446")
 
     def test_adresse_gueltig(self):
         for gut in ("192.168.178.50", "10.0.0.1/24", "192.168.178.60/32", "8.8.8.8/32"):
@@ -356,7 +357,7 @@ class GeraeteWerkstatt(Werkstatt):
 
     def setUp(self):
         super().setUp()
-        for n in ("nmblookup", "avahi-resolve", "flock", "logger"):
+        for n in ("nmblookup", "avahi-resolve", "ip", "flock", "logger"):
             schreibe(self.bin / n, ATTRAPPE, ausfuehrbar=True)
         schreibe(self.p("etc/wamo-labor/betreuer-adressen"), "# Betreuer\n192.168.178.50\n")
         schreibe(self.p("etc/wamo-labor/betreuer-geraete"), f"# Geräte\n{GERAET}\n")
@@ -387,6 +388,12 @@ class GeraeteWerkstatt(Werkstatt):
 
     def mdns(self, *adressen: str, name: str = GERAET) -> str:
         return "".join(f"{name}.local\t{a}\n" for a in adressen)
+
+    def nachbar(self, *adressen: str, zustand: str = "REACHABLE") -> None:
+        """Was ip -4 neigh show ADRESSE nach der Probe zeigt: mit Hardware-Adresse (REACHABLE, STALE, DELAY, PROBE) oder ohne (INCOMPLETE, FAILED). Ohne Aufruf: kein Eintrag."""
+        lladdr = "" if zustand in ("INCOMPLETE", "FAILED") else " lladdr 02:00:00:00:00:01"
+        for a in adressen:
+            self.ausgabe(f"ip.neigh_show_{a.replace('.', '_')}", f"{a} dev enp1s0{lladdr} {zustand}\n")
 
     def aktualisieren(self, *args: str, jetzt: int | None = None, extra: dict | None = None) -> subprocess.CompletedProcess:
         env = {"WAMO_LABOR_GERAETE_WURZEL": posix(self.wurzel), "WAMO_LABOR_GERAETE_JETZT": str(jetzt or self.JETZT)}
@@ -448,24 +455,27 @@ class AufloesungTests(GeraeteWerkstatt):
 
     def test_mdns_gilt_nur_wenn_netbios_nach_dem_filter_nichts_liefert(self):
         mdns_aufruf = f"avahi-resolve -4 -n -- {GERAET}.local"
+        self.nachbar("192.168.178.67", "192.168.178.68", "192.168.178.69")  # die mDNS-Adressen sind im LAN da (ARP-Eintrag nach der Probe)
         # NetBIOS findet den Namen nicht (Mac, Linux): mDNS ersetzt es
         self.antworten(GERAET, "name_query failed to find name WMC-H-04-NS\n", self.mdns("192.168.178.67"))
         self.assertEqual(self.aktualisieren().returncode, 0)
         self.assertIn(self.remote_ip("192.168.178.67"), self.site())
         self.assertIn(mdns_aufruf, self.aufrufe())
         # NetBIOS antwortet nur mit Adressen außerhalb des Büro-LANs (virtuell): Nach dem Filter ist nichts übrig, mDNS wird gefragt
+        # (jeweils mehr als 15 Minuten später, damit die vorige Adresse nicht mehr als Ersatz bleibt)
         self.log.write_text("", encoding="utf-8")
         self.antworten(GERAET, self.netbios("172.17.0.1", "10.0.0.5"), self.mdns("192.168.178.68"))
-        self.assertEqual(self.aktualisieren(jetzt=self.JETZT + 200).returncode, 0)
+        self.assertEqual(self.aktualisieren(jetzt=self.JETZT + ERSATZ + 100).returncode, 0)
         self.assertIn(self.remote_ip("192.168.178.68"), self.site())
         self.assertIn(mdns_aufruf, self.aufrufe())
         # NetBIOS scheitert (Fehlercode, Zeitüberschreitung): ebenfalls mDNS
         self.log.write_text("", encoding="utf-8")
         self.ausgabe(f"nmblookup.{GERAET}", "", rc=1)
         self.antworten_mdns_nur(GERAET, self.mdns("192.168.178.69"))
-        self.assertEqual(self.aktualisieren(jetzt=self.JETZT + 400).returncode, 0)
+        self.assertEqual(self.aktualisieren(jetzt=self.JETZT + 2 * (ERSATZ + 100)).returncode, 0)
         self.assertIn(self.remote_ip("192.168.178.69"), self.site())
         self.assertLess(self.aufrufe().index(f"nmblookup -- {GERAET}"), self.aufrufe().index(mdns_aufruf))  # erst NetBIOS, dann mDNS
+        self.assertLess(self.aufrufe().index(mdns_aufruf), self.aufrufe().index("ip -4 neigh show 192.168.178.69"))  # dann die Probe der mDNS-Adresse
 
     def test_antwortet_auch_mdns_nicht_oder_nur_ausserhalb_des_lans_gilt_nichts(self):
         self.antworten(GERAET, "", self.mdns("172.17.0.1", "10.0.0.5"))
@@ -503,8 +513,17 @@ class AufloesungTests(GeraeteWerkstatt):
         self.assertIn("avahi-resolve", c)
         self.assertLess(c.index("nmblookup --"), c.index("avahi-resolve -4"))
         self.assertRegex(c, r'if \[ -z "\$antwort" \]')  # mDNS nur, wenn NetBIOS nach dem Filter nichts lieferte
-        for nie in ("getent", "dig ", "nslookup", "host ", "resolvectl", "arp ", "ip neigh", "ping"):
+        for nie in ("getent", "dig ", "nslookup", "host ", "resolvectl", "arp "):
             self.assertNotIn(nie, c, nie)  # das DNS der Fritz!Box liefert veraltete Adressen und gehört nicht dazu
+        # die Probe (UDP-Paket, dann ip neigh) liefert nie eine Adresse, sie prüft nur, ob eine Adresse aus mDNS im LAN da ist (je einmal, mit Zeitgrenze)
+        for skript in (AKTUALISIERER, GERAETE_EINRICHTEN, SITE_BIB):
+            self.assertIsNone(re.search(r"\bping\b", code(skript)), skript.name)  # ohne CAP_NET_RAW und ohne ICMP-Sockets am Server scheiterte ping immer
+        self.assertEqual(len(re.findall(r"\bip -4 neigh\b", c)), 1)
+        self.assertIn("""timeout "$PROBE_FRIST_S" bash -c 'printf x > "$1/$2/9"' _ "$UDP_ZIEL" "$1" 2>/dev/null || true""", c)
+        self.assertIn('sleep "$ARP_WARTE_S"', c)
+        self.assertIn('timeout "$PROBE_FRIST_S" ip -4 neigh show "$1"', c)
+        self.assertIn('UDP_ZIEL="$W/dev/udp"', c)  # im Probelauf ein Ordner unter der Wurzel, nie ein Paket ins Netz
+        self.assertRegex(c, r'antwort="\$\(nur_im_lan_da "\$antwort" "\$2"\)"')  # nur im Zweig von mDNS
 
     def test_genau_vier_antworten_gelten(self):
         vier = [f"192.168.178.{n}" for n in (90, 20, 30, 40)]
@@ -578,6 +597,7 @@ class AufloesungTests(GeraeteWerkstatt):
         schreibe(self.p("etc/wamo-labor/betreuer-geraete"), "pc-eins\nPC-ZWEI  # Kommentar\r\nPC-EINS\n")
         self.antworten("PC-EINS", self.netbios("192.168.178.21", name="PC-EINS"), self.mdns(name="PC-EINS"))
         self.antworten("PC-ZWEI", "", self.mdns("192.168.178.22", name="PC-ZWEI"))
+        self.nachbar("192.168.178.22")  # die Adresse aus mDNS ist im LAN da
         r = self.aktualisieren()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.stand(), [("PC-EINS", "192.168.178.21", self.JETZT), ("PC-ZWEI", "192.168.178.22", self.JETZT)])
@@ -859,45 +879,51 @@ class FristUndAenderungTests(GeraeteWerkstatt):
         self.assertEqual(self.aktualisieren(jetzt=t0 + FRIST + 300).returncode, 0)  # mehr als drei Minuten nach dem letzten Reload
         self.assertIn(self.remote_ip("192.168.178.78"), self.site())
 
-    def test_neue_antwort_entzieht_die_alte_adresse_sofort_und_laesst_die_neue_nach_drei_minuten_zu(self):
-        """Gemischte Änderung in der Sperrfrist: Es wird nur die Schnittmenge aus altem und neuem Stand geladen, der Entzug wartet nie, die neue Adresse höchstens 3 Minuten."""
+    def test_neue_antwort_laesst_die_alte_adresse_noch_15_minuten_und_die_neue_nach_drei_minuten_zu(self):
+        """Neue Adresse in der Sperrfrist: Die neue wartet höchstens 3 Minuten, die alte bleibt bis 15 Minuten nach ihrer letzten Antwort (früher fiel sie sofort weg)."""
         t0 = self.JETZT
         self.antworten(GERAET, self.netbios("192.168.178.78"))
         self.assertEqual(self.aktualisieren(jetzt=t0).returncode, 0)
         self.antworten(GERAET, self.netbios("192.168.178.79"))  # der PC hat eine neue Adresse (DHCP)
         r = self.aktualisieren(jetzt=t0 + 60)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertNotIn("192.168.178.78", self.site())  # der Entzug wartet nie
-        self.assertNotIn("192.168.178.79", self.site())  # die neue Zulassung wartet
-        self.assertEqual(self.reloads(), 2)
-        self.assertEqual(self.stand(), [])  # der Stand sagt, was geladen ist
-        self.assertIn("192.168.178.78 entfernt", r.stdout)
-        self.assertNotIn("zugelassen", r.stdout)
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        self.assertIn(self.remote_ip("192.168.178.78"), self.site())  # die alte bleibt, die neue Zulassung wartet
+        self.assertEqual(self.reloads(), 1)
+        self.assertEqual(self.stand(), [(GERAET, "192.168.178.78", t0)])  # der Stand sagt, was geladen ist
         r = self.aktualisieren(jetzt=t0 + 179)
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
-        self.assertEqual(self.reloads(), 2)
+        self.assertEqual(self.reloads(), 1)
         r = self.aktualisieren(jetzt=t0 + 180)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(self.remote_ip("192.168.178.79"), self.site())
-        self.assertEqual(self.stand(), [(GERAET, "192.168.178.79", t0 + 180)])
+        self.assertIn(self.remote_ip("192.168.178.78", "192.168.178.79"), self.site())
+        self.assertEqual(self.stand(), [(GERAET, "192.168.178.79", t0 + 180), (GERAET, "192.168.178.78", t0)])  # der Zeitpunkt der alten bleibt
         self.assertIn("192.168.178.79 zugelassen", r.stdout)
+        self.assertNotIn("entfernt", r.stdout)
+        self.assertEqual(self.reloads(), 2)
+        r = self.aktualisieren(jetzt=t0 + ERSATZ + 1)  # die alte hat seit mehr als 15 Minuten nicht geantwortet: Entzug ohne Wartezeit
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(self.remote_ip("192.168.178.79"), self.site())
+        self.assertNotIn("192.168.178.78", self.site())
+        self.assertIn("192.168.178.78 entfernt (ersetzt durch die neue Antwort)", r.stdout)
         self.assertEqual(self.reloads(), 3)
 
     def test_in_der_sperrfrist_bleibt_was_zugelassen_ist_und_weiter_antwortet(self):
+        """Gemischte Änderung in der Sperrfrist: Es wird nur die Schnittmenge aus altem und neuem Stand geladen, der Entzug wartet nie, das Neue höchstens 3 Minuten."""
         t0 = self.JETZT
         schreibe(self.p("etc/wamo-labor/betreuer-geraete"), "PC-EINS\nPC-ZWEI\nPC-DREI\n")
-        self.antworten("PC-EINS", self.netbios("192.168.178.21", name="PC-EINS"))
-        self.antworten("PC-ZWEI", self.netbios("192.168.178.40", name="PC-ZWEI"))
-        self.antworten("PC-DREI")
-        self.assertEqual(self.aktualisieren(jetzt=t0).returncode, 0)
+        schreibe(self.p(STAND_REL), f"PC-EINS 192.168.178.21 {t0 - ERSATZ - 1}\nPC-ZWEI 192.168.178.40 {t0 - 60}\n")  # .21 schweigt seit mehr als 15 Minuten
+        schreibe(self.p(VERSUCH_REL), f"{t0 - 60}\n")  # vor einer Minute wurde neu zugelassen: Neues wartet noch 2 Minuten
+        self.schreibe_site(["192.168.178.21", "192.168.178.40"])
         self.antworten("PC-EINS", self.netbios("192.168.178.22", name="PC-EINS"))  # ersetzt: .21 weg, .22 neu
+        self.antworten("PC-ZWEI", self.netbios("192.168.178.40", name="PC-ZWEI"))
         self.antworten("PC-DREI", self.netbios("192.168.178.50", name="PC-DREI"))  # neu
-        r = self.aktualisieren(jetzt=t0 + 60)
+        r = self.aktualisieren(jetzt=t0)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(self.remote_ip("192.168.178.40"), self.site())  # nur die Schnittmenge: PC-ZWEI bleibt
-        self.assertEqual(self.stand(), [("PC-ZWEI", "192.168.178.40", t0 + 60)])
-        self.assertEqual(self.reloads(), 2)
-        r = self.aktualisieren(jetzt=t0 + 180)
+        self.assertIn(self.remote_ip("192.168.178.40"), self.site())  # nur die Schnittmenge: PC-ZWEI bleibt, .21 fällt sofort weg
+        self.assertEqual(self.stand(), [("PC-ZWEI", "192.168.178.40", t0)])
+        self.assertIn("192.168.178.21 entfernt (ersetzt durch die neue Antwort)", r.stdout)
+        self.assertEqual(self.reloads(), 1)
+        r = self.aktualisieren(jetzt=t0 + 120)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(self.remote_ip("192.168.178.22", "192.168.178.40", "192.168.178.50"), self.site())
 
@@ -948,8 +974,8 @@ class FristUndAenderungTests(GeraeteWerkstatt):
         self.assertEqual(site.replace(f"{liste} 192.168.178.78", liste), self.site_vorher.decode("utf-8"))  # sonst bleibt die Site, wie sie war (auch die Kommentare nennen die Liste)
         schreibe(self.p("etc/wamo-labor/betreuer-adressen"), "192.168.178.50\n192.168.178.60/32\n")  # eine geänderte feste Liste gilt bei der nächsten Änderung mit
         self.antworten(GERAET, self.netbios("192.168.178.79"))
-        self.aktualisieren(jetzt=self.JETZT + 200)
-        self.assertIn(f"remote_ip {INTERN} 192.168.178.50 192.168.178.60/32 192.168.178.79\n", self.site())
+        self.aktualisieren(jetzt=self.JETZT + 200)  # .78 bleibt als Ersatz, bis sie 15 Minuten nicht mehr geantwortet hat
+        self.assertIn(f"remote_ip {INTERN} 192.168.178.50 192.168.178.60/32 192.168.178.78 192.168.178.79\n", self.site())
 
     def test_gepruefte_site_wird_installiert_und_der_arbeitsordner_geraeumt(self):
         self.antworten(GERAET, self.netbios("192.168.178.78"))
@@ -1036,6 +1062,151 @@ class FristUndAenderungTests(GeraeteWerkstatt):
         self.assertIn("übersprungen", r.stderr)
         self.assertNotIn("10.0.0.5", self.site())
         self.assertEqual(self.stand(), [(GERAET, "192.168.178.78", self.JETZT)])
+
+
+@unittest.skipUnless(BASH, "keine Bash vorhanden")
+class ErsatzFristTests(GeraeteWerkstatt):
+    """Befund 17.11.2026: mDNS antwortet für manche Geräte abwechselnd mit zwei Adressen. Sofortiges Ersetzen ließ die Site alle paar Minuten flattern (Entzug sofort,
+    Zulassung erst nach der 3-Minuten-Sperre). Bisherige Adressen bleiben deshalb bis 15 Minuten nach ihrer letzten Antwort (ERSATZ_FRIST_S)."""
+
+    A, B = "192.168.178.10", "192.168.178.20"
+
+    def setUp(self):
+        super().setUp()
+        self.nachbar(self.A, self.B)  # beide sind im LAN da
+
+    def antwort(self, adresse: str) -> None:
+        self.antworten(GERAET, "", self.mdns(adresse))  # nur mDNS antwortet, je Abfrage mit einer Adresse
+
+    def test_abwechselnde_antworten_innerhalb_von_15_minuten_flattern_nicht(self):
+        t0 = self.JETZT
+        for minute in range(15):
+            self.antwort(self.A if minute % 2 == 0 else self.B)
+            r = self.aktualisieren(jetzt=t0 + 60 * minute)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn("entfernt", r.stdout, minute)  # A wird nie entfernt, B nach ihrer Zulassung auch nicht
+            self.assertIn(self.A, self.site(), minute)
+            if minute >= 3:
+                self.assertIn(self.remote_ip(self.A, self.B), self.site(), minute)
+        self.assertEqual(self.reloads(), 2)  # A zu Beginn, B nach der 3-Minuten-Sperre, danach kein Hin und Her
+        self.assertEqual(self.zaehle("logger"), 2)  # nur zwei Meldungen: A zugelassen, B zugelassen
+
+    def test_eine_adresse_die_15_minuten_schweigt_faellt_mit_ersetzt_durch_die_neue_antwort_weg(self):
+        t0 = self.JETZT
+        self.antwort(self.A)
+        self.assertEqual(self.aktualisieren(jetzt=t0).returncode, 0)
+        self.antwort(self.B)  # der Name antwortet nur noch mit B
+        for sekunden in (200, 500, ERSATZ):
+            r = self.aktualisieren(jetzt=t0 + sekunden)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn(self.remote_ip(self.A, self.B), self.site(), sekunden)  # A bleibt bis genau 15 Minuten nach ihrer letzten Antwort
+        self.assertIn((GERAET, self.A, t0), self.stand())  # ihr Zeitpunkt bleibt unverändert
+        r = self.aktualisieren(jetzt=t0 + ERSATZ + 1)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(self.remote_ip(self.B), self.site())
+        self.assertNotIn(self.A, self.site())
+        self.assertEqual(self.stand(), [(GERAET, self.B, t0 + ERSATZ + 1)])
+        self.assertIn(f"Gerät {GERAET}: {self.A} entfernt (ersetzt durch die neue Antwort)", r.stdout)
+        self.assertEqual(self.reloads(), 3)  # A, dann B dazu, dann A weg (ohne Wartezeit)
+
+    def test_hoechstens_vier_adressen_je_name_die_frischen_zuerst_von_den_alten_die_juengsten(self):
+        t0 = self.JETZT
+        alt = {"192.168.178.41": t0 - 400, "192.168.178.42": t0 - 100, "192.168.178.43": t0 - 300, "192.168.178.44": t0 - 200}
+        schreibe(self.p(STAND_REL), "".join(f"{GERAET} {a} {z}\n" for a, z in alt.items()))
+        self.schreibe_site(sorted(alt))
+        self.antworten(GERAET, self.netbios("192.168.178.21", "192.168.178.22"))
+        r = self.aktualisieren(jetzt=t0)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.stand(), [(GERAET, "192.168.178.21", t0), (GERAET, "192.168.178.22", t0),
+                                        (GERAET, "192.168.178.42", t0 - 100), (GERAET, "192.168.178.44", t0 - 200)])
+        self.assertIn(self.remote_ip("192.168.178.21", "192.168.178.22", "192.168.178.42", "192.168.178.44"), self.site())
+        for weg in ("192.168.178.41", "192.168.178.43"):
+            self.assertIn(f"{weg} entfernt (ersetzt durch die neue Antwort)", r.stdout)
+            self.assertNotIn(weg, self.site())
+        self.antworten(GERAET, self.netbios("192.168.178.21", "192.168.178.22", "192.168.178.23", "192.168.178.24"))  # vier frische: keine alte bleibt
+        r = self.aktualisieren(jetzt=t0 + 200)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.stand(), [(GERAET, f"192.168.178.{n}", t0 + 200) for n in (21, 22, 23, 24)])
+        self.assertIn(self.remote_ip("192.168.178.21", "192.168.178.22", "192.168.178.23", "192.168.178.24"), self.site())
+
+    def test_antworten_zwischen_zwei_schreibzeitpunkten_gehen_nicht_verloren(self):
+        """Ohne Änderung wird der Stand nur alle 5 Minuten geschrieben. Antwortet B nur zwischen diesen Zeitpunkten, darf ihr Zeitpunkt trotzdem nicht veralten:
+        Ist er im Stand mindestens 5 Minuten alt, zieht er bei der nächsten Antwort sofort nach (sonst fiele B nach Minute 23 weg)."""
+        t0 = self.JETZT
+        for minute, adresse in ((0, self.A), (3, self.B), (8, self.A), (9, self.B), (13, self.A), (18, self.A), (19, self.B), (23, self.A)):
+            self.antwort(adresse)
+            r = self.aktualisieren(jetzt=t0 + 60 * minute)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn("entfernt", r.stdout, minute)
+        self.assertIn(self.remote_ip(self.A, self.B), self.site())
+        self.assertEqual(self.reloads(), 2)
+        self.assertIn((GERAET, self.B, t0 + 19 * 60), self.stand())
+
+
+@unittest.skipUnless(BASH, "keine Bash vorhanden")
+class MdnsProbeTests(GeraeteWerkstatt):
+    """Befund 17.11.2026: mDNS lieferte für ein Gerät abwechselnd zwei Adressen, die beide tot waren (kein Ping, kein ARP-Eintrag). Eine Adresse nur aus mDNS gilt
+    deshalb erst, wenn sie nach einer Probe (UDP-Paket an den Port 9, löst ARP aus) in der Nachbartabelle mit Hardware-Adresse steht. NetBIOS-Antworten gelten
+    ohne Probe. Im Probelauf geht das UDP-Paket nie ins Netz: Es landet als Datei unter WURZEL/dev/udp/ADRESSE/9, wenn der Test den Ordner anlegt."""
+
+    def test_mdns_adresse_mit_arp_eintrag_wird_zugelassen(self):
+        lebend = {"192.168.178.11": "REACHABLE", "192.168.178.12": "STALE", "192.168.178.13": "DELAY", "192.168.178.14": "PROBE"}
+        for a, z in lebend.items():
+            self.nachbar(a, zustand=z)
+            self.p(f"dev/udp/{a}").mkdir(parents=True)
+        self.antworten(GERAET, "", self.mdns(*lebend))
+        r = self.aktualisieren()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(self.remote_ip(*lebend), self.site())
+        self.assertEqual([a for _, a, _ in self.stand()], list(lebend))
+        self.assertNotIn("WARNUNG", r.stdout)
+        for a in lebend:
+            self.assertEqual(self.p(f"dev/udp/{a}/9").read_text(encoding="utf-8"), "x")  # das UDP-Paket an den Port 9 (löst ARP aus)
+            self.assertIn(f"ip -4 neigh show {a}", self.aufrufe())  # danach die Nachbartabelle
+
+    def test_mdns_adresse_ohne_arp_eintrag_wird_verworfen_und_hoechstens_stuendlich_gemeldet(self):
+        t0 = self.JETZT
+        self.nachbar("192.168.178.31", zustand="INCOMPLETE")
+        self.nachbar("192.168.178.32", zustand="FAILED")  # .33 hat gar keinen Eintrag
+        self.antworten(GERAET, "", self.mdns("192.168.178.31", "192.168.178.32", "192.168.178.33"))
+        r = self.aktualisieren(jetzt=t0)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.site_datei.read_bytes(), self.site_vorher)  # nichts zugelassen
+        self.assertEqual((self.stand(), self.reloads()), ([], 0))
+        for a in ("192.168.178.31", "192.168.178.32", "192.168.178.33"):
+            self.assertIn(f"WARNUNG Gerät {GERAET}: {a} aus mDNS verworfen (im LAN nicht da, nach einer Probe kein ARP-Eintrag).\n", r.stdout)
+        self.assertNotIn("zugelassen", r.stdout)
+        self.assertEqual(self.zaehle("logger"), 3)  # bei einem Aufruf von Hand auch ins Journal
+        self.assertRegex(code(AKTUALISIERER), r'\$\(kurz "\$name"\): \$\(kurz "\$adr"\) aus mDNS verworfen')  # maskiert wie die Werte der Eingabedateien
+        r = self.aktualisieren(jetzt=t0 + 60)  # dieselbe Lage eine Minute später: keine zweite Warnung
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        r = self.aktualisieren(jetzt=t0 + 3600)  # nach einer Stunde wieder
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("192.168.178.31 aus mDNS verworfen", r.stdout)
+        self.assertNotIn("192.168.178.31", self.site())
+
+    def test_netbios_antworten_gelten_ohne_probe(self):
+        self.antworten(GERAET, self.netbios("192.168.178.78"))  # kein Eintrag in der Nachbartabelle: für NetBIOS egal
+        self.p("dev/udp/192.168.178.78").mkdir(parents=True)
+        r = self.aktualisieren()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(self.remote_ip("192.168.178.78"), self.site())
+        self.assertFalse([z for z in self.aufrufe() if z.startswith("ip ")])
+        self.assertFalse(self.p("dev/udp/192.168.178.78/9").exists())  # kein UDP-Paket
+
+    def test_mehr_als_vier_mdns_antworten_werden_nie_zu_einer_flut_von_proben(self):
+        self.antworten(GERAET, "", self.mdns(*[f"192.168.178.{n}" for n in (11, 12, 13, 14, 15)]))
+        r = self.aktualisieren()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse([z for z in self.aufrufe() if z.startswith("ip ")])
+        self.assertIn("5 Antworten", r.stdout)  # der Name ist verdächtig: nichts Neues, nur Bestätigung
+        self.assertEqual(self.site_datei.read_bytes(), self.site_vorher)
+
+    def test_die_proben_eines_namens_laufen_gleichzeitig(self):
+        c = code(AKTUALISIERER)
+        self.assertRegex(c, r'\{ if im_lan_da "\$adr"; then echo "\$adr ja"; else echo "\$adr nein"; fi; \} &\n  done\n  wait')
+        self.assertRegex(c, r'(?m)^PROBE_FRIST_S=2\b')
+        self.assertRegex(c, r'(?m)^ARP_WARTE_S=1\b')
 
 
 @unittest.skipUnless(BASH, "keine Bash vorhanden")
@@ -1167,14 +1338,18 @@ class SperreMeldungUndGrenzenTests(GeraeteWerkstatt):
             self.assertIsNone(re.search(r"token", code(datei), re.I), datei.name)  # die Skripte lesen und nennen nie ein Token
 
     def test_fasst_weder_dienst_noch_firewall_noch_kern_an(self):
+        schreibe(self.p("etc/wamo-labor/betreuer-geraete"), f"{GERAET}\nPC-ZWEI\n")
         self.antworten(GERAET, self.netbios("192.168.178.78"))
+        self.antworten("PC-ZWEI", "", self.mdns("192.168.178.22", name="PC-ZWEI"))  # nur mDNS: mit der Probe über die Nachbartabelle
+        self.nachbar("192.168.178.22")
         self.assertEqual(self.aktualisieren().returncode, 0)
-        erlaubt = re.compile(r"^(nmblookup |avahi-resolve |flock |logger |curl |docker (ps|inspect|run|exec wamo-caddy caddy reload))")
+        erlaubt = re.compile(r"^(nmblookup |avahi-resolve |ip -4 neigh show |flock |logger |curl |docker (ps|inspect|run|exec wamo-caddy caddy reload))")
         for z in self.aufrufe():
             self.assertRegex(z, erlaubt, z)
+        self.assertIn("ip -4 neigh show 192.168.178.22", self.aufrufe())
         c = code(AKTUALISIERER) + code(SITE_BIB)
         for nie in ("docker compose", "docker rm", "docker stop", "docker restart", "docker kill", "docker network", "docker volume", "iptables", "wamo-firewall",
-                    "systemctl", "wamo-core", "wamo-labor-dienst", "wamo-core-env"):
+                    "systemctl", "wamo-core", "wamo-labor-dienst", "wamo-core-env", "ping"):
             self.assertNotIn(nie, c, nie)
         self.assertFalse(self.p("var/lib/wamo-labor").exists())
         self.assertEqual((self.caddy / "docker-compose.yml").read_text(encoding="utf-8"), "name: wamo-caddy\n# alter Stand\n")
@@ -1355,10 +1530,12 @@ class UnitTests(unittest.TestCase):
         curl = int(re.search(r"--max-time (\d+)", s).group(1))
         ports = len(re.search(r'CADDY_PORTS="([^"]+)"', s).group(1).split())
         suche = int(re.search(r"(?m)^SUCHFRIST_S=(\d+)", a).group(1))
+        arp = int(re.search(r"(?m)^PROBE_FRIST_S=(\d+)", a).group(1))  # UDP-Paket und ip neigh je Adresse aus mDNS, alle Adressen eines Namens gleichzeitig
+        warte = int(re.search(r"(?m)^ARP_WARTE_S=(\d+)", a).group(1))  # dazwischen die Wartezeit auf ARP
         parallel = int(re.search(r"(?m)^MAX_PARALLEL=(\d+)", a).group(1))
         namen = int(re.search(r"(?m)^MAX_NAMEN=(\d+)", s).group(1))
         probe = ports * runden * (curl + sekunden)
-        aufloesung = -(-namen // parallel) * 2 * suche
+        aufloesung = -(-namen // parallel) * (2 * suche + 2 * arp + warte)
         schlimmstens = aufloesung + 2 * probe + 30
         self.assertGreater(int(o["TimeoutStartSec"]), schlimmstens)
         self.assertEqual(o["TasksMax"], "512")
