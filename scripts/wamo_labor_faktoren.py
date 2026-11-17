@@ -9,6 +9,7 @@ Aufrufe (im Repo-Hauptordner, nur Standardbibliothek):
   python scripts/wamo_labor_faktoren.py einrichten                                # alle neun Profile
   python scripts/wamo_labor_faktoren.py einrichten --profile labor-01,labor-02    # nur diese
   python scripts/wamo_labor_faktoren.py einrichten --profile labor-03 --neu       # Faktor entfernen und neu einrichten
+  python scripts/wamo_labor_faktoren.py einrichten --profile labor-01,labor-02 --neu --qr   # dazu je Profil den QR zum Scannen zeigen
   python scripts/wamo_labor_faktoren.py pruefen                                   # je Profil: Seed in der Datei ja oder nein, kein Netz
   python scripts/wamo_labor_faktoren.py codes --profil labor-03                   # der aktuelle Code für genau ein Profil
 Optionen: --umschlag-datei (Standard %USERPROFILE%\\.wamo-labor\\umschlag-labor.txt, nie im Repo), --basis (Standard SUPABASE_URL aus der
@@ -21,11 +22,22 @@ dass ein neues Token aal2 trägt, Sitzung beenden und erst dann den Seed schreib
 nach dem Anlegen des Faktors und vor dem Speichern des Seeds, wird der Faktor wieder entfernt. Bricht ein Profil ab, laufen die übrigen
 weiter.
 
+QR zum Scannen (--qr, für die Authenticator-Apps der Betreuer): Ist ein Faktor eingerichtet, der Seed gespeichert und die Sitzung
+beendet, öffnet sich eine kurze HTML-Seite mit dem QR aus der Antwort von GoTrue im Standardbrowser (Ordner unter
+%LOCALAPPDATA%\\WAMO, Datei nur für den Benutzer, keine Netzquelle). Die Konsole wartet auf Enter, danach werden Datei und Ordner
+gelöscht, auch bei Strg+C und Fehlern. Der Seed kommt trotzdem wie immer in die Umschlag-Datei. Einen QR gibt es nur für einen
+neu angelegten Faktor, übersprungene Profile bekommen keinen (dafür --neu). Lässt sich ein QR nicht zeigen, hält der Lauf an, die
+übrigen Profile bleiben unberührt (Ausgang 1). Ohne Konsole (Enter nicht möglich) beginnt der Lauf gar nicht. Einzelheiten in
+scripts/wamo_labor_faktoren_qr.py.
+
 Ausgänge: 0 alles in Ordnung (eingerichtet oder übersprungen), 1 mindestens ein Profil ist gescheitert (oder pruefen meldet nein),
 2 Eingabe oder Einstellung falsch (nichts wurde am Server angefasst).
 
 Geheimnisse: Passwörter, Seeds, Token und Codes erscheinen nie in der Ausgabe, im Fehlertext oder in einer Befehlszeile. Eine einzige
-Ausnahme ist der Befehl codes, der genau einen Code für genau ein Profil ausgibt. Die Umschlag-Datei wird nie angezeigt.
+Ausnahme ist der Befehl codes, der genau einen Code für genau ein Profil ausgibt. Die Umschlag-Datei wird nie angezeigt. Mit --qr
+gilt dasselbe für den QR: Die SVG, die otpauth-URI und der Seed darin stehen nur in der HTML-Datei bis zum Enter, nie auf der
+Standardausgabe, der Fehlerausgabe oder in einem Fehlertext. Die Konsole meldet nur "QR für labor-0N angezeigt, nach dem Scannen
+Enter drücken".
 """
 from __future__ import annotations
 
@@ -40,6 +52,7 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 import wamo_labor_faktoren_api as api
+import wamo_labor_faktoren_qr as qr
 import wamo_labor_faktoren_signale as sg
 import wamo_labor_faktoren_totp as tt
 import wamo_labor_faktoren_umschlag as um
@@ -64,6 +77,7 @@ class Ergebnis:
     art: str
     kennung: str
     text: str
+    qr: str = field(default="", repr=False, compare=False)  # nur bei eingerichtet: totp.qr_code aus der Antwort (für --qr)
 
 
 @dataclass(frozen=True)
@@ -223,7 +237,7 @@ class _Lauf:
 
     def _neu_einrichten(self) -> None:
         self.neuer = self.v.faktor_anlegen(self.token, "WAMO-" + secrets.token_hex(3))
-        self.aus.merke(self.neuer.seed)
+        self.aus.merke(self.neuer.seed, self.neuer.qr)
         self._bestaetigen(self.neuer.id, self.neuer.seed)
         self.um.zwischen_schreiben(self.kennung, self.neuer.id, self.neuer.seed)  # sofort: bei hartem Abbruch geht der Seed nicht verloren
         if self._sitzung(self.v.erneuern(self.refresh)).aal != "aal2":
@@ -249,7 +263,7 @@ class _Lauf:
         self.um.seed_speichern(k, self.neuer.seed)  # erst nach dem Ende der Sitzung
         self.gespeichert = True
         self._zwischen_loeschen_still()
-        return Ergebnis(EINGERICHTET, k, "Faktor eingerichtet, aal2 geprüft")
+        return Ergebnis(EINGERICHTET, k, "Faktor eingerichtet, aal2 geprüft", qr=self.neuer.qr)
 
     # ---- Abbruch ----
 
@@ -330,7 +344,7 @@ def profil_einrichten(kennung: str, umschlag: um.Umschlag, verbindung: api.Verbi
 
 # ---------- Befehle ----------
 
-def _plan(kennung: str, umschlag: um.Umschlag, neu: bool) -> Ergebnis:
+def _plan(kennung: str, umschlag: um.Umschlag, neu: bool, mit_qr: bool = False) -> Ergebnis:
     try:
         zugang = umschlag.zugang(kennung)
     except um.UmschlagFehler as e:
@@ -338,6 +352,8 @@ def _plan(kennung: str, umschlag: um.Umschlag, neu: bool) -> Ergebnis:
     seed = "ja" if tt.seed_gueltig(zugang.seed) else "nein"
     tat = ("den Faktor neu einrichten (ein vorhandener wird ersetzt)" if neu
            else "einen Faktor einrichten, falls keiner vorhanden ist (sonst überspringen)")
+    if mit_qr:
+        tat += ", danach den QR-Code zum Scannen im Browser zeigen" + ("" if neu else " (nur bei einem neu eingerichteten Faktor)")
     return Ergebnis(GEPLANT, kennung, f"Trockenlauf, würde anmelden und {tat}. Seed in der Datei: {seed}")
 
 
@@ -352,20 +368,46 @@ def befehl_einrichten(args: argparse.Namespace, profile: list[str], umschlag: um
             ausgabe.merke(umschlag.zugang(kennung).passwort)
         except um.UmschlagFehler:
             pass
+    mit_qr = args.qr and not args.trocken
+    if mit_qr:  # vor jeder Änderung: ohne Konsole ließe sich kein QR bestätigen
+        qr.bereit(ausgabe.zeile, ausgabe.fehler)
     if not args.trocken:
         umschlag.schreibprobe()
     _zwischen_uebernehmen(umschlag, ausgabe, args.trocken)
     ergebnisse = []
+    qr_angehalten = False
     alt = {} if args.trocken else sg.umsetzen()  # Signale lösen das Aufräumen aus
     try:
-        for kennung in profile:
-            e = (_plan(kennung, umschlag, args.neu) if args.trocken
+        for i, kennung in enumerate(profile):
+            e = (_plan(kennung, umschlag, args.neu, args.qr) if args.trocken
                  else profil_einrichten(kennung, umschlag, verbindung, args.neu, ausgabe, warte))
             _melden(ausgabe, e)
             ergebnisse.append(e.art)
+            if mit_qr and not _qr_zeigen(e, ausgabe, profile[i + 1:]):
+                qr_angehalten = True
+                break
     finally:
         sg.zuruecksetzen(alt)
-    return _abschluss(ergebnisse, args.trocken, verbindung, umschlag, ausgabe)
+    code = _abschluss(ergebnisse, args.trocken, verbindung, umschlag, ausgabe)
+    return EXIT_FEHLER if qr_angehalten else code
+
+
+def _qr_zeigen(e: Ergebnis, ausgabe: Ausgabe, uebrige: list[str]) -> bool:
+    """Mit --qr: den QR eines eben eingerichteten Faktors zeigen (nur dann liefert GoTrue einen). False heißt: Lauf anhalten, damit
+    keine weiteren Profile einen neuen Faktor bekommen, den niemand scannen kann."""
+    if e.art == UEBERSPRUNGEN:
+        ausgabe.zeile(f"{e.kennung}: kein QR, der Faktor bestand schon (für einen neuen QR mit --neu einrichten)")
+    if e.art != EINGERICHTET:
+        return True
+    try:
+        qr.zeigen(e.kennung, e.qr, ausgabe.zeile, ausgabe.fehler, RECHTE_SETZEN)
+        return True
+    except qr.QrFehler as f:
+        ausgabe.fehler(f"{e.kennung}: FEHLER: QR nicht angezeigt ({f}). Der Faktor ist eingerichtet, der Seed steht in der Datei. "
+                       f"Neuer QR: einrichten --profile {e.kennung} --neu --qr")
+    if uebrige:
+        ausgabe.fehler("Lauf angehalten, nicht begonnen: " + ", ".join(uebrige))
+    return False
 
 
 def _zwischen_uebernehmen(umschlag: um.Umschlag, ausgabe: Ausgabe, trocken: bool) -> None:
@@ -447,6 +489,8 @@ def _parser() -> argparse.ArgumentParser:
     ein.add_argument("--profile", help="Profile mit Komma getrennt (Standard: labor-01 bis labor-09)")
     ein.add_argument("--neu", action="store_true", help="vorhandenen Faktor entfernen und neu einrichten")
     ein.add_argument("--trocken", action="store_true", help="nur der Plan, kein Netz, nichts wird geändert")
+    ein.add_argument("--qr", action="store_true",
+                     help="je neu eingerichtetem Faktor den QR-Code im Browser zeigen und auf Enter warten (für die Authenticator-App)")
     ein.add_argument("--basis", help="Adresse des Anmeldeservers (Standard SUPABASE_URL)")
     ein.add_argument("--ca", help="CA-Datei (Standard WAMO_CA_FILE, sonst infra/sokrates2/wamo-ca.crt)")
     ein.add_argument("--env-datei", action="append", help="weitere .env-Datei, darf mehrfach stehen")
@@ -489,7 +533,7 @@ def main(argv: list[str] | None = None, *, zeit: Callable[[], float] = time.time
         if args.befehl == "codes":
             return befehl_codes(profile[0], umschlag, ausgabe, zeit)
         return befehl_einrichten(args, profile, umschlag, ausgabe, zeit, warte)
-    except (EingabeFehler, um.UmschlagFehler, api.ApiFehler) as e:
+    except (EingabeFehler, um.UmschlagFehler, api.ApiFehler, qr.QrFehler) as e:
         ausgabe.fehler(f"Fehler: {e}")
         return EXIT_EINGABE
     except OSError as e:  # nie der Text der Ausnahme: er könnte Pfade oder Werte enthalten

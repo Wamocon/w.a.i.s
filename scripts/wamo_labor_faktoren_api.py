@@ -11,7 +11,8 @@ Vor jedem Lesen und Senden wird die Wartezeit auf den Rest des Limits gekürzt, 
 Byte für Byte langsam liefert (das Zeitlimit je Vorgang allein würde sie nie abbrechen).
 
 Fehlertexte nennen nur die Handlung, die Ursache in Worten, den HTTP-Status und eine kurze Kennung des Servers (error_code), nie
-den Text der Antwort und nie einen Wert der Anfrage. Die Tokens und der Seed stehen nicht in der Darstellung der Objekte (repr).
+den Text der Antwort und nie einen Wert der Anfrage. Die Tokens, der Seed und der QR-Code stehen nicht in der Darstellung der
+Objekte (repr).
 """
 from __future__ import annotations
 
@@ -70,6 +71,7 @@ class Sitzung:
 class NeuerFaktor:
     id: str
     seed: str = field(repr=False)
+    qr: str = field(default="", repr=False)  # totp.qr_code der Antwort (SVG, meist als Daten-URL), nur für einrichten --qr
 
 
 @dataclass(frozen=True)
@@ -292,7 +294,9 @@ class Verbindung:
         fid, seed = d.get("id"), totp.get("secret")
         if not isinstance(fid, str) or not FAKTOR_ID_FORM.fullmatch(fid) or not seed_gueltig(seed):
             raise ApiFehler("Faktor anlegen: ungültige Antwort des Servers")
-        return NeuerFaktor(fid, seed_normalisieren(seed))  # ohne Leerraum, in Großbuchstaben: so steht er später in der Datei
+        qr = totp.get("qr_code")
+        return NeuerFaktor(fid, seed_normalisieren(seed),  # ohne Leerraum, in Großbuchstaben: so steht er später in der Datei
+                           qr if isinstance(qr, str) else "")
 
     def challenge(self, token: str, faktor_id: str) -> str:
         a = self.anfrage("POST", f"/auth/v1/factors/{_id(faktor_id)}/challenge", {}, token, aktion="challenge")
