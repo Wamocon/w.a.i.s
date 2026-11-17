@@ -42,6 +42,7 @@ from loguru import logger
 from websockets.protocol import State
 
 from env_schalter import schalter_an, schalter_oder_none, zahl_im_bereich
+from satz_vor_werkzeug import SatzVorWerkzeugTTS
 
 from pipecat.services.soniox.tts import SonioxTTSService
 from pipecat.services.tts_service import TextAggregationMode
@@ -138,7 +139,18 @@ class StartAggregator(SimpleTextAggregator):
         self._gesendet = 0
 
 
-class LazySonioxTTSService(SonioxTTSService):
+class LazySonioxTTSService(SatzVorWerkzeugTTS, SonioxTTSService):
+    # Beginnt ein Werkzeugaufruf (satz_vor_werkzeug.py): Rest des Aggregators sofort an Soniox und den Stream mit text_end
+    # abschließen, damit Soniox auch einen kurzen Satz sofort spricht (Rückhalt am Textende, siehe oben). Weiterer Text derselben
+    # Antwort öffnet einen neuen Stream (run_tts schickt die Konfiguration für jeden neuen Kontext), Text nach dem Werkzeug kommt
+    # in einer neuen Antwort und damit ohnehin in einem neuen Stream.
+    stream_vor_werkzeug_beenden = True
+
+    def _stream_abgeschlossen(self, context_id: str) -> None:
+        # Nach text_end kein cancel mehr für diesen Stream, auch nicht bei einer Unterbrechung (Pipecat, SonioxTTSService._close_stream:
+        # "Do not call after text_end:true"); Ton, der danach noch für ihn kommt, verwirft der Empfang, weil der Kontext dann fehlt.
+        self._configured_contexts.discard(context_id)
+
     def __init__(self, *args, start: int | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         schwelle = start_zeichen() if start is None else start

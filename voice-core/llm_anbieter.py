@@ -64,6 +64,7 @@ from pipecat.utils.http import connection_limits
 
 from env_schalter import zahl_im_bereich
 from marker_wache import MarkerFallback
+from satz_vor_werkzeug import SatzVorWerkzeugLLM
 from schluessel import schwaerzen
 
 Anbieter = Literal["claude", "litellm"]
@@ -745,8 +746,9 @@ class LiteLLMService(MarkerFallback, _Verbrauch, OpenAILLMService):
         )
 
 
-class ClaudeService(MarkerFallback, _Verbrauch, AnthropicLLMService):
-    """Anthropic-Dienst einer Sitzung mit dem Client des Profils."""
+class ClaudeService(SatzVorWerkzeugLLM, MarkerFallback, _Verbrauch, AnthropicLLMService):
+    """Anthropic-Dienst einer Sitzung mit dem Client des Profils. Beginnt ein Werkzeugaufruf, geht der Text davor sofort an die
+    Sprachausgabe (satz_vor_werkzeug.py, WAMO_TTS_VOR_WERKZEUG)."""
 
     _wamo_anbieter = "claude"
 

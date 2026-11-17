@@ -75,6 +75,9 @@ ERLAUBT = set(PFLICHT) | {
     "WAMO_PAUSEN_PROMPT", "WAMO_LERNEN_OHNE_MOMENT", "WAMO_RUECKMELDUNG_WERKZEUG", "WAMO_JA_WAECHTER", "WAMO_ECHO_MODUS",
     # Fehlerbehebungen aus der Sitzung vom 31.10.2026 (voice-core/werkzeug_wache.py), Standard an
     "WAMO_ABBRUCH_HINWEIS", "WAMO_WERKZEUG_DOPPELT", "WAMO_LERNEN_HAUS_SECS", "WAMO_MARKER_FALLBACK",
+    # Satz vor dem Werkzeug (voice-core/satz_vor_werkzeug.py, Lasttest-Vorstufe 17.11.2026), Standard an: Text vor einem
+    # Werkzeugaufruf sofort sprechen, den Soniox-Stream mit text_end abschließen
+    "WAMO_TTS_VOR_WERKZEUG",
     # Entwicklungsaufträge und lange Werkzeugausgaben (09.11.2026): prüfbares Ziel in Runden, Befehlskriterien der Abnahme
     # (Standard aus; im Büro wirkt WAMO_ABNAHME_BEFEHLE nur, wenn zusätzlich WAMO_ENTWICKLUNG_BEFEHLE_BUERO=an im Drop-in
     # wamo-entwicklung-buero.conf steht, nie hier), Schwelle zum Kürzen langer Werkzeugausgaben

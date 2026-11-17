@@ -245,6 +245,7 @@ Lücke, Verstummen, erste Reaktion, hartes Abschneiden, falsche Unterbrechungen,
 | `WAMO_PERSONA_GESPRAECH` | aus | Prompt-Block "Gesprächsführung": Selbstkorrektur der Person gilt nur in der letzten Fassung, Rückbezug statt Neufragen, nicht wiederholen was gerade gesagt wurde, nur eine Frage, knappe Bestätigung | `voice-core/persona.py` |
 | `WAMO_WARTESATZ_MODELL` | aus | Antwortet das Modell nach einer Anfrage über `WAMO_WARTESATZ_MODELL_SECS` (Standard 2,5 s) mit keinem einzigen Zeichen, sagt WAMO einmal "Einen Moment.", nicht im Verlauf | `voice-core/wartesatz.py`, `bot.py` |
 | Messweg `folge_ton_ms` | immer | Zeit vom Ende des Einwurfs bis zum ersten Ton der Folgeantwort | `scripts/wamo_stimme.py` |
+| `WAMO_TTS_VOR_WERKZEUG` | an | Beginnt Claude einen Werkzeugaufruf, erklingt der Satz davor sofort statt erst nach den Argumenten (Abschnitt 10) | `voice-core/satz_vor_werkzeug.py` |
 
 Erlaubnislisten ergänzt: `infra/sokrates2/wamo_core_env.py` und `scripts/wamo_kern_sokrates2.py` (`WAMO_PERSONA_GESPRAECH`,
 `WAMO_WARTESATZ_MODELL`, `WAMO_WARTESATZ_MODELL_SECS`).
@@ -574,3 +575,26 @@ beigetragen hat, wurde nicht getrennt gemessen.
 Ergebnis: `voice-core/eval/ergebnisse/2026-11-10_abnahme_prompt_nachmessung.json` (Kennzahlen, Zähler, Vergleich, Erfolgskriterien, Handprüfung; keine Antworttexte). Neu auswerten ohne Modell, im Ordner
 `voice-core`: `python eval/abnahme_persona.py --auswerten eval/ergebnisse/2026-11-10_abnahme_prompt_nachmessung.json --vorher eval/ergebnisse/2026-11-10_abnahme_persona.json --ausgabe <Datei>
 --ueberschreiben`.
+
+## 10. Satz vor dem Werkzeug (Lasttest-Vorstufe 17.11.2026)
+
+Befund in den Zeilen `LATENZ_JSON` des Kerns: Sagt Claude einen kurzen Einleitungssatz und ruft danach ein Werkzeug mit langen
+Argumenten auf (`canvas_zeigen` mit fünf Stories), erklingt der Satz erst, wenn die Argumente fertig sind. Fall 1: `llm_token`
+939 ms, `tts_satz` 4269 ms, `tts_audio` 4471 ms; Pipecats Satzende-Erkennung wartet nach dem Punkt auf weiteren Text, und nach
+dem Punkt kommt nur noch der Werkzeugaufruf. Fall 2: `tts_satz` 1129 ms, `tts_audio` 6697 ms; Soniox hält einen Text unter etwa
+65 Zeichen zurück, bis mehr Text oder `text_end` kommt. Zusammen 4 bis 6 s Stille, obwohl der Satz nach 1 s fertig war.
+
+Änderung (`voice-core/satz_vor_werkzeug.py`): Beginnt im Antwortstrom ein Block `tool_use` und hat die Antwort schon gesprochenen
+Text geliefert (ein Marker allein zählt nicht), schickt der Claude-Dienst einen eigenen Steuerframe hinter dem Text her. Die
+Sprachausgabe gibt darauf den Rest ihres Satz-Aggregators sofort weiter, Soniox bekommt zusätzlich `text_end` für den laufenden
+Stream; weiterer Text öffnet einen neuen Stream. Verlauf, Untertitel, Kontext und das eine Antwortende je Antwort bleiben wie
+bisher (das Antwortende geht hinter dem letzten Wort des Satzes weiter, also vor dem Werkzeugaufruf im Kontext). Sichtbar anders:
+Endet der Satz, bevor die Argumente fertig sind, steht im Journal zweimal "Antwort des Modells beendet" (Modell und
+Sprachausgabe). Text hinter einem Werkzeugblock derselben Antwort (bei Claude praktisch nie) kommt als eigene Nachricht ohne ● in
+den Verlauf. Die Sprachausgabe
+im Haus schickt ohnehin jeden Satz einzeln, dort wirkt nur der Aggregator. Hausmodelle im Gespräch bleiben unverändert: Das Gateway
+liefert einen Werkzeugaufruf erst als ganzen Block, sein Beginn fällt mit dem Antwortende zusammen.
+
+Schalter `WAMO_TTS_VOR_WERKZEUG` (an oder aus, Standard an; in beiden Erlaubnislisten). Tests:
+`voice-core/test_satz_vor_werkzeug.py`. Zu messen in der nächsten Lastrunde: `tts_audio` minus `llm_token` in Zügen mit
+Einleitungssatz und Werkzeug, Ziel unter 1 s statt 4 bis 6 s.

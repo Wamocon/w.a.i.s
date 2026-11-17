@@ -112,6 +112,8 @@ NEUE_NAMEN = (
     "WAMO_PERSONA_NATUERLICH",
     # Innehalten statt Abbrechen (wiedergabe.py), seit 14.11.2026
     "WAMO_INNEHALTEN", "WAMO_INNEHALTEN_WEITER_SECS", "WAMO_INNEHALTEN_MAX_SECS",
+    # Satz vor dem Werkzeug (satz_vor_werkzeug.py), seit 17.11.2026
+    "WAMO_TTS_VOR_WERKZEUG",
 )
 
 # Stimmabdruck (stimme_gate.py, stimme_modell.py): Modus, Schwellen und Modellpfad, alle seit 14.11.2026; die Schwellen zum Verwerfen
