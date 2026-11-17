@@ -35,6 +35,14 @@ Die Stellenangaben aller 15 Befunde wurden im Arbeitsbaum nachgeprüft und stimm
 | E15 | **Zweite Faktoren der Laborprofile richtet WAMO automatisch ein** (nicht Niko von Hand) | PC-Skript `scripts/wamo_labor_faktoren.py` nach dem Muster des Token-Tests (Ablauf siehe 3.9, Abschnitt "Zweite Faktoren automatisch"), Passwörter und TOTP-Schlüssel nur in die Umschlag-Datei auf dem PC von Niko. Die Faktoren der Betreuer-Geräte werden am Mi 25.11. neu eingerichtet |
 | E16 | Datenschutzhinweis und Einwilligung schreibt WAMO als Entwurf (`docs/labor-datenschutz-entwurf.md`) | Eine verantwortliche Person prüft und zeichnet den Text, das ist die einzige Stelle, die ein Mensch sein muss |
 
+**Nachtrag 17.11.2026: weitere Entscheidungen von Niko, verbindlich (sie gehen den Angaben weiter oben und unten vor).**
+
+| Nr | Entscheidung | Folge im Papier |
+| --- | --- | --- |
+| E17 | Am Labortag gibt es **vier Besucher-Plätze** (1 bis 4), die Besucher wechseln sich ab. `labor-05` bis `labor-08` bleiben eingerichtet und dienen als Reserve, Platz 9 bleibt Reserve-Laptop. Der Lasttest prüft weiter bis 8 Sitzungen, realistisch sind 4 gleichzeitig | Runbook Abschnitte 2, 3, 6.7, Morgencheckliste B2 und B3, Lasttest. Angaben zu 8 Plätzen im Betrieb gelten nicht mehr |
+| E18 | **Keine Aufzeichnung fürs Schaufenster.** Die Aufzeichnung aus E9 entfällt. Der Rückfall ist die Vorführung durch einen Betreuer am Betreuer-Platz oder die Texteingabe | Runbook Abschnitt 7, Morgencheckliste A5.2 und B7.2, Restplan N.4. Der Fernseher zeigt dann nichts Aufgezeichnetes |
+| E19 | Vorstufe des Lasttests mit 2 und 4 Sitzungen je 10 Minuten am Mi 18.11. früh, der volle Lasttest bleibt Fr 20.11. | Lasttest-Dokument Abschnitt 4, Restplan N.4 |
+
 **Befunde des Sicherheitsreviews und ihre Einarbeitung.**
 
 | Nr | Schwere | Änderung im Papier | Abschnitt |

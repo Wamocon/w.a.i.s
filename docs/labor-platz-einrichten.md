@@ -94,7 +94,7 @@ Restrisiko, ehrlich begrenzt:
 - **Die Betreuer-Seite kopiert:** Die Knöpfe "Token kopieren" und "Link kopieren" legen das Token in die Zwischenablage und in den Verlauf (Win+V) des Betreuer-Geräts. "Nie in der Zwischenablage" gilt nur für den Weg des Skripts. Am Betreuer-Gerät den Verlauf der Zwischenablage ausschalten oder nach dem Kopieren leeren (Win+V, Alle löschen).
 - Das Token gilt nur für das Board dieses einen Platzes (nur lesend) und wird mit `neuer-durchlauf` ungültig.
 
-**Besucherwechsel:** beide Chrome-Fenster schließen, auf der Betreuer-Seite `neuer-durchlauf` (neues Token), dann den Platz neu starten und das neue Token eingeben. Ohne Token nur die Oberfläche: `starten --ohne-board`. Belegt ein anderes Programm den Port 55489, meldet das Skript es und startet nichts.
+**Besucherwechsel:** Am Labortag gibt es vier Besucher-Plätze (1 bis 4), die Besucher wechseln sich ab. Nach jedem Besucher den Durchlauf beenden (Runbook 3.4), dann beide Chrome-Fenster schließen, auf der Betreuer-Seite `neuer-durchlauf` (neues Token) auslösen (Runbook 3.1), dann den Platz neu starten und das neue Token eingeben. Ohne Token nur die Oberfläche: `starten --ohne-board`. Belegt ein anderes Programm den Port 55489, meldet das Skript es und startet nichts.
 
 ## 6. Rückweg
 

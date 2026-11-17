@@ -1,6 +1,6 @@
 # Testlabor 28.11.2026: Checkliste für Freitag 27.11. und Samstag 28.11.
 
-**Stand:** 17.11.2026, Entwurf (Nachtrag: A1.3, A6.2, B1.10 und B1.11). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 5.3) und zum Runbook `docs/labor-runbook.md`. Die Checkliste ist zum Ausdrucken und Abhaken gedacht. In jeder Zeile steht, was zu tun ist und was dabei herauskommen muss ("Erwartet"). Weicht ein Ergebnis ab, wird nicht abgehakt, sondern in die Tabelle "Abweichungen" am Ende eingetragen. Alles, was in den Unterlagen noch fehlt, steht als `[offen: ...]` im Text.
+**Stand:** 17.11.2026, Entwurf (Nachtrag: A1.3, A6.2, B1.10 und B1.11; Nachtrag 17.11. nach Entscheidung von Niko: vier Besucher-Plätze, Reserveprofile 05 bis 08, keine Aufzeichnung mehr, Zeilen A2, A5.2, B2, B3 und B7.2 angepasst). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 5.3) und zum Runbook `docs/labor-runbook.md`. Die Checkliste ist zum Ausdrucken und Abhaken gedacht. In jeder Zeile steht, was zu tun ist und was dabei herauskommen muss ("Erwartet"). Weicht ein Ergebnis ab, wird nicht abgehakt, sondern in die Tabelle "Abweichungen" am Ende eingetragen. Alles, was in den Unterlagen noch fehlt, steht als `[offen: ...]` im Text.
 
 **Wer.** Server und Skripte prüft T (Technik-Bereitschaft W.A.I.S.). Die Konsole des Sprachmodells prüft Niko. Plätze prüfen B, N und T gemeinsam. Rollen: siehe Runbook, Abschnitt 1.1.
 
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | A1.1 | [ ] | Liste der Datenänderungen seit dem 20.11. (Datum und Prüfsumme je Änderung) durchgehen | Die Liste ist vollständig. Zu jeder Änderung gab es 3 Läufe der betroffenen Karten |
 | A1.2 | [ ] | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-daten-einrichten.sh status"` | Alle acht Dateien entsprechen der Lieferung oder der Änderungsliste. Der Lader nimmt sie an. Die gewählte Fassung der Regeln ist die entschiedene (`standard` oder `streng`). `WAMO_LABOR_DATEN` ist beim Kern gesetzt |
-| A1.3 | [ ] | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh status"` | Der aktive Slot läuft mit dem Release des Freeze-Etiketts `labor-freeze`. Stand 17.11.2026 am Server: Slot a `v0.5.0-ddada3f` aktiv, Slot b `v0.5.0-d12ba6f` inaktiv. Das Freeze-Release vom Mo 23.11. wird hier nachgetragen. Kein weiterer Release ist unterwegs. Das Rückweg-Ziel ist der inaktive Slot und muss ein Release mit Erstanmeldung sein (ab 0.3.0, Restplan Entscheidung E6), nie `c751d04` oder älter |
+| A1.3 | [ ] | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh status"` | Der aktive Slot läuft mit dem Release des Freeze-Etiketts `labor-freeze`. Stand 17.11.2026 nach dem Rollout (Restplan R9): Kern `v0.5.0-7fc7a84`, Bewährung bestanden. Welcher Slot ihn trägt und welcher inaktiv ist, zeigt `status` am Server `[offen: Slot-Zuordnung nach dem Rollout am Server bestätigen]`. Vor dem Rollout war Slot a `v0.5.0-ddada3f` aktiv, Slot b `v0.5.0-d12ba6f` inaktiv. Das Freeze-Release vom Mo 23.11. wird hier nachgetragen. Kein weiterer Release ist unterwegs. Das Rückweg-Ziel ist der inaktive Slot und muss ein Release mit Erstanmeldung sein (ab 0.3.0, Restplan Entscheidung E6), nie `c751d04` oder älter |
 | A1.4 | [ ] | Befunde der Generalprobe vom 26.11. durchgehen | Jeder Befund ist behoben oder bewusst als Abweichung eingetragen |
 | A1.5 | [ ] | `python scripts/wamo_labor.py status` | Neun Laborprofile (`labor-01` bis `labor-09`), alle "gesperrt". Kein Profil ist über Nacht freigeschaltet |
 | A1.6 | [ ] | Daten der Generalprobe löschen. `python scripts/wamo_labor.py status` zeigt je Profil die Zeilen. Stehen dort noch welche: `python scripts/wamo_labor_nachlauf.py nachlauf --ausfuehren --vor-dem-labortag` (sperrt alle Profile, leert die 16 Plätze im Dienst und den Gesprächstext im Kern, mit Zählung davor und danach) | `status` zeigt für jedes Profil "gesperrt" und "0 Zeilen". Der Nachlauf meldet "Nachweis erbracht" |
@@ -25,11 +25,11 @@
 
 | Nr | Erledigt | Prüfung | Erwartet |
 | --- | --- | --- | --- |
-| A2.1 | [ ] | Ausgabenlimit der Konsole für den Schlüssel `ANTHROPIC_API_KEY` | Das Limit ist gesetzt: `[offen: Betrag]` |
+| A2.1 | [ ] | Ausgabenlimit der Konsole für den Schlüssel `ANTHROPIC_API_KEY` | Das Limit steht bei 100 USD (Restplan N3, erledigt 17.11.) |
 | A2.2 | [ ] | Guthaben und Monatsgrenze | Sie decken die geschätzte Nutzung des Labortags, Schätzung aus dem Lasttest `[offen: erwartete Ausgaben]` |
-| A2.3 | [ ] | Tarif und Ratenlimit des Schlüssels notieren | Die Werte stehen hier: `[offen: Tarif, Anfragen und Tokens je Minute]` |
+| A2.3 | [ ] | Tarif und Ratenlimit des Schlüssels notieren | Ratenlimit für Haiku 5.5: 4.000 Anfragen, 2 Mio. Eingabe-Tokens und 400.000 Ausgabe-Tokens je Minute. Preise 0,10 und 0,50 USD je Mio. Tokens (Restplan N3) |
 | A2.4 | [ ] | Ersatzschlüssel für den Schlüsseltausch | Ein Schlüssel eines Kollegen liegt bereit, falls das Limit fällt `[offen: ob gewünscht]` |
-| A2.5 | [ ] | Soniox: Konto aktiv, Parallelität mindestens 9 Sitzungen | Bestätigt `[offen: Wert aus der Messrunde, Konzept 2.3 Punkt 4]` |
+| A2.5 | [ ] | Soniox: Konto aktiv, Parallelität mindestens 9 Sitzungen | Bestätigt: Sprachausgabe 15, Erkennung 20 gleichzeitige Streams, in Region USA und EU genehmigt (Restplan R11, 17.11.) |
 
 ### A3 Rückwegübung (T, anderthalb Stunden, nur mit Ruhe am Server)
 
@@ -62,7 +62,7 @@ Ziel: Die Zeit bis zum Rückweg messen und die Befehle festhalten, die im Runboo
 | Nr | Erledigt | Prüfung | Erwartet |
 | --- | --- | --- | --- |
 | A5.1 | [ ] | Datenschutzhinweis Version 1 von `https://192.168.178.136:55447/datenschutz` ausdrucken (Knopf Drucken), ein Aushang je Platz und einer am Betreuer-Platz | Der Ausdruck trägt "Version 1" und hat denselben Text wie die Seite |
-| A5.2 | [ ] | Die Aufzeichnung (Rückfall) läuft am Fernseher | Bild und Ton gehen, die Länge ist bekannt `[offen: Dateiname, Ort, Gerät]` |
+| A5.2 | [ ] | Rückfall geprobt: Vorführung am Betreuer-Platz (Runbook 7.3) und Texteingabe (Runbook 6.3) einmal durchgehen | Die Vorführung läuft ohne Besucher, die Texteingabe antwortet. Bezeichnung und Ort des Eingabefelds `[offen: in der Generalprobe bestätigen]` |
 | A5.3 | [ ] | Kartensatz der 17 Karten ausgedruckt (`docs/labor-kartensatz.html`, im Browser drucken, A4, ohne Kopf- und Fußzeile des Browsers) | Je Platz ein Exemplar, Erwartungswerte zu W1 und W2 vom Trainer eingetragen `[offen: Ablageort am Platz]` |
 | A5.4 | [ ] | Reserve-Laptop eingerichtet und geprüft | Das Platz-Skript `pruefen` zeigt keine Zeile mit `[FEHLER]` `[offen: Reserve-Laptop gehört zu Platz 9]` |
 | A5.5 | [ ] | Zettel "Defekt" und "Notaus" liegen bereit | Je Betreuer-Platz ein Zettel mit der Stufe 1 des Notaus |
@@ -99,12 +99,12 @@ Beginn: 90 Minuten vor der Öffnung `[offen: Uhrzeit der Öffnung]`. Am Labortag
 | Nr | Erledigt | Prüfung | Erwartet |
 | --- | --- | --- | --- |
 | B2.1 | [ ] | `python scripts/wamo_labor.py status` | Neun Profile, alle "gesperrt", jedes "0 Zeilen" (Daten der Probe sind gelöscht) |
-| B2.2 | [ ] | Freischalten, wie geplant: `python scripts/wamo_labor.py aktivieren --kennung labor-01 labor-02 labor-03 labor-04 labor-05 labor-06 labor-07 labor-08 --ausfuehren` | Acht Meldungen "freigeschaltet (labor_aktiv = true)". Das Reserveprofil `labor-09` bleibt gesperrt `[offen: ob die Reserve schon am Morgen freigeschaltet wird]` |
-| B2.3 | [ ] | `python scripts/wamo_labor.py status` | Genau die geplanten Profile sind "freigeschaltet" (acht Plätze), die Reserve und alle anderen "gesperrt" |
+| B2.2 | [ ] | Freischalten, wie geplant: `python scripts/wamo_labor.py aktivieren --kennung labor-01 labor-02 labor-03 labor-04 --ausfuehren` | Vier Meldungen "freigeschaltet (labor_aktiv = true)". Die Reserveprofile `labor-05` bis `labor-09` bleiben gesperrt `[offen: ob die Reserve schon am Morgen freigeschaltet wird]` |
+| B2.3 | [ ] | `python scripts/wamo_labor.py status` | Genau die geplanten Profile sind "freigeschaltet" (vier Besucher-Plätze), die Reserveprofile 05 bis 09 und alle anderen "gesperrt" |
 | B2.4 | [ ] | Faktor prüfen: `python scripts/wamo_labor_faktoren.py codes --profil labor-03` und den Code mit der Authenticator-App des Betreuer-Geräts vergleichen | Beide Codes sind gleich. Weichen sie ab, geht eine Uhr falsch (NTP) |
 | B2.5 | [ ] | Anmeldung an jedem Platz-Laptop mit Passwort und Code ("Angemeldet bleiben") | Das W.A.I.S.-Fenster zeigt "Gespräch starten". Passwörter bleiben bei T und L |
 
-### B3 Plätze (B, N, T je Laptop, Plätze 1 bis 8 und Reserve)
+### B3 Plätze (B, N, T je Laptop, Plätze 1 bis 4 und Reserve)
 
 | Nr | Erledigt | Prüfung | Erwartet |
 | --- | --- | --- | --- |
@@ -155,7 +155,7 @@ Beginn: 90 Minuten vor der Öffnung `[offen: Uhrzeit der Öffnung]`. Am Labortag
 | Nr | Erledigt | Prüfung | Erwartet |
 | --- | --- | --- | --- |
 | B7.1 | [ ] | Die Zeiten der Rückwegübung vom 27.11. stehen im Runbook, Abschnitt 5.3 | Stufe 3 und 4 haben eine gemessene Zeit |
-| B7.2 | [ ] | Die Aufzeichnung ist startbereit am Fernseher | Der Rückfall dauert unter 1 Minute bis zum Start |
+| B7.2 | [ ] | Der Rückfall ist startbereit: Vorführung am Betreuer-Platz und Texteingabe sind geprobt (A5.2). Keine Aufzeichnung | Der Rückfall dauert unter 1 Minute bis zum Start |
 | B7.3 | [ ] | Go oder No-Go durch L und T | Alle Zeilen abgehakt oder bewusst als Abweichung eingetragen. Bei einem No-Go entscheidet P, ob der Rückfall (Runbook, Abschnitt 7) gilt |
 
 ## Abweichungen
