@@ -1,6 +1,6 @@
 # Testlabor 28.11.2026: Checkliste für Freitag 27.11. und Samstag 28.11.
 
-**Stand:** 13.11.2026, Entwurf. Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 5.3) und zum Runbook `docs/labor-runbook.md`. Die Checkliste ist zum Ausdrucken und Abhaken gedacht. In jeder Zeile steht, was zu tun ist und was dabei herauskommen muss ("Erwartet"). Weicht ein Ergebnis ab, wird nicht abgehakt, sondern in die Tabelle "Abweichungen" am Ende eingetragen. Alles, was in den Unterlagen noch fehlt, steht als `[offen: ...]` im Text.
+**Stand:** 17.11.2026, Entwurf (Nachtrag: A1.3, A6.2, B1.10 und B1.11). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 5.3) und zum Runbook `docs/labor-runbook.md`. Die Checkliste ist zum Ausdrucken und Abhaken gedacht. In jeder Zeile steht, was zu tun ist und was dabei herauskommen muss ("Erwartet"). Weicht ein Ergebnis ab, wird nicht abgehakt, sondern in die Tabelle "Abweichungen" am Ende eingetragen. Alles, was in den Unterlagen noch fehlt, steht als `[offen: ...]` im Text.
 
 **Wer.** Server und Skripte prüft T (Technik-Bereitschaft W.A.I.S.). Die Konsole des Sprachmodells prüft Niko. Plätze prüfen B, N und T gemeinsam. Rollen: siehe Runbook, Abschnitt 1.1.
 
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | A1.1 | [ ] | Liste der Datenänderungen seit dem 20.11. (Datum und Prüfsumme je Änderung) durchgehen | Die Liste ist vollständig. Zu jeder Änderung gab es 3 Läufe der betroffenen Karten |
 | A1.2 | [ ] | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-daten-einrichten.sh status"` | Alle acht Dateien entsprechen der Lieferung oder der Änderungsliste. Der Lader nimmt sie an. Die gewählte Fassung der Regeln ist die entschiedene (`standard` oder `streng`). `WAMO_LABOR_DATEN` ist beim Kern gesetzt |
-| A1.3 | [ ] | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh status"` | Der aktive Slot läuft mit dem Release des Freeze-Etiketts `labor-freeze`. Stand 16.11.2026 am Server: Slot b `v0.4.1-fecb8e5` aktiv, Slot a `v0.4.0-55eb122` inaktiv (das Freeze-Release vom Mo 23.11. hier nachtragen). Kein weiterer Release ist unterwegs. Der inaktive Slot ist das Rückweg-Ziel und muss ein Release mit Erstanmeldung sein (ab 0.3.0, nie `c751d04` oder älter) |
+| A1.3 | [ ] | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh status"` | Der aktive Slot läuft mit dem Release des Freeze-Etiketts `labor-freeze`. Stand 17.11.2026 am Server: Slot a `v0.5.0-ddada3f` aktiv, Slot b `v0.5.0-d12ba6f` inaktiv. Das Freeze-Release vom Mo 23.11. wird hier nachgetragen. Kein weiterer Release ist unterwegs. Das Rückweg-Ziel ist der inaktive Slot und muss ein Release mit Erstanmeldung sein (ab 0.3.0, Restplan Entscheidung E6), nie `c751d04` oder älter |
 | A1.4 | [ ] | Befunde der Generalprobe vom 26.11. durchgehen | Jeder Befund ist behoben oder bewusst als Abweichung eingetragen |
 | A1.5 | [ ] | `python scripts/wamo_labor.py status` | Neun Laborprofile (`labor-01` bis `labor-09`), alle "gesperrt". Kein Profil ist über Nacht freigeschaltet |
 | A1.6 | [ ] | Daten der Generalprobe löschen. `python scripts/wamo_labor.py status` zeigt je Profil die Zeilen. Stehen dort noch welche: `python scripts/wamo_labor_nachlauf.py nachlauf --ausfuehren --vor-dem-labortag` (sperrt alle Profile, leert die 16 Plätze im Dienst und den Gesprächstext im Kern, mit Zählung davor und danach) | `status` zeigt für jedes Profil "gesperrt" und "0 Zeilen". Der Nachlauf meldet "Nachweis erbracht" |
@@ -72,7 +72,7 @@ Ziel: Die Zeit bis zum Rückweg messen und die Befehle festhalten, die im Runboo
 | Nr | Erledigt | Prüfung | Erwartet |
 | --- | --- | --- | --- |
 | A6.1 | [ ] | `python scripts/wamo_labor_faktoren.py pruefen` | Jedes der neun Profile meldet "ja" (Seed in der Datei, kein Netz) |
-| A6.2 | [ ] | Der Faktor der Betreuer-Geräte wurde am 25.11. neu eingerichtet (die Seeds des Mess-PCs sind ungültig) | Die Authenticator-Einträge der Betreuer-Geräte sind die neuen |
+| A6.2 | [ ] | Der Faktor der Betreuer-Geräte wurde am 20.11. nachmittags neu eingerichtet (die Seeds des Mess-PCs sind danach ungültig) | Die Authenticator-Einträge der Betreuer-Geräte sind die neuen |
 
 ## Teil B: Samstag 28.11.2026, Morgen (vor der Öffnung)
 
@@ -91,6 +91,8 @@ Beginn: 90 Minuten vor der Öffnung `[offen: Uhrzeit der Öffnung]`. Am Labortag
 | B1.7 | [ ] | Firewall: `ssh wamo-sokrates2 "sudo systemctl is-active wamo-firewall"` | `active`. Die Ketten für 55447 und gegen den Ausgang des Dienstes prüft der Rauchtest (B1.5) |
 | B1.8 | [ ] | Dienst von einer fremden Adresse nicht erreichbar | Vom Rauchtest geprüft. Von einem Gäste-Laptop aus `/gesundheit` und `/api/kern/` öffnen: beide ohne Inhalt (403 oder 404) |
 | B1.9 | [ ] | Kein anderer Betrieb auf dem Kern | Niemand sonst nutzt W.A.I.S. Keine geplante Wartung am Server |
+| B1.10 | [ ] | `ssh wamo-sokrates2 "systemctl is-failed wamo-core@a wamo-core@b"` | Kein Slot meldet `failed`. Ein Slot, der nach `ausleiten` steht, zeigt `inactive` (das Skript ruft `reset-failed` auf) |
+| B1.11 | [ ] | Das zentrale Gateway (LiteLLM auf Sokrates-1) wird am Labortag nicht neu gestartet, auch nicht für eine Änderung. Die Regel steht in `infra/sokrates1/gateway-wamo.md` | Keine Änderung am Gateway zwischen Fr 27.11. 12:00 und Sa 28.11. abends (N10). Niko betreut das Gateway selbst |
 
 ### B2 Profile (T)
 
