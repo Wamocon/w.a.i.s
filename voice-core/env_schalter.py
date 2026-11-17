@@ -51,6 +51,9 @@ Fehlerbehebungen aus der Sitzung vom 31.10.2026 (Standard an, sie ändern kein S
   WAMO_WERKZEUG_DOPPELT        dieselbe Öffnen-Aktion im selben Zug nicht wiederholen, weitere Seite mit Hinweis (werkzeug_wache.py)
   WAMO_MARKER_FALLBACK         fehlt der Satzende-Marker, den Text sofort freigeben statt am Antwortende (marker_wache.py)
   WAMO_LERNEN_HAUS_SECS        Zahl: so lange darf ein Hausmodell für "lernen" brauchen, bevor Claude übernimmt (Standard 15, 0 = aus)
+Latenz der Sprachausgabe (Lasttest-Vorstufe 17.11.2026, Standard an; ändert nur, wann ein Satz erklingt, nicht was):
+  WAMO_TTS_VOR_WERKZEUG        beginnt Claude einen Werkzeugaufruf, geht der Text davor sofort an die Sprachausgabe, Soniox bekommt
+                               text_end für den laufenden Stream (satz_vor_werkzeug.py); aus = der Satz wartet aufs Antwortende
 Jira-Stories aus dem Canvas (jira_client.py, jira_werkzeuge.py, seit 14.11.2026; nur vom Server über wamo-core-env, nie aus der .env des PCs):
   WAMO_JIRA                    Werkzeug jira_story_anlegen und Knopf am Canvas für Admins im Büro (Standard aus; ein Tippfehler bleibt aus)
   WAMO_JIRA_URL                Jira Cloud, nur https://<name>.atlassian.net (Standard https://wamocon.atlassian.net)

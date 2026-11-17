@@ -44,6 +44,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 from llm_anbieter import litellm_basis, litellm_problem, litellm_problem_statisch
+from satz_vor_werkzeug import SatzVorWerkzeugTTS
 
 ANBIETER = ("soniox", "haus")
 HAUS_TIMEOUT_SECS = 20.0  # eine Äußerung bzw. ein Satz; danach Fehler statt Hänger
@@ -278,8 +279,11 @@ async def _mit_ganzem_kopf(stuecke: AsyncIterator[bytes]) -> AsyncIterator[bytes
         yield anfang
 
 
-class HausTTSService(TTSService):
+class HausTTSService(SatzVorWerkzeugTTS, TTSService):
     """TTS im Haus über LiteLLM (WAV, satzweise, ohne Wortzeitstempel).
+
+    Beginnt ein Werkzeugaufruf (satz_vor_werkzeug.py), geht der Rest des Satz-Aggregators sofort als eigene Anfrage hinaus. Einen
+    Stream, der Text zurückhält, gibt es hier nicht: jeder Satz ist eine eigene Anfrage (stream_vor_werkzeug_beenden bleibt aus).
 
     Zwei Wege, beide über das Gateway (Hausregel):
       * Modellweg /v1/audio/speech: LiteLLM 1.92.0 holt dort die ganze Datei, bevor es das erste Byte weitergibt (das Feld stream

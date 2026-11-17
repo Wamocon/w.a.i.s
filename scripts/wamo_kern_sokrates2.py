@@ -76,6 +76,9 @@ AUS_ENV = (
     "WAMO_PAUSEN_PROMPT", "WAMO_LERNEN_OHNE_MOMENT", "WAMO_RUECKMELDUNG_WERKZEUG", "WAMO_JA_WAECHTER", "WAMO_ECHO_MODUS",
     # Fehlerbehebungen aus der Sitzung vom 31.10.2026 (voice-core/werkzeug_wache.py), Standard an
     "WAMO_ABBRUCH_HINWEIS", "WAMO_WERKZEUG_DOPPELT", "WAMO_LERNEN_HAUS_SECS", "WAMO_MARKER_FALLBACK",
+    # Satz vor dem Werkzeug (voice-core/satz_vor_werkzeug.py, Lasttest-Vorstufe 17.11.2026), Standard an: Text vor einem
+    # Werkzeugaufruf sofort sprechen, den Soniox-Stream mit text_end abschließen
+    "WAMO_TTS_VOR_WERKZEUG",
     # Entwicklungsaufträge und lange Werkzeugausgaben (09.11.2026): prüfbares Ziel in Runden (persona.py, Standard an),
     # Befehlskriterien der Abnahme (abnahme.py, Standard aus; im Büro wirken sie erst mit WAMO_ENTWICKLUNG_BEFEHLE_BUERO=an im
     # Drop-in wamo-entwicklung-buero.conf, und der Kern-Kanal des Dispatchers sperrt den Befehl pruefen ohnehin), Schwelle zum
