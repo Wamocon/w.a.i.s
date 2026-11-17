@@ -346,7 +346,7 @@ Jede Stufe beginnt erst, wenn die Prüfung der vorigen bestanden ist und kein Au
 | `wamo-job-einrichten.sh` (Stufe 0) | ja | Es startet `wamo-egress` neu, dessen `ExecStop` die nft-Tabelle löscht (infra/sokrates2/wamo-job-einrichten.sh:255, infra/sokrates2/wamo-egress.service:22). Ein laufender Auftrag hätte kurz keinen Ausgangsfilter |
 | `schluessel`, `kanal`, Änderungen an `kernkanal.conf` | ja, außer `kanal zu` und Notaus | Ein laufender Kern-Auftrag soll seine Regeln nicht unter den Füßen verlieren |
 | `umschalten-kern` | nein | Laufende Sitzungen bleiben auf ihrem Slot, der neue Slot wird erst nach bestandener Probe geschaltet (infra/sokrates2/wamo-core-slots.sh:274-294) |
-| `ausleiten` | ja | frühestens nach 1800 s Bewährung, ohne Sitzung und nach 15 Minuten Ruhe im Journal des alten Slots (:204-209). Der nächste `schalter` folgt erst danach |
+| `ausleiten` | ja | frühestens nach 1800 s Bewährung, ohne Sitzung und nach 15 Minuten Ruhe im Journal des alten Slots (:204-209). Der nächste `schalter` folgt erst danach. Läuft der Stopp in `TimeoutStopSec` (SIGKILL, Zustand failed), meldet `ausleiten` das als WARNUNG, setzt den Zustand mit `reset-failed` zurück und wählt den Slot trotzdem ab; läuft die Instanz danach noch, bricht es ab. Der Kern selbst endet mit Fristen deutlich unter 20 s (`voice-core/abschaltung.py`) |
 | Version von Claude Code anheben (S6) | ja | Es betrifft beide Kanäle, `wamo-job.sh` startet bei abweichender Version nichts |
 
 **Slot-Mechanik.** Die Vorlage `wamo-core@.service` hat die Instanzen `a` und `b`, `wamo-core-slots.sh` schaltet sie (`einrichten`, `release`, `umschalten-kern`,

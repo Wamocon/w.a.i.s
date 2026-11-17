@@ -23,6 +23,7 @@ from unittest import mock
 import httpx
 import pytest
 
+import abschaltung
 import kern_dienst
 import pc_host
 import pc_tunnel
@@ -346,7 +347,7 @@ def test_dienst_tcp_und_logging(monkeypatch):
     log = []
     assert kern_dienst.runner_vorbereiten(runner, lambda: log.append("neu")) is None
     runner.uvicorn.run(_app_mit_zugang(), host="localhost", port=7860)
-    assert log == ["neu"] and aufrufe == [{"host": "localhost", "port": 7860}]
+    assert log == ["neu"] and aufrufe == [{"host": "localhost", "port": 7860, "timeout_graceful_shutdown": abschaltung.FRIST_VERBINDUNGEN_S}]
 
 
 def test_dienst_ohne_zugangskontrolle_startet_nicht(monkeypatch):
@@ -367,7 +368,7 @@ def test_dienst_unix_socket(monkeypatch):
     assert kern_dienst.runner_vorbereiten(runner, lambda: None) == "/run/wamo-core/core.sock"
     kern_dienst.runner_vorbereiten(runner, lambda: None)  # zweimal vorbereiten schachtelt nicht
     runner.uvicorn.run(_app_mit_zugang(), host="localhost", port=7860)
-    assert aufrufe == [{"uds": "/run/wamo-core/core.sock"}]
+    assert aufrufe == [{"uds": "/run/wamo-core/core.sock", "timeout_graceful_shutdown": abschaltung.FRIST_VERBINDUNGEN_S}]
 
 
 @pytest.mark.parametrize("pfad", ["core.sock", "run/core.sock", "/run/../tmp/core.sock"])

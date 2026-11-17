@@ -34,7 +34,8 @@ BENUTZER=wamo-core
 PYTHON=/usr/bin/python3
 UNIT=/etc/systemd/system/wamo-core@.service
 NAME_RE='^v[0-9A-Za-z._-]{1,40}$'
-CADDY_ETC=/home/wamocon/wamo-tls/caddy/etc/kern   # wird als /etc/caddy/kern in den Container von wamo-caddy eingehängt
+# wird als /etc/caddy/kern in den Container von wamo-caddy eingehängt; WAMO_CADDY_ETC nur für Probeläufe (Tests), am Server nie gesetzt
+CADDY_ETC="${WAMO_CADDY_ETC:-/home/wamocon/wamo-tls/caddy/etc/kern}"
 CADDY_BESITZER=wamocon
 # Einstellungen, die andere Einrichtungsskripte der alten Unit als Drop-in mitgeben (erlaubter Ursprung der Oberfläche, Fernzugriff): sie gelten
 # auch für die Slots. Ein Slot ohne sie weist die Oberfläche ab (CORS) und kennt den Fernzugriff nicht (Fehler der ersten Umstellung, 02.11.2026).
@@ -409,20 +410,41 @@ cmd_schalten() {
   echo "SLOT $ziel"
 }
 
-# Beendet die auslaufende Instanz, aber nur ohne Sitzung und nach der Bewährung (so lange bleibt der Rückweg sofort möglich)
+# Beendet die auslaufende Instanz, aber nur ohne Sitzung und nach der Bewährung (so lange bleibt der Rückweg sofort möglich).
+# Läuft der Stopp in die Zeitgrenze der Unit (TimeoutStopSec, danach SIGKILL, Result=timeout und Zustand failed; so am 16.11.2026, R7), ist
+# die Instanz trotzdem beendet: ausleiten meldet das deutlich, setzt den Fehlerzustand zurück und wählt den Slot wie sonst ab. Nur wenn die
+# Instanz nach dem Stopp noch läuft (oder noch endet), bricht ausleiten ab und ändert nichts an der Auswahl für den Neustart.
 cmd_ausleiten() {
   root_pflicht
-  local akt alt alter
+  local akt alt alter rc zustand ergebnis hinweis=""
   akt="$(aktiver_slot)"; alt="$(anderer_slot "$akt")"
   systemctl is-active --quiet "wamo-core@$alt.service" || { echo "Nichts auszuleiten: Slot $alt läuft nicht."; return 0; }
   alter=$(( $(date +%s) - $(stat -c %Y "$CADDY_ETC/slot.inc") ))
   [ "$alter" -ge "${BEWAEHRUNG_S:-1800}" ] || fehler "Die Bewährung läuft noch ($alter s von ${BEWAEHRUNG_S:-1800} s): der Rückweg soll sofort möglich bleiben"
   [ "$(sitzungen_von "$alt")" = 0 ] || fehler "Slot $alt hat noch $(sitzungen_von "$alt") Sitzung(en)"
   ruhe_pruefen "wamo-core@$alt.service"
-  systemctl stop "wamo-core@$alt.service"
+  rc=0
+  systemctl stop "wamo-core@$alt.service" || rc=$?
+  zustand="$(systemctl show -p ActiveState --value "wamo-core@$alt.service" 2>/dev/null || true)"
+  ergebnis="$(systemctl show -p Result --value "wamo-core@$alt.service" 2>/dev/null || true)"
+  case "$zustand" in
+    inactive|failed) ;;
+    *) fehler "wamo-core@$alt ist nach dem Stopp nicht beendet (Zustand ${zustand:-unbekannt}, Exit $rc): nichts abgewählt, Slot $akt bleibt aktiv" ;;
+  esac
+  if [ "$rc" != 0 ] || [ "$zustand" = failed ] || [ "${ergebnis:-success}" != success ]; then
+    if [ "$ergebnis" = timeout ]; then
+      echo "WARNUNG: Der Stopp von wamo-core@$alt lief in die Zeitgrenze (TimeoutStopSec, Ergebnis timeout, Exit $rc): systemd hat die Instanz mit SIGKILL beendet." >&2
+      hinweis=" Der Stopp lief in die Zeitgrenze (SIGKILL), siehe Warnung."
+    else
+      echo "WARNUNG: Der Stopp von wamo-core@$alt endete nicht geordnet (Ergebnis ${ergebnis:-unbekannt}, Exit $rc)." >&2
+      hinweis=" Der Stopp endete nicht geordnet (Ergebnis ${ergebnis:-unbekannt}), siehe Warnung."
+    fi
+    echo "  Ablauf: journalctl -u wamo-core@$alt. Der Fehlerzustand wird zurückgesetzt, der Slot trotzdem abgewählt." >&2
+    systemctl reset-failed "wamo-core@$alt.service" >/dev/null 2>&1 || echo "  reset-failed für wamo-core@$alt ging nicht: der Zustand failed bleibt sichtbar." >&2
+  fi
   systemctl disable "wamo-core@$alt.service" >/dev/null 2>&1 || true
   systemctl enable "wamo-core@$akt.service" >/dev/null 2>&1 || true
-  echo "Slot $alt beendet und für den Neustart abgewählt. Aktiv bleibt Slot $akt."
+  echo "Slot $alt beendet und für den Neustart abgewählt. Aktiv bleibt Slot $akt.$hinweis"
 }
 
 case "$befehl" in
