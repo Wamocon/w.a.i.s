@@ -1,6 +1,6 @@
 # Testlabor 28.11.2026: Runbook für die Betreuer
 
-**Stand:** 17.11.2026, Entwurf für die Generalprobe am 26.11.2026. Nachtrag: Abschnitte 5.3, 5.4 und 6.1 auf Version 0.5.0 und die Abschaltung nach #181 gebracht. Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
+**Stand:** 17.11.2026, Entwurf für die Generalprobe am 26.11.2026. Nachtrag: Abschnitte 5.3, 5.4 und 6.1 auf Version 0.5.0 und die Abschaltung nach #181 gebracht. Nachtrag 17.11.2026 (Entscheidungen von Niko): am Labortag nur vier Besucher-Plätze (1 bis 4), Reserveprofile 05 bis 08, Wartende (3.7), keine Aufzeichnung fürs Schaufenster mehr (Abschnitt 7). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
 
 **So liest du es.** Jeder Ablauf besteht aus kurzen nummerierten Schritten. Mach sie in dieser Reihenfolge. Steht bei einem Schritt "Erwartet", vergleiche, bevor du weitermachst. Passt es nicht, höre auf und gehe zu Abschnitt 6 (Störungen) oder rufe die Leitung (Abschnitt 8). Ein Abbruch ist nie ein Fehler.
 
@@ -38,12 +38,13 @@ Ein Platz ist ein Laptop mit zwei Fenstern. Links läuft W.A.I.S. (Gespräch mit
 
 | Plätze | Verwendung |
 | --- | --- |
-| 1 bis 8 | Besucher |
-| 9 | Reserve (wird bei Bedarf freigeschaltet) |
+| 1 bis 4 | Besucher (Laptops, Abschnitt 3) |
+| 5 bis 8 | Reserveprofile `labor-05` bis `labor-08`. Eingerichtet und gesperrt, kein Besucher-Platz. Der Einsatz nur nach Anweisung der Technik (6.7) |
+| 9 | Reserve-Laptop (wird bei Bedarf freigeschaltet) |
 | 10 bis 14 | nicht belegt |
 | 15 und 16 | nur für die Abnahme des Dienstes. Die Betreuer-Seite zeigt "Reserviert für die Abnahme, kein Besucher". Nie öffnen |
 
-Platz N gehört zum Profil `labor-NN` (Platz 3 zu `labor-03`). Das brauchst du nur am Telefon mit der Technik.
+Platz N gehört zum Profil `labor-NN` (Platz 3 zu `labor-03`). Das brauchst du nur am Telefon mit der Technik. Welcher Laptop ein Reserveprofil 05 bis 08 nutzt, legt die Technik fest (6.7).
 
 | Was | Adresse |
 | --- | --- |
@@ -56,6 +57,8 @@ Auf dem Desktop jedes Platz-Laptops liegen zwei Verknüpfungen: **WAMO Labor sta
 ## 3. Ablauf je Besucher
 
 Die Knöpfe heißen auf der Betreuer-Seite genau so: "Neuer Durchlauf …", "Durchlauf beenden", "Zurücksetzen …", "Daten löschen …", "Platz-Token erzeugen". Bei den Knöpfen mit Auslassungspunkten kommt ein Fenster, in dem du die Platznummer eintippst.
+
+Am Labortag gibt es vier Besucher-Plätze (1 bis 4). Die Besucher wechseln sich an ihnen ab: Für jeden Besucher ein neuer Durchlauf (3.1), am Ende der Durchlauf beenden (3.4). Wer warten muss, siehe 3.7.
 
 ### 3.1 Platz öffnen (neuer Durchlauf)
 
@@ -120,13 +123,22 @@ Wann: Der Token fehlt, ging verloren, oder das Board zeigt "Dieser Platz-Link gi
 2. Den Kasten innerhalb von 60 Sekunden nutzen. Der alte Token gilt ab jetzt nicht mehr.
 3. Am Laptop beide Chrome-Fenster schließen, **WAMO Labor starten**, den neuen Token einfügen.
 
+### 3.7 Wartende Besucher
+
+Wann: Alle Plätze 1 bis 4 sind belegt, und weitere Besucher warten.
+
+1. Die Leitung legt die Reihenfolge der Wartenden fest. Die Betreuer wählen niemanden eigenmächtig aus. `[offen: erwarteter Andrang, Dauer eines Besuchs und Wartezeit]`
+2. Wartende können einem laufenden Platz zusehen, wenn die Person am Platz zustimmt. Zuschauer sprechen nicht in das Mikrofon und fotografieren nicht (4.4).
+3. Oder ein Betreuer führt am Betreuer-Platz vor (7.3). Standort `[offen: Standort des Betreuer-Platzes]`.
+4. Wer danach mitmachen möchte, wartet, bis ein Platz frei ist (3.4, dann 3.1). Der Haken kommt erst nach einem Ja (4.4).
+
 ## 4. Besucher möchte nicht, oder anders
 
 ### 4.1 Besucher möchte nicht zustimmen
 
 1. Kein Haken, kein neuer Durchlauf, kein Platz-Token. Für diese Person wird nichts gespeichert.
 2. Sag: "Kein Problem. Die Teilnahme ist freiwillig. Du kannst dir W.A.I.S. gern am Betreuer-Platz ansehen." (So steht es im Hinweis.)
-3. Führe die Person zum Betreuer-Platz `[offen: Standort und Gerät des Betreuer-Platzes]`. Dort führt ein Betreuer vor (7.3) oder zeigt die Aufzeichnung (7.2).
+3. Führe die Person zum Betreuer-Platz `[offen: Standort und Gerät des Betreuer-Platzes]`. Dort führt ein Betreuer vor (7.3).
 4. Frage nicht nach Gründen und notiere keinen Namen.
 
 ### 4.2 Besucher bricht ab
@@ -211,10 +223,10 @@ Sofort (B):
 
 Danach (T, rund 5 Minuten):
 1. P prüft die Konsole des Sprachmodells: Ausgabenlimit, Guthaben, Störungsmeldung.
-2. Hausmodelle einschalten, je Laborprofil: `uv run python wamo_admin.py modellzugang-setzen --user-id <uuid> --nur-haus an` im Ordner `voice-core` (die UUIDs zeigt `uv run python wamo_admin.py profile`). Das gilt ab der nächsten Sitzung. Die Qualität mit Hausmodellen ist nicht gemessen `[offen: 3 Läufe aus der Messrunde]`.
+2. Hausmodelle einschalten, je Laborprofil: `uv run python wamo_admin.py modellzugang-setzen --user-id <uuid> --nur-haus an` im Ordner `voice-core` (die UUIDs zeigt `uv run python wamo_admin.py profile`). Das gilt ab der nächsten Sitzung. Gemessen ist bisher `gemma4-31b`: die Karte a1 gelingt in 3 von 3 Läufen (Stand 17.11.2026, Kern `v0.5.0-7fc7a84`). Andere Hausmodelle sind nicht gemessen `[offen: Messung weiterer Hausmodelle]`.
 3. Oder Schlüsseltausch (9.6). Er braucht kein neues Release. Ein Umschalten auf den Rückweg-Slot gilt nur für ein Release mit Erstanmeldung (ab 0.3.0). Meldet `ausleiten` dabei einen Timeout, beendet sich der Kern nach etwa 13 Sekunden selbst (Abschnitt 5.3).
 4. Nach dem Umschalten beendet der Besucher das Gespräch (Knopf "Beenden") und tippt neu auf "Gespräch starten". Der Durchlauf auf der Betreuer-Seite bleibt offen, das Board bleibt.
-5. Geht beides nicht: Rückfall Aufzeichnung (Abschnitt 7).
+5. Geht beides nicht: Rückfall (Abschnitt 7).
 
 ### 6.2 Dienst ist aus
 
@@ -231,7 +243,7 @@ Danach (T):
 1. `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-einrichten.sh status"` zeigt die Zustände (nur Namen, nie Werte).
 2. `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-einrichten.sh pruefen"` startet den Rauchtest mit 20 Proben.
 3. Neustart des Containers `wamo-labor-dienst` `[offen: Befehl und Wirkung in der Rückwegübung bestätigen, steht nicht in den Unterlagen]`.
-4. Ist der Dienst nach `[offen: Frist, L und T legen sie fest, zum Beispiel 10 Minuten]` nicht zurück: Rückfall Aufzeichnung (Abschnitt 7).
+4. Ist der Dienst nach `[offen: Frist, L und T legen sie fest, zum Beispiel 10 Minuten]` nicht zurück: Rückfall (Abschnitt 7).
 
 ### 6.3 Spracherkennung (Soniox) fällt aus
 
@@ -243,7 +255,7 @@ Sofort (B):
 
 Danach (T):
 1. Prüfen, ob ein Platz oder alle betroffen sind. Ein Platz: 6.5.
-2. Alle Plätze: Texteingabe weiterlaufen lassen oder Rückfall Aufzeichnung (Abschnitt 7).
+2. Alle Plätze: Texteingabe weiterlaufen lassen oder Rückfall (Abschnitt 7).
 3. Nur wenn vorab gemessen und das Gateway Audiomodelle anbietet: `uv run python wamo_admin.py modellzugang-setzen --user-id <uuid> --stt haus --tts haus` je Profil `[offen: Audiomodelle im Gateway prüfen, Messung]`.
 
 ### 6.4 Netz
@@ -296,22 +308,29 @@ Wechsel an den Reserveplatz 9:
 | Freigabekarte | die Karte ist weg | Sie gilt etwa zwei Minuten. Der Besucher fragt W.A.I.S. neu |
 | Platz | "Gespräch starten" tut nichts | Zeigt die Karte "Durchlauf offen"? Wenn nein: 3.1. Wenn ja: L rufen, T prüft, ob das Profil freigeschaltet ist |
 
-## 7. Rückfall mit Aufzeichnung
+### 6.7 Zweiter Faktor eines Profils unbrauchbar
+
+Du merkst es: Die Anmeldung eines Platzes mit Passwort und Code schlägt fehl, obwohl der Code stimmt, oder die Oberfläche verlangt einen neuen zweiten Faktor. Ein Besucher kann den zweiten Faktor seines Profils entfernen (Restrisiko aus dem Token-Test vom 17.11.2026).
+
+Sofort (B):
+1. Platz beenden: **Durchlauf beenden** und **Daten löschen** (3.4, 3.5). L rufen.
+
+Danach (L und T):
+1. Das Profil des Platzes bleibt gesperrt: `python scripts/wamo_labor.py sperren --kennung labor-02 --ausfuehren` (Beispiel für Platz 2).
+2. T schaltet ein freies Reserveprofil frei: `python scripts/wamo_labor.py aktivieren --kennung labor-05 --ausfuehren`. Es gilt nach etwa einer Minute. Die Reserveprofile 05 bis 08 haben einen eingerichteten zweiten Faktor.
+3. Welcher Laptop dieses Reserveprofil nutzt, legt die Technik fest `[offen: Zuordnung Reserveprofil zu Platz und Laptop, Ablauf in der Generalprobe prüfen]`.
+4. Der Besucher bestätigt den Hinweis noch einmal, denn die Einwilligung gehört zum Platz. Dann weiter mit 3.1.
+5. Der Besucher hat den Faktor selbst entfernt: Die Anmeldung am Platz bleibt Sache von T und L, Passwörter und Codes bekommen Besucher nicht (9.3).
+
+## 7. Rückfall
 
 ### 7.1 Wann
 
-L entscheidet. Typische Anlässe: Claude und Hausmodelle fallen aus, die Spracherkennung fällt aus, der Dienst ist nicht schnell zurück, der Kern ist nach einem Notaus gesperrt. Auch bei Wartezeiten kann die Aufzeichnung am Fernseher laufen.
+L entscheidet. Typische Anlässe: Claude und Hausmodelle fallen aus, die Spracherkennung fällt aus, der Dienst ist nicht schnell zurück, der Kern ist nach einem Notaus gesperrt. Bei Wartezeiten führt ein Betreuer am Betreuer-Platz vor (7.3), oder die Wartenden sehen einem laufenden Platz zu (3.7). Es gibt keine Aufzeichnung als Ersatz (Entscheidung von Niko am 17.11.2026).
 
-### 7.2 Schaufenster, die Aufzeichnung am Fernseher
+### 7.2 Texteingabe und Fernseher
 
-Die Aufzeichnung zeigt einen Entwicklungsauftrag, den W.A.I.S. vorab erledigt hat. Sie liegt vorbereitet bereit `[offen: Dateiname, Ort, Gerät, Länge]`.
-
-1. L gibt das Zeichen "Rückfall Aufzeichnung".
-2. Aufzeichnung auf dem großen Fernseher starten `[offen: Ort des Fernsehers]`.
-3. Besucher an den Fernseher bitten. Die Plätze bleiben frei oder werden geschlossen (3.4).
-4. Drei Sätze sagen: "Das ist eine Aufzeichnung, kein Live-Gespräch. W.A.I.S. bekam diesen Auftrag und hat ihn so erledigt. Beim Test später kannst du das selbst ausprobieren." `[offen: Erzähltext liefert das Projektteam]`
-5. Fragen beantworten. Fachfragen gehen an F.
-6. Dabei entsteht nichts Gespeichertes. Es braucht weder Durchlauf noch Haken noch Platz-Token `[offen: D bestätigt]`.
+Fällt die Stimme aus, nutzen die Besucher die Texteingabe (6.3). Der große Fernseher zeigt in diesem Fall nichts Aufgezeichnetes. `[offen: ob der Fernseher am Labortag etwas zeigt, Standort des Fernsehers]`
 
 ### 7.3 Vorführung ohne Besucher am Betreuer-Platz
 
@@ -423,18 +442,17 @@ Das muss Niko oder das Projektteam vor der Generalprobe am 26.11.2026 nennen:
 
 1. Namen, Telefonnummern und der Kanal (Telefon oder Chat) aller Rollen aus Abschnitt 8.
 2. Raum und Standort des Labors, des Betreuer-Platzes und des Fernsehers.
-3. Öffnungszeiten, Pausen und die Dauer eines Besuchs.
+3. Öffnungszeiten, Pausen, die Dauer eines Besuchs und der erwartete Andrang.
 4. Der Weg, auf dem die Betreuer den Betreuer-Token bekommen. Das Einrichtungsskript zeigt ihn nie an, das PC-Skript dafür steht als Folgeschritt aus.
 5. Wortlaut des Datenschutzhinweises (Altersangabe ist entschieden: mindestens 16, jünger mit Aufsichtsperson; die verantwortliche Person prüft den Text).
-6. Die Aufzeichnung: Dateiname, Ort, Gerät, Länge und der Erzähltext.
-7. Der Ausdruck des Kartensatzes (`docs/labor-kartensatz.html`, Entwurf liegt vor, A4 mit WMC-Kopf) und sein Ablageort am Platz. Der Trainer trägt die Erwartungswerte zu W1 und W2 vor dem Ausdruck ein.
-8. Aus der Generalprobe: Einfügen des Platz-Tokens in die verdeckte Eingabe, Nutzung des Besucher-Links im Kiosk, Bezeichnung und Ort des Eingabefelds für Text.
-9. Reserve: ob der Reserve-Laptop Platz 9 ist und welche Profile am Labortag freigeschaltet sind.
-10. Aus der Rückwegübung am 27.11.: Dauer der Stufen 3 und 4 des Notaus, Befehl zum Neustart des Dienstes, Wiederherstellen des Dienstes nach Stufe 3, Befehlszeile des Schlüsseltauschs.
-11. Fristen, die L und T festlegen: Wartezeit bis zum Wechsel an den Reserveplatz, Frist für die Rückkehr des Dienstes.
-12. Ob die Qualität mit Hausmodellen reicht und ob das Gateway Audiomodelle für Sprache anbietet.
-13. Ob Zuschauer am Betreuer-Platz einen Hinweis brauchen (Datenschutz).
-14. Der Weg, die Laborkonten zu löschen.
+6. Der Ausdruck des Kartensatzes (`docs/labor-kartensatz.html`, Entwurf liegt vor, A4 mit WMC-Kopf) und sein Ablageort am Platz. Der Trainer trägt die Erwartungswerte zu W1 und W2 vor dem Ausdruck ein.
+7. Aus der Generalprobe: Einfügen des Platz-Tokens in die verdeckte Eingabe, Nutzung des Besucher-Links im Kiosk, Bezeichnung und Ort des Eingabefelds für Text.
+8. Reserve: ob der Reserve-Laptop Platz 9 ist, welche Profile am Labortag freigeschaltet sind und wie die Reserveprofile 05 bis 08 an einem Laptop genutzt werden (6.7).
+9. Aus der Rückwegübung am 27.11.: Dauer der Stufen 3 und 4 des Notaus, Befehl zum Neustart des Dienstes, Wiederherstellen des Dienstes nach Stufe 3, Befehlszeile des Schlüsseltauschs.
+10. Fristen, die L und T festlegen: Wartezeit bis zum Wechsel an den Reserveplatz, Frist für die Rückkehr des Dienstes.
+11. Ob die Qualität mit weiteren Hausmodellen reicht und ob das Gateway Audiomodelle für Sprache anbietet.
+12. Ob Zuschauer am Betreuer-Platz einen Hinweis brauchen (Datenschutz) und ob Zuschauer bei laufenden Plätzen einen Hinweis brauchen (3.7).
+13. Der Weg, die Laborkonten zu löschen.
 
 ---
 

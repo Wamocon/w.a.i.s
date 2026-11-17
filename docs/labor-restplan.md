@@ -24,8 +24,23 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 - #182: Lasttest fragt den aktiven Slot am Server ab, kein fester Slot b mehr
 - Dazu entfernt: die Umgebungsvariable `WAMO_LLM_VISION_MODELL`
 
+### N.1a Prüfungen und Messungen am 17.11.2026
+
+| Baustein | Stand | Beleg |
+| --- | --- | --- |
+| Token-Test (`infra/sokrates2/labor_tokentest.py`, über Caddy mit `--basis https://192.168.178.136:55443`) | 11 erwartet, 6 dokumentiert, 0 offen, 3 nicht gemessen. Von den 3 sind 2 bewusst nicht gemessen (Schreibprobe, Realtime-Auslieferung), 1 nicht gemessen, weil `/rest/v1/` über Caddy 403 statt des Verzeichnisses liefert. Das ist strenger als erwartet und unkritisch. Passwortwechsel mit dem Besucher-Token: 403. Wegwerf-Konto gelöscht | Lauf 17.11. |
+| Restrisiko aus dem Token-Test | Ein Besucher kann mit aal2 den eigenen bestätigten Faktor löschen. Abhilfe im Betrieb: Reserveprofil (Runbook 6.7), Entwicklerwerkzeuge im Kiosk gesperrt | R13 |
+| Lasttest, Trockenlauf | 8 Sitzungen sauber: 12 Sprechproben, 8 Seeds, geschätzt 0,34 USD. `WAMO_LATENZ_LOG` am Kern gesetzt | Trockenlauf 17.11. |
+| REA | Installer 0.5.0 gegen 0.4.1 ohne Befund. Nur die Versionsnummer hat sich geändert, die Fuses sind unverändert und korrekt, die Update-Signatur prüft. Offen bleibt nur die bekannte fehlende Codesignatur | REA 17.11. |
+| Soniox-Grenzen | Sprachausgabe 15, Erkennung 20 gleichzeitige Streams, in Region USA und EU genehmigt | R11 |
+| Hausmodell `gemma4-31b` | a1 in 3 von 3 Läufen, Kern `v0.5.0-7fc7a84` | R9 |
+
 ### N.2 Entscheidungen von Niko, Ergänzung
 
+- Am Labortag nur vier Besucher-Plätze (1 bis 4). Die Besucher wechseln sich ab. Die Profile `labor-05` bis `labor-08` bleiben eingerichtet und dienen als Reserve, Platz 9 bleibt Reserve-Laptop (17.11.).
+- Der Lasttest prüft weiter bis 8 Sitzungen, aber nur als Reserve. Realistisch sind 4 Sitzungen gleichzeitig (17.11.).
+- Keine Aufzeichnung fürs Schaufenster mehr (hebt die Aufzeichnung aus E9 auf). Der Rückfall ist die Vorführung am Betreuer-Platz oder die Texteingabe (Runbook 7, 17.11.).
+- Vorstufe des Lasttests mit 2 und 4 Sitzungen je 10 Minuten am Mi 18.11. früh. Der volle Lasttest bleibt Fr 20.11. (17.11.).
 - Freeze Mo 23.11. früh (E1 bleibt).
 - Die zweiten Faktoren der Laborprofile werden am Fr 20.11. nach dem Lasttest neu eingerichtet, nicht am 25.11. (E2 präzisiert).
 - Der Lasttest läuft voll am Fr 20.11., nicht am 24.11.
@@ -47,8 +62,9 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | R8 | Lasttest nahm einen festen Slot b an | behoben mit #182 |
 | R9 | Ausweichweg Hausmodell `gemma4-31b` (3 Läufe am 17.11.): a1 bricht in 3 von 3 Läufen ab. Der erste Satz kommt nach 0,7 s, der Aufruf von `canvas_zeigen` mit den Stories kommt als Block und überschreitet die Lesefrist des Gesprächs von 20 s (`GESPRAECH_LESE_TIMEOUT_SECS`). Gilt auch im Büro für Nutzer mit Hausmodellen. Vorschlag: längere Lesefrist nur für Hausmodelle, Entscheidung durch Niko vor dem Freeze-Kandidaten | behoben mit #184 (Lesefrist 60 s für Hausmodelle, Claude bleibt bei 20 s), a1 mit `gemma4-31b` danach 3 von 3, ausgerollt 17.11. als Kern v0.5.0-7fc7a84 (Bewährung bestanden, Labor-Rauchtest 20 OK) |
 | R10 | Büro-Fall I04 („Puh, das ist schwierig.“ soll warten): am 17.11. 4 von 17 Läufen bestanden (vor #176 4 von 5, danach 3 von 5). W.A.I.S. antwortet sofort mit einer freundlichen Rückfrage statt zu warten. Betrifft nur das Büro, das Labor hat diesen Fall nicht. Vorschlag: ein Beispiel in der Marker-Regel ergänzen und mit der Messrunde gegenprüfen, Entscheidung durch Niko | verschoben auf nach dem Labortag (Entscheidung 17.11.: die Marker-Regel vor dem Freeze nicht mehr ändern, Schweigen wiegt schwerer als eine zu schnelle Antwort im Büro) |
-| R11 | Soniox-Grenzen der Organisation: Sprachausgabe 3 gleichzeitige Streams (über alle Verbindungen, darüber Ablehnung 429), Spracherkennung 10. Für 8 Plätze, Schau-Profil und Büro zu wenig | Erhöhung auf 15 und 20 am 17.11. beantragt, Region USA genehmigt, Region EU (unser Projekt) offen. Prüfung im vollen Lasttest Fr 20.11. |
+| R11 | Soniox-Grenzen der Organisation: Sprachausgabe 3 gleichzeitige Streams (über alle Verbindungen, darüber Ablehnung 429), Spracherkennung 10. Für 8 Plätze, Schau-Profil und Büro zu wenig | behoben: Erhöhung auf 15 und 20 am 17.11. in Region USA und EU genehmigt, Prüfung im vollen Lasttest Fr 20.11. |
 | R12 | Betreuer-Geräte flatterten: mDNS lieferte abwechselnd tote Adressen, jede abweichende Antwort entzog die zugelassene sofort (492 Paare in 24 h, je ein Caddy-Reload, `/betreuer` je eine Minute gesperrt) | behoben mit #186 (ersetzte Adresse bleibt 15 Minuten, Adresse nur aus mDNS erst nach ARP-Nachweis per UDP-Probe), eingespielt 17.11., danach kein Flattern mehr |
+| R13 | Besucher löscht mit aal2 den eigenen bestätigten zweiten Faktor (Token-Test am 17.11.). Ein Besucher kann so sein Profil unbrauchbar machen | Restrisiko. Abhilfe im Betrieb: Reserveprofile `labor-05` bis `labor-08` (Runbook 6.7), Entwicklerwerkzeuge im Kiosk gesperrt. Zuordnung Reserveprofil zu Laptop `[offen: Generalprobe]` |
 
 ### N.4 Fahrplan Di 17.11. bis Fr 11.12.
 
@@ -59,13 +75,15 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | Mi 18.11. | N3 bis N5 liefern: Preise und Ratenlimit, Fassung der Regeln, Büro-Adressen für die Ports 55446, 55322 und 56543 | Niko | erledigt 17.11. (N3 bis N5) |
 | Do 19.11. | Erwartungswerte des Trainers zu W1 und W2 (N8) | Niko, Trainer | Pflicht vor dem Ausdruck |
 | Fr 20.11. vormittags | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen, mit Preisen, Ratenlimit und `--kosten-obergrenze`. Vorher den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“, Starttickets zählen als belegt) | W.A.I.S., Niko | Ja von Niko, N3, E5 |
-| Fr 20.11. nachmittags | Zweite Faktoren neu auf die Betreuer-Geräte (E2), zuerst ein Profil. Aufzeichnung des Schaufensters | W.A.I.S., Betreuer, Niko | Lasttest abgeschlossen |
+| Mi 18.11. früh | Vorstufe Lasttest mit 2 und 4 Sitzungen je 10 Minuten (Entscheidung 17.11.), vorher Trockenlauf | W.A.I.S., Niko | Trockenlauf ohne Befund |
+| Fr 20.11. nachmittags | Zweite Faktoren neu auf die Betreuer-Geräte (E2), zuerst ein Profil. Die zweiten Faktoren der Profile 01 bis 08 bleiben eingerichtet (05 bis 08 als Reserve). ~~Aufzeichnung des Schaufensters~~ entfällt (17.11.) | W.A.I.S., Betreuer, Niko | Lasttest abgeschlossen |
+| Fr 20.11. | Finale Datenschutzrichtlinie der Betreuer (N11) liefern. Kommt sie bis dahin, wird sie als Fassung 2 vor dem Freeze eingebaut, sonst gilt Fassung 1 | Betreuer, W.A.I.S., Niko | N11 |
 | Sa 21.11. | Letzte Freischaltungen der Mitglieder (E4). Puffer für Befunde aus dem Lasttest | Niko, W.A.I.S. | E4 |
 | So 22.11. abends | Freeze-Kandidat ist ausgerollt: Kern mit Bewährung, Oberfläche, Labor-Rauchtest, Lasttest-Probelauf mit einer Sitzung. Ab hier nur noch Sicherheitskorrekturen mit Nikos Ja | W.A.I.S. | E1 |
-| Mo 23.11. früh | **Freeze** (E1): Etikett `labor-freeze` auf den ausgerollten Stand. Platz-Skript auf einem echten Laptop im Kiosk-Konto und auf einem Ersatzgerät (`einrichten`, CA, `pruefen`, Board) | W.A.I.S., Niko, Kollegen | Geräte da |
+| Mo 23.11. früh | **Freeze** (E1): Etikett `labor-freeze` auf den ausgerollten Stand. Kiosk-Test des Platz-Skripts auf einem echten Platz-Laptop im Kiosk-Konto und auf einem Ersatzgerät (`einrichten`, CA, `pruefen`, Board), Termin `[offen: Niko]`, muss vor dem Freeze liegen | W.A.I.S., Niko, Kollegen | Geräte da |
 | Di 24.11. | Kartensatz drucken, Zahlen aus dem Lasttest ins Runbook | W.A.I.S., Niko | Lasttest-Ergebnis, W1, W2 |
 | Mi 25.11. | Betreuer-Token persönlich übergeben, Namen und Telefonnummern eintragen | Niko | N6, N7 |
-| Do 26.11. | Generalprobe, drei Stunden, vier Kollegen als Besucher, zwei Betreuer, acht Geräte | alle | Kartensatz gedruckt |
+| Do 26.11. | Generalprobe, drei Stunden, vier Kollegen als Besucher an den Plätzen 1 bis 4, zwei Betreuer, Reserve-Laptop (Platz 9) | alle | Kartensatz gedruckt |
 | Fr 27.11. | Daten-Freeze 12:00. Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer. Ab 12:00 kein Neustart des Gateways bis Sa 28.11. abends (N10) | W.A.I.S., Betreuer, Niko | Morgencheckliste Teil A |
 | Sa 28.11. | Labortag. Kern-Kanal morgens sperren, kein Neustart des Gateways | alle | Morgencheckliste Teil B |
 | ab Mo 30.11. | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`). Messungen H0 und M3 (`docs/hausmodelle-und-kikollege.md`) | W.A.I.S. | Runbook Abschnitt 10 |
@@ -74,7 +92,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 
 ### N.5 Offene Lieferungen
 
-Offen am 17.11.2026: N3 bis N8 und N10 (Abschnitt 5). N10 ist neu: Gateway ohne Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut das Gateway selbst (`infra/sokrates1/gateway-wamo.md`).
+Stand am 17.11.2026, Nachmittag: N3 bis N5 erledigt. Datenschutz: Fassung 1 des Hinweises am 17.11. von Niko freigegeben, die finale Datenschutzrichtlinie liefern die Betreuer (N11, Fassung 2 nur bis Fr 20.11.). Offen sind N6 bis N8, N10 und N11 (Abschnitt 5). N10 ist neu: Gateway ohne Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut das Gateway selbst (`infra/sokrates1/gateway-wamo.md`).
 
 ---
 
@@ -148,16 +166,17 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | vor der Generalprobe |
 | N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste; Entwurf mit Musterantworten an den verantwortlichen Trainer am 17.11., Seminar-Angaben sind kein Muss (`ausgang.md` verweist sonst auf den Stand) |
 | N10 | Gateway (zentrales LiteLLM auf Sokrates-1): kein Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut es selbst, Betriebsnotiz `infra/sokrates1/gateway-wamo.md` | Fr 27.11. 12:00 | Keine Änderung am Gateway in dieser Zeit |
-| E5 | Kern-Kanal während Lasttest und Labortag sperren | Fr 20.11. | Ja, das Schaufenster zeigt nur die Aufzeichnung |
+| N11 | Datenschutz: finale Datenschutzrichtlinie der Betreuer. Fassung 1 des Hinweises ist am 17.11. von Niko freigegeben (`docs/labor-datenschutz-entwurf.md`, Dienst `labor-dienst/wamo_labor_dienst/web/datenschutz.html`) | Fr 20.11. für Fassung 2, sonst gilt am Labortag Fassung 1 | Kommt sie bis Fr 20.11., wird sie als Fassung 2 vor dem Freeze eingebaut: neuer Text im Dienst, Versionsnummer 2 auf der Betreuer-Seite, `WAMO_LABOR_EINWILLIGUNG_MIN=2` am Kern mit dem Freeze-Kandidaten So 22.11. |
+| E5 | Kern-Kanal während Lasttest und Labortag sperren | Fr 20.11. | Ja. Der Grund Schaufenster entfällt (17.11.), der gemeinsame Server bleibt (Abschnitt 6, Punkt 4) |
 
 ## 6. Lücken und Risiken
 
 1. **Laborkonten löschen und Sitzungen widerrufen:** noch kein Skript (Bau nach dem Labortag, Fahrplan).
 2. **Marker bei w2:** Bis zur Korrektur schweigt W.A.I.S. bei der Wissensfrage zur CTFL-Prüfung. Ob der Büro-Prompt betroffen ist, klärt die Ursachenanalyse.
-3. **CPU des Kerns:** schon bei 1 Sitzung p95 43,5 Prozent eines Kerns. Erst der volle Lasttest zeigt, ob 8 Sitzungen unter 70 Prozent bleiben.
+3. **CPU des Kerns:** schon bei 1 Sitzung p95 43,5 Prozent eines Kerns. Erst der volle Lasttest zeigt, ob 4 Sitzungen (Betrieb) und 8 Sitzungen (Reserve) unter 70 Prozent bleiben.
 4. **Gemeinsamer Server:** Entwicklungsaufträge (bis 6) und das Hausmodell teilen sich Sokrates-2 mit dem Kern und dem Labor-Dienst. Darum sperrt der Kern-Kanal während Lasttest und Labortag.
 5. **Ein Schlüssel für alle Plätze** (Ratenlimit und Guthaben). Der Lasttest ist die einzige Messung dafür.
-6. **Platz-Laptop im Kiosk-Konto** wurde noch nicht gesehen, der Rauchtest am Server kann das nicht belegen.
+6. **Platz-Laptop im Kiosk-Konto** wurde noch nicht gesehen, der Rauchtest am Server kann das nicht belegen. Kiosk-Test auf einem echten Platz-Laptop vor dem Freeze, Termin `[offen: Niko]`.
 7. **Gäste-Laptops im flachen Büronetz**, das Netzkonzept liegt bei den Kollegen.
 
 ---

@@ -2,6 +2,8 @@
 
 Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8 gleichzeitigen Sitzungen verhält. Es setzt den Absatz "Last" in `docs/testlabor-wamo.md`, Abschnitt 3.7, um. Dieses Dokument beschreibt Ablauf, Voraussetzungen, Kosten, Abbruch, Auswertung und die Grenzen der Aussage. **Vor dem Probelauf am Server wurde das Werkzeug nur gegen Attrappen getestet.** Am 16.11.2026 lief ein Probelauf mit einer Sitzung und drei Minuten am Server (Abschnitt 4). Der volle Lauf ist für Fr 20.11.2026 vorgesehen. Alles, was nur ein echter Lauf zeigt, steht im letzten Abschnitt.
 
+**Betriebsgröße am Labortag (Entscheidung von Niko, 17.11.2026):** Am Labortag gibt es vier Besucher-Plätze (1 bis 4). Realistisch laufen 4 Sitzungen gleichzeitig. Die Stufen mit 8 Sitzungen bleiben als Reserve und für die Höchstgrenze des Werkzeugs (unten). Der Trockenlauf am 17.11. mit 8 Sitzungen war sauber.
+
 ## 1. Was der Lauf tut
 
 1. **Vorprüfung** (nur lesend, vor jeder Änderung): feste Adresse, Sprechproben, Seeds in der Umschlag-Datei (nur ob da), Laborprofile im Kern (alle gesperrt, alle vorhanden), Plätze 1 bis N im Dienst (leer), Kern `wamo-core@<slot>` (aktiv, Speicher unter 3 GiB, Journal, Speicher und CPU-Zeit lesbar). Den Slot ermittelt der Echtlauf ohne `--slot` vorher am Server (Abschnitt 3). Scheitert eine Prüfung, wurde nichts verändert.
@@ -60,7 +62,8 @@ Ausgänge: 0 bestanden (oder Trockenlauf), 1 durchgefallen, vorzeitig beendet od
 
 ## 4. Empfohlene Reihenfolge am Fr 20.11.
 
-1. Vorbereitung bis Do 19.11.: Sprechproben erzeugen, Trockenlauf. Ratenlimit und Preise aus der Konsole (N3, Mi 18.11.) in den Aufruf eintragen.
+1. Vorbereitung bis Do 19.11.: Sprechproben erzeugen, Trockenlauf. Ratenlimit und Preise aus der Konsole (N3, erledigt 17.11.) in den Aufruf eintragen.
+1a. Vorstufe am Mi 18.11. früh (Entscheidung von Niko, 17.11.): Stufen 2 und 4 mit je 10 Minuten. Zuerst den Trockenlauf mit `--sitzungen 2,4 --minuten 10` ansehen, danach den Echtlauf mit `--sitzungen 2,4 --minuten 10 --ausfuehren --bestaetigung LASTTEST`. Vorher wie in Schritt 2 den Kern-Kanal sperren und die Plätze leeren. Der volle Lauf bleibt am Fr 20.11.
 2. Vormittags vor dem Lauf den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“). Dann kurzer Probelauf: `--sitzungen 1 --minuten 3` (Urteil bleibt "offen", der Umfang fehlt). Er prüft Anmeldung, Browser, Messung und Aufräumen, bevor die Stunden beginnen.
 3. Voller Lauf ohne Murmeln (Stufen 1, 2, 4, 8, etwa 1 Stunde 20 Minuten mit Vorbereitung und Aufräumen).
 4. Murmeln: entweder gleich im vollen Aufruf (`--murmeln 20,10,5`, etwa 2 Stunden 10 Minuten) oder danach allein (`--sitzungen 8 --murmeln 20,10,5`). Ein Lauf nur mit Murmelstufen bleibt "offen", weil ihm der Umfang fehlt, das ist gewollt: Die Murmelstufen ergänzen den vollen Lauf.
@@ -129,7 +132,7 @@ Der letzte Befehl leert alle 16 Plätze und alle Gesprächstexte der Laborprofil
 
 ## 9. Was die Last nicht belegt
 
-- **Echte Menschen:** Die Sprechproben sind eine Windows-Stimme, das Murmeln ist erzeugt (sechs überlagerte, in der Tonhöhe verschobene Sprechproben) oder eine Aufnahme. Das Murmeln ersetzt keine echte Mehrstimmenaufnahme. Gerät, WLAN (8 Geräte im Raum) und echte Mikrofone fehlen.
+- **Echte Menschen:** Die Sprechproben sind eine Windows-Stimme, das Murmeln ist erzeugt (sechs überlagerte, in der Tonhöhe verschobene Sprechproben) oder eine Aufnahme. Das Murmeln ersetzt keine echte Mehrstimmenaufnahme. Gerät, WLAN (am Labortag im Raum vier Besucher-Laptops, Reserve und Betreuer-Geräte) und echte Mikrofone fehlen.
 - **Eine Maschine:** Acht Chrome-Instanzen auf einem PC teilen sich Netz, CPU und Speicher. Ob der Mess-PC selbst zum Engpass wird, ist offen, die Zeiten des ersten Tons enthalten diesen Anteil.
 - **Dienst der Kollegen:** Gemessen wird, was der Kern und der Browser sehen. Mit der Attrappe statt des Dienstes (Konzept 3.7) ist die Dienstlast nicht belegt. Bei `--freigabe ablehnen` entstehen keine Tickets.
 - **Nicht gemessen:** Verzug der Ereignisschleife und Datenbankverbindungen des Kerns (kein lesender Weg, den das Werkzeug nutzt), Cache-Treffer und Websuchen, Tokens je Zug außerhalb der Latenzzeilen.
