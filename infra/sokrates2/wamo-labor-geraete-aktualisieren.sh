@@ -13,19 +13,27 @@
 #   3. Jeden Namen auflösen, höchstens 4 Namen gleichzeitig: NetBIOS (nmblookup -- NAME) hat Vorrang. Nur wenn es nach dem Filter auf das Büro-LAN keine Adresse liefert,
 #      wird mDNS (avahi-resolve -4 -n -- NAME.local) gefragt und seine Antwort verwendet (für Mac- und Linux-Geräte); kein Zusammenführen, denn mDNS liefert gern eine veraltete
 #      Adresse (ein Gerät kann sie später per DHCP bekommen). Das DNS des Routers wird nie gefragt (auch es liefert veraltete Adressen). Es zählen nur IPv4-Adressen im Büro-LAN 192.168.178.0/24 (.1 bis .254);
-#      virtuelle Adressen (172.x, Docker, WSL, VPN) fallen weg. Antwortet ein Name mit mehr als 4 Adressen, ist das verdächtig (Flut oder Täuschung): Es wird nichts Neues
+#      virtuelle Adressen (172.x, Docker, WSL, VPN) fallen weg. Eine Adresse, die nur aus mDNS stammt, zählt nur, wenn sie im LAN da ist: eine kurze Probe
+#      (ping -c1 -W1, das Ergebnis zählt nicht, sie löst nur ARP aus), danach muss ip -4 neigh show ADRESSE eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY
+#      oder PROBE zeigen, FAILED, INCOMPLETE oder kein Eintrag heißt verwerfen (Warnung höchstens einmal je Stunde). Die Proben eines Namens laufen gleichzeitig, je
+#      höchstens 2 Sekunden, innerhalb der parallelen Auflösung. NetBIOS-Antworten gelten ohne Probe. Grund (Befund 17.11.2026): mDNS lieferte für ein Gerät abwechselnd
+#      zwei Adressen, die beide tot waren (kein Ping, kein ARP-Eintrag). Antwortet ein Name mit mehr als 4 Adressen, ist das verdächtig (Flut oder Täuschung): Es wird nichts Neues
 #      zugelassen, schon zugelassene Adressen, die weiter antworten, werden bestätigt, und der Lauf warnt (höchstens einmal je Stunde) im Journal. Die echte Adresse wird so nie verdrängt.
 #   4. Mit dem zuletzt eingesetzten Stand vergleichen (/var/lib/wamo-labor-geraete/betreuer-geraete.stand, root 0644: Name, Adresse, Zeitpunkt der letzten Antwort).
-#      Antwortet ein Gerät (zum Beispiel nach dem Ruhezustand), ersetzt die neue Antwort die alten Adressen dieses Namens. Antwortet es nicht, bleibt die zuletzt gute
-#      Adresse höchstens 12 Stunden nach der letzten Antwort zugelassen, danach fällt sie weg. Ein Name, der aus der Liste verschwindet, verliert seine Adressen sofort.
-#      Zeitpunkte in der Zukunft (Zeitsprung, Fälschung) zählen als jetzt.
+#      Antwortet ein Gerät, gelten seine neuen Adressen mit dem Zeitpunkt jetzt. Seine bisherigen Adressen, die nicht in der Antwort stehen, bleiben noch, solange ihre
+#      letzte Antwort höchstens 15 Minuten zurückliegt (ihr Zeitpunkt bleibt), danach fallen sie weg ("ersetzt durch die neue Antwort"). Zusammen gelten höchstens 4 je
+#      Name: die frischen zuerst, von den alten die jüngsten. Grund (Befund 17.11.2026): mDNS antwortet für manche Geräte abwechselnd mit der aktuellen und einer
+#      veralteten Adresse. Das sofortige Ersetzen entzog die aktuelle Adresse alle paar Minuten, die 3-Minuten-Sperre ließ sie erst danach wieder zu.
+#      Antwortet es nicht, bleibt die zuletzt gute Adresse höchstens 12 Stunden nach der letzten Antwort zugelassen, danach fällt sie weg. Ein Name, der aus der Liste
+#      verschwindet, verliert seine Adressen sofort. Zeitpunkte in der Zukunft (Zeitsprung, Fälschung) zählen als jetzt.
 #   5. Ändert sich die Menge der Adressen, wird die Caddy-Site neu zusammengesetzt (Vorlage /usr/local/lib/wamo-labor-geraete/wamo-labor.caddy, der Server selbst, feste
 #      Adressen aus betreuer-adressen, die Adressen der Geräte: dieselbe Logik wie wamo-labor-einrichten.sh, geteilt in wamo-labor-site.sh), mit caddy adapt in einem
 #      Wegwerf-Container ohne Netz geprüft (Image-ID von wamo-caddy, --pull=never), installiert und mit caddy reload ohne Ausfall geladen. Danach müssen 55443 bis 55446
 #      antworten. Eine neue Zulassung wartet, bis der letzte Reload mindestens 3 Minuten zurückliegt, ein reiner Entzug nie.
 #      Schlägt eine Stufe fehl, bleibt die vorherige Site-Datei aktiv (bei einem Fehler nach dem Installieren kommt sie zurück und wird neu geladen), der Stand bleibt
 #      unverändert, der Lauf endet mit Ausgang 1. Die nächste Minute versucht es erneut. Bleibt die Menge gleich, gibt es weder Prüfung noch Reload noch Ausgabe.
-#   6. Den Stand schreiben (atomar, nur wenn sich die Menge ändert oder der letzte Schreibzeitpunkt mehr als 5 Minuten zurückliegt) und die Änderungen melden: je Zeile
+#   6. Den Stand schreiben (atomar, nur wenn sich die Menge ändert, der letzte Schreibzeitpunkt mehr als 5 Minuten zurückliegt oder eine Adresse antwortet, deren
+#      Zeitpunkt im Stand mindestens 5 Minuten alt ist: sonst liefe die 15-Minuten-Frist ab einer älteren Antwort) und die Änderungen melden: je Zeile
 #      "Gerät NAME: ADRESSE zugelassen" oder "... entfernt (Grund)". Ohne Änderung bleibt es still. Die Meldungen gehen auf stdout (unter systemd ins Journal, Kennung
 #      wamo-labor-geraete) und bei einem Aufruf von Hand zusätzlich mit logger -t wamo-labor-geraete.
 #
@@ -35,15 +43,19 @@
 #
 # Grenzen: Die Namensauflösung im LAN ist nicht kryptografisch gesichert. Ein fremdes Gerät im Büro-LAN könnte einen Namen vortäuschen und so die Seiten /betreuer und
 # /api/betreuer/ erreichen. Der Betreuer-Token bleibt die eigentliche Absicherung. Eine neue Adresse gilt frühestens mit dem nächsten Lauf und frühestens 3 Minuten nach
-# dem letzten Versuch. NetBIOS und mDNS erreichen nur Geräte im selben Netz (Windows, Mac, Linux). mDNS gilt nur als Ersatz, dort kann eine veraltete Adresse vorkommen. Ein Gerät, das beides
-# nicht beantwortet, braucht eine feste Adresse in betreuer-adressen. Die 12-Stunden-Frist wird nur durchgesetzt, solange die Läufe gelingen.
+# dem letzten Versuch. NetBIOS und mDNS erreichen nur Geräte im selben Netz (Windows, Mac, Linux). mDNS gilt nur als Ersatz, dort kann eine veraltete Adresse vorkommen:
+# Die Probe verwirft tote Adressen, aber eine Adresse, die eben noch lebte (Eintrag STALE), besteht sie noch für kurze Zeit, und ping braucht in der Unit ohne CAP_NET_RAW
+# ICMP-Datagram-Sockets (net.ipv4.ping_group_range, sonst fällt jede mDNS-Adresse durch). Antwortet mDNS abwechselnd mit zwei lebenden Adressen, bleiben beide zugelassen,
+# solange jede innerhalb von 15 Minuten wieder antwortet, und nach einem Adresswechsel bleibt die alte Adresse noch bis zu 15 Minuten (lieber eine Adresse zu viel als ein
+# gesperrtes Gerät, auch hier hält der Betreuer-Token). Ein Gerät, das beides nicht beantwortet, braucht eine feste Adresse in betreuer-adressen. Die 12-Stunden-Frist wird
+# nur durchgesetzt, solange die Läufe gelingen.
 #
 # --trocken   löst die Namen auf und zeigt, was sich ändern würde (Auflösung, Meldungen, neue Adressliste), ohne zu sperren, zu schreiben, zu laden oder zu melden.
 # Ausgang: 0 ok (auch ohne Änderung und bei gehaltener Sperre), 1 Fehler (auch ein Fehler in den Eingaben), 2 falsche Aufrufform.
 #
 # Probelauf ohne root (nur für Tests): WAMO_LABOR_GERAETE_WURZEL=/pfad/zu/einem/wegwerf/ordner stellt allen Pfaden unter /etc, /usr, /var und /run diesen Ordner voran,
 # WAMO_LABOR_GERAETE_JETZT=<Sekunden> ersetzt die Uhrzeit (Prüfung der 12-Stunden-Frist), WAMO_LABOR_CADDY_DIR den Ordner von wamo-caddy
-# (Standard /home/wamocon/wamo-tls/caddy). nmblookup, avahi-resolve, docker, curl, flock und logger stammen dann aus dem PATH (Attrappen).
+# (Standard /home/wamocon/wamo-tls/caddy). nmblookup, avahi-resolve, ping, ip, docker, curl, flock und logger stammen dann aus dem PATH (Attrappen).
 set -euo pipefail
 umask 077
 export LC_ALL=C
@@ -64,6 +76,7 @@ SITE_DATEI="$CADDY_DIR/etc/kern/wamo-labor.caddy"
 MAX_JE_NAME=4          # mehr Antworten je Name sind verdächtig: nichts Neues zulassen
 MAX_PARALLEL=4         # so viele Namen werden höchstens gleichzeitig aufgelöst (TasksMax der Unit und die Dauer eines Laufs hängen daran)
 SUCHFRIST_S=8          # so lange darf eine Namensauflösung (je Quelle) dauern
+PROBE_FRIST_S=2        # so lange darf jeder der zwei Schritte der Probe einer Adresse aus mDNS dauern (alle Adressen eines Namens gleichzeitig)
 RELOAD_ABSTAND_S=180   # neue Zulassungen: frühestens so lange nach dem letzten Versuch (auch nach einem Misserfolg), ein Entzug nie
 STAND_ABSTAND_S=300    # ohne Änderung wird der Stand höchstens alle 5 Minuten geschrieben
 WARN_ABSTAND_S=3600    # dieselbe Warnung höchstens einmal je Stunde
@@ -77,6 +90,7 @@ SITE_HINZU=nein
 GESCHRIEBEN=0
 GEWARNT=0
 WARN_NEU=nein
+NACHZIEHEN=nein
 AUFLOESUNG=""
 STAND_TMP=""
 ARBEIT=""
@@ -86,7 +100,7 @@ ALT_ZEILEN=()
 NEU=()
 MELDUNGEN=()
 WARNUNGEN=()
-declare -A ALT=() FRISCH=() ANZAHL=()
+declare -A ALT=() FRISCH=() ANZAHL=() VERWORFEN=()
 
 fehler() { echo "wamo-labor-geraete: $*" >&2; exit 1; }
 usage() { echo "Aufruf: $0 [--trocken]" >&2; exit 2; }
@@ -208,26 +222,59 @@ lan_filtern() {
   done | sort -t. -k4,4n -u
 }
 
+# Ist die Adresse (geprüft, aus dem Büro-LAN) im LAN wirklich da? Eine kurze Probe mit ping (das Ergebnis zählt nicht, sie löst nur ARP aus, auch bei Geräten, die
+# Ping nicht beantworten), danach muss die Nachbartabelle eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY oder PROBE zeigen. FAILED, INCOMPLETE oder kein
+# Eintrag heißt nein. ip bekommt die Adresse ohne "--" (das kennt ip nicht als Ende der Optionen), sie ist geprüft und beginnt nie mit einem Bindestrich.
+im_lan_da() {
+  timeout "$PROBE_FRIST_S" ping -c1 -W1 -- "$1" >/dev/null 2>&1 || true
+  timeout "$PROBE_FRIST_S" ip -4 neigh show "$1" 2>/dev/null | tr -d '\r' | awk -v a="$1" '
+    $1 == a { l = 0; s = 0; for (i = 2; i <= NF; i++) { if ($i == "lladdr") l = 1; if ($i ~ /^(REACHABLE|STALE|DELAY|PROBE)$/) s = 1 } if (l && s) da = 1 }
+    END { exit !da }'
+}
+
+# Je Adresse (stdin, eine je Zeile) gleichzeitig die Probe im_lan_da: Zeilen "ADRESSE ja" oder "ADRESSE nein"
+proben() {
+  local adr
+  while IFS= read -r adr; do
+    { if im_lan_da "$adr"; then echo "$adr ja"; else echo "$adr nein"; fi; } &
+  done
+  wait
+}
+
+# Von den Antworten aus mDNS (ANTWORT, eine Adresse je Zeile) nur die, die im LAN da sind, die übrigen hängt sie an DATEI an (Befund 17.11.2026: mDNS lieferte für ein
+# Gerät abwechselnd zwei Adressen, die beide tot waren). Mehr als MAX_JE_NAME Antworten gehen ohne Probe weiter: Der Name ist dann ohnehin verdächtig (nichts Neues,
+# nur Bestätigung), und eine Flut von Antworten wird so nie zu einer Flut von Proben.
+nur_im_lan_da() {
+  local adr ergebnis
+  [ -n "$1" ] || return 0
+  if (( $(wc -l <<<"$1") > MAX_JE_NAME )); then printf '%s\n' "$1"; return 0; fi
+  while read -r adr ergebnis; do
+    if [ "$ergebnis" = ja ]; then printf '%s\n' "$adr"; else printf '%s\n' "$adr" >> "$2"; fi
+  done < <(proben <<<"$1" | sort -t. -k4,4n)
+}
+
 # Die Antworten eines Namens ("--": Der Name ist nie eine Option). NetBIOS hat Vorrang: Nur wenn es nach dem Filter auf das Büro-LAN keine Adresse liefert (kein Treffer,
-# Fehler, Zeitüberschreitung, nur virtuelle Adressen), wird mDNS gefragt und seine Antwort verwendet (für Mac- und Linux-Geräte). Kein Zusammenführen: mDNS liefert
-# gern eine veraltete Adresse, die später ein fremdes Gerät per DHCP bekommen könnte.
+# Fehler, Zeitüberschreitung, nur virtuelle Adressen), wird mDNS gefragt und seine Antwort verwendet (für Mac- und Linux-Geräte), aber nur die Adressen, die im LAN da
+# sind (nur_im_lan_da, verworfene nach VERWORFEN_DATEI). NetBIOS-Antworten gelten ohne Probe. Kein Zusammenführen: mDNS liefert gern eine veraltete Adresse, die später
+# ein fremdes Gerät per DHCP bekommen könnte. Aufruf: NAME VERWORFEN_DATEI.
 aufloesen() {
   local antwort
   antwort="$(timeout "$SUCHFRIST_S" nmblookup -- "$1" 2>/dev/null | awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $1 }' | tr -d '\r' | lan_filtern || true)"
   if [ -z "$antwort" ]; then
     antwort="$(timeout "$SUCHFRIST_S" avahi-resolve -4 -n -- "$1.local" 2>/dev/null | awk 'NF >= 2 && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { print $2 }' | tr -d '\r' | lan_filtern || true)"
+    antwort="$(nur_im_lan_da "$antwort" "$2")"
   fi
   if [ -n "$antwort" ]; then printf '%s\n' "$antwort"; fi
 }
 
-# Die Namen mit höchstens MAX_PARALLEL gleichzeitigen Auflösungen (eine Auflösung dauert bis zu zwei Fristen, viele Namen sollen den Takt von einer Minute nicht
-# sprengen und die Unit nicht mit Prozessen fluten)
+# Die Namen mit höchstens MAX_PARALLEL gleichzeitigen Auflösungen (eine Auflösung dauert bis zu zwei Fristen und die Probe, viele Namen sollen den Takt von einer
+# Minute nicht sprengen und die Unit nicht mit Prozessen fluten)
 frisch_holen() {
   local i name gefunden laufend=0
   AUFLOESUNG="$(mktemp -d)"
   for i in "${!NAMEN[@]}"; do
     if (( laufend >= MAX_PARALLEL )); then wait -n || true; laufend=$((laufend - 1)); fi
-    aufloesen "${NAMEN[$i]}" > "$AUFLOESUNG/$i" &
+    aufloesen "${NAMEN[$i]}" "$AUFLOESUNG/$i.verworfen" > "$AUFLOESUNG/$i" &
     laufend=$((laufend + 1))
   done
   wait
@@ -236,6 +283,7 @@ frisch_holen() {
     mapfile -t gefunden < "$AUFLOESUNG/$i"
     ANZAHL[$name]="${#gefunden[@]}"
     FRISCH[$name]="${gefunden[*]}"
+    if [ -s "$AUFLOESUNG/$i.verworfen" ]; then VERWORFEN[$name]="$(paste -sd' ' "$AUFLOESUNG/$i.verworfen")"; fi
   done
 }
 
@@ -259,11 +307,15 @@ bestaetigte_antworten() {
 }
 
 # Was die Antworten neu zulassen dürfen: Mehr als MAX_JE_NAME Antworten sind verdächtig (Flut oder Täuschung): Nichts Neues, Warnung, aber schon zugelassene Adressen,
-# die weiter antworten, werden bestätigt (ein Fremdgerät friert das echte nicht ein). Bei einem Fehler in den Eingaben gilt dasselbe: nur Bestätigung.
+# die weiter antworten, werden bestätigt (ein Fremdgerät friert das echte nicht ein). Bei einem Fehler in den Eingaben gilt dasselbe: nur Bestätigung. Adressen aus mDNS,
+# die im LAN nicht da sind (nur_im_lan_da), kommen als Warnung dazu (Name und Adresse maskiert wie in den anderen Meldungen, höchstens einmal je Stunde).
 frisch_einschraenken() {
-  local name
+  local name adr
   WARNUNGEN=()
   for name in "${NAMEN[@]}"; do
+    for adr in ${VERWORFEN[$name]:-}; do
+      WARNUNGEN+=("WARNUNG Gerät $(kurz "$name"): $(kurz "$adr") aus mDNS verworfen (im LAN nicht da, nach einer Probe kein ARP-Eintrag).")
+    done
     if [ "${ANZAHL[$name]:-0}" -gt "$MAX_JE_NAME" ]; then
       FRISCH[$name]="$(bestaetigte_antworten "$name")"
       WARNUNGEN+=("WARNUNG Gerät $name: ${ANZAHL[$name]} Antworten im Büro-LAN (mehr als $MAX_JE_NAME): Es wird nichts Neues zugelassen, schon zugelassene Adressen werden bestätigt.")
@@ -274,14 +326,42 @@ frisch_einschraenken() {
 }
 
 # ---------- Vergleich
-# Der neue Stand: Antwortet ein Name, gelten genau seine neuen Adressen. Antwortet er nicht, bleiben seine alten Adressen höchstens GERAETE_FRIST_S nach der
-# letzten Antwort (der Zeitpunkt der letzten Antwort bleibt dabei unverändert).
+# Die bisherigen Adressen eines Namens, die nicht in seiner neuen Antwort stehen und deren letzte Antwort höchstens ERSATZ_FRIST_S zurückliegt (NAME): je Zeile
+# "ZEITPUNKT ADRESSE", die jüngsten zuerst, jede Adresse einmal
+ersatz_adressen() {
+  local e adr zeit frisch=" ${FRISCH[$1]:-} "
+  for e in ${ALT[$1]:-}; do
+    adr="${e%%:*}"
+    zeit="${e##*:}"
+    if [[ "$frisch" != *" $adr "* ]] && (( JETZT - zeit <= ERSATZ_FRIST_S )); then printf '%s %s\n' "$zeit" "$adr"; fi
+  done | sort -k1,1nr -k2,2 | awk '!gesehen[$2]++'
+}
+
+# Antwortet eine Adresse, deren Zeitpunkt im Stand mindestens STAND_ABSTAND_S zurückliegt, muss der Stand geschrieben werden (NAME, setzt NACHZIEHEN=ja): Sonst ginge
+# die Antwort verloren, die Ersatzfrist liefe ab einer älteren Antwort, und bei abwechselnden Antworten fiele eine Adresse weg, die immer wieder antwortet.
+nachziehen_pruefen() {
+  local e frisch=" ${FRISCH[$1]:-} "
+  for e in ${ALT[$1]:-}; do
+    if [[ "$frisch" == *" ${e%%:*} "* ]] && (( JETZT - ${e##*:} >= STAND_ABSTAND_S )); then NACHZIEHEN=ja; fi
+  done
+}
+
+# Der neue Stand: Antwortet ein Name, gelten seine neuen Adressen mit dem Zeitpunkt jetzt, dazu seine bisherigen Adressen aus ersatz_adressen mit ihrem alten Zeitpunkt
+# (mDNS antwortet teils abwechselnd mit einer aktuellen und einer veralteten Adresse, sofortiges Ersetzen ließ die Site flattern). Zusammen höchstens MAX_JE_NAME: die
+# frischen zuerst, von den alten die jüngsten. Antwortet er nicht, bleiben seine alten Adressen höchstens GERAETE_FRIST_S nach der letzten Antwort (der Zeitpunkt der
+# letzten Antwort bleibt dabei unverändert).
 stand_berechnen() {
-  local name adr zeit eintrag
+  local name adr zeit eintrag n
   NEU=()
+  NACHZIEHEN=nein
   for name in "${NAMEN[@]}"; do
     if [ -n "${FRISCH[$name]:-}" ]; then
-      for adr in ${FRISCH[$name]}; do NEU+=("$name $adr $JETZT"); done
+      n=0
+      for adr in ${FRISCH[$name]}; do NEU+=("$name $adr $JETZT"); n=$((n + 1)); done
+      while read -r zeit adr; do
+        if (( n < MAX_JE_NAME )); then NEU+=("$name $adr $zeit"); n=$((n + 1)); fi
+      done < <(ersatz_adressen "$name")
+      nachziehen_pruefen "$name"
     else
       for eintrag in ${ALT[$name]:-}; do
         adr="${eintrag%%:*}"
@@ -435,8 +515,8 @@ schnittmenge_begrenzen() {
 }
 
 # Anwenden: Eine neue Zulassung wartet, bis der letzte Versuch mindestens RELOAD_ABSTAND_S zurückliegt (auch nach einem Misserfolg; bis dahin gilt nur die Schnittmenge,
-# eine Rücknahme nie), ein reiner Entzug nie. Der Stand wird geschrieben, wenn sich die Menge ändert, eine Warnung gemeldet wurde oder der letzte Schreibzeitpunkt mehr als
-# STAND_ABSTAND_S zurückliegt.
+# eine Rücknahme nie), ein reiner Entzug nie. Der Stand wird geschrieben, wenn sich die Menge ändert, eine Warnung gemeldet wurde, ein Zeitpunkt nachziehen muss
+# (nachziehen_pruefen) oder der letzte Schreibzeitpunkt mehr als STAND_ABSTAND_S zurückliegt.
 anwenden() {
   local m
   site_abweichung
@@ -453,7 +533,7 @@ anwenden() {
     GELADEN="$JETZT"
   fi
   warnungen_melden
-  if [ "$GEAENDERT" = ja ] || [ "$WARN_NEU" = ja ] || (( JETZT - GESCHRIEBEN >= STAND_ABSTAND_S )); then
+  if [ "$GEAENDERT" = ja ] || [ "$WARN_NEU" = ja ] || [ "$NACHZIEHEN" = ja ] || (( JETZT - GESCHRIEBEN >= STAND_ABSTAND_S )); then
     stand_schreiben
     for m in "${MELDUNGEN[@]}"; do melde "$m"; done
   fi
