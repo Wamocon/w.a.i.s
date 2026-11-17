@@ -31,7 +31,8 @@ from stimme_modell import (
     mittelpunkt,
     modell_pfad,
     normalisieren,
-    sprachbloecke,
+    ohne_pausen,
+    schwelle_einlernen,
 )
 
 RATE = 16000
@@ -75,18 +76,85 @@ class VektorTests(unittest.TestCase):
         self.assertLess(mittelpunkt([a, b])[1], 0.8)
 
 
+def secs(pcm: bytes) -> float:
+    return len(pcm) / 2 / RATE
+
+
 class AudioTests(unittest.TestCase):
-    def test_pausen_fallen_weg(self):
-        pcm = ton(1.0) + stille(2.0) + ton(1.0)
-        self.assertAlmostEqual(len(sprachbloecke(pcm, RATE)) / 2 / RATE, 2.0, places=1)
+    """Einlernen passend zum Prüfen (17.11.2026): kein Schnitt in 20-ms-Blöcke mehr, nur Pausen über PAUSE_SECS fallen weg, wie in einer
+    Äußerung, die der Prüfer anhand der Sprachpausenerkennung ausschneidet."""
+
+    def test_lange_pausen_fallen_weg(self):
+        self.assertEqual(sm.PAUSE_SECS, 0.3)
+        self.assertAlmostEqual(secs(ohne_pausen(ton(1.0) + stille(2.0) + ton(1.0), RATE)), 2.0, places=2)
+        self.assertAlmostEqual(secs(ohne_pausen(ton(1.0) + stille(0.32) + ton(1.0), RATE)), 2.0, places=2)
+
+    def test_kurze_pausen_und_raender_bleiben(self):
+        self.assertAlmostEqual(secs(ohne_pausen(ton(1.0) + stille(0.2) + ton(1.0), RATE)), 2.2, places=2)
+        self.assertAlmostEqual(secs(ohne_pausen(stille(0.24) + ton(1.0) + stille(0.1), RATE)), 1.34, places=2)
+
+    def test_leise_sprache_wird_nicht_zerschnitten(self):
+        """Ein leiser Block mitten im Wort (unter -45 dBFS, kürzer als eine Pause) bleibt: der Ton ist derselbe wie beim Prüfen."""
+        pcm = ton(0.5) + ton(0.1, amplitude=100) + ton(0.5)
+        self.assertEqual(ohne_pausen(pcm, RATE), pcm)
 
     def test_nur_stille_ergibt_nichts(self):
-        self.assertEqual(sprachbloecke(stille(1.0), RATE), b"")
+        self.assertEqual(ohne_pausen(stille(1.0), RATE), b"")
+        self.assertEqual(ohne_pausen(b"", RATE), b"")
 
-    def test_stuecke_gleich_lang_rest_faellt_weg(self):
+    def test_stuecke_von_anderthalb_sekunden_rest_faellt_weg(self):
+        self.assertEqual(sm.STUECK_SECS, 1.5)
         stuecke = einlern_stuecke(ton(10.0), RATE)
-        self.assertEqual(len(stuecke), 3)
-        self.assertTrue(all(len(s) == RATE * 3 * 2 for s in stuecke))
+        self.assertEqual(len(stuecke), 6)
+        self.assertTrue(all(len(s) == int(RATE * 1.5) * 2 for s in stuecke))
+
+    def test_zwanzig_sekunden_sprache_ergeben_genug_stuecke(self):
+        pcm = b"".join(ton(2.0) + stille(0.6) for _ in range(10))  # 20 s Sprache mit Pausen zwischen den Sätzen
+        stuecke = einlern_stuecke(ohne_pausen(pcm, RATE), RATE)
+        self.assertEqual(len(stuecke), 13)
+        self.assertGreaterEqual(len(stuecke), sm.MIN_STUECKE)
+        self.assertLessEqual(sm.MIN_STUECKE, 10)
+        self.assertGreaterEqual(sm.MIN_STUECKE, 6)
+
+
+def streuende(n: int, abstand: float, seed: int = 3) -> list[np.ndarray]:
+    """n Abdrücke um eine gemeinsame Richtung, je weiter abstand, desto unähnlicher."""
+    rng = np.random.default_rng(seed)
+    basis = normalisieren(rng.normal(size=DIM))
+    return [normalisieren(basis + abstand * normalisieren(rng.normal(size=DIM))) for _ in range(n)]
+
+
+class PersoenlicheSchwelleTests(unittest.TestCase):
+    """Beim Einlernen: je Stück der Kosinus gegen den Mittelpunkt der übrigen Stücke (leave-one-out), davon das 10-%-Quantil minus 0,03,
+    begrenzt auf 0,30 bis 0,50."""
+
+    def test_feste_werte(self):
+        self.assertEqual((sm.SCHWELLE_QUANTIL, sm.SCHWELLE_ABSTAND, sm.SCHWELLE_MIN, sm.SCHWELLE_MAX), (0.10, 0.03, 0.30, 0.50))
+
+    def test_leave_one_out_quantil_minus_abstand(self):
+        abdruecke = streuende(12, 1.4)
+        loo = []
+        for i, e in enumerate(abdruecke):
+            rest = normalisieren(np.mean([x for j, x in enumerate(abdruecke) if j != i], axis=0))
+            loo.append(kosinus(e, rest))
+        q10 = float(np.quantile(loo, 0.10))
+        self.assertTrue(0.33 < q10 < 0.53, q10)  # die Daten liegen so, dass die Grenzen nicht greifen
+        schwelle, quantil = schwelle_einlernen(abdruecke)
+        self.assertAlmostEqual(quantil, q10, places=5)
+        self.assertAlmostEqual(schwelle, q10 - 0.03, places=5)
+        self.assertIsInstance(schwelle, float)
+
+    def test_begrenzt_auf_0_30_bis_0_50(self):
+        gleich = [normalisieren(np.ones(DIM))] * 12
+        self.assertEqual(schwelle_einlernen(gleich)[0], 0.50)  # sehr ruhige Aufnahme: nie strenger als 0,5
+        zufall = [normalisieren(x) for x in np.random.default_rng(9).normal(size=(12, DIM))]
+        schwelle, quantil = schwelle_einlernen(zufall)
+        self.assertLess(quantil, 0.3)
+        self.assertEqual(schwelle, 0.30)  # unruhige Aufnahme: nie lockerer als 0,3
+
+    def test_zu_wenig_stuecke_ergeben_keine_schwelle(self):
+        self.assertEqual(schwelle_einlernen([]), (None, None))
+        self.assertEqual(schwelle_einlernen([normalisieren(np.ones(DIM))]), (None, None))
 
 
 class ModellPfadTests(unittest.TestCase):

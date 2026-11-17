@@ -44,19 +44,26 @@ def bereites_gate(modus="streng", uhr=None, schwellen: Schwellen | None = None) 
     return gate
 
 
-def urteil(art: str, secs: float = 2.0, wert: float | None = 0.12, nr: int = 1, ueberlappung: bool = False) -> Urteil:
-    return Urteil(nr=nr, urteil=art, wert=wert, secs=secs, ueberlappung=ueberlappung, um=1000.0)
+def urteil(art: str, secs: float = 2.0, wert: float | None = 0.12, nr: int = 1, ueberlappung: bool = False,
+           schwelle: float | None = None) -> Urteil:
+    return Urteil(nr=nr, urteil=art, wert=wert, secs=secs, ueberlappung=ueberlappung, um=1000.0, schwelle=schwelle)
+
+
+# Schwelle für eigen bis zur Kalibrierung vom 17.11.2026 (0,5 für alle Längen): die Regeltests mit den Werten aus dem Journal vom 16.11.2026
+# prüfen die Regel des Wächters, nicht die Schwellen; die gelten seither nach Länge (test_stimme_gate.SchwelleNachLaengeTests)
+BIS_17_11 = {"eigen_min_kurz": 0.5, "eigen_min_lang": 0.5}
 
 
 def eingestuft(wert: float, secs: float, ueberlappung: bool = False, schwellen: Schwellen | None = None) -> Urteil:
-    """Ein Urteil, wie der Prüfer es fällt (StimmGate.einstufen mit den Standardschwellen oder den übergebenen)."""
-    gate = StimmGate(schwellen=schwellen or Schwellen())
+    """Ein Urteil, wie der Prüfer es fällt (StimmGate.einstufen mit den Schwellen bis 17.11.2026 oder den übergebenen)."""
+    gate = StimmGate(schwellen=schwellen or Schwellen(**BIS_17_11))
     return urteil(gate.einstufen(wert, secs, ueberlappung), secs=secs, wert=wert, ueberlappung=ueberlappung)
 
 
 def alt(**kwargs) -> Schwellen:
-    """Beide Schalter vom 17.11.2026 aus (WAMO_STIMME_NUR_EIGEN=aus, WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN=aus): das Verhalten davor."""
-    return Schwellen(nur_eigen=False, unterbrechen_nur_eigen=False, **kwargs)
+    """Beide Schalter vom 17.11.2026 aus (WAMO_STIMME_NUR_EIGEN=aus, WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN=aus): das Verhalten davor, mit der
+    Schwelle von damals."""
+    return Schwellen(nur_eigen=False, unterbrechen_nur_eigen=False, **{**BIS_17_11, **kwargs})
 
 
 ALT = alt()
@@ -143,12 +150,24 @@ class NurEigenRegelTests(unittest.TestCase):
         for u, soll in faelle:
             self.assertEqual(verwerfen(u, s), soll, u)
 
+    def test_befund_vom_17_11_mit_der_schwelle_nach_laenge(self):
+        """Über 70 % der eigenen Äußerungen waren verworfen (Werte meist 0,35 bis 0,60 bei 0,4 bis 1,8 s). Mit der Schwelle nach Länge geht
+        die eigene Stimme durch, die zweite Person (0,10 bis 0,30) bleibt draußen."""
+        s = Schwellen()
+        for wert, secs in ((0.35, 0.4), (0.38, 0.9), (0.41, 1.2), (0.36, 1.5), (0.38, 1.8), (0.6, 0.6)):
+            u = eingestuft(wert, secs, schwellen=s)
+            self.assertIn(u.urteil, (EIGEN, KURZ), (wert, secs))
+            self.assertFalse(verwerfen(u, s), (wert, secs))
+        for wert, secs in ((0.1, 0.5), (0.22, 1.0), (0.3, 1.8), (0.3, 3.0)):
+            self.assertTrue(verwerfen(eingestuft(wert, secs, schwellen=s), s), (wert, secs))
+        self.assertTrue(verwerfen(eingestuft(0.4, 3.5, schwellen=s), s))  # lang und nicht sicher: die lange Schwelle 0,45 gilt
+
     def test_verwerfen_max_und_min_secs_wirken_nur_bei_aus(self):
         """Die Schalter vom 16.11.2026 wirken nur mit WAMO_STIMME_NUR_EIGEN=aus wie bisher."""
-        s = Schwellen(verwerfen_max=0.3, verwerfen_min_secs=5.0)
+        s = Schwellen(verwerfen_max=0.3, verwerfen_min_secs=5.0, **BIS_17_11)
         self.assertTrue(verwerfen(eingestuft(0.35, 1.1, schwellen=s), s))
         self.assertTrue(verwerfen(eingestuft(0.15, 0.4, schwellen=s), s))
-        s = Schwellen(verwerfen_max=0.3, verwerfen_min_secs=5.0, nur_eigen=False)
+        s = Schwellen(verwerfen_max=0.3, verwerfen_min_secs=5.0, nur_eigen=False, **BIS_17_11)
         self.assertFalse(verwerfen(eingestuft(0.35, 1.1, schwellen=s), s))
         self.assertFalse(verwerfen(eingestuft(0.15, 0.4, schwellen=s), s))
 
@@ -258,6 +277,14 @@ class VerwerfenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texte[0].text.strip(), "")
         self.assertEqual(meldungen, [{"type": "stimme", "ergebnis": "unklar", "wert": 0.31, "modus": "streng", "ignoriert": True,
                                       "zeit": ZEIT}])
+
+    async def test_log_nennt_die_schwelle_des_urteils(self):
+        waechter = StimmWaechter(bereites_gate(), AttrappePruefer(urteil(UNKLAR, secs=2.25, wert=0.38, schwelle=0.4)))
+        with mock.patch.object(stimme_waechter.logger, "info") as info:
+            await durchlassen(waechter, [final("Was gibt es heute in der Kantine")])
+        self.assertIn("Schwelle", info.call_args.args[0])
+        self.assertEqual(info.call_args.args[1:], ("unklare", 0.38, 2.25, 0.4))
+        self.assertNotIn("Kantine", repr(info.call_args))
 
     async def test_mit_beiden_schaltern_aus_gehen_eigen_kurz_und_unsicheres_unveraendert_durch(self):
         """Das Verhalten vor dem 17.11.2026: nur die Meldung je Urteil (mit ignoriert false und zeit) ist neu."""

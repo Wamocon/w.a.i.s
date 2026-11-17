@@ -24,9 +24,9 @@ Sekunde Sprache streut der Abdruck stark, deshalb gilt dort nur "kurz" (StimmGat
 deshalb: FRUEH_AB_SECS (1 s) nach dem Beginn der Äußerung (laut VAD) und danach alle FRUEH_TAKT_SECS rechnet der Prüfer, solange die
 Äußerung läuft und WAMO spricht, die letzten FRUEH_FENSTER_SECS (2 s) der Äußerung. Das Fenster statt der ganzen Äußerung, weil eine
 Äußerung während der Rede von WAMO oft mit Echo oder einer fremden Stimme beginnt; die eigene Stimme danach soll trotzdem durchkommen.
-Klingt es nach der Person (Wert ab EIGEN_MIN, unter Überlappung), schickt der Prüfer einmal je Äußerung StimmUrteilFrame mit frueh, und
-laufend_eigen sagt ja, solange die Äußerung läuft. Ein frühes "nicht eigen" entscheidet nichts (zu wenig Ton, Echo), es zählt erst das
-Urteil am Sprechende; dazu kommt ein StimmUrteilFrame ohne frueh, solange keine neuere Äußerung begonnen hat (sonst gälte es für sie).
+Klingt es nach der Person (Wert ab der Schwelle für eigen, StimmGate.schwelle_fuer, unter Überlappung), schickt der Prüfer einmal je
+Äußerung StimmUrteilFrame mit frueh, und laufend_eigen sagt ja, solange die Äußerung läuft. Ein frühes "nicht eigen" entscheidet nichts
+(zu wenig Ton, Echo), es zählt erst das Urteil am Sprechende; dazu kommt ein StimmUrteilFrame ohne frueh, solange keine neuere Äußerung begonnen hat (sonst gälte es für sie).
 Ein frühes eigen merkt sich der Prüfer auch für den Wächter (frueh_eigen). Kurze Äußerungen ("Stopp", unter einer Sekunde) bekommen also nur
 das Urteil am Sprechende: WAMO hält dort rund 0,5 bis 1 Sekunde später an als bisher, und das ist so gewollt. Das frühe Urteil ändert
 weder den Prüfzustand im Gate (Werkzeuge) noch das Urteil, auf das das Transkript wartet, und es geht nicht an die Oberfläche.
@@ -42,7 +42,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-import numpy as np
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -58,7 +57,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 
 from soft_interrupt import StimmUrteilFrame
-from stimme_einlernen import Einlernen
+from stimme_einlernen import Einlernen, Speichern
 from stimme_gate import EIGEN, KURZ, UNKLAR, StimmGate
 from stimme_modell import ModellQuelle, kosinus
 
@@ -78,7 +77,7 @@ FRUEH_FENSTER_SECS = 2.0
 @dataclass(frozen=True)
 class Urteil:
     """Ergebnis der Prüfung einer Äußerung. nr: Nummer der Äußerung. urteil: eigen, fremd, unklar oder kurz. secs: reine Sprache.
-    um: Zeitpunkt (Uhr des Gates)."""
+    um: Zeitpunkt (Uhr des Gates). schwelle: ab diesem Wert hätte die Äußerung als eigen gegolten (StimmGate.schwelle_fuer), None ohne Wert."""
 
     nr: int
     urteil: str
@@ -86,6 +85,7 @@ class Urteil:
     secs: float
     ueberlappung: bool
     um: float
+    schwelle: float | None = None
 
 
 class Stimmpruefer(FrameProcessor):
@@ -96,7 +96,7 @@ class Stimmpruefer(FrameProcessor):
         gate: StimmGate,
         modell: ModellQuelle,
         *,
-        speichern: Callable[[np.ndarray, str, datetime], Awaitable[bool]],
+        speichern: Speichern,
         sagen: Callable[[str], Awaitable[None]],
         uhr: Callable[[], float] = time.time,
         nachweis: Callable[[], bool] | None = None,
@@ -277,7 +277,7 @@ class Stimmpruefer(FrameProcessor):
         if not math.isfinite(wert) or gate.abdruck is None:
             return
         urteil = gate.einstufen(wert, secs, True)
-        logger.info("Stimme früh: {:.2f} bei {:.1f} s (WAMO spricht) -> {}", wert, secs, urteil)
+        logger.info("Stimme früh: {:.2f} bei {:.1f} s (WAMO spricht) -> {} (Schwelle {:.2f})", wert, secs, urteil, gate.schwelle_fuer(secs))
         if urteil not in (EIGEN, KURZ) or not self._laeuft(nr) or not gate.nur_eigen_unterbricht():
             return
         self._frueh_eigen_nr = nr
@@ -350,16 +350,20 @@ class Stimmpruefer(FrameProcessor):
             return
         if gate.abdruck is None:
             return
-        await self._ergebnis(nr, gate.einstufen(wert, secs, ueberlappung), wert, secs, ueberlappung, gehoert_um)
+        await self._ergebnis(nr, gate.einstufen(wert, secs, ueberlappung), wert, secs, ueberlappung, gehoert_um, gate.schwelle_fuer(secs))
 
-    async def _ergebnis(self, nr: int, urteil: str, wert: float | None, secs: float, ueberlappung: bool, gehoert_um: float) -> None:
+    async def _ergebnis(
+        self, nr: int, urteil: str, wert: float | None, secs: float, ueberlappung: bool, gehoert_um: float, schwelle: float | None = None
+    ) -> None:
         self._gate.eintragen(urteil, gehoert_um)
-        self._urteile[nr] = Urteil(nr, urteil, wert, secs, ueberlappung, self._gate.uhr())
+        self._urteile[nr] = Urteil(nr, urteil, wert, secs, ueberlappung, self._gate.uhr(), schwelle)
         for alt in [n for n in self._urteile if n <= nr - URTEILE_MERKEN]:
             del self._urteile[alt]
         self._fertig = max(self._fertig, nr)
         if wert is not None:
-            logger.info("Stimme: {:.2f} bei {:.1f} s{} -> {}", wert, secs, " (WAMO sprach)" if ueberlappung else "", urteil)
+            # für die Kalibrierung: Wert, Länge, Urteil und die angewandte Schwelle, nie ein Inhalt
+            logger.info("Stimme: {:.2f} bei {:.1f} s{} -> {} (Schwelle {:.2f})", wert, secs, " (WAMO sprach)" if ueberlappung else "", urteil,
+                        schwelle)
         if self._gate.nur_eigen_unterbricht() and nr == self._begonnen:
             # fürs Unterbrechen (Start-Strategie und Gate, soft_interrupt.py); hat schon die nächste Äußerung begonnen, gälte es für sie
             await self.push_frame(StimmUrteilFrame(nr=nr, eigen=urteil in (EIGEN, KURZ)))

@@ -5,6 +5,7 @@ Ausführen:  python -m pytest -q test_stimme_speicher.py   (im Ordner voice-core
 
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 
 import asyncpg
 import numpy as np
@@ -20,30 +21,49 @@ ABDRUCK = np.eye(DIM, dtype=np.float32)[3]
 
 
 class FakeDb:
+    """speakers als Wörterbuch. ohne_0025: die Spalte voice_threshold fehlt (Migration 0025 noch nicht angewandt)."""
+
     configured = True
     schema = "wamo_test"
 
-    def __init__(self, zeilen: dict | None = None, fehler: Exception | None = None):
+    def __init__(self, zeilen: dict | None = None, fehler: Exception | None = None, schwellen: dict | None = None,
+                 ohne_0025: bool = False):
         self.zeilen = zeilen if zeilen is not None else {}  # user_id -> Text des Abdrucks
+        self.schwellen = schwellen if schwellen is not None else {}  # user_id -> voice_threshold
         self.fehler = fehler
+        self.ohne_0025 = ohne_0025
         self.calls: list[tuple] = []
 
     def t(self, name):
         return f"wamo_test.{name}"
 
-    async def fetchval(self, sql, *args):
-        self.calls.append(("fetchval", sql, args))
+    def _pruefen(self, sql):
         if self.fehler:
             raise self.fehler
+        if self.ohne_0025 and "voice_threshold" in sql:
+            raise asyncpg.UndefinedColumnError('column "voice_threshold" does not exist')
+
+    async def fetchval(self, sql, *args):
+        self.calls.append(("fetchval", sql, args))
+        self._pruefen(sql)
         return self.zeilen.get(args[0])
+
+    async def fetchrow(self, sql, *args):
+        self.calls.append(("fetchrow", sql, args))
+        self._pruefen(sql)
+        if args[0] not in self.zeilen:
+            return None
+        return {"abdruck": self.zeilen[args[0]], "schwelle": self.schwellen.get(args[0]) if "voice_threshold" in sql else None}
 
     async def execute(self, sql, *args):
         self.calls.append(("execute", sql, args))
-        if self.fehler:
-            raise self.fehler
+        self._pruefen(sql)
         if sql.startswith("delete"):
+            self.schwellen.pop(args[0], None)
             return f"DELETE {1 if self.zeilen.pop(args[0], None) is not None else 0}"
         self.zeilen[args[0]] = args[2]
+        if "voice_threshold" in sql:
+            self.schwellen[args[0]] = args[5]
         return "INSERT 0 1"
 
 
@@ -110,6 +130,65 @@ class LadenTests(unittest.IsolatedAsyncioTestCase):
     async def test_ohne_datenbank_oder_profil_wird_nichts_gefragt(self):
         for store in (speicher(USER_A, None), speicher(None, FakeDb()), speicher("keine-uuid", FakeDb())):
             self.assertEqual(await ss.abdruck_laden(store), (False, None))
+            self.assertEqual(await ss.abdruck_mit_schwelle_laden(store), (False, None, None))
+
+
+class SchwelleLadenTests(unittest.IsolatedAsyncioTestCase):
+    """Persönliche Schwelle (speakers.voice_threshold, Migration 0025) mit dem Abdruck in einer Abfrage. Fehlt die Spalte, gilt der Stand
+    davor: der Abdruck ohne Schwelle, ohne Fehler."""
+
+    def setUp(self):
+        ss._GEMELDET.clear()
+        ss._schwelle_spalte(True)
+
+    async def test_laedt_abdruck_und_schwelle(self):
+        db = FakeDb({USER_A: als_vektor(ABDRUCK)}, schwellen={USER_A: 0.42})
+        ok, abdruck, schwelle = await ss.abdruck_mit_schwelle_laden(speicher(USER_A, db))
+        self.assertTrue(ok)
+        self.assertAlmostEqual(kosinus(abdruck, ABDRUCK), 1.0, places=5)
+        self.assertAlmostEqual(schwelle, 0.42)
+        art, sql, args = db.calls[0]
+        self.assertEqual(art, "fetchrow")
+        self.assertIn("voice_threshold", sql)
+        self.assertIn("wamo_test.speakers", sql)
+        self.assertIn("is_owner", sql)
+        self.assertEqual(args, (USER_A,))
+        self.assertEqual(len(db.calls), 1)
+
+    async def test_ohne_schwelle_gilt_keine(self):
+        db = FakeDb({USER_A: als_vektor(ABDRUCK)})
+        ok, abdruck, schwelle = await ss.abdruck_mit_schwelle_laden(speicher(USER_A, db))
+        self.assertTrue(ok and abdruck is not None)
+        self.assertIsNone(schwelle)
+        self.assertEqual(await ss.abdruck_mit_schwelle_laden(speicher(USER_B, db)), (True, None, None))
+
+    async def test_unbrauchbare_schwelle_gilt_nicht(self):
+        for falsch in (0.95, 0.1, float("nan"), "0.4"):
+            db = FakeDb({USER_A: als_vektor(ABDRUCK)}, schwellen={USER_A: falsch})
+            ok, abdruck, schwelle = await ss.abdruck_mit_schwelle_laden(speicher(USER_A, db))
+            self.assertTrue(ok and abdruck is not None, falsch)
+            self.assertIsNone(schwelle, falsch)
+
+    async def test_ohne_migration_0025_wie_vorher_und_einmal_gemeldet(self):
+        db = FakeDb({USER_A: als_vektor(ABDRUCK)}, ohne_0025=True)
+        with mock.patch.object(ss.logger, "warning") as warnung:
+            ok, abdruck, schwelle = await ss.abdruck_mit_schwelle_laden(speicher(USER_A, db))
+            await ss.abdruck_mit_schwelle_laden(speicher(USER_A, db))
+        self.assertTrue(ok)
+        self.assertAlmostEqual(kosinus(abdruck, ABDRUCK), 1.0, places=5)
+        self.assertIsNone(schwelle)
+        self.assertNotIn("voice_threshold", db.calls[1][1])  # zweiter Versuch ohne die Spalte
+        self.assertEqual(warnung.call_count, 1)
+        self.assertIn("0025", warnung.call_args.args[0])
+        self.assertFalse(ss.schwelle_speicherbar())
+        db.ohne_0025 = False  # die Migration ist inzwischen angewandt
+        await ss.abdruck_mit_schwelle_laden(speicher(USER_A, db))
+        self.assertTrue(ss.schwelle_speicherbar())
+
+    async def test_datenbankfehler_bleibt_ein_fehler(self):
+        db = FakeDb(fehler=asyncpg.PostgresError("kaputt"))
+        self.assertEqual(await ss.abdruck_mit_schwelle_laden(speicher(USER_A, db)), (False, None, None))
+        self.assertEqual(len(db.calls), 1)
 
 
 class SpeichernTests(unittest.IsolatedAsyncioTestCase):
@@ -153,6 +232,45 @@ class SpeichernTests(unittest.IsolatedAsyncioTestCase):
     async def test_ohne_datenbank_kein_erfolg(self):
         am = datetime.now(timezone.utc)
         self.assertFalse(await ss.abdruck_speichern(speicher(USER_A, None), ABDRUCK, version="stimme-1", name="E", einwilligung_am=am))
+
+
+class SchwelleSpeichernTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        ss._GEMELDET.clear()
+        ss._schwelle_spalte(True)
+        self.am = datetime(2026, 11, 17, 9, 30, tzinfo=timezone.utc)
+
+    async def test_speichert_die_persoenliche_schwelle(self):
+        db = FakeDb()
+        ok = await ss.abdruck_speichern(speicher(USER_A, db), ABDRUCK, version="stimme-1", name="Erika", einwilligung_am=self.am,
+                                        schwelle=0.42)
+        self.assertTrue(ok)
+        _, sql, args = db.calls[0]
+        self.assertIn("voice_threshold", sql)
+        self.assertIn("voice_threshold = excluded.voice_threshold", sql)  # neu einlernen ersetzt auch die Schwelle
+        self.assertEqual(args[:5], (USER_A, "Erika", als_vektor(ABDRUCK), "stimme-1", self.am))
+        self.assertEqual(args[5], 0.42)
+        self.assertEqual(db.schwellen[USER_A], 0.42)
+
+    async def test_ohne_oder_mit_unbrauchbarer_schwelle_wird_null_gespeichert(self):
+        for schwelle in (None, float("nan"), 0.95):
+            db = FakeDb(schwellen={USER_A: 0.42})
+            await ss.abdruck_speichern(speicher(USER_A, db), ABDRUCK, version="stimme-1", name="E", einwilligung_am=self.am,
+                                       schwelle=schwelle)
+            self.assertIsNone(db.schwellen[USER_A], schwelle)  # die alte Schwelle gilt für den neuen Abdruck nicht
+
+    async def test_ohne_migration_0025_wird_ohne_schwelle_gespeichert(self):
+        db = FakeDb(ohne_0025=True)
+        with mock.patch.object(ss.logger, "warning") as warnung:
+            ok = await ss.abdruck_speichern(speicher(USER_A, db), ABDRUCK, version="stimme-1", name="E", einwilligung_am=self.am,
+                                            schwelle=0.42)
+        self.assertTrue(ok)
+        self.assertEqual(len(db.calls), 2)
+        self.assertNotIn("voice_threshold", db.calls[1][1])
+        self.assertEqual(len(db.calls[1][2]), 5)
+        self.assertIn(USER_A, db.zeilen)
+        self.assertEqual(warnung.call_count, 1)
+        self.assertFalse(ss.schwelle_speicherbar())  # die Sitzung lässt die nicht gespeicherte Schwelle dann weg
 
 
 class LoeschenTests(unittest.IsolatedAsyncioTestCase):

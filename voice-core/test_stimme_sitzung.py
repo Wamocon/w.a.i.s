@@ -18,6 +18,7 @@ import numpy as np
 import labor
 import memory as m
 import stimme_sitzung as ss
+import stimme_speicher as ss_speicher
 from auth_gate import Identity
 from stimme_einlernen import ZIEL_SECS
 from stimme_einwilligung import EINWILLIGUNG_TEXT, EINWILLIGUNG_VERSION
@@ -102,6 +103,18 @@ class LaborTests(unittest.TestCase):
     def test_status_aus_fuer_die_oberflaeche_im_labor(self):
         self.assertEqual(ss.nachricht_aus(), {"type": "stimme", "status": "aus", "modus": "aus"})
 
+    def test_labor_liest_weder_abdruck_noch_schwelle_auch_mit_den_neuen_schaltern(self):
+        """Kalibrierung vom 17.11.2026: Laborprofile haben keinen Abdruck und keine persönliche Schwelle; selbst wenn in speakers etwas
+        stünde, fragt der Kern es für sie nie ab."""
+        db = FakeDb({USER_A: als_vektor(EIGENER)}, schwellen={USER_A: 0.42})
+        umgebung = {"WAMO_STIMME_PRUEFUNG": "streng", "WAMO_STIMME_EIGEN_MIN_KURZ": "0.4", "WAMO_STIMME_EIGEN_MIN_LANG": "0.5"}
+        with mock.patch.dict(os.environ, umgebung):
+            for art in ("platz", "schaufenster"):
+                identity = Identity(USER_A, "Gast", "mitglied", "du", labor_art=art, labor_platz=3 if art == "platz" else None,
+                                    labor_aktiv=True)
+                self.assertIsNone(ss.StimmSitzung.fuer(identity, m.MemoryStore(USER_A, db), senden=mock.AsyncMock(), sagen=mock.AsyncMock()))
+        self.assertEqual(db.calls, [])
+
 
 class VorbereitenTests(unittest.IsolatedAsyncioTestCase):
     async def test_mit_abdruck_wird_modell_geladen_und_status_bereit(self):
@@ -143,7 +156,7 @@ class VorbereitenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_zweiter_versuch_gelingt(self):
         db = FakeDb({USER_A: als_vektor(EIGENER)})
-        echtes = db.fetchval
+        echtes = db.fetchrow
         zaehler = {"n": 0}
 
         async def mal_kaputt(sql, *args):
@@ -152,7 +165,7 @@ class VorbereitenTests(unittest.IsolatedAsyncioTestCase):
                 raise asyncpg.PostgresError("kurz weg")
             return await echtes(sql, *args)
 
-        db.fetchval = mal_kaputt
+        db.fetchrow = mal_kaputt
         s, _, _, _ = neu(db)
         with mock.patch.object(ss.asyncio, "sleep", mock.AsyncMock()):
             await s.vorbereiten()
@@ -173,11 +186,29 @@ class VorbereitenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unerwartete_ausnahme_ist_kaputt_und_wirft_nicht(self):
         db = FakeDb()
-        db.fetchval = mock.AsyncMock(side_effect=RuntimeError("unerwartet"))
+        db.fetchrow = mock.AsyncMock(side_effect=RuntimeError("unerwartet"))
         s, _, _, _ = neu(db)
         with mock.patch.object(ss.asyncio, "sleep", mock.AsyncMock()):
             await s.vorbereiten()
         self.assertEqual(s.gate.status, "kaputt")
+
+    async def test_persoenliche_schwelle_wird_mit_dem_abdruck_geladen(self):
+        db = FakeDb({USER_A: als_vektor(EIGENER), USER_B: als_vektor(EIGENER)}, schwellen={USER_A: 0.42})
+        a, _, _, _ = neu(db, user=USER_A)
+        b, _, _, _ = neu(db, user=USER_B)
+        await asyncio.gather(a.vorbereiten(), b.vorbereiten())
+        self.assertAlmostEqual(a.gate.schwelle_kurz, 0.42)
+        self.assertAlmostEqual(a.gate.schwelle_fuer(1.0), 0.42)
+        self.assertIsNone(b.gate.schwelle_kurz)  # je Profil, nie geteilt
+        self.assertAlmostEqual(b.gate.schwelle_fuer(1.0), 0.35)
+
+    async def test_ohne_migration_0025_laeuft_alles_wie_vorher(self):
+        db = FakeDb({USER_A: als_vektor(EIGENER)}, ohne_0025=True)
+        s, _, _, _ = neu(db)
+        await s.vorbereiten()
+        self.assertEqual(s.gate.status, "bereit")
+        self.assertIsNone(s.gate.schwelle_kurz)
+        self.assertAlmostEqual(s.gate.schwelle_fuer(1.0), 0.35)
 
     async def test_zwei_profile_laden_je_ihren_abdruck_und_teilen_nur_das_modell(self):
         andere = np.eye(DIM, dtype=np.float32)[9]
@@ -341,6 +372,23 @@ class NachrichtTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(vorher <= zeile[4] <= nachher)  # der Zeitpunkt der Einwilligung (beim Klick), mit Zeitzone
         self.assertIsNotNone(zeile[4].tzinfo)
         self.assertEqual(s.gate.status, "bereit")
+        self.assertEqual(zeile[5], 0.5)  # persönliche Schwelle (gleiche Stücke: die Obergrenze)
+        self.assertEqual(db.schwellen[USER_A], 0.5)
+        self.assertEqual(s.gate.schwelle_kurz, 0.5)
+
+    async def test_einlernen_ohne_migration_0025_speichert_den_abdruck_trotzdem(self):
+        ss_speicher._schwelle_spalte(True)
+        db = FakeDb(ohne_0025=True)
+        s, gesendet, uhr, _ = await self.bereit(db)
+        await s.nachricht({"aktion": "start", "einwilligung": EINWILLIGUNG_VERSION})
+        await self.aufnehmen(s, uhr)
+        await s.pruefer.einlernen_warten()
+        self.assertEqual(arten(gesendet, "stimmabdruck")[-1]["status"], "fertig")
+        self.assertIn(USER_A, db.zeilen)
+        self.assertEqual(s.gate.status, "bereit")
+        # nicht gespeichert heißt nicht wirksam, auch nicht bis zum Ende dieser Sitzung: es gilt die kurze Schwelle aus der Umgebung
+        self.assertIsNone(s.gate.schwelle_kurz)
+        self.assertAlmostEqual(s.gate.schwelle_fuer(1.0), 0.35)
 
     async def test_loeschen_entfernt_den_abdruck_und_meldet_es(self):
         db = FakeDb({USER_A: als_vektor(EIGENER), USER_B: als_vektor(EIGENER)})

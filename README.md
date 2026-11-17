@@ -1114,7 +1114,7 @@ außer `aus` nur mit Nachweis: Die Person wurde gerade sicher an der Stimme erka
 
 | Modus | Wirkung |
 | --- | --- |
-| `streng` (Standard) | **Nur die eigene Stimme** erreicht das Sprachmodell (Entscheidung vom 17.11.2026, `WAMO_STIMME_NUR_EIGEN`): durch geht nur eine Äußerung mit Wert ab `EIGEN_MIN`, auch ein kurzes eigenes "Ja". Alles andere wird verworfen: fremd, unklar mit jedem Wert, unklar ohne Wert (Prüfung fehlgeschlagen) und keine Antwort des Prüfers in der Frist; kein Zug, kein Eintrag im Verlauf und im Gedächtnis, eine Meldung an die Oberfläche (`ignoriert`). Während W.A.I.S. spricht, **unterbricht nur die eigene Stimme** (`WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN`): eine andere Stimme dämpft W.A.I.S. kurz, W.A.I.S. spricht weiter, ihr Satz wird verworfen. Werkzeuge außer Uhrzeit, Websuche und Canvas sind gesperrt, solange die Stimme nicht sicher die eigene war (oder die Person nicht getippt hat). |
+| `streng` (Standard) | **Nur die eigene Stimme** erreicht das Sprachmodell (Entscheidung vom 17.11.2026, `WAMO_STIMME_NUR_EIGEN`): durch geht nur eine Äußerung mit Wert ab der Schwelle für eigen (nach Länge, siehe Schwellen), auch ein kurzes eigenes "Ja". Alles andere wird verworfen: fremd, unklar mit jedem Wert, unklar ohne Wert (Prüfung fehlgeschlagen) und keine Antwort des Prüfers in der Frist; kein Zug, kein Eintrag im Verlauf und im Gedächtnis, eine Meldung an die Oberfläche (`ignoriert`). Während W.A.I.S. spricht, **unterbricht nur die eigene Stimme** (`WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN`): eine andere Stimme dämpft W.A.I.S. kurz, W.A.I.S. spricht weiter, ihr Satz wird verworfen. Werkzeuge außer Uhrzeit, Websuche und Canvas sind gesperrt, solange die Stimme nicht sicher die eigene war (oder die Person nicht getippt hat). |
 | `beobachten` | Misst, zeigt das Ergebnis in der Oberfläche und schreibt es ins Log, sperrt und verwirft nichts. Geeignet zum Einstellen der Schwellen. |
 | `aus` | Keine Prüfung, kein Einlernen. Löschen eines vorhandenen Abdrucks geht trotzdem. Ohne Datenbank ist die Prüfung ebenfalls aus. |
 
@@ -1122,26 +1122,70 @@ außer `aus` nur mit Nachweis: Die Person wurde gerade sicher an der Stimme erka
 
 | Schalter | Standard | Bedeutung |
 | --- | --- | --- |
-| `WAMO_STIMME_EIGEN_MIN` | 0,5 | Ab diesem Wert (Kosinus der Abdrücke, 0,35 bis 0,95) gilt eine Äußerung als die eigene Stimme |
-| `WAMO_STIMME_FREMD_MAX` | 0,3 | Bis zu diesem Wert (0 bis 0,8) gilt sie als sicher fremd; muss unter `EIGEN_MIN` liegen, sonst gelten beide Standardwerte |
-| `WAMO_STIMME_MIN_SECS` | 1 | So viel reine Sprache braucht eine Äußerung für ein Urteil (0,3 bis 10); kürzere ("Ja", "mach") erben das Vertrauen nur, wenn sie nach der eigenen Stimme klingen (Wert ab `EIGEN_MIN`), sonst gilt die Stimme als nicht sicher erkannt |
+| `WAMO_STIMME_EIGEN_MIN_KURZ` | 0,35 | Ab diesem Wert (Kosinus der Abdrücke, 0,35 bis 0,95) gilt eine Äußerung mit bis zu 1,5 s Sprache als die eigene Stimme (seit 17.11.2026). Hat das Profil eine persönliche Schwelle vom Einlernen (Migration 0025), gilt diese statt dessen |
+| `WAMO_STIMME_EIGEN_MIN_LANG` | 0,45 | Dasselbe ab 3 s Sprache, dazwischen linear (0,35 bis 0,95); nie unter der kurzen Schwelle, auch nicht unter der persönlichen |
+| `WAMO_STIMME_EIGEN_MIN` | leer | Früher die eine Schwelle für alle Längen (0,5). Gilt nur noch, wo `EIGEN_MIN_KURZ` oder `EIGEN_MIN_LANG` leer sind; ist nur sie gesetzt, gilt sie für beide Längen wie bisher. Für die Staffel nach Länge also leer lassen |
+| `WAMO_STIMME_FREMD_MAX` | 0,3 | Bis zu diesem Wert (0 bis 0,8) gilt sie bei jeder Länge als sicher fremd; muss unter der kurzen Schwelle liegen, sonst gelten die Standardwerte |
+| `WAMO_STIMME_MIN_SECS` | 1 | So viel reine Sprache braucht eine Äußerung für ein Urteil (0,3 bis 10); kürzere ("Ja", "mach") erben das Vertrauen nur, wenn sie nach der eigenen Stimme klingen (Wert ab der kurzen Schwelle), sonst gilt die Stimme als nicht sicher erkannt |
 | `WAMO_STIMME_KURZ_VERTRAUEN_SECS` | 15 | So lange läuft das Vertrauen höchstens weiter, wenn seit der letzten sicheren Erkennung nur kurze Äußerungen kamen (1 bis 120); eine sichere Erkennung oder getippter Text beginnt neu |
 | `WAMO_STIMME_VERTRAUEN_SECS` | 120 | So lange gilt "eigen" für kurze Folgesätze und Werkzeuge (10 bis 3600) |
-| `WAMO_STIMME_NUR_EIGEN` | an | Nur Modus `streng` mit Abdruck: nur eine eigene Äußerung (Wert ab `EIGEN_MIN`) erreicht das Modell, alles andere verwirft der Wächter. `aus`: die Regel vom 16.11.2026 mit den beiden Schaltern darunter |
+| `WAMO_STIMME_NUR_EIGEN` | an | Nur Modus `streng` mit Abdruck: nur eine eigene Äußerung (Wert ab der Schwelle für eigen) erreicht das Modell, alles andere verwirft der Wächter. `aus`: die Regel vom 16.11.2026 mit den beiden Schaltern darunter |
 | `WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN` | an | Nur Modus `streng` mit Abdruck: während W.A.I.S. spricht, unterbricht nur die eigene Stimme, erst nach dem Urteil eigen; eine andere Stimme dämpft W.A.I.S. nur kurz und ihr Satz wird verworfen, auch mit `NUR_EIGEN=aus`. `aus`: jede Stimme unterbricht sofort wie bisher, und was W.A.I.S. überlappt, geht durch |
-| `WAMO_STIMME_VERWERFEN_MAX` | 0,4 | Nur Modus `streng` und `NUR_EIGEN=aus`: unklare Äußerungen unter diesem Wert verwirft der Wächter (an den Bereich `FREMD_MAX` bis `EIGEN_MIN` gesetzt; 0 oder `FREMD_MAX` schaltet das Verwerfen unklarer Äußerungen ab) |
+| `WAMO_STIMME_VERWERFEN_MAX` | 0,4 | Nur Modus `streng` und `NUR_EIGEN=aus`: unklare Äußerungen unter diesem Wert verwirft der Wächter (an den Bereich `FREMD_MAX` bis `EIGEN_MIN_LANG` gesetzt; 0 oder `FREMD_MAX` schaltet das Verwerfen unklarer Äußerungen ab) |
 | `WAMO_STIMME_VERWERFEN_MIN_SECS` | 0 | Nur Modus `streng` und `NUR_EIGEN=aus`: so viel reine Sprache braucht eine Äußerung mindestens, damit sie verworfen wird (0 bis 10). Ganz wie vor dem 16.11.2026: `NUR_EIGEN=aus`, `VERWERFEN_MAX=0` und `VERWERFEN_MIN_SECS` gleich `MIN_SECS` |
 | `WAMO_STIMME_MODELL` | Cache-Ordner | Pfad der Modelldatei, Standard `XDG_CACHE_HOME/wamo/sprecher/nemo_en_titanet_large.onnx`, sonst `voice-core/.cache/sprecher/` |
 
 **Wie geprüft wird.** Das Modell (NeMo TitaNet-Large als ONNX über `sherpa-onnx`, 192 Werte je Stimme) läuft im Kern auf der CPU, einmal je
 Prozess für alle Sitzungen. Abdruck und Prüfzustand gehören je Sitzung zum Profil, einen Abdruck-Zwischenspeicher über Profile hinweg gibt
 es nicht. Der Ton der letzten 10 Sekunden liegt nur im Arbeitsspeicher; beim Sprechende (VAD) wird die Äußerung (höchstens die letzten 8
-Sekunden) berechnet und mit dem Abdruck verglichen. Das Ergebnis steht im Log (`Stimme: 0.78 bei 2.3 s -> eigen`, nie Inhalte). Spricht jemand,
+Sekunden) berechnet und mit dem Abdruck verglichen. Das Ergebnis steht im Log mit der angewandten Schwelle (`Stimme: 0.41 bei 0.9 s -> kurz
+(Schwelle 0.35)`, nie Inhalte). Spricht jemand,
 während W.A.I.S. spricht (Modus `streng` mit `UNTERBRECHEN_NUR_EIGEN`), rechnet der Kern schon während der Äußerung: nach einer Sekunde Sprache
-und dann jede Sekunde die letzten zwei Sekunden (`Stimme früh: 0.71 bei 1.0 s (WAMO spricht) -> eigen`). Unter einer Sekunde streut der
-Abdruck zu stark für ein Urteil; ein frühes "nicht eigen" entscheidet nichts, dann zählt das Urteil am Sprechende. Zum Einlernen
-teilt der Kern die Sprache in Stücke von 3 Sekunden, nimmt den Mittelwert und verwirft die Aufnahme, wenn die Stücke zu unterschiedlich
-klingen (zu unruhig oder mehrere Stimmen). Gespeichert werden nur 192 Zahlen, nie eine Aufnahme.
+und dann jede Sekunde die letzten zwei Sekunden (`Stimme früh: 0.71 bei 1.0 s (WAMO spricht) -> eigen (Schwelle 0.35)`). Unter einer
+Sekunde streut der Abdruck zu stark für ein Urteil; ein frühes "nicht eigen" entscheidet nichts, dann zählt das Urteil am Sprechende. Zum
+Einlernen entfernt der Kern nur Pausen über 0,3 Sekunden (leise Stellen und kurze Pausen bleiben, wie in einer Äußerung beim Prüfen), teilt
+die Sprache in Stücke von 1,5 Sekunden (aus 20 Sekunden rund 13, mindestens 8), nimmt den normierten Mittelwert und verwirft die Aufnahme,
+wenn die Stücke zu unterschiedlich klingen (zu unruhig oder mehrere Stimmen). Dazu misst er die persönliche Schwelle (siehe Kalibrierung).
+Gespeichert werden nur 192 Zahlen und diese eine Schwelle, nie eine Aufnahme. Im Log: `Stimmabdruck: 13 Stücke, Streuung 0.81, 10-%-Quantil
+0.52, persönliche Schwelle 0.49`, beim Laden `Stimmprüfung: Schwelle für kurze Äußerungen 0.49 (persönlich)`.
+
+**Kalibrierung (17.11.2026).** Befund: Im Modus streng mit `NUR_EIGEN` wurden über 70 % der Äußerungen des Besitzers verworfen. Seine Werte
+lagen meist bei 0,35 bis 0,60 bei Äußerungen von 0,4 bis 1,8 Sekunden, eine zweite Person bei 0,10 bis 0,30. Ursachen: zu kurze Prüfstücke
+(Sprachpause 0,2 s, jedes Transkript ein eigenes Urteil), die Schwelle 0,5 war nie an echten Stimmen gemessen, und Einlernen (Stücke von 3 s,
+jeder leise 20-ms-Block entfernt) und Prüfen (ganze Äußerung mit Pausen) passten nicht zueinander. Literatur zu TitaNet-L: unter einer Sekunde
+liegt der Punkt gleicher Fehlerraten bei etwa 0,30 (empfohlen mindestens 0,33), die Fehlerrate steigt von 2,4 % bei 3 s auf 18,4 % bei 1 s,
+mehrere Einlernstücke helfen deutlich. Daraus:
+
+- Schwelle nach Länge (`StimmGate.schwelle_fuer`): bis 1,5 s Sprache 0,35, ab 3 s 0,45, dazwischen linear; fremd bis 0,3 für alle Längen.
+- Einlernen wie Prüfen: keine 20-ms-Blöcke mehr, nur Pausen über 0,3 s entfernen, Stücke von 1,5 s.
+- Persönliche Schwelle (`stimme_modell.schwelle_einlernen`): je Stück der Kosinus gegen den Mittelpunkt der übrigen Stücke, davon das
+  10-%-Quantil minus 0,03, begrenzt auf 0,30 bis 0,50, gespeichert in `speakers.voice_threshold` (Migration `0025_stimme_schwelle`, nur
+  `wamo_core` liest und schreibt die Spalte). Sie ersetzt die kurze Schwelle; die lange kommt aus der Umgebung und liegt nie darunter. Fehlt
+  die Spalte (Migration nicht angewandt), läuft alles wie mit der Schwelle nach Länge, auch in der Sitzung des Einlernens.
+
+Versuch mit dem echten Modell (TitaNet-Large, `sherpa-onnx`), nur mit sieben synthetischen Hausstimmen der Sprachausgabe im Haus (Einlernen
+aus 6,6 bis 10,1 s statt 20 s, Prüfen mit einem anderen Text, jede Äußerung wie beim Prüfer mit 0,25 s Vorlauf und 0,1 s Nachlauf und
+leisem Grundrauschen; dazu zwei weitere Hausstimmen nur als fremde). "alt": Stücke von 3 s mit Blockschnitt und eine Schwelle 0,5. "neu":
+Stücke von 1,5 s ohne lange Pausen, angenommen nach Länge (0,35 bis 0,45) beziehungsweise mit persönlicher Schwelle. Werte: Mittel (kleinster)
+der eigenen, größter der fremden Äußerungen; angenommen: Anteil über der Schwelle.
+
+| Länge | eigen alt | eigen neu | fremd max alt / neu | eigen angenommen alt / nach Länge / persönlich | fremd angenommen alt / nach Länge / persönlich |
+| --- | --- | --- | --- | --- | --- |
+| 1 s | 0,55 (0,31) | 0,60 (0,37) | 0,49 / 0,51 | 32 / 42 / 36 von 42 | 0 / 21 / 2 von 336 |
+| 2 s | 0,64 (0,53) | 0,69 (0,54) | 0,49 / 0,53 | 42 / 42 / 42 von 42 | 0 / 26 / 5 von 336 |
+| 4,5 s | 0,69 (0,60) | 0,73 (0,61) | 0,49 / 0,52 | 16 / 16 / 16 von 16 | 0 / 13 / 7 von 180 |
+| 1 s, Rauschen 15 dB unter der Sprache | 0,49 (0,27) | 0,52 (0,32) | 0,44 / 0,43 | 19 / 41 / 27 von 42 | 0 / 20 / 0 von 336 |
+
+Persönliche Schwelle der sieben Hausstimmen: 0,48 bis 0,50 (10-%-Quantil 0,51 bis 0,75, also fast immer die Obergrenze). Lesart: Das neue
+Einlernen hebt die eigenen Werte bei jeder Länge um etwa 0,04 bis 0,05, die fremden kaum (0,01 bis 0,02). Mit der Schwelle nach Länge kommen
+alle eigenen Äußerungen durch, auch mit Rauschen, aber vier einander ähnliche Stimmen desselben Sprachmodells (serena, sohee, vivian, ono_anna)
+erreichen untereinander 0,45 bis 0,53 und kommen zu 6 bis 8 % über die Schwelle; echte zweite Personen lagen im Befund bei 0,10 bis 0,30. Die
+persönliche Schwelle landet bei so gleichmäßigen Aufnahmen an der Obergrenze 0,50 und ist dann für kurze Äußerungen strenger als 0,35: weniger
+fremde, aber auch weniger eigene kurze Äußerungen (bei 1 s und Rauschen 27 statt 41 von 42). Synthetische Stimmen klingen gleichmäßiger als
+Menschen; ob echte Aufnahmen niedrigere persönliche Schwellen ergeben, zeigt erst das Log nach dem neuen Einlernen. Ausrollen deshalb in zwei
+Schritten: erst der Kern (Schwelle nach Länge und neues Einlernen, Migration 0025 noch nicht angewandt, `WAMO_STIMME_EIGEN_MIN` am Server
+entfernen), Abdruck neu einlernen und die Logzeilen `Stimme: ... (Schwelle ...)` ansehen; dann Migration 0025 anwenden und noch einmal
+einlernen, die persönliche Schwelle steht im Log.
 
 **Antwortzeit.** Die Prüfung beginnt beim Sprechende und läuft parallel zur Spracherkennung. Der Wächter hält nur das **endgültige** Transkript
 einer Äußerung an, bis das Urteil da ist, höchstens 1 Sekunde; die Zwischenstände laufen ungebremst durch. Die Antwort für die eigene Stimme
@@ -1213,13 +1257,14 @@ Liegt die Datei woanders, nennt `WAMO_STIMME_MODELL` (über `wamo-core-env`) den
 laut PyPI am 14.11.2026). Ein echter Lauf auf dem Server steht aus.
 
 **Grenzen.** Die Stimmprüfung ersetzt keine Freigabe: Aktionen mit Risiko brauchen weiter die Freigabe per Klick. Sie schützt nicht gegen
-Aufnahmen oder geklonte Stimmen. Sie kann sich irren (Erkältung, Lärm, Mikrofon): Eine eigene Äußerung mit einem Wert unter `EIGEN_MIN` wird
-im Modus streng ignoriert, auch eine sehr kurze, und während W.A.I.S. spricht, unterbricht sie W.A.I.S. dann nicht; die Oberfläche zeigt einen
-Hinweis, getippter Text geht immer. Werden eigene Sätze überhört, zuerst `WAMO_STIMME_EIGEN_MIN` senken (etwa 0,45) oder neu einlernen;
+Aufnahmen oder geklonte Stimmen. Sie kann sich irren (Erkältung, Lärm, Mikrofon): Eine eigene Äußerung mit einem Wert unter der Schwelle für
+eigen wird im Modus streng ignoriert, auch eine sehr kurze, und während W.A.I.S. spricht, unterbricht sie W.A.I.S. dann nicht; die Oberfläche
+zeigt einen Hinweis, getippter Text geht immer. Werden eigene Sätze überhört, zuerst die Logzeilen ansehen (Wert, Länge, Schwelle), dann neu
+einlernen oder `WAMO_STIMME_EIGEN_MIN_KURZ` beziehungsweise `WAMO_STIMME_EIGEN_MIN_LANG` senken (die persönliche Schwelle ersetzt die kurze);
 `WAMO_STIMME_NUR_EIGEN=aus` stellt die Regel vom 16.11.2026 wieder her (dann wirken `VERWERFEN_MAX` und `VERWERFEN_MIN_SECS`),
 `WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN=aus` lässt jede Stimme wieder sofort unterbrechen. **Lautsprecher statt Headset:** Das Mikrofon hört
-W.A.I.S. mit. Ein Einwurf mischt sich dann mit dem Echo, der Wert sinkt, und besonders ein kurzes eigenes "Stopp" kann unter `EIGEN_MIN`
-fallen: W.A.I.S. spricht dann weiter. Hält das Echo die Sprachpausenerkennung offen, gibt es kein Sprechende und nur die frühen Urteile;
+W.A.I.S. mit. Ein Einwurf mischt sich dann mit dem Echo, der Wert sinkt, und besonders ein kurzes eigenes "Stopp" kann unter die
+Schwelle für eigen fallen: W.A.I.S. spricht dann weiter. Hält das Echo die Sprachpausenerkennung offen, gibt es kein Sprechende und nur die frühen Urteile;
 ein längerer Satz der Person kommt über das Fenster der letzten zwei Sekunden meist trotzdem durch. Mit Headset tritt das nicht auf. Hat das
 frühe Urteil die Person erkannt und W.A.I.S. deshalb unterbrochen, geht ihr Satz ans Modell, auch wenn das Urteil am Sprechende schwächer
 ausfällt (Echo am Anfang, eine zweite Stimme); die Werkzeuge bleiben dann gesperrt. `WAMO_STIMME_MIN_SECS` wirkt nur auf die Grenze zwischen eigen und kurz.

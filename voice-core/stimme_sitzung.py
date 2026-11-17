@@ -35,7 +35,7 @@ from stimme_einwilligung import einwilligung_gilt, einwilligung_nachricht
 from stimme_gate import StimmGate, stand_nachricht
 from stimme_modell import MODELL, ModellQuelle
 from stimme_pruefer import Stimmpruefer
-from stimme_speicher import abdruck_laden, abdruck_loeschen, abdruck_speichern
+from stimme_speicher import abdruck_loeschen, abdruck_mit_schwelle_laden, abdruck_speichern, schwelle_speicherbar
 from stimme_waechter import StimmWaechter
 
 LADE_VERSUCHE = 3  # der Abdruck wird beim Start der Sitzung gelesen; ein kurzer Ausfall der Datenbank soll nicht gleich "kaputt" heißen
@@ -135,16 +135,20 @@ class StimmSitzung:
 
     async def _laden(self) -> None:
         vorher = self.gate.zustand  # laedt oder kaputt
-        ok, abdruck = False, None
+        ok, abdruck, schwelle = False, None, None
         for versuch in range(LADE_VERSUCHE):
-            ok, abdruck = await abdruck_laden(self._memory)
+            ok, abdruck, schwelle = await abdruck_mit_schwelle_laden(self._memory)
             if ok:
                 break
             if versuch + 1 < LADE_VERSUCHE:
                 await asyncio.sleep(LADE_PAUSE_SECS * (versuch + 1))
         if self.gate.zustand != vorher:
             return  # während des Lesens gelöscht: das Gelesene ist veraltet
-        self.gate.setze_abdruck(abdruck, ok)
+        self.gate.schwelle_erlaubt = schwelle_speicherbar()
+        self.gate.setze_abdruck(abdruck, ok, schwelle=schwelle)
+        if abdruck is not None:
+            logger.info("Stimmprüfung: Schwelle für kurze Äußerungen {:.2f} ({})", self.gate.schwelle_fuer(0.0),
+                        "persönlich" if self.gate.schwelle_kurz is not None else "Umgebung")
         if abdruck is not None:
             self.gate.modell_ok = await self._modell.get() is not None
 
@@ -199,10 +203,14 @@ class StimmSitzung:
         else:
             await self.pruefer.einlernen_starten(einwilligung, jetzt_utc())
 
-    async def _speichern(self, abdruck: np.ndarray, version: str, einwilligung_am: datetime) -> bool:
-        return await abdruck_speichern(
-            self._memory, abdruck, version=version, name=getattr(self._identity, "name", ""), einwilligung_am=einwilligung_am
+    async def _speichern(self, abdruck: np.ndarray, version: str, einwilligung_am: datetime, *, schwelle: float | None = None) -> bool:
+        gespeichert = await abdruck_speichern(
+            self._memory, abdruck, version=version, name=getattr(self._identity, "name", ""), einwilligung_am=einwilligung_am,
+            schwelle=schwelle,
         )
+        # Ohne Spalte für die Schwelle (Migration 0025) wirkt sie auch in dieser Sitzung nicht: das Einlernen setzt sie danach im Gate
+        self.gate.schwelle_erlaubt = schwelle_speicherbar()
+        return gespeichert
 
     async def _loeschen(self) -> None:
         gate = self.gate

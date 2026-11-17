@@ -7,7 +7,9 @@ voice-core/.cache/sprecher/; WAMO_STIMME_MODELL nennt eine andere Datei. Fehlt s
 die SHA-256-Summe. Eine vorhandene Datei wird bei jedem Prozessstart gegen dieselbe Summe geprüft.
 
 Vergleich: Kosinus-Ähnlichkeit zweier normierter Abdrücke (1 = gleiche Stimme, um 0 = fremd). Gemessen mit den Beispielaufnahmen von
-sherpa-onnx: gleiche Sprecher 0,67 bis 0,80, fremde höchstens 0,34. Rechenzeit für 8 s Sprache rund 250 ms mit 2 Threads.
+sherpa-onnx: gleiche Sprecher 0,67 bis 0,80, fremde höchstens 0,34. Rechenzeit für 8 s Sprache rund 250 ms mit 2 Threads. Kurze
+Äußerungen liegen deutlich tiefer (Befund vom 17.11.2026 und Versuch mit Hausstimmen in der README, Abschnitt Stimmabdruck); deshalb
+schneidet das Einlernen den Ton wie der Prüfer (ohne_pausen, Stücke von 1,5 s) und misst eine persönliche Schwelle (schwelle_einlernen).
 
 Ein Prozess hält das Modell genau einmal (MODELL am Ende der Datei), alle Sitzungen und Profile benutzen dieselbe Instanz. Der Rechner
 ist nicht an ein Profil gebunden: Abdrücke und Prüfzustand gehören je Sitzung zum Gate (stimme_gate.py). Gerechnet wird nacheinander
@@ -39,12 +41,20 @@ WARTEZEITEN = (NEUER_VERSUCH_SECS, 300.0, 1800.0)  # nach jedem weiteren Fehlsch
 MODELL_MAX_BYTES = 150 * 1024 * 1024  # das Modell ist rund 100 MB groß; mehr wird nicht geladen
 GESAMT_FRIST_SECS = 600.0  # ein Download dauert höchstens 10 Minuten
 # Einlernen: die Sprache in Stücke dieser Länge teilen, jedes Stück ergibt einen Abdruck. Der Mittelwert ist der Stimmabdruck,
-# die Streuung zeigt, ob die Aufnahme sauber war.
-STUECK_SECS = 3.0
-MIN_STUECKE = 3
-# Sprache von Stille trennen (nur beim Einlernen): 20-ms-Blöcke lauter als das
+# die Streuung zeigt, ob die Aufnahme sauber war. Seit dem 17.11.2026 so lang wie eine typische Äußerung im Gespräch (vorher 3 s): Der
+# Abdruck soll zu dem passen, womit der Prüfer vergleicht. Aus 20 s Sprache werden so rund 13 Stücke.
+STUECK_SECS = 1.5
+MIN_STUECKE = 8
+# Sprache von Stille trennen (nur beim Einlernen): 20-ms-Blöcke lauter als das zählen als Sprache. Leise Stellen bleiben im Ton, nur
+# Pausen über PAUSE_SECS fallen weg, wie in einer Äußerung, die der Prüfer an den Meldungen der Sprachpausenerkennung ausschneidet.
 SPRACHE_DBFS = -45.0
 BLOCK_SECS = 0.02
+PAUSE_SECS = 0.3
+# Persönliche Schwelle (schwelle_einlernen): je Stück der Kosinus gegen den Mittelpunkt der übrigen Stücke, davon dieses Quantil minus
+# den Abstand, begrenzt auf SCHWELLE_MIN bis SCHWELLE_MAX
+SCHWELLE_QUANTIL = 0.10
+SCHWELLE_ABSTAND = 0.03
+SCHWELLE_MIN, SCHWELLE_MAX = 0.30, 0.50
 VERBINDUNG_SECS = 10.0
 LESEN_SECS = 60.0
 
@@ -245,22 +255,45 @@ def dbfs(samples: np.ndarray) -> float:
     return 20 * float(np.log10(rms / 32768)) if rms > 0 else -120.0
 
 
-def sprachbloecke(pcm: bytes, sample_rate: int, schwelle_dbfs: float = SPRACHE_DBFS) -> bytes:
-    """Nur die lauten 20-ms-Blöcke (Sprache), Pausen dazwischen fallen weg."""
+def ohne_pausen(pcm: bytes, sample_rate: int, schwelle_dbfs: float = SPRACHE_DBFS, pause_secs: float = PAUSE_SECS) -> bytes:
+    """Der Ton ohne Pausen über pause_secs: Eine Pause ist eine Folge von 20-ms-Blöcken, die nicht lauter als schwelle_dbfs sind. Kürzere
+    Pausen, leise Stellen mitten in der Sprache und kurze Ränder bleiben, wie in einer Äußerung beim Prüfen. Ohne einen lauten Block: nichts."""
     samples = np.frombuffer(pcm[: len(pcm) - len(pcm) % 2], dtype=np.int16)
     groesse = max(1, int(sample_rate * BLOCK_SECS))
-    behalten = [
-        samples[i : i + groesse]
-        for i in range(0, len(samples) - groesse + 1, groesse)
-        if dbfs(samples[i : i + groesse]) > schwelle_dbfs
-    ]
-    return np.concatenate(behalten).tobytes() if behalten else b""
+    bloecke = [samples[i : i + groesse] for i in range(0, len(samples), groesse)]
+    laut = [dbfs(b) > schwelle_dbfs for b in bloecke]
+    if not any(laut):
+        return b""
+    behalten: list[np.ndarray] = []
+    i = 0
+    while i < len(bloecke):
+        j = i + 1
+        while j < len(bloecke) and laut[j] == laut[i]:
+            j += 1
+        lauf = bloecke[i:j]
+        if laut[i] or sum(len(b) for b in lauf) <= pause_secs * sample_rate:
+            behalten.extend(lauf)
+        i = j
+    return np.concatenate(behalten).tobytes()
 
 
 def einlern_stuecke(pcm: bytes, sample_rate: int, stueck_secs: float = STUECK_SECS) -> list[bytes]:
-    """Teilt reine Sprache in gleich lange Stücke; ein kurzer Rest fällt weg."""
+    """Teilt Sprache (ohne lange Pausen) in gleich lange Stücke; ein kurzer Rest fällt weg."""
     groesse = int(sample_rate * stueck_secs) * 2
     return [pcm[i : i + groesse] for i in range(0, len(pcm) - groesse + 1, groesse)]
+
+
+def schwelle_einlernen(abdruecke: list[np.ndarray]) -> tuple[float | None, float | None]:
+    """Persönliche Schwelle für kurze Äußerungen aus den Abdrücken der Einlernstücke: je Stück der Kosinus gegen den Mittelpunkt der übrigen
+    (leave-one-out, so ähnlich klingt ein Stück von 1,5 s dieser Person zu ihrem Abdruck), davon das SCHWELLE_QUANTIL-Quantil minus
+    SCHWELLE_ABSTAND, begrenzt auf SCHWELLE_MIN bis SCHWELLE_MAX. Ergebnis (Schwelle, Quantil), mit weniger als zwei Stücken (None, None)."""
+    if len(abdruecke) < 2:
+        return None, None
+    normiert = np.stack([normalisieren(np.asarray(e, dtype=np.float64)) for e in abdruecke])
+    summe = normiert.sum(axis=0)
+    werte = [kosinus(normiert[i], summe - normiert[i]) for i in range(len(normiert))]
+    quantil = float(np.quantile(werte, SCHWELLE_QUANTIL))
+    return float(min(max(quantil - SCHWELLE_ABSTAND, SCHWELLE_MIN), SCHWELLE_MAX)), quantil
 
 
 def als_vektor(v: np.ndarray) -> str:

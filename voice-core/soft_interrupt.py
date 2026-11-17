@@ -100,8 +100,8 @@ SENTENCE_END = (".", "!", "?", "…", ":")
 @dataclass
 class StimmUrteilFrame(SystemFrame):
     """Urteil der Stimmprüfung für das Unterbrechen (stimme_pruefer.py schickt es nur, wenn im Modus streng mit bereiter Prüfung nur die
-    eigene Stimme unterbricht). nr: Nummer der Äußerung beim Prüfer. eigen: klingt nach der Person (Wert ab EIGEN_MIN). frueh: aus einer
-    Prüfung, während die Äußerung noch läuft (nur mit eigen), sonst das Urteil am Sprechende. Die Start-Strategie bewertet damit den
+    eigene Stimme unterbricht). nr: Nummer der Äußerung beim Prüfer. eigen: klingt nach der Person (Wert ab der Schwelle für eigen).
+    frueh: aus einer Prüfung, während die Äußerung noch läuft (nur mit eigen), sonst das Urteil am Sprechende. Die Start-Strategie bewertet damit den
     wartenden Zwischenstand, das Gate nimmt bei nicht eigen die Dämpfung zurück und lässt das Frame dort enden. Systemframe: es überholt das
     endgültige Transkript, das der Wächter bis zum Urteil anhält."""
 

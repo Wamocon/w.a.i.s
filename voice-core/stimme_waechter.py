@@ -20,9 +20,10 @@ Satz beginnt dann einen eigenen Zug. Das ist besser, als einen eigenen Satz stil
 keine Nachfrist.
 
 Regel (verwerfen), nur im Modus streng mit bereitem Abdruck und Modell (StimmGate.verwirft):
-- WAMO_STIMME_NUR_EIGEN (an oder aus, Standard an): Es geht nur durch, was eigen ist, also einen Wert ab EIGEN_MIN (0,5) hat, auch ein kurzes
-  eigenes "Ja" (Urteil kurz). Verworfen wird alles andere: fremd, unklar mit jedem Wert, unklar ohne Wert (Prüfung fehlgeschlagen) und
-  keine Antwort des Prüfers in der Frist. WAMO_STIMME_VERWERFEN_MAX und WAMO_STIMME_VERWERFEN_MIN_SECS wirken dann nicht.
+- WAMO_STIMME_NUR_EIGEN (an oder aus, Standard an): Es geht nur durch, was eigen ist, also einen Wert ab der Schwelle für eigen hat
+  (nach Länge 0,35 bis 0,45 oder die persönliche Schwelle, StimmGate.schwelle_fuer), auch ein kurzes eigenes "Ja" (Urteil kurz).
+  Verworfen wird alles andere: fremd, unklar mit jedem Wert, unklar ohne Wert (Prüfung fehlgeschlagen) und keine Antwort des Prüfers in
+  der Frist. WAMO_STIMME_VERWERFEN_MAX und WAMO_STIMME_VERWERFEN_MIN_SECS wirken dann nicht.
 - Mit WAMO_STIMME_NUR_EIGEN=aus gilt die Regel vom 16.11.2026: fremd (Wert bis WAMO_STIMME_FREMD_MAX, 0,3) immer verworfen, unklar nur unter
   WAMO_STIMME_VERWERFEN_MAX (0,4); unklar ohne Wert und keine Antwort in der Frist gehen durch; WAMO_STIMME_VERWERFEN_MIN_SECS (Standard 0)
   verlangt mindestens so viel Sprache für jedes Verwerfen.
@@ -70,7 +71,7 @@ verwirft das Transkript (kein Zug, kein Verlauf). Gewollter Preis: Die eigene St
 
 Grenzen: Eine eigene Äußerung mit niedrigem Wert (Erkältung, Lärm, weit vom Mikrofon, sehr kurz) wird verworfen, und während WAMO spricht,
 unterbricht sie WAMO dann nicht; die Oberfläche zeigt den Hinweis, getippter Text geht immer. Mit Lautsprechern statt Headset hört das
-Mikrofon WAMO mit: Ein Einwurf mischt sich mit dem Echo, der Wert sinkt, und ein kurzes eigenes "Stopp" kann dann unter EIGEN_MIN fallen.
+Mikrofon WAMO mit: Ein Einwurf mischt sich mit dem Echo, der Wert sinkt, und ein kurzes eigenes "Stopp" kann dann unter die Schwelle für eigen fallen.
 Hält das Echo die Sprachpausenerkennung dauerhaft offen, gibt es kein Sprechende und nur die frühen Urteile. Beginnt der Zug erst mit dem
 Urteil am Sprechende (kurzes "Stopp"), hat die Stop-Strategie das Sprechende schon verpasst: sie entscheidet das Satzende ohne Smart-Turn
 und wartet ihre Frist ab (mit der Haltezeit bei Soniox rund 1,2 s nach dem Transkript), die Antwort auf ein kurzes eigenes "Stopp" kommt
@@ -116,7 +117,7 @@ def _satz_fertig(text: str) -> bool:
 
 
 def ist_eigen(urteil: Urteil | None) -> bool:
-    """Klingt die Äußerung nach der Person (Wert ab EIGEN_MIN)? Das Urteil kurz zählt mit, ein kurzes eigenes "Ja" wird nie überhört."""
+    """Klingt die Äußerung nach der Person (Wert ab der Schwelle für eigen)? Das Urteil kurz zählt mit, ein kurzes eigenes "Ja" wird nie überhört."""
     return urteil is not None and urteil.urteil in (EIGEN, KURZ)
 
 
@@ -243,6 +244,9 @@ def _ignoriert_loggen(urteil: Urteil | None) -> None:
         logger.info("Stimme: Äußerung ignoriert (kein Urteil in der Frist)")
     elif urteil.wert is None:
         logger.info("Stimme: Äußerung ignoriert (Prüfung fehlgeschlagen, {:.1f} s)", urteil.secs)
-    else:
+    elif urteil.schwelle is None:
         logger.info("Stimme: {} Äußerung ignoriert ({:.2f} bei {:.1f} s)", _LOG_ART.get(urteil.urteil, urteil.urteil), float(urteil.wert),
                     urteil.secs)
+    else:  # mit der angewandten Schwelle für eigen (Kalibrierung vom 17.11.2026)
+        logger.info("Stimme: {} Äußerung ignoriert ({:.2f} bei {:.1f} s, Schwelle {:.2f})", _LOG_ART.get(urteil.urteil, urteil.urteil),
+                    float(urteil.wert), urteil.secs, urteil.schwelle)

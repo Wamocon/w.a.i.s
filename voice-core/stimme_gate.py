@@ -3,7 +3,7 @@
 Es merkt sich, wie die letzte Äußerung eingestuft wurde (stimme_pruefer.py liefert die Werte). Jedes Werkzeug außer OFFENE_WERKZEUGE fragt
 vor dem Ausführen das Gate (werkzeuge_absichern, schemas_absichern): geprüft wird im Code, nicht im Prompt.
 - eigen (genug Sprache, Wert hoch): erlaubt, bis vertrauen_secs danach.
-- kurz ("Ja", "mach", zu wenig Sprache für "eigen"): klingt es nach der Person (Wert ab eigen_min), gilt das Ergebnis davor weiter, aber
+- kurz ("Ja", "mach", zu wenig Sprache für "eigen"): klingt es nach der Person (Wert ab der kurzen Schwelle), gilt das Ergebnis davor weiter, aber
   nur kurz_vertrauen_secs (15 s) nach der letzten sicheren Erkennung. Klingt es nicht danach, ist es unklar (entzieht das Vertrauen,
   die Äußerung geht trotzdem ans Modell), klingt es klar fremd, fremd.
 - fremd oder unklar (genug Sprache, aber nicht sicher; ebenso jede fehlgeschlagene Prüfung): gesperrt, bis die Person wieder sicher erkannt
@@ -17,14 +17,21 @@ ihr Fehlen ohne Nachteil. Ausnahme (Entscheidung N10, Plan docs/ausrollen-neue-n
 die Pflichtstufe (pflicht_pruefen), unabhängig vom Modus; ohne Abdruck nehmen sie nur getippte Befehle an. Streng sperrt Werkzeuge außerdem, solange für ein Profil mit Abdruck oder bei unbekanntem Stand (Datenbank nicht
 lesbar) Modell oder Abdruck nicht geladen sind oder die Prüfung länger als WARTEN_WERKZEUG_SECS dauert; getippter Text geht immer.
 
-Schwellen (alle als Schalter in der Umgebung, siehe schwellen_aus_env): WAMO_STIMME_EIGEN_MIN (ab hier die eigene Stimme, 0,5),
-WAMO_STIMME_FREMD_MAX (bis hier fremd, 0,3), WAMO_STIMME_MIN_SECS (kürzere Äußerungen reichen nicht für "eigen", 1 s),
+Schwellen (alle als Schalter in der Umgebung, siehe schwellen_aus_env): Ab welchem Wert eine Äußerung die eigene Stimme ist, hängt seit der
+Kalibrierung vom 17.11.2026 von ihrer Länge ab (schwelle_fuer): bis KURZ_BIS_SECS (1,5 s) Sprache WAMO_STIMME_EIGEN_MIN_KURZ (0,35), ab
+LANG_AB_SECS (3 s) WAMO_STIMME_EIGEN_MIN_LANG (0,45), dazwischen linear. Befund dazu: Im Modus streng wurden über 70 % der eigenen Äußerungen
+verworfen, ihre Werte lagen bei 0,4 bis 1,8 s meist bei 0,35 bis 0,60, eine zweite Person bei 0,10 bis 0,30; TitaNet streut unter 2 s stark
+(Literatur: EER 2,4 % bei 3 s, 18,4 % bei 1 s, Schwelle des EER unter 1 s bei etwa 0,30). Hat das Profil eine persönliche Schwelle vom
+Einlernen (speakers.voice_threshold, Migration 0025, stimme_modell.schwelle_einlernen), ersetzt sie die kurze; die lange liegt nie darunter.
+Das alte WAMO_STIMME_EIGEN_MIN gilt nur noch, wo KURZ oder LANG leer sind (ist nur es gesetzt, also für beide Längen wie bisher).
+WAMO_STIMME_FREMD_MAX (bis hier fremd, 0,3, für alle Längen), WAMO_STIMME_MIN_SECS (kürzere Äußerungen reichen nicht für "eigen", 1 s; sie
+werden mit der kurzen Schwelle bewertet),
 WAMO_STIMME_VERTRAUEN_SECS (so lange gilt "eigen" für Folgesätze, 120 s), WAMO_STIMME_KURZ_VERTRAUEN_SECS (so lange darf das Vertrauen nur aus
 kurzen Äußerungen weiterlaufen, 15 s nach der letzten sicheren Erkennung). Nur für den Modus streng mit bereiter Prüfung (stimme_waechter.py,
 Entscheidung vom 17.11.2026): WAMO_STIMME_NUR_EIGEN (an oder aus, Standard an: nur eine eigene Äußerung erreicht das Modell) und
 WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN (an oder aus, Standard an: während WAMO spricht, unterbricht nur die eigene Stimme). Mit
 WAMO_STIMME_NUR_EIGEN=aus gilt die Regel vom 16.11.2026 mit WAMO_STIMME_VERWERFEN_MAX (unklare Äußerungen unter diesem Wert verwerfen, 0,4,
-an den Bereich FREMD_MAX bis EIGEN_MIN gesetzt) und WAMO_STIMME_VERWERFEN_MIN_SECS (so viel Sprache braucht eine Äußerung mindestens, damit
+an den Bereich FREMD_MAX bis EIGEN_MIN_LANG gesetzt) und WAMO_STIMME_VERWERFEN_MIN_SECS (so viel Sprache braucht eine Äußerung mindestens, damit
 sie verworfen wird, 0 s).
 """
 
@@ -33,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import math
+import numbers
 import os
 import time
 from collections.abc import Callable
@@ -54,17 +62,25 @@ OFFENE_WERKZEUGE = frozenset({"aktuelle_zeit", "websuche", "canvas_zeigen"})
 WARTEN_WERKZEUG_SECS = 2.0  # so lange wartet ein Werkzeug höchstens auf die laufende Prüfung
 MARKE = "_wamo_stimme_gate"  # am eingepackten Handler: welches Gate ihn schon prüft
 _GEWARNT: set[object] = set()  # was schon einmal gewarnt wurde (unbekannter Modus, VERWERFEN_MAX außerhalb des Bereichs)
+# Schwelle für "eigen" nach Länge der Äußerung (Befund vom 17.11.2026, siehe oben): bis KURZ_BIS_SECS gilt die kurze Schwelle, ab LANG_AB_SECS
+# die lange, dazwischen linear. Fest im Code, einstellbar sind nur die beiden Schwellen.
+KURZ_BIS_SECS = 1.5
+LANG_AB_SECS = 3.0
+# So weit darf die persönliche Schwelle aus der Datenbank (speakers.voice_threshold, Migration 0025) reichen; sonst gilt sie nicht
+PERSOENLICH_MIN, PERSOENLICH_MAX = 0.2, 0.8
 
 
 @dataclass(frozen=True)
 class Schwellen:
-    eigen_min: float = 0.5
-    fremd_max: float = 0.3
+    # Ab hier gilt eine Äußerung als die eigene Stimme: eigen_min_kurz bis KURZ_BIS_SECS Sprache, eigen_min_lang ab LANG_AB_SECS
+    eigen_min_kurz: float = 0.35
+    eigen_min_lang: float = 0.45
+    fremd_max: float = 0.3  # für alle Längen
     min_secs: float = 1.0
     vertrauen_secs: float = 120.0
     kurz_vertrauen_secs: float = 15.0
     # nur für den Wächter (stimme_waechter.verwerfen, Modus streng): unklare Äußerungen unter diesem Wert verwerfen (zwischen fremd_max
-    # und eigen_min), und nur Äußerungen mit mindestens so viel Sprache; beides gilt nur mit nur_eigen aus
+    # und eigen_min_lang), und nur Äußerungen mit mindestens so viel Sprache; beides gilt nur mit nur_eigen aus
     verwerfen_max: float = 0.4
     verwerfen_min_secs: float = 0.0
     # Regeln vom 17.11.2026 (Modus streng mit bereiter Prüfung): nur eine eigene Äußerung erreicht das Modell (WAMO_STIMME_NUR_EIGEN), und
@@ -92,43 +108,64 @@ def pruefmodus(wert: str | None = None) -> str:
 
 
 def schwellen_aus_env() -> Schwellen:
-    """Schwellen aus der Umgebung. Unbrauchbares (keine Zahl, außerhalb der Grenzen) heißt Standard, und fremd_max muss unter eigen_min
-    liegen, sonst gelten beide Standardwerte. verwerfen_max liegt von fremd_max bis eigen_min (beide Ränder erlaubt), siehe
-    _verwerfen_max."""
+    """Schwellen aus der Umgebung. Unbrauchbares (keine Zahl, außerhalb der Grenzen) heißt Standard. Die kurze und die lange Schwelle für
+    "eigen" kommen aus WAMO_STIMME_EIGEN_MIN_KURZ und WAMO_STIMME_EIGEN_MIN_LANG; fehlt einer davon, gilt dafür das alte
+    WAMO_STIMME_EIGEN_MIN (ist nur dieses gesetzt, gilt es also für beide Längen wie vor dem 17.11.2026), sonst der Standard. Die kurze liegt
+    nie über der langen (sonst steigt die lange auf die kurze, mit einer Warnung), und fremd_max muss unter der kurzen liegen, sonst gelten
+    alle drei Standardwerte. verwerfen_max liegt von fremd_max bis zur langen Schwelle (beide Ränder erlaubt), siehe _verwerfen_max."""
     standard = Schwellen()
-    eigen = zahl_im_bereich("WAMO_STIMME_EIGEN_MIN", 0.35, 0.95)
+    alt = zahl_im_bereich("WAMO_STIMME_EIGEN_MIN", 0.35, 0.95)
+    kurz = zahl_im_bereich("WAMO_STIMME_EIGEN_MIN_KURZ", 0.35, 0.95)
+    lang = zahl_im_bereich("WAMO_STIMME_EIGEN_MIN_LANG", 0.35, 0.95)
     fremd = zahl_im_bereich("WAMO_STIMME_FREMD_MAX", 0.0, 0.8)
-    eigen_min = standard.eigen_min if eigen is None else eigen
+    eigen_kurz = kurz if kurz is not None else alt if alt is not None else standard.eigen_min_kurz
+    eigen_lang = lang if lang is not None else alt if alt is not None else standard.eigen_min_lang
     fremd_max = standard.fremd_max if fremd is None else fremd
-    if fremd_max >= eigen_min:
-        logger.warning("WAMO_STIMME_FREMD_MAX ({}) muss unter WAMO_STIMME_EIGEN_MIN ({}) liegen: es gelten die Standardwerte",
-                       fremd_max, eigen_min)
-        eigen_min, fremd_max = standard.eigen_min, standard.fremd_max
+    if eigen_kurz > eigen_lang:
+        if ("KURZ_LANG", eigen_kurz, eigen_lang) not in _GEWARNT:
+            _GEWARNT.add(("KURZ_LANG", eigen_kurz, eigen_lang))
+            logger.warning("WAMO_STIMME_EIGEN_MIN_KURZ ({}) liegt über WAMO_STIMME_EIGEN_MIN_LANG ({}): für lange Äußerungen gilt {}",
+                           eigen_kurz, eigen_lang, eigen_kurz)
+        eigen_lang = eigen_kurz
+    if fremd_max >= eigen_kurz:
+        logger.warning("WAMO_STIMME_FREMD_MAX ({}) muss unter der Schwelle für kurze eigene Äußerungen ({}) liegen: es gelten die Standardwerte",
+                       fremd_max, eigen_kurz)
+        eigen_kurz, eigen_lang, fremd_max = standard.eigen_min_kurz, standard.eigen_min_lang, standard.fremd_max
     verwerfen_min_secs = zahl_im_bereich("WAMO_STIMME_VERWERFEN_MIN_SECS", 0.0, 10.0)  # 0 ist gültig: nicht mit "or" abkürzen
     return Schwellen(
-        eigen_min=eigen_min,
+        eigen_min_kurz=eigen_kurz,
+        eigen_min_lang=eigen_lang,
         fremd_max=fremd_max,
         min_secs=zahl_im_bereich("WAMO_STIMME_MIN_SECS", 0.3, 10.0) or standard.min_secs,
         vertrauen_secs=zahl_im_bereich("WAMO_STIMME_VERTRAUEN_SECS", 10.0, 3600.0) or standard.vertrauen_secs,
         kurz_vertrauen_secs=zahl_im_bereich("WAMO_STIMME_KURZ_VERTRAUEN_SECS", 1.0, 120.0) or standard.kurz_vertrauen_secs,
-        verwerfen_max=_verwerfen_max(fremd_max, eigen_min, standard.verwerfen_max),
+        verwerfen_max=_verwerfen_max(fremd_max, eigen_lang, standard.verwerfen_max),
         verwerfen_min_secs=standard.verwerfen_min_secs if verwerfen_min_secs is None else verwerfen_min_secs,
         nur_eigen=schalter_an("WAMO_STIMME_NUR_EIGEN", standard=standard.nur_eigen),
         unterbrechen_nur_eigen=schalter_an("WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN", standard=standard.unterbrechen_nur_eigen),
     )
 
 
-def _verwerfen_max(fremd_max: float, eigen_min: float, standard: float) -> float:
-    """WAMO_STIMME_VERWERFEN_MAX, an den Bereich fremd_max bis eigen_min gesetzt: darunter heißt fremd_max (nur fremde verwerfen, so ist
-    "0" gemeint), darüber eigen_min (jede unklare verwerfen), beides mit einer Warnung je Wert. Leer oder keine Zahl: der Standard 0,4,
-    ebenso in diesen Bereich gerückt."""
+def _verwerfen_max(fremd_max: float, eigen_lang: float, standard: float) -> float:
+    """WAMO_STIMME_VERWERFEN_MAX, an den Bereich fremd_max bis zur langen Schwelle für eigen gesetzt: darunter heißt fremd_max (nur fremde
+    verwerfen, so ist "0" gemeint), darüber die lange Schwelle (jede unklare verwerfen, denn unklar liegt bei jeder Länge darunter), beides
+    mit einer Warnung je Wert. Leer oder keine Zahl: der Standard 0,4, ebenso in diesen Bereich gerückt."""
     wert = zahl_im_bereich("WAMO_STIMME_VERWERFEN_MAX", 0.0, 0.95)
-    gesetzt = min(max(standard if wert is None else wert, fremd_max), eigen_min)
-    if wert is not None and gesetzt != wert and ("VERWERFEN_MAX", wert, fremd_max, eigen_min) not in _GEWARNT:
-        _GEWARNT.add(("VERWERFEN_MAX", wert, fremd_max, eigen_min))
-        logger.warning("WAMO_STIMME_VERWERFEN_MAX ({}) liegt außerhalb von WAMO_STIMME_FREMD_MAX ({}) bis WAMO_STIMME_EIGEN_MIN ({}): es gilt {}",
-                       wert, fremd_max, eigen_min, gesetzt)
+    gesetzt = min(max(standard if wert is None else wert, fremd_max), eigen_lang)
+    if wert is not None and gesetzt != wert and ("VERWERFEN_MAX", wert, fremd_max, eigen_lang) not in _GEWARNT:
+        _GEWARNT.add(("VERWERFEN_MAX", wert, fremd_max, eigen_lang))
+        logger.warning("WAMO_STIMME_VERWERFEN_MAX ({}) liegt außerhalb von WAMO_STIMME_FREMD_MAX ({}) bis zur Schwelle für lange eigene "
+                       "Äußerungen ({}): es gilt {}", wert, fremd_max, eigen_lang, gesetzt)
     return gesetzt
+
+
+def persoenliche_schwelle(wert: object) -> float | None:
+    """Die persönliche Schwelle aus der Datenbank oder vom Einlernen, wenn sie brauchbar ist (endliche Zahl von PERSOENLICH_MIN bis
+    PERSOENLICH_MAX), sonst None: dann gilt die kurze Schwelle aus der Umgebung."""
+    if isinstance(wert, bool) or not isinstance(wert, numbers.Real):
+        return None
+    zahl = float(wert)
+    return zahl if math.isfinite(zahl) and PERSOENLICH_MIN <= zahl <= PERSOENLICH_MAX else None
 
 
 @dataclass
@@ -139,6 +176,8 @@ class StimmGate:
     abdruck: np.ndarray | None = None
     zustand: str = "laedt"  # laedt | da | fehlt | kaputt (Stand des Abdrucks in der Datenbank)
     modell_ok: bool | None = None  # nur für ein Profil mit Abdruck von Belang
+    schwelle_kurz: float | None = None  # persönliche Schwelle für kurze Äußerungen (vom Einlernen, speakers.voice_threshold), sonst None
+    schwelle_erlaubt: bool = True  # False: die Datenbank kann sie nicht speichern (Migration 0025 fehlt), dann wirkt auch keine
     _wer: str | None = None
     _um: float = 0.0  # Zeitpunkt der letzten sicheren Erkennung (oder des letzten Tippens)
     _nur_kurz: bool = False  # seither kamen nur kurze Äußerungen, die nach der Person klangen
@@ -182,10 +221,12 @@ class StimmGate:
         """Nachricht an die Oberfläche mit dem Stand dieses Gates (oder einem vorgegebenen, zum Beispiel laedt beim Modellstart)."""
         return stand_nachricht(self.modus, status or self.status)
 
-    def setze_abdruck(self, abdruck: np.ndarray | None, ok: bool = True, geloescht: bool = False) -> None:
+    def setze_abdruck(self, abdruck: np.ndarray | None, ok: bool = True, geloescht: bool = False, schwelle: float | None = None) -> None:
         """Stand des Abdrucks nach dem Laden, Einlernen oder Löschen. ok False: nicht lesbar, es ist unbekannt, ob es einen gibt.
-        geloescht: die Person hat ihn gerade gelöscht, das neue Einlernen in dieser Sitzung braucht dann denselben Nachweis wie ein Ersetzen."""
+        geloescht: die Person hat ihn gerade gelöscht, das neue Einlernen in dieser Sitzung braucht dann denselben Nachweis wie ein Ersetzen.
+        schwelle: persönliche Schwelle für kurze Äußerungen, die zu diesem Abdruck gehört (None oder unbrauchbar: die aus der Umgebung)."""
         self.abdruck = abdruck if ok else None
+        self.schwelle_kurz = persoenliche_schwelle(schwelle) if self.abdruck is not None and self.schwelle_erlaubt else None
         if geloescht and self.abdruck is None:
             self._geloescht = True
         self.zustand = "kaputt" if not ok else "da" if abdruck is not None else "fehlt"
@@ -199,12 +240,26 @@ class StimmGate:
         Stimme oder eine frische Anmeldung, siehe stimme_sitzung.py), sonst könnte jemand an der angemeldeten Oberfläche den Schutz aushebeln."""
         return self.abdruck is not None or self._geloescht
 
+    def schwelle_fuer(self, secs: float) -> float:
+        """Ab diesem Wert gilt eine Äußerung mit secs Sekunden Sprache als die eigene Stimme. Kurz ist die persönliche Schwelle (wenn es
+        eine gibt, nie unter fremd_max) oder eigen_min_kurz, lang eigen_min_lang (nie unter der kurzen); bis KURZ_BIS_SECS gilt die kurze,
+        ab LANG_AB_SECS die lange, dazwischen linear. Unter min_secs (Urteil kurz) gilt immer die kurze."""
+        s = self.schwellen
+        kurz = s.eigen_min_kurz if self.schwelle_kurz is None else max(self.schwelle_kurz, s.fremd_max)
+        lang = max(s.eigen_min_lang, kurz)
+        if secs < s.min_secs or secs <= KURZ_BIS_SECS:
+            return kurz
+        if secs >= LANG_AB_SECS:
+            return lang
+        return kurz + (lang - kurz) * (secs - KURZ_BIS_SECS) / (LANG_AB_SECS - KURZ_BIS_SECS)
+
     def einstufen(self, wert: float, secs: float, ueberlappung: bool) -> str:
         """eigen: sicher die Person. fremd: sicher nicht. unklar: nicht sicher (entzieht das Vertrauen), auch eine kurze Äußerung, die nicht
         nach der Person klingt. kurz: zu wenig Sprache zum Urteilen ("Ja"), klingt aber nach der Person (das Vertrauen läuft nur begrenzt
-        weiter, siehe grund_der_stimme). ueberlappung: WAMO sprach gleichzeitig, es kann Echo sein."""
+        weiter, siehe grund_der_stimme). ueberlappung: WAMO sprach gleichzeitig, es kann Echo sein. Die Schwelle für eigen hängt von der
+        Länge ab (schwelle_fuer), fremd gilt bis fremd_max für alle Längen."""
         s = self.schwellen
-        if wert >= s.eigen_min:
+        if wert >= self.schwelle_fuer(secs):
             return EIGEN if secs >= s.min_secs else KURZ
         if wert <= s.fremd_max:
             return UNKLAR if ueberlappung else FREMD

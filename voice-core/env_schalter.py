@@ -26,15 +26,22 @@ Füllwörter und Sprechweise (fuellwoerter.py, persona.py, Entscheidung vom 14.1
 Stimmabdruck (stimme_gate.py, stimme_modell.py, seit 14.11.2026; wirkt nur für Profile mit eingelerntem Abdruck, nie für Laborprofile):
   WAMO_STIMME_PRUEFUNG         aus | beobachten | streng (Standard streng): beobachten misst und meldet nur, streng lässt nur die eigene
                                Stimme ans Modell und sperrt Werkzeuge außer Uhrzeit, Websuche und Canvas
-  WAMO_STIMME_EIGEN_MIN        Zahl, Standard 0,5: ab diesem Wert (Kosinus, 0,35 bis 0,95) gilt die Äußerung als die eigene Stimme
-  WAMO_STIMME_FREMD_MAX        Zahl, Standard 0,3: bis zu diesem Wert (0 bis 0,8) gilt sie als fremd; muss unter EIGEN_MIN liegen
+  WAMO_STIMME_EIGEN_MIN_KURZ   Zahl, Standard 0,35 (seit 17.11.2026): ab diesem Wert (Kosinus, 0,35 bis 0,95) gilt eine Äußerung bis
+                               1,5 s Sprache als die eigene Stimme; eine persönliche Schwelle vom Einlernen (speakers.voice_threshold,
+                               Migration 0025) ersetzt sie für das Profil
+  WAMO_STIMME_EIGEN_MIN_LANG   Zahl, Standard 0,45 (seit 17.11.2026): dasselbe ab 3 s Sprache, dazwischen linear; nie unter der kurzen
+                               (auch nicht unter der persönlichen)
+  WAMO_STIMME_EIGEN_MIN        Zahl, früher die eine Schwelle für alle Längen (0,35 bis 0,95): gilt nur noch, wo EIGEN_MIN_KURZ oder
+                               EIGEN_MIN_LANG leer sind; ist nur sie gesetzt, gilt sie für beide Längen wie bisher
+  WAMO_STIMME_FREMD_MAX        Zahl, Standard 0,3: bis zu diesem Wert (0 bis 0,8) gilt sie bei jeder Länge als fremd; muss unter der
+                               kurzen Schwelle liegen
   WAMO_STIMME_MIN_SECS         Zahl, Standard 1: so viel reine Sprache braucht eine Äußerung, damit sie als eigen zählt (kürzere mit hohem
                                Wert: kurz; 0,3 bis 10); fürs Verwerfen gilt WAMO_STIMME_VERWERFEN_MIN_SECS
   WAMO_STIMME_VERTRAUEN_SECS   Zahl, Standard 120: so lange gilt "eigen" für kurze Folgesätze und Werkzeuge (10 bis 3600)
   WAMO_STIMME_KURZ_VERTRAUEN_SECS  Zahl, Standard 15: so lange läuft das Vertrauen höchstens weiter, wenn seit der letzten sicheren
                                Erkennung nur kurze Äußerungen kamen (1 bis 120)
   WAMO_STIMME_NUR_EIGEN        an oder aus, Standard an (seit 17.11.2026): im Modus streng mit Abdruck erreicht nur die eigene Stimme
-                               das Modell (Wert ab EIGEN_MIN, auch kurz); fremd, unklar mit jedem Wert, fehlgeschlagene Prüfung und keine
+                               das Modell (Wert ab der Schwelle für eigen, auch kurz); fremd, unklar mit jedem Wert, fehlgeschlagene Prüfung und keine
                                Antwort in der Frist verwirft der Wächter (stimme_waechter.py). aus: die Regel vom 16.11.2026 mit
                                VERWERFEN_MAX und VERWERFEN_MIN_SECS
   WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN  an oder aus, Standard an (seit 17.11.2026): während WAMO spricht, unterbricht im Modus streng mit
@@ -42,7 +49,7 @@ Stimmabdruck (stimme_gate.py, stimme_modell.py, seit 14.11.2026; wirkt nur für 
                                Sprechende); andere Stimmen dämpfen WAMO nur kurz, ihr Satz wird verworfen. aus: jede Stimme unterbricht
                                sofort wie bisher, und was WAMO überlappt, geht durch
   WAMO_STIMME_VERWERFEN_MAX    Zahl, Standard 0,4, nur mit WAMO_STIMME_NUR_EIGEN=aus: im Modus streng verwirft der Wächter auch unklare
-                               Äußerungen unter diesem Wert (an den Bereich FREMD_MAX bis EIGEN_MIN gesetzt; 0 oder FREMD_MAX schaltet das
+                               Äußerungen unter diesem Wert (an den Bereich FREMD_MAX bis EIGEN_MIN_LANG gesetzt; 0 oder FREMD_MAX schaltet das
                                ab); fremde verwirft er immer (stimme_waechter.py)
   WAMO_STIMME_VERWERFEN_MIN_SECS  Zahl, Standard 0, nur mit WAMO_STIMME_NUR_EIGEN=aus: so viel reine Sprache braucht eine Äußerung
                                mindestens, damit der Wächter sie verwirft (0 bis 10). Ganz wie vor dem 16.11.2026: VERWERFEN_MAX=0 und
