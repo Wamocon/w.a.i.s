@@ -357,7 +357,7 @@ class GeraeteWerkstatt(Werkstatt):
 
     def setUp(self):
         super().setUp()
-        for n in ("nmblookup", "avahi-resolve", "ping", "ip", "flock", "logger"):
+        for n in ("nmblookup", "avahi-resolve", "ip", "flock", "logger"):
             schreibe(self.bin / n, ATTRAPPE, ausfuehrbar=True)
         schreibe(self.p("etc/wamo-labor/betreuer-adressen"), "# Betreuer\n192.168.178.50\n")
         schreibe(self.p("etc/wamo-labor/betreuer-geraete"), f"# Geräte\n{GERAET}\n")
@@ -475,7 +475,7 @@ class AufloesungTests(GeraeteWerkstatt):
         self.assertEqual(self.aktualisieren(jetzt=self.JETZT + 2 * (ERSATZ + 100)).returncode, 0)
         self.assertIn(self.remote_ip("192.168.178.69"), self.site())
         self.assertLess(self.aufrufe().index(f"nmblookup -- {GERAET}"), self.aufrufe().index(mdns_aufruf))  # erst NetBIOS, dann mDNS
-        self.assertLess(self.aufrufe().index(mdns_aufruf), self.aufrufe().index("ping -c1 -W1 -- 192.168.178.69"))  # dann die Probe der mDNS-Adresse
+        self.assertLess(self.aufrufe().index(mdns_aufruf), self.aufrufe().index("ip -4 neigh show 192.168.178.69"))  # dann die Probe der mDNS-Adresse
 
     def test_antwortet_auch_mdns_nicht_oder_nur_ausserhalb_des_lans_gilt_nichts(self):
         self.antworten(GERAET, "", self.mdns("172.17.0.1", "10.0.0.5"))
@@ -515,11 +515,14 @@ class AufloesungTests(GeraeteWerkstatt):
         self.assertRegex(c, r'if \[ -z "\$antwort" \]')  # mDNS nur, wenn NetBIOS nach dem Filter nichts lieferte
         for nie in ("getent", "dig ", "nslookup", "host ", "resolvectl", "arp "):
             self.assertNotIn(nie, c, nie)  # das DNS der Fritz!Box liefert veraltete Adressen und gehört nicht dazu
-        # ping und ip neigh liefern nie eine Adresse, sie prüfen nur, ob eine Adresse aus mDNS im LAN da ist (je einmal, mit Zeitgrenze)
-        self.assertEqual(len(re.findall(r"\bping\b", c)), 1)
+        # die Probe (UDP-Paket, dann ip neigh) liefert nie eine Adresse, sie prüft nur, ob eine Adresse aus mDNS im LAN da ist (je einmal, mit Zeitgrenze)
+        for skript in (AKTUALISIERER, GERAETE_EINRICHTEN, SITE_BIB):
+            self.assertIsNone(re.search(r"\bping\b", code(skript)), skript.name)  # ohne CAP_NET_RAW und ohne ICMP-Sockets am Server scheiterte ping immer
         self.assertEqual(len(re.findall(r"\bip -4 neigh\b", c)), 1)
-        self.assertRegex(c, r'timeout "\$PROBE_FRIST_S" ping -c1 -W1 -- "\$1"')
-        self.assertRegex(c, r'timeout "\$PROBE_FRIST_S" ip -4 neigh show "\$1"')
+        self.assertIn("""timeout "$PROBE_FRIST_S" bash -c 'printf x > "$1/$2/9"' _ "$UDP_ZIEL" "$1" 2>/dev/null || true""", c)
+        self.assertIn('sleep "$ARP_WARTE_S"', c)
+        self.assertIn('timeout "$PROBE_FRIST_S" ip -4 neigh show "$1"', c)
+        self.assertIn('UDP_ZIEL="$W/dev/udp"', c)  # im Probelauf ein Ordner unter der Wurzel, nie ein Paket ins Netz
         self.assertRegex(c, r'antwort="\$\(nur_im_lan_da "\$antwort" "\$2"\)"')  # nur im Zweig von mDNS
 
     def test_genau_vier_antworten_gelten(self):
@@ -1143,21 +1146,23 @@ class ErsatzFristTests(GeraeteWerkstatt):
 @unittest.skipUnless(BASH, "keine Bash vorhanden")
 class MdnsProbeTests(GeraeteWerkstatt):
     """Befund 17.11.2026: mDNS lieferte für ein Gerät abwechselnd zwei Adressen, die beide tot waren (kein Ping, kein ARP-Eintrag). Eine Adresse nur aus mDNS gilt
-    deshalb erst, wenn sie nach einer Probe (ping) in der Nachbartabelle mit Hardware-Adresse steht. NetBIOS-Antworten gelten ohne Probe."""
+    deshalb erst, wenn sie nach einer Probe (UDP-Paket an den Port 9, löst ARP aus) in der Nachbartabelle mit Hardware-Adresse steht. NetBIOS-Antworten gelten
+    ohne Probe. Im Probelauf geht das UDP-Paket nie ins Netz: Es landet als Datei unter WURZEL/dev/udp/ADRESSE/9, wenn der Test den Ordner anlegt."""
 
     def test_mdns_adresse_mit_arp_eintrag_wird_zugelassen(self):
         lebend = {"192.168.178.11": "REACHABLE", "192.168.178.12": "STALE", "192.168.178.13": "DELAY", "192.168.178.14": "PROBE"}
         for a, z in lebend.items():
             self.nachbar(a, zustand=z)
+            self.p(f"dev/udp/{a}").mkdir(parents=True)
         self.antworten(GERAET, "", self.mdns(*lebend))
         r = self.aktualisieren()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(self.remote_ip(*lebend), self.site())
         self.assertEqual([a for _, a, _ in self.stand()], list(lebend))
         self.assertNotIn("WARNUNG", r.stdout)
-        aufrufe = self.aufrufe()
         for a in lebend:
-            self.assertLess(aufrufe.index(f"ping -c1 -W1 -- {a}"), aufrufe.index(f"ip -4 neigh show {a}"))  # erst die Probe (ARP), dann die Nachbartabelle
+            self.assertEqual(self.p(f"dev/udp/{a}/9").read_text(encoding="utf-8"), "x")  # das UDP-Paket an den Port 9 (löst ARP aus)
+            self.assertIn(f"ip -4 neigh show {a}", self.aufrufe())  # danach die Nachbartabelle
 
     def test_mdns_adresse_ohne_arp_eintrag_wird_verworfen_und_hoechstens_stuendlich_gemeldet(self):
         t0 = self.JETZT
@@ -1182,16 +1187,18 @@ class MdnsProbeTests(GeraeteWerkstatt):
 
     def test_netbios_antworten_gelten_ohne_probe(self):
         self.antworten(GERAET, self.netbios("192.168.178.78"))  # kein Eintrag in der Nachbartabelle: für NetBIOS egal
+        self.p("dev/udp/192.168.178.78").mkdir(parents=True)
         r = self.aktualisieren()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(self.remote_ip("192.168.178.78"), self.site())
-        self.assertFalse([z for z in self.aufrufe() if z.startswith(("ping", "ip "))])
+        self.assertFalse([z for z in self.aufrufe() if z.startswith("ip ")])
+        self.assertFalse(self.p("dev/udp/192.168.178.78/9").exists())  # kein UDP-Paket
 
     def test_mehr_als_vier_mdns_antworten_werden_nie_zu_einer_flut_von_proben(self):
         self.antworten(GERAET, "", self.mdns(*[f"192.168.178.{n}" for n in (11, 12, 13, 14, 15)]))
         r = self.aktualisieren()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertFalse([z for z in self.aufrufe() if z.startswith(("ping", "ip "))])
+        self.assertFalse([z for z in self.aufrufe() if z.startswith("ip ")])
         self.assertIn("5 Antworten", r.stdout)  # der Name ist verdächtig: nichts Neues, nur Bestätigung
         self.assertEqual(self.site_datei.read_bytes(), self.site_vorher)
 
@@ -1199,6 +1206,7 @@ class MdnsProbeTests(GeraeteWerkstatt):
         c = code(AKTUALISIERER)
         self.assertRegex(c, r'\{ if im_lan_da "\$adr"; then echo "\$adr ja"; else echo "\$adr nein"; fi; \} &\n  done\n  wait')
         self.assertRegex(c, r'(?m)^PROBE_FRIST_S=2\b')
+        self.assertRegex(c, r'(?m)^ARP_WARTE_S=1\b')
 
 
 @unittest.skipUnless(BASH, "keine Bash vorhanden")
@@ -1330,14 +1338,18 @@ class SperreMeldungUndGrenzenTests(GeraeteWerkstatt):
             self.assertIsNone(re.search(r"token", code(datei), re.I), datei.name)  # die Skripte lesen und nennen nie ein Token
 
     def test_fasst_weder_dienst_noch_firewall_noch_kern_an(self):
+        schreibe(self.p("etc/wamo-labor/betreuer-geraete"), f"{GERAET}\nPC-ZWEI\n")
         self.antworten(GERAET, self.netbios("192.168.178.78"))
+        self.antworten("PC-ZWEI", "", self.mdns("192.168.178.22", name="PC-ZWEI"))  # nur mDNS: mit der Probe über die Nachbartabelle
+        self.nachbar("192.168.178.22")
         self.assertEqual(self.aktualisieren().returncode, 0)
-        erlaubt = re.compile(r"^(nmblookup |avahi-resolve |flock |logger |curl |docker (ps|inspect|run|exec wamo-caddy caddy reload))")
+        erlaubt = re.compile(r"^(nmblookup |avahi-resolve |ip -4 neigh show |flock |logger |curl |docker (ps|inspect|run|exec wamo-caddy caddy reload))")
         for z in self.aufrufe():
             self.assertRegex(z, erlaubt, z)
+        self.assertIn("ip -4 neigh show 192.168.178.22", self.aufrufe())
         c = code(AKTUALISIERER) + code(SITE_BIB)
         for nie in ("docker compose", "docker rm", "docker stop", "docker restart", "docker kill", "docker network", "docker volume", "iptables", "wamo-firewall",
-                    "systemctl", "wamo-core", "wamo-labor-dienst", "wamo-core-env"):
+                    "systemctl", "wamo-core", "wamo-labor-dienst", "wamo-core-env", "ping"):
             self.assertNotIn(nie, c, nie)
         self.assertFalse(self.p("var/lib/wamo-labor").exists())
         self.assertEqual((self.caddy / "docker-compose.yml").read_text(encoding="utf-8"), "name: wamo-caddy\n# alter Stand\n")
@@ -1518,11 +1530,12 @@ class UnitTests(unittest.TestCase):
         curl = int(re.search(r"--max-time (\d+)", s).group(1))
         ports = len(re.search(r'CADDY_PORTS="([^"]+)"', s).group(1).split())
         suche = int(re.search(r"(?m)^SUCHFRIST_S=(\d+)", a).group(1))
-        arp = int(re.search(r"(?m)^PROBE_FRIST_S=(\d+)", a).group(1))  # ping und ip neigh je Adresse aus mDNS, alle Adressen eines Namens gleichzeitig
+        arp = int(re.search(r"(?m)^PROBE_FRIST_S=(\d+)", a).group(1))  # UDP-Paket und ip neigh je Adresse aus mDNS, alle Adressen eines Namens gleichzeitig
+        warte = int(re.search(r"(?m)^ARP_WARTE_S=(\d+)", a).group(1))  # dazwischen die Wartezeit auf ARP
         parallel = int(re.search(r"(?m)^MAX_PARALLEL=(\d+)", a).group(1))
         namen = int(re.search(r"(?m)^MAX_NAMEN=(\d+)", s).group(1))
         probe = ports * runden * (curl + sekunden)
-        aufloesung = -(-namen // parallel) * (2 * suche + 2 * arp)
+        aufloesung = -(-namen // parallel) * (2 * suche + 2 * arp + warte)
         schlimmstens = aufloesung + 2 * probe + 30
         self.assertGreater(int(o["TimeoutStartSec"]), schlimmstens)
         self.assertEqual(o["TasksMax"], "512")

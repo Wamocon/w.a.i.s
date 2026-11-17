@@ -1691,7 +1691,7 @@ Lauf oder ändert ein Einrichten gerade die Site, endet dieser ohne Änderung); 
 halb geschriebene `betreuer-geraete.stand.neu.*`), nie die Sperrdatei. Die Namen werden mit höchstens 4 gleichzeitigen Auflösungen aufgelöst (`LC_ALL=C`, der Name nach `--`, nie als Option gelesen): **NetBIOS hat Vorrang** (`nmblookup -- NAME`). Nur wenn es nach dem Filter
 auf das Büro-LAN keine Adresse liefert (kein Treffer, Fehler, Zeitüberschreitung, nur virtuelle Adressen), wird mDNS (`avahi-resolve -4 -n -- NAME.local`) gefragt und seine Antwort verwendet (für Mac- und
 Linux-Geräte, die kein NetBIOS sprechen); es gibt kein Zusammenführen. **Eine Adresse nur aus mDNS zählt nur, wenn sie im LAN da ist:** eine kurze Probe
-(`ping -c1 -W1`, das Ergebnis zählt nicht, sie löst nur ARP aus), danach muss `ip -4 neigh show ADRESSE` eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY oder PROBE zeigen;
+(ein UDP-Paket an den Port 9 über `/dev/udp` der Bash, ohne Sonderrechte, das Ergebnis zählt nicht, es löst nur ARP aus), nach einer Sekunde muss `ip -4 neigh show ADRESSE` eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY oder PROBE zeigen;
 FAILED, INCOMPLETE oder kein Eintrag heißt verwerfen (Warnung im Journal höchstens einmal je Stunde). Die Proben eines Namens laufen gleichzeitig, je Schritt höchstens 2 Sekunden;
 NetBIOS-Antworten gelten ohne Probe (Befund 17.11.2026: mDNS lieferte für ein Gerät abwechselnd zwei Adressen, die beide tot waren). Es zählen nur IPv4-Adressen im Büro-LAN
 192.168.178.0/24 (.1 bis .254) zählen, höchstens 4 je Name. Antwortet ein Name mit mehr als 4 Antworten, ist das verdächtig (Flut oder Täuschung): Es wird nichts Neues zugelassen, schon zugelassene,
@@ -1730,7 +1730,7 @@ ssh sokrates2 "sudo /usr/local/sbin/wamo-labor-geraete-aktualisieren --trocken" 
 ssh sokrates2 "journalctl -t wamo-labor-geraete --since today"                                  # die Änderungen
 ```
 
-`einrichten` prüft vorab die Werkzeuge (`docker`, `flock`, `timeout`, `nmblookup`, `avahi-resolve`, `ping`, `ip`, `systemctl`, `logger`, `curl`), dass `wamo-caddy` läuft, die Site besteht und beide Listen
+`einrichten` prüft vorab die Werkzeuge (`docker`, `flock`, `timeout`, `nmblookup`, `avahi-resolve`, `ip`, `sleep`, `systemctl`, `logger`, `curl`), dass `wamo-caddy` läuft, die Site besteht und beide Listen
 gültig sind (`avahi-daemon` aus ist nur eine Warnung), sichert den vorigen Stand unter `/var/backups/wamo-labor/<JJJJMMTT-HHMMSS>/` (ohne Token), installiert Aktualisierer, Bibliothek, Vorlage,
 Unit und Timer (der Ordner von `wamo-caddy` steht in der Unit), legt `betreuer-geraete` als Vorlage an, falls sie fehlt, aktiviert den Timer (`enable` ohne `--now`), lässt die Unit einmal laufen
 (`systemctl start`, das prüft auch die Härtung der Unit) und startet erst danach den Timer. Sicherung, Installation und Aktivierung laufen unter der gemeinsamen Sperre, der Prüflauf nimmt sie danach selbst.
@@ -1751,7 +1751,7 @@ ausführen. `betreuer-geraete`, `betreuer-adressen` und die Sicherungen unter `/
 2. **Eine neue Adresse gilt frühestens mit dem nächsten Lauf**, also nach höchstens etwa einer Minute (beim Systemstart 30 Sekunden nach dem Start), und frühestens 3 Minuten nach dem letzten Versuch, eine neue
    Zulassung zu laden. Ein Entzug wartet nie (in der Zwischenzeit gilt nur die Schnittmenge aus altem und neuem Stand).
 3. **NetBIOS und mDNS erreichen nur Windows-, Mac- und Linux-Geräte im selben Netz, und mDNS gilt nur als Ersatz.** Sprechen Mac- und Linux-Geräte kein NetBIOS, kommt ihre Adresse allein aus mDNS: Dort kann eine
-   veraltete Adresse vorkommen. Die Probe (`ping`, dann `ip neigh`) verwirft tote Adressen, eine Adresse, die eben noch lebte (Eintrag STALE), besteht sie aber noch kurze Zeit; eine schon
+   veraltete Adresse vorkommen. Die Probe (UDP-Paket, dann `ip neigh`) verwirft tote Adressen, eine Adresse, die eben noch lebte (Eintrag STALE), besteht sie aber noch kurze Zeit; eine schon
    zugelassene Adresse bleibt dann bis zur nächsten Antwort, nach einem Adresswechsel bis zu 15 Minuten, ohne Antwort bis zu 12 Stunden (auch hier hält der Betreuer-Token). Windows-Geräte sind davon nicht betroffen, solange NetBIOS antwortet. Ein Tablet oder Handy, das beides nicht beantwortet, braucht eine feste Adresse in `betreuer-adressen`
    (ein Gerät, das nie antwortet, bekommt nie eine Adresse; der Aktualisierer meldet das nicht jede Minute, `status` zeigt den Stand).
 4. **Die Firewall kennt keine Namen.** `plaetze-adressen` (Quellen für 55447 in `wamo-firewall`) bleibt eine Adressliste: Mit Einträgen müsste ein Betreuer-PC dort mit einer Adresse oder dem Büro-/24
@@ -1779,8 +1779,7 @@ ausführen. `betreuer-geraete`, `betreuer-adressen` und die Sicherungen unter `/
 
 **Nur am Server prüfbar** (die Tests laufen mit Attrappen): echte Antworten von `nmblookup` und `avahi-resolve` im Büro-LAN (vor dem ersten Einrichten `nmblookup NAME` und
 `avahi-resolve -4 -n NAME.local` von Hand ausführen und mit dem Aktualisierer `--trocken` vergleichen), das Verhalten eines echten `flock`, die gehärtete Unit unter systemd (`einrichten` startet sie einmal und
-nimmt bei einem Fehler alles zurück; Verdächtige bei einem Fehler: `ReadWritePaths`, `InaccessiblePaths`, `ProtectHome`, `CapabilityBoundingSet`, `RestrictAddressFamilies`;
-`ping` braucht in der Unit ohne `CAP_NET_RAW` ICMP-Datagram-Sockets, also `sysctl net.ipv4.ping_group_range` mit der Gruppe 0, sonst fällt jede Adresse aus mDNS mit einer Warnung durch; insbesondere ob Docker den
+nimmt bei einem Fehler alles zurück; Verdächtige bei einem Fehler: `ReadWritePaths`, `InaccessiblePaths`, `ProtectHome`, `CapabilityBoundingSet`, `RestrictAddressFamilies`; insbesondere ob Docker den
 Wegwerf-Ordner unter `/run/wamo-labor-geraete` für `caddy adapt` einbinden kann und ob die Unit unter `ProtectHome=read-only` den Baum von `wamo-caddy` lesen kann), ein echter `caddy reload` mit der neuen Adressliste und die
 Zeit, bis ein aufgewachter PC wieder zugelassen ist (höchstens eine Minute plus die Antwortzeit des PCs).
 

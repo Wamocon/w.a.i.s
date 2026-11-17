@@ -14,9 +14,10 @@
 #      wird mDNS (avahi-resolve -4 -n -- NAME.local) gefragt und seine Antwort verwendet (für Mac- und Linux-Geräte); kein Zusammenführen, denn mDNS liefert gern eine veraltete
 #      Adresse (ein Gerät kann sie später per DHCP bekommen). Das DNS des Routers wird nie gefragt (auch es liefert veraltete Adressen). Es zählen nur IPv4-Adressen im Büro-LAN 192.168.178.0/24 (.1 bis .254);
 #      virtuelle Adressen (172.x, Docker, WSL, VPN) fallen weg. Eine Adresse, die nur aus mDNS stammt, zählt nur, wenn sie im LAN da ist: eine kurze Probe
-#      (ping -c1 -W1, das Ergebnis zählt nicht, sie löst nur ARP aus), danach muss ip -4 neigh show ADRESSE eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY
-#      oder PROBE zeigen, FAILED, INCOMPLETE oder kein Eintrag heißt verwerfen (Warnung höchstens einmal je Stunde). Die Proben eines Namens laufen gleichzeitig, je
-#      höchstens 2 Sekunden, innerhalb der parallelen Auflösung. NetBIOS-Antworten gelten ohne Probe. Grund (Befund 17.11.2026): mDNS lieferte für ein Gerät abwechselnd
+#      (ein UDP-Paket an den Port 9 über /dev/udp der Bash, ohne Sonderrechte, das Ergebnis zählt nicht, es löst nur ARP aus), nach einer Sekunde muss
+#      ip -4 neigh show ADRESSE eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY oder PROBE zeigen, FAILED, INCOMPLETE oder kein Eintrag heißt verwerfen
+#      (Warnung höchstens einmal je Stunde). Die Proben eines Namens laufen gleichzeitig, je Schritt höchstens 2 Sekunden, innerhalb der parallelen Auflösung.
+#      NetBIOS-Antworten gelten ohne Probe. Grund (Befund 17.11.2026): mDNS lieferte für ein Gerät abwechselnd
 #      zwei Adressen, die beide tot waren (kein Ping, kein ARP-Eintrag). Antwortet ein Name mit mehr als 4 Adressen, ist das verdächtig (Flut oder Täuschung): Es wird nichts Neues
 #      zugelassen, schon zugelassene Adressen, die weiter antworten, werden bestätigt, und der Lauf warnt (höchstens einmal je Stunde) im Journal. Die echte Adresse wird so nie verdrängt.
 #   4. Mit dem zuletzt eingesetzten Stand vergleichen (/var/lib/wamo-labor-geraete/betreuer-geraete.stand, root 0644: Name, Adresse, Zeitpunkt der letzten Antwort).
@@ -44,8 +45,7 @@
 # Grenzen: Die Namensauflösung im LAN ist nicht kryptografisch gesichert. Ein fremdes Gerät im Büro-LAN könnte einen Namen vortäuschen und so die Seiten /betreuer und
 # /api/betreuer/ erreichen. Der Betreuer-Token bleibt die eigentliche Absicherung. Eine neue Adresse gilt frühestens mit dem nächsten Lauf und frühestens 3 Minuten nach
 # dem letzten Versuch. NetBIOS und mDNS erreichen nur Geräte im selben Netz (Windows, Mac, Linux). mDNS gilt nur als Ersatz, dort kann eine veraltete Adresse vorkommen:
-# Die Probe verwirft tote Adressen, aber eine Adresse, die eben noch lebte (Eintrag STALE), besteht sie noch für kurze Zeit, und ping braucht in der Unit ohne CAP_NET_RAW
-# ICMP-Datagram-Sockets (net.ipv4.ping_group_range, sonst fällt jede mDNS-Adresse durch). Antwortet mDNS abwechselnd mit zwei lebenden Adressen, bleiben beide zugelassen,
+# Die Probe verwirft tote Adressen, aber eine Adresse, die eben noch lebte (Eintrag STALE), besteht sie noch für kurze Zeit. Antwortet mDNS abwechselnd mit zwei lebenden Adressen, bleiben beide zugelassen,
 # solange jede innerhalb von 15 Minuten wieder antwortet, und nach einem Adresswechsel bleibt die alte Adresse noch bis zu 15 Minuten (lieber eine Adresse zu viel als ein
 # gesperrtes Gerät, auch hier hält der Betreuer-Token). Ein Gerät, das beides nicht beantwortet, braucht eine feste Adresse in betreuer-adressen. Die 12-Stunden-Frist wird
 # nur durchgesetzt, solange die Läufe gelingen.
@@ -55,7 +55,8 @@
 #
 # Probelauf ohne root (nur für Tests): WAMO_LABOR_GERAETE_WURZEL=/pfad/zu/einem/wegwerf/ordner stellt allen Pfaden unter /etc, /usr, /var und /run diesen Ordner voran,
 # WAMO_LABOR_GERAETE_JETZT=<Sekunden> ersetzt die Uhrzeit (Prüfung der 12-Stunden-Frist), WAMO_LABOR_CADDY_DIR den Ordner von wamo-caddy
-# (Standard /home/wamocon/wamo-tls/caddy). nmblookup, avahi-resolve, ping, ip, docker, curl, flock und logger stammen dann aus dem PATH (Attrappen).
+# (Standard /home/wamocon/wamo-tls/caddy). nmblookup, avahi-resolve, ip, docker, curl, flock und logger stammen dann aus dem PATH (Attrappen), und die Probe der
+# mDNS-Adressen schreibt nach WURZEL/dev/udp/ADRESSE/9 (nur wenn der Ordner besteht), statt ein Paket zu senden.
 set -euo pipefail
 umask 077
 export LC_ALL=C
@@ -77,6 +78,8 @@ MAX_JE_NAME=4          # mehr Antworten je Name sind verdächtig: nichts Neues z
 MAX_PARALLEL=4         # so viele Namen werden höchstens gleichzeitig aufgelöst (TasksMax der Unit und die Dauer eines Laufs hängen daran)
 SUCHFRIST_S=8          # so lange darf eine Namensauflösung (je Quelle) dauern
 PROBE_FRIST_S=2        # so lange darf jeder der zwei Schritte der Probe einer Adresse aus mDNS dauern (alle Adressen eines Namens gleichzeitig)
+ARP_WARTE_S=1          # so lange wartet die Probe nach dem UDP-Paket auf die Antwort von ARP, bevor sie die Nachbartabelle liest
+UDP_ZIEL="$W/dev/udp"  # die Probe sendet über /dev/udp der Bash; im Probelauf ist das ein Ordner unter der Wurzel, es geht dann nie ein Paket ins Netz
 RELOAD_ABSTAND_S=180   # neue Zulassungen: frühestens so lange nach dem letzten Versuch (auch nach einem Misserfolg), ein Entzug nie
 STAND_ABSTAND_S=300    # ohne Änderung wird der Stand höchstens alle 5 Minuten geschrieben
 WARN_ABSTAND_S=3600    # dieselbe Warnung höchstens einmal je Stunde
@@ -222,11 +225,13 @@ lan_filtern() {
   done | sort -t. -k4,4n -u
 }
 
-# Ist die Adresse (geprüft, aus dem Büro-LAN) im LAN wirklich da? Eine kurze Probe mit ping (das Ergebnis zählt nicht, sie löst nur ARP aus, auch bei Geräten, die
-# Ping nicht beantworten), danach muss die Nachbartabelle eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY oder PROBE zeigen. FAILED, INCOMPLETE oder kein
-# Eintrag heißt nein. ip bekommt die Adresse ohne "--" (das kennt ip nicht als Ende der Optionen), sie ist geprüft und beginnt nie mit einem Bindestrich.
+# Ist die Adresse (geprüft, aus dem Büro-LAN) im LAN wirklich da? Ein UDP-Paket an den Port 9 (discard) löst ARP aus, ohne Sonderrechte (die Unit hat kein CAP_NET_RAW,
+# ICMP ginge dort nicht). Das Ergebnis des Sendens zählt nicht. Nach ARP_WARTE_S muss die
+# Nachbartabelle eine Hardware-Adresse im Zustand REACHABLE, STALE, DELAY oder PROBE zeigen, FAILED, INCOMPLETE oder kein Eintrag heißt nein. ip bekommt die Adresse
+# ohne "--" (das kennt ip nicht als Ende der Optionen), sie ist geprüft und beginnt nie mit einem Bindestrich.
 im_lan_da() {
-  timeout "$PROBE_FRIST_S" ping -c1 -W1 -- "$1" >/dev/null 2>&1 || true
+  timeout "$PROBE_FRIST_S" bash -c 'printf x > "$1/$2/9"' _ "$UDP_ZIEL" "$1" 2>/dev/null || true
+  sleep "$ARP_WARTE_S"
   timeout "$PROBE_FRIST_S" ip -4 neigh show "$1" 2>/dev/null | tr -d '\r' | awk -v a="$1" '
     $1 == a { l = 0; s = 0; for (i = 2; i <= NF; i++) { if ($i == "lladdr") l = 1; if ($i ~ /^(REACHABLE|STALE|DELAY|PROBE)$/) s = 1 } if (l && s) da = 1 }
     END { exit !da }'
