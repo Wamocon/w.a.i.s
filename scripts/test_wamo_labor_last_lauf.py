@@ -66,6 +66,7 @@ class Welt:
         self.tempordner: list[Path] = []
         self.tmp_path = tmp_path
         stufen = pl.stufen_bauen(list(sitzungen), minuten, list(snr))
+        ein.setdefault("slot", "b")   # im Echtlauf steht der Slot vor dem Lauf fest (--slot oder vom Server ermittelt)
         self.ein = um.Einstellungen(lauf="last-test", seed=7, stufen=stufen, clips_ordner=clips, ausgabe_ordner=tmp_path / "aus", **ein)
 
     def aktive(self) -> int:
@@ -223,6 +224,14 @@ def test_der_code_gehoert_zum_seed_und_zur_serveruhr(tmp_path, clips):
 
 
 # ---------- Vorprüfung ----------
+
+@pytest.mark.parametrize("slot", [None, "", "c"])
+def test_ohne_festgelegten_slot_stoppt_die_vorpruefung_vor_jeder_aenderung(tmp_path, clips, slot):
+    w = Welt(tmp_path, clips, slot=slot)
+    e = w.lauf()
+    assert "Kern-Slot" in e["abbruchgrund"] and e["stufen"] == [] and e["aufraeumen"] == []
+    assert w.protokoll.namen("kern") == [] and w.protokoll.namen("dienst") == []
+
 
 def test_belegter_platz_stoppt_vor_jeder_aenderung(welt):
     import wamo_labor_last_server as sv

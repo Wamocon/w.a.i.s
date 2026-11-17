@@ -10,7 +10,8 @@ Aufrufe (im Repo-Hauptordner, nur Standardbibliothek plus Node mit Playwright f�
   python scripts/wamo_labor_last.py lauf --ausfuehren --bestaetigung LASTTEST      # Echtlauf, nur mit beiden Schaltern
   python scripts/wamo_labor_last.py clips                                 # fehlende Sprechproben mit der Windows-Stimme erzeugen
 Optionen: --sitzungen 1,2,4,8  --minuten 15 (höchstens 20)  --murmeln 20,10,5 (Stufen mit 8 Sitzungen und Signal-Rausch-Abstand in dB)  --murmeln-datei WAV
---seed 1  --lauf NAME  --schema wamo_dev  --host wamo-sokrates2  --slot b  --einwilligung 1  --freigabe ablehnen|freigeben|keine  --kopflos
+--seed 1  --lauf NAME  --schema wamo_dev  --host wamo-sokrates2  --slot a|b  --einwilligung 1  --freigabe ablehnen|freigeben|keine  --kopflos
+Ohne --slot ermittelt der Echtlauf den aktiven Kern-Slot am Server (nur lesend, systemctl is-active); genau einer muss laufen, sonst Ausgang 2.
 --kerndaten-behalten (die Gesprächstexte im Kern am Ende nicht löschen)
 --ratenlimit-anfragen N  --ratenlimit-tokens N  --preis-eingabe USD  --preis-ausgabe USD  (Dollar je Million Tokens)  --kosten-obergrenze USD
 --clips-ordner, --ausgabe-ordner, --umschlag-datei (Standard unter %USERPROFILE%\\.wamo-labor, nie im Repo).
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import json
 import os
 import re
@@ -94,7 +96,7 @@ def _parser() -> argparse.ArgumentParser:
     lauf.add_argument("--lauf")
     lauf.add_argument("--schema", default="wamo_dev")
     lauf.add_argument("--host", default=os.environ.get("WAMO_SSH_HOST", "wamo-sokrates2"))
-    lauf.add_argument("--slot", default="b", choices=("a", "b"))
+    lauf.add_argument("--slot", choices=sv.SLOTS, help="Kern-Slot vorgeben; ohne: der aktive Slot, im Echtlauf am Server ermittelt")
     lauf.add_argument("--einwilligung", type=int, default=1)
     lauf.add_argument("--freigabe", default="ablehnen", choices=FREIGABEN)
     lauf.add_argument("--kerndaten-behalten", action="store_true", help="die Gesprächstexte im Kern am Ende nicht löschen")
@@ -146,13 +148,19 @@ def _zahl(wert: float) -> str:
     return f"{wert:.2f}".replace(".", ",")
 
 
-def plan_text(ein: Einstellungen, echt: bool = False) -> list[str]:
+def _kern_text(ein: Einstellungen, quelle: str) -> str:
+    if ein.slot is None:
+        return "der aktive Slot (wird im Echtlauf am Server ermittelt, nur lesend; vorgeben mit --slot a oder --slot b)"
+    return f"wamo-core@{ein.slot} ({quelle})"
+
+
+def plan_text(ein: Einstellungen, echt: bool = False, slot_quelle: str = "vorgegeben mit --slot") -> list[str]:
     k = ein.kosten or pl.kosten_schaetzen(ein.stufen)
     a = ein.annahmen
     n = ein.sitzungen_max
     zeilen = [
         f"Lasttest {ein.lauf}: " + ("ECHTLAUF, jetzt wird gestartet." if echt else "Trockenlauf, nichts wird gestartet, kein Aufruf am Server."),
-        f"Server: Sokrates-2 (ssh-Alias {ein.host}), Kern-Instanz wamo-core@{ein.slot}, Schema {ein.schema}, nur lesend am Kern",
+        f"Server: Sokrates-2 (ssh-Alias {ein.host}), Kern-Instanz {_kern_text(ein, slot_quelle)}, Schema {ein.schema}, nur lesend am Kern",
         f"Adresse der Oberfläche: {ein.url} (die einzige, die der Browser öffnen darf)",
         f"Profile: {ein.profile[0]} bis {ein.profile[-1]} ({n} Profile), Plätze 1 bis {n}, Einwilligung Version {ein.einwilligung}",
         "Stufen:", *[f"  {s.nummer}. {s.name}, {s.minuten} Minuten" for s in ein.stufen],
@@ -239,9 +247,24 @@ def _schluessel_pruefen() -> None:
         raise pl.EingabeFehler(str(e)) from None
 
 
-def echtlauf(ein: Einstellungen, args: argparse.Namespace, umgebung_bauen: Callable) -> int:
+def slot_festlegen(ein: Einstellungen, slot_ermitteln: Callable[[str], str]) -> tuple[Einstellungen, str]:
+    """Ohne --slot: der aktive Kern-Slot am Server (nur lesend). Ist er nicht eindeutig, startet nichts (Ausgang 2)."""
+    if ein.slot is not None:
+        return ein, "vorgegeben mit --slot"
+    try:
+        slot = slot_ermitteln(ein.host)
+    except sv.ServerFehler as e:
+        raise pl.EingabeFehler(str(e)) from None
+    if slot not in sv.SLOTS:
+        raise pl.EingabeFehler("Der aktive Kern-Slot ist unerwartet (weder a noch b): mit --slot vorgeben")
+    return dataclasses.replace(ein, slot=slot), "aktiv, am Server ermittelt"
+
+
+def echtlauf(ein: Einstellungen, args: argparse.Namespace, umgebung_bauen: Callable,
+             slot_ermitteln: Callable[[str], str] = sv.aktiven_slot_ermitteln) -> int:
     _schluessel_pruefen()
-    for zeile in plan_text(ein, echt=True):
+    ein, quelle = slot_festlegen(ein, slot_ermitteln)
+    for zeile in plan_text(ein, echt=True, slot_quelle=quelle):
         print(zeile, flush=True)
     umg = umgebung_bauen(ein, args)
     alt = sg.umsetzen()
@@ -286,14 +309,15 @@ def _umschlag_standard(pfad: Path):
     return ufm.Umschlag(ufm.pfad_pruefen(pfad, WURZEL))
 
 
-def lauf_befehl(args: argparse.Namespace, umgebung_bauen: Callable, umschlag_oeffnen: Callable) -> int:
+def lauf_befehl(args: argparse.Namespace, umgebung_bauen: Callable, umschlag_oeffnen: Callable,
+                slot_ermitteln: Callable[[str], str] = sv.aktiven_slot_ermitteln) -> int:
     ein = einstellungen_bauen(args)
     if args.ausfuehren and args.bestaetigung != pl.BESTAETIGUNG:
         raise pl.EingabeFehler(f"Der Echtlauf braucht --ausfuehren UND --bestaetigung {pl.BESTAETIGUNG}")
     pfad = Path(args.umschlag_datei or standardorte()["umschlag"]).expanduser()
     _ausserhalb_des_repos(pfad, "Die Umschlag-Datei")
     if args.ausfuehren:
-        return echtlauf(ein, args, umgebung_bauen)
+        return echtlauf(ein, args, umgebung_bauen, slot_ermitteln)
     for zeile in plan_text(ein) + ["Lokale Befunde:", *lokale_befunde(ein, pfad, umschlag_oeffnen)]:
         print(zeile)
     print(f"Zum Ausführen: python scripts/wamo_labor_last.py lauf --ausfuehren --bestaetigung {pl.BESTAETIGUNG} (mit denselben Optionen)")
@@ -301,7 +325,7 @@ def lauf_befehl(args: argparse.Namespace, umgebung_bauen: Callable, umschlag_oef
 
 
 def main(argv: list[str] | None = None, *, umgebung_bauen: Callable = echte_umgebung, umschlag_oeffnen: Callable = _umschlag_standard,
-         sprechen: Callable = sprechen_windows) -> int:
+         sprechen: Callable = sprechen_windows, slot_ermitteln: Callable[[str], str] = sv.aktiven_slot_ermitteln) -> int:
     for strom in (sys.stdout, sys.stderr):
         with contextlib.suppress(AttributeError, ValueError):
             strom.reconfigure(encoding="utf-8", errors="replace")
@@ -309,7 +333,7 @@ def main(argv: list[str] | None = None, *, umgebung_bauen: Callable = echte_umge
         args = _parser().parse_args(argv)
         if args.befehl == "clips":
             return clips_befehl(args, sprechen)
-        return lauf_befehl(args, umgebung_bauen, umschlag_oeffnen)
+        return lauf_befehl(args, umgebung_bauen, umschlag_oeffnen, slot_ermitteln)
     except pl.EingabeFehler as e:
         print(f"Fehler: {e}", file=sys.stderr)
         return EXIT_EINGABE

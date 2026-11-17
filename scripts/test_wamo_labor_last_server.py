@@ -268,7 +268,7 @@ class Ssh:
 
 def test_server_messen_liest_und_prueft_die_antwort():
     ssh = Ssh(antwort_messung())
-    server = sv.Server("wamo-sokrates2", ssh, uhr=lambda: 1000.0)
+    server = sv.Server("wamo-sokrates2", ssh, slot="b", uhr=lambda: 1000.0)
     m = server.messen(seit=900.0)
     assert m.zeit == 1000.0 and m.aktiv and m.kerne == 20 and m.cpu_usec == 5_000_000 and m.speicher == 1_000_000_000
     assert m.versatz_s == pytest.approx(0.0)
@@ -280,12 +280,12 @@ def test_server_messen_liest_und_prueft_die_antwort():
 
 def test_der_versatz_ist_serverzeit_minus_lokale_mitte():
     zeiten = iter([100.0, 102.0])
-    server = sv.Server("h", Ssh(antwort_messung(zeit=110.0)), uhr=lambda: next(zeiten))
+    server = sv.Server("h", Ssh(antwort_messung(zeit=110.0)), slot="b", uhr=lambda: next(zeiten))
     assert server.messen(None).versatz_s == pytest.approx(110.0 - 101.0)
 
 
 def test_nicht_lesbares_journal_bleibt_ohne_zaehlung():
-    m = sv.Server("h", Ssh(antwort_messung(journal=None, journal_lesbar=False)), uhr=lambda: 1.0).messen(5.0)
+    m = sv.Server("h", Ssh(antwort_messung(journal=None, journal_lesbar=False)), slot="b", uhr=lambda: 1.0).messen(5.0)
     assert m.journal is None and m.journal_lesbar is False
 
 
@@ -296,27 +296,74 @@ def test_nicht_lesbares_journal_bleibt_ohne_zaehlung():
 ])
 def test_unerwartete_antworten_werden_abgelehnt(kaputt):
     with pytest.raises(sv.ServerFehler, match="unerwartet"):
-        sv.Server("h", Ssh(antwort_messung(**kaputt)), uhr=lambda: 1.0).messen(5.0)
+        sv.Server("h", Ssh(antwort_messung(**kaputt)), slot="b", uhr=lambda: 1.0).messen(5.0)
 
 
 def test_antwort_die_kein_json_ist_wird_abgelehnt():
     with pytest.raises(sv.ServerFehler, match="unerwartet"):
-        sv.Server("h", Ssh(wl.Ergebnis(0, "Hallo Welt", "")), uhr=lambda: 1.0).messen(None)
+        sv.Server("h", Ssh(wl.Ergebnis(0, "Hallo Welt", "")), slot="b", uhr=lambda: 1.0).messen(None)
 
 
 def test_ssh_fehler_werden_kurz_und_ohne_rohausgabe_gemeldet():
     lang = "x" * 5000
     with pytest.raises(sv.ServerFehler) as e:
-        sv.Server("h", Ssh(wl.Ergebnis(255, "", "ssh: connect to host: Connection timed out\n" + lang)), uhr=lambda: 1.0).messen(None)
+        sv.Server("h", Ssh(wl.Ergebnis(255, "", "ssh: connect to host: Connection timed out\n" + lang)), slot="b", uhr=lambda: 1.0).messen(None)
     assert "Connection timed out" in str(e.value) and len(str(e.value)) < 400
 
 
 def test_ungueltiger_slot_und_host_werden_vor_dem_ersten_aufruf_abgelehnt():
-    with pytest.raises(sv.ServerFehler, match="Slot"):
-        sv.Server("h", Ssh({}), slot="c")
+    for slot in ("c", "", None):
+        with pytest.raises(sv.ServerFehler, match="Slot"):
+            sv.Server("h", Ssh({}), slot=slot)
+    with pytest.raises(TypeError):
+        sv.Server("h", Ssh({}))   # kein stiller Standard-Slot mehr (früher fest b)
     for host in ("-oProxyCommand=x", "a b", "", "a;b"):
         with pytest.raises(sv.ServerFehler, match="Host"):
-            sv.Server(host, Ssh({}))
+            sv.Server(host, Ssh({}), slot="b")
+
+
+# ---------- aktiver Kern-Slot (R8: der Lasttest maß fest Slot b) ----------
+
+@pytest.mark.parametrize("code,ausgabe,slot", [
+    (0, "inactive\nactive\n", "b"), (0, "active\ninactive\n", "a"), (0, "active\nfailed\n", "a"), (0, "deactivating\nactive\n", "b"),
+    (3, "inactive\nactive\n", "b"),   # systemctl is-active endet mit 3, sobald eine der Units nicht aktiv ist: das ist hier normal
+])
+def test_aktiver_slot_wird_nur_lesend_ermittelt(code, ausgabe, slot):
+    ssh = Ssh(wl.Ergebnis(code, ausgabe, ""))
+    assert sv.aktiven_slot_ermitteln("wamo-sokrates2", ssh) == slot
+    host, befehl, eingabe, frist = ssh.aufrufe[0]
+    assert (host, befehl, eingabe) == ("wamo-sokrates2", "systemctl is-active wamo-core@a.service wamo-core@b.service", "")
+    assert "sudo" not in befehl and frist <= 60
+
+
+def test_laufen_beide_slots_ist_der_aktive_nicht_eindeutig():
+    with pytest.raises(sv.ServerFehler, match="Beide Kern-Slots laufen") as e:
+        sv.aktiven_slot_ermitteln("h", Ssh(wl.Ergebnis(0, "active\nactive\n", "")))
+    assert "--slot" in str(e.value) and "ausleiten" in str(e.value)
+
+
+def test_ohne_aktiven_slot_bricht_die_ermittlung_ab():
+    with pytest.raises(sv.ServerFehler, match="Kein Kern-Slot ist aktiv") as e:
+        sv.aktiven_slot_ermitteln("h", Ssh(wl.Ergebnis(3, "inactive\nfailed\n", "")))
+    assert "a: inactive, b: failed" in str(e.value) and "wamo-core.service" in str(e.value)
+
+
+@pytest.mark.parametrize("ergebnis", [
+    wl.Ergebnis(255, "", "ssh: connect to host wamo-sokrates2 port 22: Connection timed out"),
+    wl.Ergebnis(0, "active\n", ""), wl.Ergebnis(0, "active\ninactive\nactive\n", ""), wl.Ergebnis(0, "", ""),
+    wl.Ergebnis(0, "active\n<script>\n", ""), wl.Ergebnis(1, "active\ninactive\n", "Failed to connect to bus"),
+])
+def test_unlesbarer_zustand_wird_klar_gemeldet(ergebnis):
+    with pytest.raises(sv.ServerFehler, match="ließ sich nicht lesen") as e:
+        sv.aktiven_slot_ermitteln("h", Ssh(ergebnis))
+    assert "--slot" in str(e.value) and len(str(e.value)) < 400
+
+
+def test_ungueltiger_host_wird_vor_der_ermittlung_abgelehnt():
+    ssh = Ssh(wl.Ergebnis(0, "active\ninactive\n", ""))
+    with pytest.raises(sv.ServerFehler, match="Host"):
+        sv.aktiven_slot_ermitteln("-oProxyCommand=x", ssh)
+    assert ssh.aufrufe == []
 
 
 # ---------- Weg zum Kern (Verwaltung der Laborprofile) mit Frist ----------
@@ -366,6 +413,7 @@ def test_ssh_ausfuehren_ruft_ssh_mit_batchmode_und_zeitlimit(monkeypatch):
     assert e == wl.Ergebnis(0, "aus", "fehler")
     assert gesehen["cmd"][0] == "ssh" and "BatchMode=yes" in gesehen["cmd"] and gesehen["cmd"][-2:] == ["wamo-sokrates2", "echo"]
     assert gesehen["kw"]["input"] == "eingabe" and gesehen["kw"]["timeout"] == 30 and "shell" not in gesehen["kw"]
+    assert gesehen["kw"]["errors"] == "replace"   # eine unlesbare Antwort wird ein Fehler mit Ausgang 2, kein Traceback
 
 
 def test_ssh_ausfuehren_meldet_zeitueberschreitung_und_fehlendes_ssh(monkeypatch):

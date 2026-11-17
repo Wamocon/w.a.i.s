@@ -113,6 +113,8 @@ def _kern_pruefen(ein: Einstellungen, umg: Umgebung) -> sv.Messung:
 
 def vorpruefen(ein: Einstellungen, umg: Umgebung) -> sv.Messung:
     """Alle Prüfungen vor dem ersten verändernden Aufruf. Gibt die erste Messung am Kern zurück (Serveruhr, Ausgangswerte)."""
+    if ein.slot not in sv.SLOTS:   # den Slot legt der Echtlauf vorher fest (--slot oder vom Server ermittelt), nie ein stiller Standard
+        raise VorpruefFehler("Kein Kern-Slot festgelegt (a oder b): ohne ihn wüsste die Messung nicht, welchen Kern sie liest")
     if not adresse_zulaessig(ein.url):
         raise VorpruefFehler("Adresse nicht zulässig: nur die feste Adresse der Oberfläche auf Sokrates-2 ist erlaubt")
     try:

@@ -27,6 +27,7 @@ from typing import Callable
 import wamo_labor as wl
 
 HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")  # kein führender Strich: ssh hielte ihn für eine Option
+SLOTS = ("a", "b")  # die Kern-Slots wamo-core@a und wamo-core@b (das Programm am Server hat seine eigene Liste)
 MESS_FRIST_S = 45
 DIENST_FRIST_S = 120
 MAX_AUSGABE = 70000
@@ -411,7 +412,7 @@ def ssh_ausfuehren(host: str, befehl: str, eingabe: str, frist: float) -> wl.Erg
     """Ruft einen festen Befehl über ssh auf (BatchMode, kein Passwort, kein Terminal). Die Eingabe geht über stdin, nie als Argument."""
     try:
         r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, befehl], input=eingabe, capture_output=True,
-                           text=True, encoding="utf-8", timeout=frist)
+                           text=True, encoding="utf-8", errors="replace", timeout=frist)
     except subprocess.TimeoutExpired:
         return wl.Ergebnis(1, "", f"Zeitüberschreitung: Der Weg zum Server antwortete nicht binnen {int(frist)} Sekunden.")
     except OSError as e:
@@ -499,9 +500,9 @@ def messung_lesen(daten: dict, versatz_s: float) -> Messung:
 class Server:
     """Lesende Messung am Kern (Slot a oder b). Die Uhr und der Weg sind austauschbar (Tests setzen Attrappen ein)."""
 
-    def __init__(self, host: str, ssh: ZUGRIFF = ssh_ausfuehren, slot: str = "b", uhr: Callable[[], float] = time.time):
+    def __init__(self, host: str, ssh: ZUGRIFF = ssh_ausfuehren, *, slot: str, uhr: Callable[[], float] = time.time):
         self.host, self.ssh, self.uhr = _host_pruefen(host), ssh, uhr
-        if slot not in ("a", "b"):
+        if slot not in SLOTS:   # kein Standard: welcher Slot gemessen wird, legt der Echtlauf fest (--slot oder vom Server ermittelt)
             raise ServerFehler("Ungültiger Slot (a oder b)")
         self.slot = slot
         self._befehl = befehl_fuer(REMOTE_MESSUNG)
@@ -514,6 +515,33 @@ class Server:
         zeit = daten.get("zeit")
         versatz = float(zeit) - (vorher + nachher) / 2 if type(zeit) in (int, float) else 0.0
         return messung_lesen(daten, versatz)
+
+
+SLOT_BEFEHL = "systemctl is-active wamo-core@a.service wamo-core@b.service"
+SLOT_FRIST_S = 30
+ZUSTAND_RE = re.compile(r"[a-z-]{1,20}")
+
+
+def aktiven_slot_ermitteln(host: str, ssh: ZUGRIFF = ssh_ausfuehren) -> str:
+    """Der Kern-Slot, der am Server läuft (nur lesend, ohne sudo, fester Befehl). Genau einer muss aktiv sein, sonst ServerFehler mit
+    dem Grund: In der Auslaufzeit nach einem Wechsel laufen beide (welcher neue Sitzungen bekommt, weiß nur Caddy), auf der alten Unit
+    wamo-core.service keiner. Dann gibt --slot den Slot vor."""
+    e = ssh(_host_pruefen(host), SLOT_BEFEHL, "", SLOT_FRIST_S)
+    zeilen = [z.strip() for z in e.stdout.strip().splitlines()]
+    # systemctl is-active endet mit 3, wenn keine der Units aktiv ist; gelesen wird nur die Ausgabe, je Unit eine Zeile
+    if e.code not in (0, 3) or len(zeilen) != 2 or not all(ZUSTAND_RE.fullmatch(z) for z in zeilen):
+        raise ServerFehler(f"Der aktive Kern-Slot ließ sich nicht lesen (Ausgang {e.code}): {_kurz(e.stderr) or 'keine Angabe'}. "
+                           "Den Slot mit --slot a oder --slot b vorgeben.")
+    zustand = dict(zip(("a", "b"), zeilen))
+    aktiv = [s for s, z in zustand.items() if z == "active"]
+    if len(aktiv) == 1:
+        return aktiv[0]
+    if not aktiv:
+        raise ServerFehler(f"Kein Kern-Slot ist aktiv (a: {zustand['a']}, b: {zustand['b']}). Läuft der Server noch auf der alten Unit "
+                           "wamo-core.service oder steht der Kern? Der Lasttest misst nur einen laufenden Slot.")
+    raise ServerFehler("Beide Kern-Slots laufen (Auslaufzeit nach einem Wechsel), der aktive ist so nicht eindeutig. Erst ausleiten "
+                       "(wamo-core-slots.sh ausleiten) oder den Slot mit --slot vorgeben (welcher neue Sitzungen bekommt, steht in der "
+                       "Include-Datei von Caddy, die wamo-core-slots.sh schreibt).")
 
 
 class Dienst:
