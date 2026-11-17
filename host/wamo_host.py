@@ -60,6 +60,7 @@ import office_onenote
 import office_outlook
 import office_outlook_com
 import office_teams
+import prozess_prioritaet
 import uia_control
 import windows_control as wc
 
@@ -2240,25 +2241,46 @@ def _office_erstellen(fmt: object, roh: object, oeffnen: object, canvas_id: obje
                       "ordner": office_ablage.ORDNER_ANZEIGE, "pfad": str(pfad)}}
 
 
+def _ordner_zeigen(pfad: Path) -> None:
+    """Zeigt eine selbst erzeugte Datei im Explorer: Ordner Dokumente\\WAIS, die Datei markiert (Wunsch von Niko vom 17.11.2026 für
+    den Knopf im Hinweis nach dem Speichern). Nur die sechs festen Endungen. Der Pfad kommt aus dem Register und kann unter Windows
+    kein Anführungszeichen enthalten; explorer.exe kehrt sofort zurück, der Host wartet nicht auf das Fenster."""
+    if pfad.suffix not in OFFICE_ENDUNGEN:
+        raise RuntimeError("Endung nicht erlaubt")
+    if platform.system() != "Windows":
+        raise RuntimeError("Host laeuft nicht unter Windows")
+    if '"' in str(pfad):
+        raise RuntimeError("Pfad nicht erlaubt")
+    explorer = Path(os.environ.get("SystemRoot") or "C:\\Windows") / "explorer.exe"
+    subprocess.Popen(f'"{explorer}" /select,"{pfad}"', close_fds=True)  # noqa: S603 (fester Explorer, Pfad aus dem Register)
+
+
 @mcp.tool()
-def office_datei_oeffnen(kennung: str) -> dict:
-    """Nur für den Kern: öffnet eine Datei, die W.A.I.S. selbst erzeugt hat (Kennung aus dem Register, change)."""
-    if aus := _office_aus("office_datei_oeffnen"):
+async def office_datei_oeffnen(kennung: str, im_ordner: bool = False) -> dict:
+    """Nur für den Kern: öffnet eine Datei, die W.A.I.S. selbst erzeugt hat (Kennung aus dem Register, change). im_ordner: statt
+    der Datei den Ordner Dokumente\\WAIS im Explorer zeigen, die Datei markiert."""
+    tool = "office_datei_oeffnen"
+    if aus := _office_aus(tool):
         return aus
-    if vorab := _eingabe_vorab("office_datei_oeffnen"):  # Sperre oder offene Freigabe: kein neues Fenster nach vorn
+    if vorab := _eingabe_vorab(tool):  # Sperre oder offene Freigabe: kein neues Fenster nach vorn
         return vorab
     try:
         pfad = _office_ablage().pfad(kennung)
     except office_ablage.AblageFehler as e:
-        _audit({"tool": "office_datei_oeffnen", "kennung": str(kennung)[:20], "risk": "rejected", "error": str(e)[:200]})
+        _audit({"tool": tool, "kennung": str(kennung)[:20], "risk": "rejected", "error": str(e)[:200]})
         return {"status": "rejected", "summary": str(e)}
-    if _duplicate("office_datei_oeffnen", kennung=kennung):  # Doppelklick: ein Satz für Menschen, nicht der für das Modell
+    ordner = im_ordner is True
+    if _duplicate(tool, kennung=kennung, im_ordner=ordner):  # Doppelklick: ein Satz für Menschen, nicht der für das Modell
         return {"status": "duplicate", "summary": OFFICE_SCHON_GEOEFFNET}
-    _audit({"tool": "office_datei_oeffnen", "kennung": kennung, "name": pfad.name[:120], "risk": "change"})
+    _audit({"tool": tool, "kennung": kennung, "name": pfad.name[:120], "risk": "change", **({"im_ordner": True} if ordner else {})})
+    # Im Thread (Befund 17.11.2026): Ist die Datei in Word schon offen, wartet os.startfile mehrere Sekunden auf Word. Lief das im
+    # Hauptfaden, stand der ganze Host still; weitere Klicks und die Probe des Kerns liefen in ihre Zeitgrenzen.
     try:
-        _datei_oeffnen(pfad)
+        await asyncio.to_thread(_ordner_zeigen if ordner else _datei_oeffnen, pfad)
     except (OSError, RuntimeError) as e:
         return {"status": "error", "summary": f"Öffnen hat nicht geklappt ({type(e).__name__})."}
+    if ordner:
+        return {"status": "success", "summary": f"{pfad.name} ist im Ordner {office_ablage.ORDNER_ANZEIGE} markiert."}
     return {"status": "success", "summary": f"{pfad.name} ist geöffnet."}
 
 
@@ -2781,6 +2803,8 @@ if __name__ == "__main__":
         import host_http
 
         KANAL = "http"
+        # Startet die geplante Aufgabe den Host unter normal, hebt er sich selbst an (prozess_prioritaet.py, Befund 17.11.2026)
+        _audit({"tool": "host_start", "risk": "read", "prioritaet": prozess_prioritaet.normal_setzen()})
         _geraet_datei = (os.getenv("WAMO_HOST_GERAET_DATEI") or "").strip() or None
         if _geraet_datei:
             LIVE = live_bild.Live(live_bild.datei_neben(_geraet_datei), host_http.GeraetBindung(_geraet_datei))

@@ -112,7 +112,7 @@ describe("Hinweis nach dem Speichern", () => {
     );
     expect(screen.getByText("2026-11-14 Angebot.docx liegt in Dokumente\\WAIS.")).toBeTruthy();
     expect(screen.getByText("C:\\Users\\x\\Dokumente\\WAIS\\2026-11-14 Angebot.docx")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Öffnen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Im Ordner zeigen" }));
     expect(oeffnen).toHaveBeenCalledExactlyOnceWith("0123456789abcdef");
     fireEvent.click(screen.getByRole("button", { name: "Hinweis schließen" }));
     expect(screen.queryByText(/Angebot\.docx/)).toBeNull();
@@ -122,6 +122,6 @@ describe("Hinweis nach dem Speichern", () => {
     render(<DateiHinweis onOeffnen={vi.fn(() => true)} />);
     act(() => applyServerMessage({ type: "datei", ok: false, grund: "Dieses Format geht an diesem PC nicht." }));
     expect(wamo.get().toast?.text).toBe("Dieses Format geht an diesem PC nicht.");
-    expect(screen.queryByRole("button", { name: "Öffnen" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Im Ordner zeigen" })).toBeNull();
   });
 });

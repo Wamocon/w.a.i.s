@@ -590,6 +590,25 @@ async def test_klick_oeffnen(host):
     assert len(host.aufrufe) == 1 and o_aus.gesendet[-1]["ok"] is False
 
 
+async def test_klick_im_ordner_zeigen(host):
+    """Wunsch von Niko vom 17.11.2026: Der Knopf zeigt die Datei im Explorer (Dokumente\\WAIS). Nur ein echtes true zählt."""
+    o = office()
+    await o.client_nachricht("datei_oeffnen", {"kennung": "0123456789abcdef", "ordner": True})
+    assert host.aufrufe[-1] == ("office_datei_oeffnen", {"kennung": "0123456789abcdef", "im_ordner": True})
+    await o.client_nachricht("datei_oeffnen", {"kennung": "0123456789abcdef", "ordner": "ja"})
+    assert host.aufrufe[-1] == ("office_datei_oeffnen", {"kennung": "0123456789abcdef"})
+    assert o.gesendet == []
+
+
+async def test_doppelklick_beim_oeffnen_ist_kein_fehler(monkeypatch):
+    """Befund 17.11.2026: Jeder weitere Klick bekam vom Host "duplicate" und zeigte einen roten Hinweis."""
+    h = Host(oeffnen={"status": "duplicate", "summary": "Die Datei wird gerade schon geöffnet."})
+    monkeypatch.setattr(ow, "call_host_tool", h)
+    o = office()
+    await o.client_nachricht("datei_oeffnen", {"kennung": "0123456789abcdef", "ordner": True})
+    assert len(h.aufrufe) == 1 and o.gesendet == []
+
+
 # ---------- Verdrahtung in bot.py (statisch, die Sitzung braucht Netz und Modelle) ----------
 BOT = (Path(__file__).with_name("bot.py")).read_text(encoding="utf-8")
 

@@ -245,9 +245,11 @@ class OfficeDateien:
             if ergebnis["status"] != "success":
                 await self._melden({"type": "datei", "ok": False, "grund": ergebnis.get("summary") or "Nicht gespeichert."})
         elif typ == "datei_oeffnen":
-            await self._oeffnen(d.get("kennung"))
+            await self._oeffnen(d.get("kennung"), im_ordner=d.get("ordner") is True)
 
-    async def _oeffnen(self, kennung: object) -> None:
+    async def _oeffnen(self, kennung: object, *, im_ordner: bool = False) -> None:
+        """Knopf im Hinweis nach dem Speichern. im_ordner (Wunsch von Niko vom 17.11.2026): den Ordner Dokumente\\WAIS im Explorer
+        zeigen, die Datei markiert; ein Host vor 0.5.1 kennt das Feld nicht und öffnet die Datei selbst."""
         if not isinstance(kennung, str) or not KENNUNG_RE.fullmatch(kennung):
             await self._melden({"type": "datei", "ok": False, "grund": "Unbekannte Datei."})
             return
@@ -255,12 +257,15 @@ class OfficeDateien:
         if not self._darf() or client is None:
             await self._melden({"type": "datei", "ok": False, "grund": PC_AUS})
             return
+        argumente = {"kennung": kennung, **({"im_ordner": True} if im_ordner else {})}
         try:
-            ergebnis = json.loads(await asyncio.wait_for(call_host_tool(client, "office_datei_oeffnen", {"kennung": kennung}),
+            ergebnis = json.loads(await asyncio.wait_for(call_host_tool(client, "office_datei_oeffnen", argumente),
                                                          OEFFNEN_TIMEOUT_SECS))
         except Exception as e:  # noqa: BLE001
             logger.warning("Office-Datei öffnen: Host antwortet nicht verwertbar ({})", type(e).__name__)
             ergebnis = {"status": "error", "summary": KEINE_ANTWORT}
+        if isinstance(ergebnis, dict) and ergebnis.get("status") == "duplicate":
+            return  # Doppelklick: das erste Öffnen läuft schon, kein roter Hinweis
         if not isinstance(ergebnis, dict) or ergebnis.get("status") != "success":
             grund = clean_inline(ergebnis.get("summary", "") if isinstance(ergebnis, dict) else "", 300) or "Nicht geöffnet."
             await self._melden({"type": "datei", "ok": False, "grund": grund})

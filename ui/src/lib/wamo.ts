@@ -191,7 +191,7 @@ export type WamoState = {
   toast: { key: number; text: string } | null;
   /** Jira-Stories (lib/jiraStory.ts): Angebot des Kerns (Knopf am Canvas) und das letzte Ergebnis, bis die Person es schließt */
   jira: JiraStand;
-  /** zuletzt gespeicherte Datei (Canvas als Word, Excel, ...): Hinweis mit "Öffnen", bis die Person ihn schließt */
+  /** zuletzt gespeicherte Datei (Canvas als Word, Excel, ...): Hinweis mit "Im Ordner zeigen", bis die Person ihn schließt */
   datei: Extract<DateiMeldung, { ok: true }> | null;
   /** zählt die Antworten auf "Speichern" (Erfolg oder Fehler): ein gesperrter Knopf im Canvas wird damit wieder frei */
   dateiAntworten: number;
@@ -755,7 +755,7 @@ export function applyServerMessage(msg: ServerMessage) {
       zeigeMemo({ bereich: msg.bereich, status: msg.status, text: msg.text, id: msg.id });
       return;
     case "datei": {
-      // Canvas als Datei gespeichert: Hinweis mit "Öffnen" (components/DateiHinweis.tsx); ein Fehler kommt als kurzer Hinweis
+      // Canvas als Datei gespeichert: Hinweis mit "Im Ordner zeigen" (components/DateiHinweis.tsx); ein Fehler kommt als kurzer Hinweis
       if (!msg.ok) {
         wamo.set((s) => ({ ...s, dateiAntworten: s.dateiAntworten + 1 }));
         zeigeToast(msg.grund);

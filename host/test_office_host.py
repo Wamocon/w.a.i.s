@@ -32,11 +32,13 @@ class _Basis(unittest.TestCase):
         self.schalter = wurzel / "WAMO" / "office.aus"
         self.audit: list[dict] = []
         self.geoeffnet: list[Path] = []
+        self.im_ordner: list[Path] = []
         for p in (
             mock.patch.object(host, "_audit", side_effect=self.audit.append),
             mock.patch.object(host, "_office_ablage", return_value=self.ablage),
             mock.patch.object(host, "OFFICE_AUS", self.schalter),
             mock.patch.object(host, "_datei_oeffnen", side_effect=self.geoeffnet.append),
+            mock.patch.object(host, "_ordner_zeigen", side_effect=self.im_ordner.append),
             mock.patch.object(host, "_ist_gesperrt", return_value=False),
             mock.patch.object(office_com, "word_vorhanden", return_value=True),
         ):
@@ -48,6 +50,9 @@ class _Basis(unittest.TestCase):
 
     def erstellen(self, fmt, inhalt, oeffnen=True, canvas_id=""):
         return asyncio.run(host.office_datei_erstellen(fmt, inhalt, oeffnen, canvas_id))
+
+    def oeffnen(self, kennung, im_ordner=False):
+        return asyncio.run(host.office_datei_oeffnen(kennung, im_ordner))
 
     def audit_text(self) -> str:
         return json.dumps(self.audit, ensure_ascii=False)
@@ -69,7 +74,7 @@ class Faehigkeiten(_Basis):
         self.schalter.write_text("", encoding="utf-8")
         self.assertEqual(host.office_faehigkeiten()["formate"], [])
         self.assertEqual(self.erstellen("word", DOKUMENT)["status"], "blocked")
-        self.assertEqual(host.office_datei_oeffnen("0123456789abcdef")["status"], "blocked")
+        self.assertEqual(self.oeffnen("0123456789abcdef")["status"], "blocked")
         self.assertEqual(list(self.ablage.wurzel.iterdir()), [])  # nichts angelegt
         self.assertEqual(self.geoeffnet, [])
 
@@ -191,32 +196,74 @@ class Erstellen(_Basis):
 class Oeffnen(_Basis):
     def test_nur_registerdateien(self):
         datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
-        self.assertEqual(host.office_datei_oeffnen(datei["kennung"])["status"], "success")
+        self.assertEqual(self.oeffnen(datei["kennung"])["status"], "success")
         self.assertEqual(self.geoeffnet, [self.ablage.pfad(datei["kennung"])])
         for kennung in ("fedcba9876543210", "../x", "", "C:\\Windows\\notepad.exe"):
-            self.assertEqual(host.office_datei_oeffnen(kennung)["status"], "rejected", kennung)
+            self.assertEqual(self.oeffnen(kennung)["status"], "rejected", kennung)
         self.assertEqual(len(self.geoeffnet), 1)
 
     def test_gesperrter_bildschirm(self):
         datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
         with mock.patch.object(host, "_ist_gesperrt", return_value=True):
-            self.assertEqual(host.office_datei_oeffnen(datei["kennung"])["status"], "locked")
+            self.assertEqual(self.oeffnen(datei["kennung"])["status"], "locked")
         self.assertEqual(self.geoeffnet, [])
 
     def test_offene_freigabe(self):
         datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
         with mock.patch.object(host, "_eingabe_vorab", return_value=dict(host.WARTET)):
-            self.assertEqual(host.office_datei_oeffnen(datei["kennung"])["status"], "wartet")
+            self.assertEqual(self.oeffnen(datei["kennung"])["status"], "wartet")
         self.assertEqual(self.geoeffnet, [])
 
     def test_doppelklick_bekommt_eine_freundliche_meldung(self):
         datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
-        self.assertEqual(host.office_datei_oeffnen(datei["kennung"])["status"], "success")
-        zweiter = host.office_datei_oeffnen(datei["kennung"])
+        self.assertEqual(self.oeffnen(datei["kennung"])["status"], "success")
+        zweiter = self.oeffnen(datei["kennung"])
         self.assertEqual(zweiter["status"], "duplicate")
         self.assertEqual(zweiter["summary"], host.OFFICE_SCHON_GEOEFFNET)
         self.assertIn("geöffnet", zweiter["summary"])  # für Menschen, mit Umlauten, nicht der Satz für das Modell
         self.assertEqual(len(self.geoeffnet), 1)
+
+    def test_im_ordner_zeigt_den_explorer_statt_die_datei_zu_oeffnen(self):
+        datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
+        antwort = self.oeffnen(datei["kennung"], im_ordner=True)
+        self.assertEqual(antwort["status"], "success", antwort)
+        self.assertIn("Dokumente\\WAIS", antwort["summary"])
+        self.assertEqual(self.im_ordner, [self.ablage.pfad(datei["kennung"])])
+        self.assertEqual(self.geoeffnet, [])
+        self.assertTrue(any(e.get("im_ordner") is True for e in self.audit))
+        # Ordner und Datei sind zwei verschiedene Aktionen: kein falscher Doppelklick
+        self.assertEqual(self.oeffnen(datei["kennung"])["status"], "success")
+        self.assertEqual(self.oeffnen(datei["kennung"], im_ordner=True)["status"], "duplicate")
+
+    def test_im_ordner_nur_mit_echtem_wahrheitswert(self):
+        datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
+        self.assertEqual(self.oeffnen(datei["kennung"], im_ordner="ja")["status"], "success")
+        self.assertEqual(self.im_ordner, [])
+        self.assertEqual(len(self.geoeffnet), 1)
+
+    def test_haengendes_oeffnen_blockiert_den_host_nicht(self):
+        """Befund 17.11.2026: os.startfile wartete 6 s auf Word, der ganze Host stand still. Jetzt läuft es im Thread."""
+        import threading
+        import time
+
+        datei = self.erstellen("word", DOKUMENT, oeffnen=False)["datei"]
+        frei = threading.Event()
+
+        def haengt(_pfad):
+            frei.wait(5)
+
+        async def ablauf():
+            with mock.patch.object(host, "_datei_oeffnen", side_effect=haengt):
+                aufgabe = asyncio.create_task(host.office_datei_oeffnen(datei["kennung"]))
+                start = time.monotonic()
+                await asyncio.sleep(0.05)  # der Hauptfaden kommt sofort wieder dran
+                frei_nach = time.monotonic() - start
+                frei.set()
+                return frei_nach, await aufgabe
+
+        frei_nach, antwort = asyncio.run(ablauf())
+        self.assertLess(frei_nach, 1.0)
+        self.assertEqual(antwort["status"], "success")
 
 
 class DateiOeffnen(unittest.TestCase):
@@ -232,6 +279,36 @@ class DateiOeffnen(unittest.TestCase):
             for endung in (".docx", ".xlsx", ".pptx", ".pdf", ".csv", ".md"):
                 host._datei_oeffnen(Path("C:/WAIS") / f"a{endung}")
             self.assertEqual(starten.call_count, 6)
+
+
+class OrdnerZeigen(unittest.TestCase):
+    """_ordner_zeigen selbst: fester Explorer mit /select, nur die sechs Endungen, nie ein Anführungszeichen im Pfad."""
+
+    def test_explorer_mit_markierter_datei(self):
+        pfad = Path("C:/Users/x/Dokumente/WAIS/2026-11-17 Typischer Tag.docx")
+        with mock.patch.object(host.platform, "system", return_value="Windows"), \
+             mock.patch.dict(host.os.environ, {"SystemRoot": "C:\\Windows"}), \
+             mock.patch.object(host.subprocess, "Popen") as popen:
+            host._ordner_zeigen(pfad)
+        befehl = popen.call_args.args[0]
+        self.assertEqual(befehl, f'"{Path("C:/Windows") / "explorer.exe"}" /select,"{pfad}"')
+
+    def test_nur_feste_endungen_und_kein_anfuehrungszeichen(self):
+        with mock.patch.object(host.platform, "system", return_value="Windows"), \
+             mock.patch.object(host.subprocess, "Popen") as popen:
+            for name in ("a.exe", "a.lnk", "a", "a.docx."):
+                with self.assertRaises(RuntimeError, msg=name):
+                    host._ordner_zeigen(Path("C:/WAIS") / name)
+            with self.assertRaises(RuntimeError):
+                host._ordner_zeigen(Path('C:/WAIS/a" & calc & ".docx'))
+            popen.assert_not_called()
+
+    def test_ohne_windows_nichts(self):
+        with mock.patch.object(host.platform, "system", return_value="Linux"), \
+             mock.patch.object(host.subprocess, "Popen") as popen:
+            with self.assertRaises(RuntimeError):
+                host._ordner_zeigen(Path("C:/WAIS/a.docx"))
+            popen.assert_not_called()
 
 
 class Einmalig(unittest.TestCase):

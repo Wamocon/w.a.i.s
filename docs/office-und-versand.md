@@ -359,7 +359,7 @@ Die vier PC-Werkzeuge verlangen zusätzlich PC-Steuerung und Sperre (`voice-core
 | --- | --- | --- | --- |
 | `office_faehigkeiten()` | was am PC geht (Formate, Word, Outlook klassisch, OneNote, Teams) | `read` | |
 | `office_datei_erstellen(format, inhalt, oeffnen)` | Datei bauen, ins Register, öffnen | `change` | |
-| `office_datei_oeffnen(kennung)` | Datei aus dem Register öffnen | `change` | |
+| `office_datei_oeffnen(kennung, im_ordner)` | Datei aus dem Register öffnen; mit `im_ordner` den Explorer mit Dokumente\WAIS zeigen, Datei markiert (Knopf „Im Ordner zeigen“, ab 0.5.1), Öffnen im Thread | `change` | |
 | `outlook_mail_anfragen(an, cc, betreff, text, anhaenge, anlass)` | auflösen, prüfen, Anfrage | `critical` | `mail` |
 | `teams_chat_anfragen(an, text, gruppenname, anlass)` | auflösen, prüfen, Anfrage | `critical` | `teams` |
 | `onenote_seite_anfragen(inhalt, titel, anlass, canvas_id)` | prüfen, Firmenkonto und Notizbuch lesen, Anfrage | `critical` | `onenote` |
