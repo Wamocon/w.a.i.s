@@ -1,14 +1,16 @@
 """Rohdaten eines Browser-Schritts in Kennzahlen umrechnen (scripts/wamo_labor_last.py, nur Standardbibliothek).
 
 Der Browser (scripts/wamo-last-browser.cjs) meldet je Schritt nur Rohdaten auf seiner Audio-Uhr: Anfang und Ende der Sprechprobe, die Blöcke, in
-denen WAMO hörbar war, und einen eventuellen Einwurf. Die Kennzahlen entstehen hier, damit sie ohne Browser prüfbar sind. Die Definitionen folgen
-scripts/wamo_stimme.py (erster Ton, Verstummen), ohne dessen Abhängigkeit von numpy:
+denen WAMO hörbar war, einen eventuellen Einwurf und die Folgefrage danach. Die Kennzahlen entstehen hier, damit sie ohne Browser prüfbar sind.
+Die Definitionen folgen scripts/wamo_stimme.py (erster Ton, Verstummen), ohne dessen Abhängigkeit von numpy:
 
   erster Ton   Beginn des ersten hörbaren Abschnitts nach dem Ende der Sprechprobe (50 ms Toleranz davor), in Millisekunden
   Antwortdauer vom ersten Ton bis zu einer Stille von mindestens 2,5 s
   Verstummen   vom Einwurf bis zum Ende der Wiedergabe, die mindestens 0,9 s still bleibt (Pausen in Sätzen sind kürzer)
   verpasst     WAMO sprach nach dem Einwurf länger als 4 s weiter oder verstummte nie
-  falsche Unterbrechung  ein Schnitt der Wiedergabe in der Oberfläche (data-cut), den kein Einwurf des Werkzeugs erklärt
+  falsche Unterbrechung  ein Schnitt der Wiedergabe in der Oberfläche (data-cut), den weder der Einwurf noch das Stellen der Folgefrage erklärt
+  Folgefrage   die Frage nach einwurf_a gehört zum Schritt, ist aber kein eigener: Ihr erster Ton steht für sich (folge_ton_ms), und ihre Antwort
+               zählt weder zum ersten Ton noch zur Antwortdauer des Schritts. Das Verstummen bleibt die Zeit vom Einwurf bis zum Ende der Wiedergabe
 """
 from __future__ import annotations
 
@@ -81,6 +83,16 @@ def _einwurf(segs: list[tuple[float, float]], roh_einwurf: object, ende_t: float
     return True, round(dauer * 1000), dauer > VERPASST_NACH_S
 
 
+def _folge(segs: list[tuple[float, float]], roh_folge: object) -> tuple[float | None, float | None, int]:
+    """(Beginn der Folgefrage, erster Ton nach ihrem Ende in ms, Schnitte beim Stellen). Beginn None: keine Folgefrage gestellt."""
+    if not isinstance(roh_folge, dict) or not _zahl(roh_folge.get("t0")) or not _zahl(roh_folge.get("ende")):
+        return None, None, 0
+    ende = float(roh_folge["ende"])
+    erster = _erster_ton(segs, ende)
+    geschnitten = roh_folge.get("geschnitten") if type(roh_folge.get("geschnitten")) is int else 0
+    return float(roh_folge["t0"]), None if erster is None else round((erster[0] - ende) * 1000, 1), geschnitten
+
+
 def schritt_auswerten(roh: object, plan: SchrittPlan, sitzung: int, kennung: str, beginn_s: float) -> SchrittErgebnis:
     """Die Kennzahlen eines Schritts. Rohdaten ohne die erwarteten Felder sind ein Fehler im Werkzeug und werden nie als Messwert gelesen."""
     if not isinstance(roh, dict) or not _zahl(roh.get("clip_ende")) or not isinstance(roh.get("bot"), list):
@@ -90,13 +102,16 @@ def schritt_auswerten(roh: object, plan: SchrittPlan, sitzung: int, kennung: str
     erster = _erster_ton(segs, ende_clip)
     ende_t = float(roh["ende_t"]) if _zahl(roh.get("ende_t")) else (segs[-1][1] if segs else ende_clip)
     ausgeloest, verstummen_ms, verpasst = _einwurf(segs, roh.get("einwurf"), ende_t)
+    folge_t0, folge_ton_ms, folge_geschnitten = _folge(segs, roh.get("folge"))
+    eigene = segs if folge_t0 is None else [s for s in segs if s[0] < folge_t0]  # die Antwort auf die Folgefrage gehört nicht zur Antwortdauer
     geschnitten = roh.get("geschnitten") if type(roh.get("geschnitten")) is int else 0
+    erklaert = (1 if ausgeloest else 0) + min(1, max(0, folge_geschnitten))
     return SchrittErgebnis(
         sitzung=sitzung, kennung=kennung, karte=plan.karte, beginn_s=beginn_s,
         erster_ton_ms=None if erster is None else round((erster[0] - ende_clip) * 1000, 1),
-        antwort_s=None if erster is None else round(_antwort_ende(segs, erster) - erster[0], 1),
+        antwort_s=None if erster is None else round(_antwort_ende(eigene, erster) - erster[0], 1),
         verstummen_ms=verstummen_ms, einwurf=plan.einwurf, einwurf_ausgeloest=ausgeloest, verpasst=verpasst,
-        falsche_unterbrechungen=max(0, geschnitten - (1 if ausgeloest else 0)),
+        folgefrage=folge_t0 is not None, folge_ton_ms=folge_ton_ms, falsche_unterbrechungen=max(0, geschnitten - erklaert),
         abbruch=str(roh.get("abbruch") or "")[:MAX_ABBRUCH_ZEICHEN], zeitueberschreitung=bool(roh.get("zeitueberschreitung")),
         freigabe_geklickt=roh.get("freigabe") == "freigegeben")
 

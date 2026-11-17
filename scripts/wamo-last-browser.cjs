@@ -57,10 +57,12 @@ function playwrightLaden() {
 function seite() {
   const S = (window.__s = {
     ac: null, clips: {}, remote: [], micBus: null, dest: null, botNode: null, bot: [], botBegin: -1e9, botLetzt: -1e9,
-    murm: null, cut: 0, cutAktiv: false, abbrechen: false, beobachter: null,
+    murm: null, cut: 0, cutAktiv: false, abbrechen: false, beobachter: null, folge: null,
   });
   const SCHWELLE = 0.003; // Pegel (RMS je Block), ab dem WAMO als sprechend gilt
   const LUECKE = 0.8; // Pausen bis dahin gehören zur selben Rede
+  const FOLGE_WARTEN_S = 10; // so lange wartet die Folgefrage auf eine Pause von WAMO (spricht es weiter, ist das Verstummen ohnehin verpasst)
+  const FOLGE_FRIST_S = 15; // so lange wartet sie höchstens auf den Beginn der Antwort
   const jetzt = () => S.ac.currentTime;
   const schlaf = (ms) => new Promise((r) => setTimeout(r, ms));
   async function warteBis(fn, sekunden, schritt = 25) {
@@ -210,17 +212,35 @@ function seite() {
     knopf.click();
     return wunsch === "freigeben" ? "freigegeben" : "abgelehnt";
   }
-  async function einwurfSpielen(ergebnis, clip, abS) {
+  // Die Frage nach "Moment, stopp, ich habe da eine andere Frage.", wie ein Mensch sie stellt: erst nach einer kurzen Pause hinter dem eigenen Satz und
+  // hinter dem letzten Ton von WAMO. Danach wartet der Schritt auf den Beginn der Antwort, damit sie nicht in die Denkpause oder den nächsten Schritt fällt.
+  // geschnitten zählt die Schnitte beim Stellen der Frage: Sie gehen auf die Probe zurück wie der Schnitt durch den Einwurf.
+  async function folgefrageStellen(ergebnis, folge, einwurfEnde) {
+    const bereit = await warteBis(() => !online() || (jetzt() >= einwurfEnde + folge.pauseS && botStille() >= folge.pauseS),
+      FOLGE_WARTEN_S + Math.max(0, einwurfEnde - jetzt()));
+    if (!bereit || !online()) return;
+    const cut0 = S.cut;
+    const f = sprich(folge.clip);
+    S.folge = { clip: folge.clip, t0: f.t0, ende: f.ende };
+    ergebnis.folge = { clip: folge.clip, t0: f.t0, ende: f.ende, pause_s: folge.pauseS, geschnitten: 0 };
+    await warteBis(() => !online() || (botAktiv() && S.botBegin > f.ende - 0.1), Math.min(folge.fristS, FOLGE_FRIST_S) + Math.max(0, f.ende - jetzt()));
+    ergebnis.folge.geschnitten = S.cut - cut0;
+  }
+  async function einwurfSpielen(ergebnis, clip, abS, folge) {
     const ok = await warteBis(() => !online() || !botAktiv() || botSeit() >= abS, 30);
     if (!ok || !online() || !botAktiv() || botSeit() < abS) return;
     const seit = botSeit();
     const e = sprich(clip);
     ergebnis.einwurf = { clip, t0: e.t0, ende: e.ende, bot_seit: seit };
+    if (folge.clip) await folgefrageStellen(ergebnis, folge, e.ende);
     await warteBis(() => botStille() >= 3.0 || !online(), 25);
   }
-  // Ein Schritt: Sprechprobe sprechen, auf den ersten Ton und das Ende der Antwort warten, bei A1 einen Einwurf, eine Karte entscheiden.
-  window.__schritt = async ({ clip, einwurfClip, startFristS, endeFristS, einwurfAbS, freigabe }) => {
-    const ergebnis = { clip, clip_t0: 0, clip_ende: 0, bot: [], einwurf: null, ende_t: 0, abbruch: "", zeitueberschreitung: false, geschnitten: 0, freigabe: "" };
+  // Ein Schritt: Sprechprobe sprechen, auf den ersten Ton und das Ende der Antwort warten, bei A1 einen Einwurf (nach einwurf_a mit Folgefrage),
+  // eine Karte entscheiden.
+  window.__schritt = async ({ clip, einwurfClip, folgeClip, folgePauseS, startFristS, endeFristS, einwurfAbS, freigabe }) => {
+    const ergebnis = { clip, clip_t0: 0, clip_ende: 0, bot: [], einwurf: null, folge: null, ende_t: 0, abbruch: "", zeitueberschreitung: false, geschnitten: 0,
+      freigabe: "" };
+    S.folge = null;
     const abschluss = () => {
       ergebnis.bot = S.bot.splice(0);
       ergebnis.ende_t = S.ac ? jetzt() : 0;
@@ -237,7 +257,7 @@ function seite() {
     if (S.abbrechen) { ergebnis.abbruch = "abgebrochen"; return abschluss(); }
     if (!online()) { ergebnis.abbruch = "Gespräch beendet"; return abschluss(); }
     if (!gestartet) { ergebnis.zeitueberschreitung = true; return abschluss(); }
-    if (einwurfClip) await einwurfSpielen(ergebnis, einwurfClip, einwurfAbS);
+    if (einwurfClip) await einwurfSpielen(ergebnis, einwurfClip, einwurfAbS, { clip: folgeClip || "", pauseS: folgePauseS || 0, fristS: startFristS });
     await warteBis(() => !online() || botStille() >= 3.0, endeFristS);
     if (!online() && !S.abbrechen) ergebnis.abbruch = "Gespräch beendet";
     ergebnis.freigabe = karteEntscheiden(freigabe);
@@ -319,8 +339,10 @@ class Sitzung {
     return {};
   }
 
-  async schritt({ clip, einwurf_clip: einwurfClip, start_frist_s: startFristS, ende_frist_s: endeFristS, einwurf_ab_s: einwurfAbS, freigabe }) {
-    const roh = await this.page.evaluate((o) => window.__schritt(o), { clip, einwurfClip: einwurfClip || "", startFristS, endeFristS, einwurfAbS, freigabe });
+  async schritt({ clip, einwurf_clip: einwurfClip, folge_clip: folgeClip, folge_pause_s: folgePauseS, start_frist_s: startFristS, ende_frist_s: endeFristS,
+    einwurf_ab_s: einwurfAbS, freigabe }) {
+    const auftrag = { clip, einwurfClip: einwurfClip || "", folgeClip: folgeClip || "", folgePauseS: folgePauseS || 0, startFristS, endeFristS, einwurfAbS, freigabe };
+    const roh = await this.page.evaluate((o) => window.__schritt(o), auftrag);
     const delta = (name) => { const d = this[name] - this.gesendet[name]; this.gesendet[name] = this[name]; return d; };
     return { ...roh, r429: delta("r429"), konsole: delta("konsole"), blockiert: delta("blockiert") };
   }

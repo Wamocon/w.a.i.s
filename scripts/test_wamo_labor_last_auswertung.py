@@ -121,6 +121,20 @@ def test_stufe_auswerten_fasst_schritte_und_proben_zusammen():
     json.dumps(d)  # JSON-fähig
 
 
+def test_folgefragen_stehen_gesondert_und_nie_im_ersten_ton():
+    """Die Folgefrage nach dem Einwurf ist kein eigener Schritt: Ihr erster Ton steht für sich und geht in kein Kriterium ein."""
+    schritte = [schritt("A1", 1000), schritt("G3", 1200),
+                schritt("A1", 1100, verstummen_ms=800.0, einwurf=True, einwurf_ausgeloest=True, folgefrage=True, folge_ton_ms=9000.0),
+                schritt("A1", 1300, verstummen_ms=700.0, einwurf=True, einwurf_ausgeloest=True, folgefrage=True, folge_ton_ms=None),
+                schritt("A1", 1400, verstummen_ms=900.0, einwurf=True, einwurf_ausgeloest=True)]
+    d = aw.stufe_auswerten(stufe_acht()[1], schritte, [], 0, 0)
+    assert d["schritte"] == 5 and d["erster_ton_ms"]["n"] == 5 and d["erster_ton_ms"]["max"] == 1400
+    assert d["erster_ton_je_karte"]["A1"]["max"] == 1400
+    assert d["folgefragen"] == 2 and d["folge_ohne_antwort"] == 1
+    assert d["folge_ton_ms"] == {"n": 1, "p50": 9000.0, "p95": 9000.0, "max": 9000.0}
+    assert d["verstummen_ms"]["n"] == 3 and d["einwuerfe"] == 3
+
+
 def test_stufe_ohne_daten_hat_leere_kennzahlen_und_keine_zahlen_aus_dem_nichts():
     d = aw.stufe_auswerten(stufe_acht()[0], [], [], 0, 0)
     assert d["erster_ton_ms"]["n"] == 0 and d["speicher_max"] is None and d["cpu_prozent"]["proben"] == 0
@@ -279,6 +293,7 @@ def ergebnis_fuer_bericht():
     stufen = [dict(nummer=1, name="1 Sitzung", sitzungen=1, minuten=15, snr_db=None, schritte=20, ohne_antwort=0, dauer_s=900,
                    erster_ton_ms={"n": 20, "p50": 800.0, "p95": 1500.0, "max": 1700.0}, erster_ton_je_karte={},
                    verstummen_ms={"n": 3, "p50": 700.0, "p95": 900.0, "max": 950.0}, verstummen_verpasst=0, einwuerfe=3,
+                   folgefragen=2, folge_ohne_antwort=0, folge_ton_ms={"n": 2, "p50": 1100.0, "p95": 1400.0, "max": 1400.0},
                    falsche_unterbrechungen=0, abbrueche=0, zeitueberschreitungen=0,
                    cpu_prozent={"proben": 50, "mittel": 20.0, "p95": 35.0, "max": 40.0}, speicher_max=int(1.2 * GIB), speicher_spitze=int(1.3 * GIB),
                    aufgaben_max=40, browser_429=0, konsolenfehler=0,
@@ -298,6 +313,12 @@ def test_bericht_nennt_urteil_stufen_kriterien_annahmen_aufraeumen_und_grenzen()
                  "Was die Last nicht belegt", "nicht gemessen"):
         assert muss in text, muss
     assert "Seed" in text and "7" in text
+
+
+def test_bericht_weist_die_folgefragen_gesondert_aus_und_sagt_es_in_einem_satz():
+    text = aw.bericht_text(ergebnis_fuer_bericht())
+    assert "Folgefragen" in text and "erster Ton nach Folgefrage p95" in text and "| 1400 |" in text
+    assert aw.SATZ_EINWURF in text and "kein eigener Schritt" in aw.SATZ_EINWURF
 
 
 def test_bericht_enthaelt_keine_gedankenstriche_und_kein_geheimnis():

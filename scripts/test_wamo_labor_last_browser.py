@@ -87,9 +87,10 @@ def test_anfrage_und_antwort_laufen_ueber_json_zeilen(treiber):
 
 def test_die_befehle_des_treibers_tragen_die_erwarteten_felder(treiber):
     assert treiber.starten("https://192.168.178.136:55445", Path("clips")) is None
-    plan = pl.SchrittPlan("A1", "a1", 10.0, einwurf=True, einwurf_clip="einwurf_a")
+    plan = pl.SchrittPlan("A1", "a1", 10.0, einwurf=True, einwurf_clip="einwurf_a", folge_clip="fakt_8", folge_pause_s=1.1)
     roh = treiber.schritt(plan, start_frist_s=45.0, ende_frist_s=90.0, einwurf_ab_s=3.0, freigabe="ablehnen")
-    assert roh["cmd"] == "schritt" and {"clip", "einwurf_clip", "start_frist_s", "ende_frist_s", "einwurf_ab_s", "freigabe"} <= set(roh["empfangen"])
+    assert roh["cmd"] == "schritt" and {"clip", "einwurf_clip", "folge_clip", "folge_pause_s", "start_frist_s", "ende_frist_s", "einwurf_ab_s",
+                                        "freigabe"} <= set(roh["empfangen"])
 
 
 def test_fremde_antworten_und_laerm_auf_stdout_werden_ueberlesen(treiber):

@@ -117,6 +117,56 @@ def test_ohne_geplanten_einwurf_gibt_es_kein_verstummen():
     assert e.einwurf is False and e.einwurf_ausgeloest is False and e.verstummen_ms is None
 
 
+# ---------- Folgefrage nach dem Einwurf ----------
+
+PLAN_A1_FOLGE = pl.SchrittPlan("A1", "a1", 10.0, einwurf=True, einwurf_clip="einwurf_a", folge_clip="fakt_8", folge_pause_s=1.0)
+
+
+def mit_folgefrage(antwort=(111.3, 113.0), folge_t0=109.5, **folge):
+    """Einwurf bei 106,0 s (bis 108,5 s), W.A.I.S. verstummt bei 106,8 s, die Folgefrage läuft von 109,5 s bis 111,0 s."""
+    r = mit_einwurf(onset=106.0, bot_bis=106.8, wieder=antwort)
+    r["folge"] = {"clip": "fakt_8", "t0": folge_t0, "ende": folge_t0 + 1.5, "geschnitten": 0, **folge}
+    r["ende_t"] = 120.0
+    return r
+
+
+def test_folgefrage_ist_kein_erster_ton_und_laesst_das_verstummen_gleich():
+    ohne, mit = auswerten(mit_einwurf(onset=106.0, bot_bis=106.8), PLAN_A1), auswerten(mit_folgefrage(), PLAN_A1_FOLGE)
+    assert mit.erster_ton_ms == ohne.erster_ton_ms == pytest.approx(1000.0, abs=1.0)
+    assert mit.verstummen_ms == ohne.verstummen_ms and mit.verpasst is False
+    assert mit.antwort_s == ohne.antwort_s
+    assert mit.folgefrage is True and mit.folge_ton_ms == pytest.approx(300.0, abs=1.0)
+    assert ohne.folgefrage is False and ohne.folge_ton_ms is None
+
+
+def test_antwort_auf_die_folgefrage_verlaengert_die_antwortdauer_nie():
+    """Folgt die Antwort auf die Folgefrage dicht auf die Antwort zu A1 (Lücke unter 2,5 s), zählt sie trotzdem nicht zur Antwortdauer."""
+    r = mit_einwurf(onset=106.0, bot_bis=106.8, wieder=(108.6, 108.8))  # ein kurzes "Ja?" nach dem Einwurf, dann 0,8 s Pause
+    r["folge"] = {"clip": "fakt_2", "t0": 109.6, "ende": 110.9, "geschnitten": 0}
+    r["bot"] += bloecke(111.1, 112.5)  # 2,3 s nach dem "Ja?": ohne Grenze wäre es dieselbe Antwort
+    e = auswerten(r, PLAN_A1_FOLGE)
+    assert e.antwort_s == pytest.approx(108.8 - 103.0, abs=0.1)
+    assert e.folge_ton_ms == pytest.approx(200.0, abs=1.0)
+
+
+def test_folgefrage_ohne_antwort_ist_keine_zeitueberschreitung_des_schritts():
+    e = auswerten(mit_folgefrage(antwort=None), PLAN_A1_FOLGE)
+    assert e.folgefrage is True and e.folge_ton_ms is None
+    assert e.zeitueberschreitung is False and e.erster_ton_ms == pytest.approx(1000.0, abs=1.0)
+
+
+def test_nicht_gestellte_folgefrage_wird_nicht_gezaehlt():
+    e = auswerten(mit_einwurf(onset=106.0, bot_bis=106.8), PLAN_A1_FOLGE)  # geplant, aber der Browser stellte sie nicht
+    assert e.folgefrage is False and e.folge_ton_ms is None
+
+
+@pytest.mark.parametrize("geschnitten,beim_stellen,erwartet", [(1, 0, 0), (2, 1, 0), (2, 0, 1), (3, 2, 1)])
+def test_ein_schnitt_beim_stellen_der_folgefrage_ist_erklaert(geschnitten, beim_stellen, erwartet):
+    r = mit_folgefrage(geschnitten=beim_stellen)
+    r["geschnitten"] = geschnitten
+    assert auswerten(r, PLAN_A1_FOLGE).falsche_unterbrechungen == erwartet
+
+
 # ---------- falsche Unterbrechungen, Abbrüche, Sonstiges ----------
 
 @pytest.mark.parametrize("geschnitten,einwurf,erwartet", [(0, False, 0), (2, False, 2), (1, True, 0), (3, True, 2)])

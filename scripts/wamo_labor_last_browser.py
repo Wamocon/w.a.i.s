@@ -221,8 +221,9 @@ class NodeTreiber:
         self.anfrage("murmeln", {"datei": None if datei is None else str(datei), "gain": float(gain)}, 60.0)
 
     def schritt(self, plan: SchrittPlan, start_frist_s: float, ende_frist_s: float, einwurf_ab_s: float, freigabe: str) -> dict:
-        params = {"clip": plan.clip, "einwurf_clip": plan.einwurf_clip if plan.einwurf else "", "start_frist_s": start_frist_s,
-                  "ende_frist_s": ende_frist_s, "einwurf_ab_s": einwurf_ab_s, "freigabe": freigabe}
+        params = {"clip": plan.clip, "einwurf_clip": plan.einwurf_clip if plan.einwurf else "", "folge_clip": plan.folge_clip if plan.einwurf else "",
+                  "folge_pause_s": plan.folge_pause_s if plan.einwurf else 0.0, "start_frist_s": start_frist_s, "ende_frist_s": ende_frist_s,
+                  "einwurf_ab_s": einwurf_ab_s, "freigabe": freigabe}
         return self.anfrage("schritt", params, start_frist_s + ende_frist_s + SCHRITT_RESERVE_S)
 
     def gespraech_beenden(self) -> None:

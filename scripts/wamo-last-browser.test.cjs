@@ -150,6 +150,18 @@ test("schritt gibt die Rohdaten mit den neuen 429-Antworten, Konsolenfehlern und
   assert.deepEqual([b.r429, b.konsole], [0, 0], "nur das, was seit dem letzten Schritt neu ist");
 });
 
+test("schritt reicht die Folgefrage nach dem Einwurf an die Seite weiter", async () => {
+  const { pw, log } = playwright({ evaluate: (fn, arg) => (arg && arg.clip ? { clip: arg.clip, bot: [], clip_ende: 3 } : undefined) });
+  const s = new w.Sitzung(pw);
+  await s.start({ url: w.WAMO_URL, clips_ordner: klone() });
+  const auftrag = (o) => ({ clip: "a1", einwurf_clip: "einwurf_a", start_frist_s: 45, ende_frist_s: 90, einwurf_ab_s: 3, freigabe: "keine", ...o });
+  const letzter = () => log.filter((l) => l[0] === "evaluate").pop()[2];
+  await s.schritt(auftrag({ folge_clip: "fakt_8", folge_pause_s: 1.1 }));
+  assert.deepEqual([letzter().folgeClip, letzter().folgePauseS], ["fakt_8", 1.1]);
+  await s.schritt(auftrag({}));
+  assert.deepEqual([letzter().folgeClip, letzter().folgePauseS], ["", 0]);
+});
+
 test("unbekannte Befehle und Fehler werden als Antwort gemeldet, nie als Absturz", async () => {
   const s = new w.Sitzung(playwright().pw);
   assert.deepEqual(await w.verarbeite(s, { id: 1, cmd: "rm -rf" }), { id: 1, ok: false, fehler: "Unbekannter Befehl" });
@@ -273,6 +285,48 @@ test("Seitenskript: der Einwurf wird gespielt, sobald WAMO lange genug spricht",
   assert.equal(r.einwurf.clip, "einwurf_a");
   assert.ok(r.einwurf.bot_seit >= 0.8);
   assert.equal(r.freigabe, "offen", "ohne Wunsch bleibt eine Karte liegen");
+  assert.equal(r.folge, null, "ohne Folgefrage im Auftrag bleibt es beim Einwurf");
+});
+
+test("Seitenskript: nach dem Einwurf folgt die Frage erst nach der Pause und der Schritt wartet ihre Antwort ab", async () => {
+  const { fenster, sprechen } = seiteBauen({ karte: { querySelectorAll: () => [] } });
+  await fenster.__start();
+  for (const n of ["fakt_1", "einwurf_a", "fakt_8"]) await fenster.__lade(n, "AAAA");
+  const lauf = fenster.__schritt(optionen({ einwurfClip: "einwurf_a", folgeClip: "fakt_8", folgePauseS: 0.9, einwurfAbS: 0.8 }));
+  setTimeout(() => sprechen(0, 2.2), 1300); // Antwort auf die Sprechprobe, der Einwurf kommt mitten hinein
+  const antwort = new Promise((ok) => { // W.A.I.S. antwortet 0,6 s nach dem Ende der Folgefrage, eine Sekunde lang
+    const bis = performance.now() + 15000;
+    const takt = setInterval(() => {
+      const f = fenster.__s.folge;
+      if (!f && performance.now() < bis) return;
+      clearInterval(takt);
+      if (!f) return ok(null);
+      setTimeout(() => sprechen(0, 1.0).then(() => ok(fenster.__s.ac.currentTime)), (f.ende - fenster.__s.ac.currentTime + 0.6) * 1000);
+    }, 20);
+  });
+  const r = await lauf;
+  const antwortEnde = await antwort;
+  assert.ok(r.einwurf && r.folge, "Einwurf und Folgefrage gespielt");
+  assert.equal(r.folge.clip, "fakt_8");
+  assert.ok(r.folge.t0 >= r.einwurf.ende + 0.9 - 0.01, "erst nach der Pause hinter dem eigenen Satz");
+  const letzterTonVorher = Math.max(...r.bot.filter((b) => b[0] < r.folge.t0).map((b) => b[1]));
+  assert.ok(r.folge.t0 - letzterTonVorher >= 0.9 - 0.06, "und nach der Pause hinter dem letzten Ton von W.A.I.S.");
+  assert.ok(r.bot.some((b) => b[0] > r.folge.ende), "die Antwort auf die Folgefrage gehört noch zum Schritt");
+  assert.ok(r.ende_t >= antwortEnde + 2.9, "der Schritt endet erst nach der Stille hinter dieser Antwort");
+  assert.equal(r.folge.geschnitten, 0);
+});
+
+test("Seitenskript: ohne Antwort auf die Folgefrage bleibt es ein Schritt ohne Zeitüberschreitung", async () => {
+  const { fenster, sprechen } = seiteBauen({ karte: { querySelectorAll: () => [] } });
+  await fenster.__start();
+  for (const n of ["fakt_1", "einwurf_a", "fakt_8"]) await fenster.__lade(n, "AAAA");
+  const lauf = fenster.__schritt(optionen({ einwurfClip: "einwurf_a", folgeClip: "fakt_8", folgePauseS: 0.8, einwurfAbS: 0.8, startFristS: 1.5 }));
+  setTimeout(() => sprechen(0, 2.2), 1300);
+  const r = await lauf;
+  assert.ok(r.folge, "Folgefrage gespielt");
+  assert.equal(r.zeitueberschreitung, false);
+  assert.equal(r.abbruch, "");
+  assert.ok(!r.bot.some((b) => b[0] > r.folge.ende));
 });
 
 test("Seitenskript: murmeln startet und stoppt ohne Fehler", async () => {

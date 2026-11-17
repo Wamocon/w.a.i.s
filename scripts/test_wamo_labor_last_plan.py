@@ -7,6 +7,7 @@ Reine Rechnung, kein Netz, kein Prozess, keine Datei.
 """
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 
@@ -148,6 +149,25 @@ def test_einwurf_nur_bei_a1_und_jede_dritte_a1_runde():
 
 def test_einwurf_laesst_sich_abschalten():
     assert not any(s.einwurf for s in erste(60, jede=0))
+
+
+def test_nach_einwurf_a_folgt_eine_frage_nach_kurzer_pause():
+    """'Moment, stopp, ich habe da eine andere Frage.' kündigt eine Frage an: Ohne sie wartet W.A.I.S. zu Recht, und die Wartezeit wäre ein
+    Effekt des Skripts. einwurf_b ist schon eine Frage und bekommt keine."""
+    schritte = erste(120)
+    mit_a = [s for s in schritte if s.einwurf_clip == "einwurf_a"]
+    assert mit_a and all(s.folge_clip in pl.FOLGE_CLIPS and pl.FOLGE_PAUSE_MIN_S <= s.folge_pause_s <= pl.FOLGE_PAUSE_MAX_S for s in mit_a)
+    assert all(s.folge_clip == "" and s.folge_pause_s == 0.0 for s in schritte if s.einwurf_clip != "einwurf_a")
+    assert any(s.einwurf_clip == "einwurf_b" for s in schritte)
+    assert [s.folge_clip for s in mit_a][:2] == ["fakt_8", "fakt_7"]  # von hinten: G3 fragt in jeder Sitzung von fakt_1 an
+
+
+def test_folgefrage_laesst_die_denkpausen_des_seeds_unveraendert():
+    """Die Pause vor der Folgefrage hat einen eigenen Zufall: Die Denkpausen eines Seeds bleiben wie in früheren Läufen."""
+    zufall = random.Random("wamo-last:1:1:0")
+    assert [s.pause_s for s in erste(60)] == [round(zufall.uniform(pl.DENKPAUSE_MIN_S, pl.DENKPAUSE_MAX_S), 1) for _ in range(60)]
+    pausen = [s.folge_pause_s for s in erste(600) if s.folge_clip]
+    assert len(set(pausen)) > 1 and all(round(p, 2) == p for p in pausen)
 
 
 # ---------- Kosten und Dauer ----------

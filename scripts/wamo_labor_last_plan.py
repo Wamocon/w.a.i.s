@@ -5,7 +5,8 @@ Dieses Modul rechnet nur: Es öffnet keine Datei, startet keinen Prozess und spr
 einer Stelle, damit weder ein Aufruf noch ein Fehler im Ablauf sie überschreiten kann.
 
 Die Zufallsfolge der Denkpausen ist mit einem festen Seed je Lauf, je Stufe und je Sitzung wiederholbar (Zeichenfolge als Seed: Python
-leitet daraus bei jedem Start dieselbe Folge ab).
+leitet daraus bei jedem Start dieselbe Folge ab). Die Pause vor der Folgefrage nach dem Einwurf hat einen eigenen Zufall, damit die Denkpausen
+eines Seeds dieselben bleiben wie in Läufen ohne Folgefrage.
 """
 from __future__ import annotations
 
@@ -42,6 +43,11 @@ DENKPAUSE_MIN_S, DENKPAUSE_MAX_S = 8.0, 20.0
 EINWURF_JEDE = 3  # in jeder dritten A1-Runde ein Einwurf (Messung des Verstummens), 0 schaltet ihn ab
 G3_FRAGEN = 8
 EINWURF_CLIPS = ("einwurf_a", "einwurf_b")
+# "Moment, stopp, ich habe da eine andere Frage." kündigt eine Frage an. Ohne sie wartet W.A.I.S. zu Recht und fragt nach einigen Sekunden nach,
+# ein Effekt des Skripts. Deshalb folgt wie bei einem Menschen nach kurzer Pause eine Faktenfrage. einwurf_b ist selbst eine Frage.
+FOLGEFRAGE_NACH = ("einwurf_a",)
+FOLGE_CLIPS = tuple(f"fakt_{n}" for n in range(G3_FRAGEN, 0, -1))  # von hinten: G3 fragt in jeder Sitzung von fakt_1 an
+FOLGE_PAUSE_MIN_S, FOLGE_PAUSE_MAX_S = 0.8, 1.2  # Pause hinter dem Einwurf und hinter dem letzten Ton von W.A.I.S.
 CLIP_JE_KARTE = {"A1": "a1", "J1": "j1"}
 
 # Zeiten für die Schätzung der Gesamtdauer
@@ -135,12 +141,15 @@ class SchrittPlan:
     pause_s: float
     einwurf: bool = False
     einwurf_clip: str = ""
+    folge_clip: str = ""  # Frage nach dem Einwurf, gehört zum selben Schritt
+    folge_pause_s: float = 0.0
 
 
 def schritt_folge(seed: int, stufe: int, sitzung: int, einwurf_jede: int = EINWURF_JEDE) -> Iterator[SchrittPlan]:
     """Die endlose, wiederholbare Folge der Schritte einer Sitzung: A1, J1, G3 im Wechsel, je Sitzung versetzt begonnen."""
     zufall = random.Random(f"wamo-last:{seed}:{stufe}:{sitzung}")
-    a1_runde = g3_runde = 0
+    folge_zufall = random.Random(f"wamo-last-folge:{seed}:{stufe}:{sitzung}")
+    a1_runde = g3_runde = folge_runde = 0
     schritt = sitzung % len(KETTE)
     while True:
         karte = KETTE[schritt % len(KETTE)]
@@ -153,8 +162,13 @@ def schritt_folge(seed: int, stufe: int, sitzung: int, einwurf_jede: int = EINWU
             continue
         einwurf = karte == "A1" and einwurf_jede > 0 and a1_runde % einwurf_jede == einwurf_jede - 1
         einwurf_clip = EINWURF_CLIPS[(a1_runde // max(1, einwurf_jede)) % len(EINWURF_CLIPS)] if einwurf else ""
+        folge_clip, folge_pause = "", 0.0
+        if einwurf_clip in FOLGEFRAGE_NACH:
+            folge_clip = FOLGE_CLIPS[folge_runde % len(FOLGE_CLIPS)]
+            folge_pause = round(folge_zufall.uniform(FOLGE_PAUSE_MIN_S, FOLGE_PAUSE_MAX_S), 2)
+            folge_runde += 1
         a1_runde += karte == "A1"
-        yield SchrittPlan(karte, CLIP_JE_KARTE[karte], pause, einwurf, einwurf_clip)
+        yield SchrittPlan(karte, CLIP_JE_KARTE[karte], pause, einwurf, einwurf_clip, folge_clip, folge_pause)
 
 
 # ---------- Kosten und Dauer ----------

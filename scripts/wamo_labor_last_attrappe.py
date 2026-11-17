@@ -70,6 +70,7 @@ class Verhalten:
     antwort_s: float = 4.0
     clip_s: float = 3.0
     einwurf_verstummen_s: float = 0.7
+    folge_ton_s: float = 1.0  # erster Ton nach der Folgefrage
     start_fehler: dict = field(default_factory=dict)  # Sitzung -> Text: starten scheitert
     anmelde_fehler: dict = field(default_factory=dict)
     gespraech_fehler: dict = field(default_factory=dict)  # Sitzung -> Anzahl Versuche, die scheitern
@@ -121,7 +122,7 @@ class TreiberAttrappe:
         self._log("schritt", plan.karte)
         if self.abgebrochen.is_set():
             raise TreiberFehler("abgebrochen")
-        roh = {"clip": plan.clip, "clip_t0": 100.0, "clip_ende": 100.0 + self.v.clip_s, "bot": [], "einwurf": None, "ende_t": 0.0,
+        roh = {"clip": plan.clip, "clip_t0": 100.0, "clip_ende": 100.0 + self.v.clip_s, "bot": [], "einwurf": None, "folge": None, "ende_t": 0.0,
                "abbruch": "", "zeitueberschreitung": False, "geschnitten": 0, "r429": 0, "freigabe": "", "konsole": 0}
         ton = self.v.erster_ton_s if self.v.erster_ton_je_sitzungen is None else self.v.erster_ton_je_sitzungen(self.aktive())
         self.uhr.schlafen(self.v.clip_s + ton + self.v.antwort_s)
@@ -136,14 +137,22 @@ class TreiberAttrappe:
         else:
             roh["bot"] = bloecke(ende + ton, ende + ton + self.v.antwort_s)
             if plan.einwurf:
-                onset = ende + ton + 2.0
-                roh["bot"] = bloecke(ende + ton, onset + self.v.einwurf_verstummen_s)
-                roh["einwurf"] = {"clip": plan.einwurf_clip, "t0": onset, "ende": onset + 2.0, "bot_seit": 2.0}
-                roh["geschnitten"] = 1
+                self._einwurf(roh, plan, ende + ton)
             roh["ende_t"] = roh["bot"][-1][1] + 4.0
         if self.schritte >= self.v.r429_ab.get(self.sitzung, 10 ** 9):
             roh["r429"] = 1
         return roh
+
+    def _einwurf(self, roh: dict, plan: SchrittPlan, ton_t: float) -> None:
+        """Einwurf nach 2 s Antwort, WAMO verstummt, bei geplanter Folgefrage danach Frage (1,5 s) und Antwort (2 s)."""
+        onset = ton_t + 2.0
+        roh["bot"] = bloecke(ton_t, onset + self.v.einwurf_verstummen_s)
+        roh["einwurf"] = {"clip": plan.einwurf_clip, "t0": onset, "ende": onset + 2.0, "bot_seit": 2.0}
+        roh["geschnitten"] = 1
+        if plan.folge_clip:
+            t0 = onset + 2.0 + plan.folge_pause_s
+            roh["folge"] = {"clip": plan.folge_clip, "t0": t0, "ende": t0 + 1.5, "pause_s": plan.folge_pause_s, "geschnitten": 0}
+            roh["bot"] += bloecke(t0 + 1.5 + self.v.folge_ton_s, t0 + 3.5 + self.v.folge_ton_s)
 
     def gespraech_beenden(self) -> None:
         self._log("gespraech_beenden")

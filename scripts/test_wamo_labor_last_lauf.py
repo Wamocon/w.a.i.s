@@ -478,6 +478,18 @@ def test_erster_ton_waechst_mit_der_zahl_der_sitzungen(tmp_path, clips):
     assert p4 > p1 and 1400 <= p1 <= 1700
 
 
+def test_folgefrage_nach_dem_einwurf_bleibt_im_selben_schritt(tmp_path, clips):
+    w = Welt(tmp_path, clips, sitzungen=(1,), minuten=12)
+    w.verhalten.folge_ton_s = 6.0  # eine langsame Antwort auf die Folgefrage darf den ersten Ton der Stufe nicht treffen
+    e = w.lauf()
+    stufe, schritte = e["stufen"][0], e["schritte"]["1"]
+    assert stufe["folgefragen"] >= 1 and stufe["folge_ton_ms"]["n"] == stufe["folgefragen"]
+    assert stufe["schritte"] == len(schritte) == w.treiber[0].schritte  # ein Schritt je Sprechprobe der Kette, die Folgefrage ist keiner
+    assert stufe["erster_ton_ms"]["max"] == pytest.approx(1200.0, abs=1.0) and stufe["folge_ton_ms"]["max"] == pytest.approx(6000.0, abs=1.0)
+    assert all(s["folgefrage"] == (s["karte"] == "A1" and s["einwurf_ausgeloest"] and s["folge_ton_ms"] is not None) for s in schritte)
+    assert stufe["falsche_unterbrechungen"] == 0
+
+
 # ---------- Hilfen ----------
 
 def test_parallel_sammelt_fehler_je_aufgabe():

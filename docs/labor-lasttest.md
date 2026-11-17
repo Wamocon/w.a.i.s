@@ -101,7 +101,7 @@ Am Server schreibt das Werkzeug nur über vorhandene Wege: `wamo_labor.py` (akti
 
 ## 7. Auswertung und Bestehen
 
-Ausgabe unter `%USERPROFILE%\.wamo-labor\last\<lauf>.json` und `<lauf>.md`. Die JSON-Datei enthält je Stufe die Kennzahlen, alle Schritte (Karte, erster Ton, Verstummen, Abbruch) und die Messungen am Kern. Sie enthält keine Passwörter, Seeds, Codes, Gesprächstexte oder Journalzeilen.
+Ausgabe unter `%USERPROFILE%\.wamo-labor\last\<lauf>.json` und `<lauf>.md`. Die JSON-Datei enthält je Stufe die Kennzahlen, alle Schritte (Karte, erster Ton, Verstummen, Folgefrage, Abbruch) und die Messungen am Kern. Sie enthält keine Passwörter, Seeds, Codes, Gesprächstexte oder Journalzeilen.
 
 | Kriterium (Konzept 3.7) | Grenze | Bemerkung |
 | --- | --- | --- |
@@ -116,7 +116,7 @@ Ausgabe unter `%USERPROFILE%\.wamo-labor\last\<lauf>.json` und `<lauf>.md`. Die 
 
 **Urteile:** Eine fehlende Messung ist nie ein Bestehen, sie heißt "offen". Durchgefallen ist der Lauf, sobald ein Kriterium durchfällt. Bestanden ist er nur, wenn alle Kriterien bestehen und der Lauf bis zum Ende kam. Zeigt das Journal in einer Stufe keine einzige Anfrage an das Modell, bleiben CPU, Speicher und 429 offen, weil dann nicht belegt ist, dass die Last den gemessenen Kern erreichte (falscher Slot oder falsches Schema).
 
-Weitere Zahlen im Bericht ohne Grenze im Konzept: Verstummen (Einwurf bis Ende der Wiedergabe, p50 und p95), falsche Unterbrechungen, Soniox-Fehler, Unterbrechungen im Journal gegen die Einwürfe der Probe, Aufgaben des Kerns, Zeitüberschreitungen, Konsolenfehler im Browser.
+Weitere Zahlen im Bericht ohne Grenze im Konzept: Verstummen (Einwurf bis Ende der Wiedergabe, p50 und p95), Folgefragen mit ihrem ersten Ton (p95), falsche Unterbrechungen, Soniox-Fehler, Unterbrechungen im Journal gegen die Einwürfe der Probe, Aufgaben des Kerns, Zeitüberschreitungen, Konsolenfehler im Browser.
 
 ## 8. Aufräumen von Hand
 
@@ -140,6 +140,7 @@ Der letzte Befehl leert alle 16 Plätze und alle Gesprächstexte der Laborprofil
 - **Kern-Wechsel während des Laufs:** Der Slot wird einmal vor dem Lauf festgelegt. Wechselt der Kern währenddessen (`umschalten-kern`), gehen neue Sitzungen auf den anderen Slot, gemessen wird weiter der alte. Am Lasttag keinen Kern-Wechsel starten; kommt in einer Stufe keine Anfrage mehr am gemessenen Kern an, bleiben CPU, Speicher und 429 dort offen (Abschnitt 7).
 - **Eine Stichprobe:** Ein Lauf ist keine Statistik. Bei wenigen Schritten je Stufe ist das p95 fast der größte Wert.
 - **Deutung von "Verstummen":** Das Konzept nennt Verstummen im Lastsatz ohne Definition. Hier ist es die Zeit vom Einwurf (Sprechprobe "Moment, stopp ...") bis zum Ende der Wiedergabe, gemessen in jeder dritten A1-Runde (Abweichung von der reinen Kette A1, J1, G3, abschaltbar nur durch Codeänderung `EINWURF_JEDE`). Spricht WAMO nach dem Einwurf länger als 4 Sekunden weiter, gilt das als verpasst.
+- **Folgefrage nach dem Einwurf (seit 17.11.2026):** "Moment, stopp, ich habe da eine andere Frage." kündigt eine Frage an. In der Vorstufe vom 17.11. kam danach nichts, W.A.I.S. wartete richtigerweise (Marker ◐) und fragte erst nach etwa 5 s nach, ein Effekt des Testskripts. Jetzt stellt die Probe wie ein Mensch nach 0,8 bis 1,2 s Pause (hinter dem eigenen Satz und hinter dem letzten Ton von W.A.I.S., eigener Zufall, die Denkpausen eines Seeds bleiben gleich) eine Faktenfrage, von `fakt_8` rückwärts (dieselben Sprechproben wie bei G3, keine neuen). Der Schritt wartet ihre Antwort ab, damit sie nicht in die Denkpause oder den nächsten Schritt fällt. Die Folgefrage ist kein eigener Schritt: Der erste Ton eines Schritts misst nur die Antwort auf seine Sprechprobe (bei A1 vor dem Einwurf), die Antwort auf die Folgefrage zählt weder zum ersten Ton noch zur Antwortdauer, ihr erster Ton steht gesondert im Bericht und zählt für kein Kriterium. Ein Schnitt beim Stellen der Folgefrage gilt wie der Einwurf als erklärt. Das Verstummen misst weiter vom Einwurf bis zum Ende der Wiedergabe. "Warte mal, was kostet das eigentlich?" ist selbst eine Frage und bleibt ohne Folgefrage.
 
 ## 10. Offene Angaben
 
