@@ -50,9 +50,15 @@ ENV_ERLAUBT = ("PATH", "PATHEXT", "SystemRoot", "SYSTEMROOT", "windir", "ComSpec
                "TEMP", "TMP", "ProgramFiles", "ProgramFiles(x86)", "ProgramData", "PLAYWRIGHT_MODUL", "NODE_PATH", "LANG", "LC_ALL", "DISPLAY", "XDG_RUNTIME_DIR")
 
 
+_ENV_ERLAUBT_GROSS = frozenset(n.upper() for n in ENV_ERLAUBT)
+
+
 def worker_umgebung() -> dict[str, str]:
-    """Nur die Umgebung, die Node und Chrome brauchen. Der Worker erbt nie die Anmeldung der Datenbankrolle (WAMO_ADMIN_DATABASE_URL) oder andere Schlüssel."""
-    return {k: v for k, v in os.environ.items() if k in ENV_ERLAUBT}
+    """Nur die Umgebung, die Node und Chrome brauchen. Der Worker erbt nie die Anmeldung der Datenbankrolle (WAMO_ADMIN_DATABASE_URL) oder andere Schlüssel.
+
+    Der Vergleich geht über große Buchstaben: Windows liefert os.environ mit PROGRAMFILES statt ProgramFiles. Fehlt der Name, sucht Playwright Chrome
+    nur unter LOCALAPPDATA und findet eine Installation unter C:\\Program Files nicht (Befund 17.11.2026)."""
+    return {k: v for k, v in os.environ.items() if k.upper() in _ENV_ERLAUBT_GROSS}
 
 
 def _system32(name: str) -> str:
