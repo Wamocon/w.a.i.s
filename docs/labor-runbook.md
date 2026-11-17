@@ -453,7 +453,11 @@ Alle Daten der Besucher sind spätestens am **11.12.2026** zu löschen.
 3. **N oder T, je Laptop** (im Kiosk-Konto, Chrome vorher schließen): `python <Ordner>\wamo_labor_platz.py rueckweg --profil-loeschen`. Das nimmt Richtlinien und Zertifikat zurück und löscht das Chrome-Profil mit der angemeldeten Sitzung.
 4. **T:** Die Umschlag-Datei und ihre Sicherungen (`umschlag-labor.txt.sicherung-...`) enthalten Passwörter und Seeds. Löschen, sobald die Profile nicht mehr gebraucht werden.
 5. **T, ab dem 12.12.2026:** `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN"`. Es löscht Container, Token, Image und Kern-Einstellungen und schreibt einen Nachweis ohne Inhalte. Das Skript lässt den Lauf erst ab dem 12.12.2026 zu. Daten von Besuchern hat der Nachlauf dann längst gelöscht.
-6. **T:** Laborkonten löschen und alle Sitzungen widerrufen `[offen: Weg, es gibt dafür noch kein Skript]`.
+6. **T, nach dem Nachlauf (Punkt 2), spätestens am Fr 11.12.2026:** Laborkonten löschen und alle Sitzungen widerrufen mit `infra/sokrates2/wamo_labor_konten_loeschen.py` (Ordner wie üblich nach `~/wamo-infra` kopiert, `infra/sokrates2/README.md` Abschnitt 0). Ein Laborkonto ist ein Konto mit Laborprofil (`labor_art`) und der Adresse `<Kennung>@wamo.test`, beides muss zutreffen. Jedes andere Konto fasst das Werkzeug nie an, bei mehr als 12 Laborkonten bricht es ohne Änderung ab.
+   1. Trockenlauf: `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py"`. Er listet die Laborkonten (Kennung, Adresse maskiert, Profil, letzte Anmeldung), zählt je Tabelle die Zeilen des Kontos und zeigt den Plan. Er ändert nichts und liest keinen Schlüssel. Erwartet: unter "Ziel" `labor-01` bis `labor-09`, kein Eintrag unter "Nicht angefasst", keine Zeile "Achtung".
+   2. Zuerst ein Reservekonto: `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py --kennung labor-09 --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN"`. Erwartet: "labor-09: gelöscht (...), danach 0 Zeilen ..." und "Ergebnis: Nachweis erbracht.", Ausgang 0.
+   3. Dann alle: `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN"`. Je Konto: Profil sperren, Konto in GoTrue sperren, Sitzungen widerrufen, Einträge im Anmeldeprotokoll löschen, Konto hart löschen, nachzählen. Erwartet: "verbliebene Laborkonten (Konten mit Laborprofil in einem Schema): 0", "Ergebnis: Nachweis erbracht.", Ausgang 0. Die Ausgabe ist der Nachweis (ohne Adressen und Inhalte), dazu eine Zeile im Journal: `ssh wamo-sokrates2 "journalctl -t wamo-labor-loeschen"`.
+   4. Bei einem Fehler nennt das Werkzeug Konto, Schritt und Grund, die übrigen Konten laufen weiter. Der Lauf ist wiederholbar. Ein Konto mit Fehler beim Löschen bleibt gesperrt und ohne Sitzungen. "Achtung: laufende Sitzung im Kern" heißt: später wiederholen. "Achtung: Verweis, den das Löschen nur auf null setzen würde" heißt: zuerst den Nachlauf (Punkt 2) laufen lassen. "Zählung unvollständig" heißt: die Rolle postgres liest eine Tabelle nicht vollständig, dann löscht das Werkzeug dieses Konto nicht und T klärt die Rechte.
 7. **T:** Snapshots und Sicherungen des Servers dürfen den 11.12.2026 nicht überdauern. Von Hand prüfen.
 8. **P:** Verbrauch in der Konsole des Sprachmodells notieren, Ausgabenlimit zurücksetzen.
 
@@ -473,7 +477,7 @@ Das muss Niko oder das Projektteam vor der Generalprobe am 26.11.2026 nennen:
 10. Fristen, die L und T festlegen: Wartezeit bis zum Wechsel an den Reserveplatz, Frist für die Rückkehr des Dienstes.
 11. Ob die Qualität mit weiteren Hausmodellen reicht und ob das Gateway Audiomodelle für Sprache anbietet.
 12. Ob Zuschauer am Betreuer-Platz einen Hinweis brauchen (Datenschutz) und ob Zuschauer bei laufenden Plätzen einen Hinweis brauchen (3.7).
-13. Der Weg, die Laborkonten zu löschen.
+13. Der Weg, die Laborkonten zu löschen: erledigt, Abschnitt 10, Punkt 6 (`infra/sokrates2/wamo_labor_konten_loeschen.py`).
 
 ---
 

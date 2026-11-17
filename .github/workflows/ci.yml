@@ -395,7 +395,9 @@ jobs:
         run: uv run --frozen --project voice-core python -m pytest -q -p no:cacheprovider --durations=10 scripts
 
       - name: Tests in infra/sokrates2 (pytest)
-        run: uv run --frozen --project voice-core python -m pytest -q -p no:cacheprovider infra/sokrates2/test_labor_tokentest.py
+        run: >-
+          uv run --frozen --project voice-core python -m pytest -q -p no:cacheprovider
+          infra/sokrates2/test_labor_tokentest.py infra/sokrates2/test_wamo_labor_konten_loeschen.py
 
       - name: Node-Tests (Lastbrowser, Eingabe-Erweiterung des Gateways)
         run: node --test scripts/wamo-last-browser.test.cjs infra/sokrates2/wamo-rd/erweiterung/wamo-eingabe.test.js

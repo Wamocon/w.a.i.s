@@ -87,8 +87,8 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | Fr 27.11. | Daten-Freeze 12:00. Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer. Ab 12:00 kein Neustart des Gateways bis Sa 28.11. abends (N10) | W.A.I.S., Betreuer, Niko | Morgencheckliste Teil A |
 | Sa 28.11. | Labortag. Kern-Kanal morgens sperren, kein Neustart des Gateways | alle | Morgencheckliste Teil B |
 | ab Mo 30.11. | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`). Messungen H0 und M3 (`docs/hausmodelle-und-kikollege.md`) | W.A.I.S. | Runbook Abschnitt 10 |
-| Mo 30.11. bis Fr 04.12. | Skript zum Löschen der Laborkonten und Widerrufen der Sitzungen (Trockenlauf als Standard, Bestätigungswort, Nachweis), mit Review | W.A.I.S. | Lücke 1 |
-| bis Fr 11.12. | Skript ausführen, Umschlag-Datei und Sicherungen löschen. Ab 12.12. Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
+| Mo 30.11. bis Fr 04.12. | Laborkonten löschen und Sitzungen widerrufen, nach dem Nachlauf. Das Werkzeug liegt vor: `infra/sokrates2/wamo_labor_konten_loeschen.py` (Trockenlauf als Standard, Bestätigungswort, Höchstgrenze 12, Nachweis). Ablauf: Trockenlauf `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py"`, dann ein Reservekonto mit `--kennung labor-09 --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN`, dann alle mit `--ausfuehren --bestaetigung LABORKONTEN-LOESCHEN` | W.A.I.S., Niko | Nachlauf gelaufen, Ja von Niko, Runbook Abschnitt 10, Punkt 6 |
+| bis Fr 11.12. | Nachweis "verbliebene Laborkonten: 0" (Ausgang 0, Zeile in `journalctl -t wamo-labor-loeschen`), Umschlag-Datei und Sicherungen löschen. Ab 12.12. Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
 
 ### N.5 Offene Lieferungen
 
@@ -171,7 +171,7 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 
 ## 6. Lücken und Risiken
 
-1. **Laborkonten löschen und Sitzungen widerrufen:** noch kein Skript (Bau nach dem Labortag, Fahrplan).
+1. **Laborkonten löschen und Sitzungen widerrufen:** Das Werkzeug liegt vor (`infra/sokrates2/wamo_labor_konten_loeschen.py`, Runbook Abschnitt 10, Punkt 6). Offen ist der Lauf am Server nach dem Nachlauf, spätestens Fr 11.12. Erst der Lauf zeigt, ob die Rolle postgres die Tabellen im Schema auth lesen und dort löschen darf.
 2. **Marker bei w2:** Bis zur Korrektur schweigt W.A.I.S. bei der Wissensfrage zur CTFL-Prüfung. Ob der Büro-Prompt betroffen ist, klärt die Ursachenanalyse.
 3. **CPU des Kerns:** schon bei 1 Sitzung p95 43,5 Prozent eines Kerns. Erst der volle Lasttest zeigt, ob 4 Sitzungen (Betrieb) und 8 Sitzungen (Reserve) unter 70 Prozent bleiben.
 4. **Gemeinsamer Server:** Entwicklungsaufträge (bis 6) und das Hausmodell teilen sich Sokrates-2 mit dem Kern und dem Labor-Dienst. Darum sperrt der Kern-Kanal während Lasttest und Labortag.

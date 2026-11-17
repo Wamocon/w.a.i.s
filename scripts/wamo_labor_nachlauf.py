@@ -10,8 +10,8 @@ dem Labortag") steht, in fünf Schritten und einer festen Reihenfolge:
   4. Kern: Gesprächsdaten aller Laborprofile löschen (wamo_labor.py loeschen --alle, die Funktion labor_loeschen; das Skript wartet die Sperrfrist selbst
      ab und prüft danach auf null).
   5. Zählung danach (nur lesen). Der Nachweis gilt nur, wenn im Kern und im Dienst alles null ist und kein Laborprofil freigeschaltet ist.
-Am Ende stehen die Erinnerungen an die Handarbeit, die kein Skript übernimmt (Umschlag-Datei und ihre Sicherungen, Platz-Skript je Laptop, Löschlauf am
-Server, Laborkonten).
+Am Ende stehen die Erinnerungen an die Handarbeit, die dieser Lauf nicht übernimmt (Umschlag-Datei und ihre Sicherungen, Platz-Skript je Laptop, Löschlauf
+am Server, Laborkonten mit infra/sokrates2/wamo_labor_konten_loeschen.py).
 
 Aufrufe (im Repo-Hauptordner, nur Standardbibliothek):
   python scripts/wamo_labor_nachlauf.py nachlauf                    # Trockenlauf: Plan, Zählung davor (nur lesen), Erinnerungen, nichts wird geändert
@@ -480,7 +480,9 @@ def erinnerungen(umschlag_datei: Path) -> list[str]:
         "     ssh wamo-sokrates2 \"sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN\"",
         "     (Container, Token, Image und Kern-Einstellungen mit Nachweis; das Skript lässt ihn erst ab dem 12.12.2026 zu, vorher nur mit --vor-der-frist.",
         "     Snapshots und Sicherungen des Servers über den 11.12.2026 hinaus von Hand prüfen.)",
-        "  4. Laborkonten löschen und alle Sitzungen widerrufen (Entscheidung Q11, Handgriff am Server, dafür gibt es noch kein Skript).",
+        "  4. Laborkonten löschen und alle Sitzungen widerrufen (Entscheidung Q11, spätestens 11.12.2026), erst ohne --ausfuehren als Trockenlauf,",
+        "     dann mit --kennung labor-09 und danach für alle (Runbook Abschnitt 10, Punkt 6):",
+        "     ssh wamo-sokrates2 \"python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN\"",
     ]
 
 
