@@ -136,7 +136,9 @@ UMGEBUNGEN = [
      "WAMO_OFFICE": "dateien,outlook,teams,onenote", "WAMO_JIRA": "an", "WAMO_JIRA_URL": "https://jira.example.invalid",
      "WAMO_JIRA_EMAIL": "technik@example.invalid", "WAMO_JIRA_TOKEN": "attrappe", "WAMO_JIRA_PROJEKTE": "LAB",
      "WAMO_JIRA_STANDARD_PROJEKT": "LAB", "WAMO_ENTWICKLUNG_BUERO": "an", "WAMO_ENTWICKLUNG_PROFILE": USER,
-     "WAMO_ENTWICKLUNG_MITGLIEDER": "an", "WAMO_ENTWICKLUNG_HAUS": "an", "WAMO_PC_MITGLIEDER_PROFILE": USER},
+     "WAMO_ENTWICKLUNG_MITGLIEDER": "an", "WAMO_ENTWICKLUNG_HAUS": "an", "WAMO_PC_MITGLIEDER_PROFILE": USER,
+     # Stimmprüfung streng, nur die eigene Stimme hören und unterbrechen lassen (17.11.2026): Laborprofile haben trotzdem nie eine
+     "WAMO_STIMME_PRUEFUNG": "streng", "WAMO_STIMME_NUR_EIGEN": "an", "WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN": "an"},
 ]
 
 
@@ -167,6 +169,25 @@ class WerkzeugMatrixTests(unittest.IsolatedAsyncioTestCase):
                 b.beruehrt["pc_host_fuer"].assert_not_called()
                 await b.session.cleanup()
                 b.beruehrt["pc_zugang"].assert_not_called()
+
+    async def test_keine_stimmpruefung_in_jeder_umgebung(self):
+        """Laborprofile haben nie einen Stimmabdruck: keine Stimmsitzung, kein Prüfer, kein Wächter, und die Startstrategie fragt weder nach
+        dem endgültigen Transkript noch, ob nur die eigene Stimme unterbricht (Entscheidung vom 17.11.2026 gilt nicht im Labor)."""
+        from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregator
+
+        from stimme_pruefer import Stimmpruefer
+        from stimme_waechter import StimmWaechter
+
+        for art, env in itertools.product(("platz", "schaufenster"), UMGEBUNGEN):
+            with self.subTest(art=art, env=env), mock.patch.object(bot, "Pipeline", wraps=bot.Pipeline) as pipeline:
+                b = await bauen(platz_identitaet(art), env)
+                stufen = pipeline.call_args.args[0]
+                strategie = next(p for p in stufen if isinstance(p, LLMUserAggregator))._params.user_turn_strategies.start[0]
+                self.assertIsNone(b.session.stimme)
+                self.assertFalse([p for p in stufen if isinstance(p, (Stimmpruefer, StimmWaechter))])
+                self.assertIsNone(strategie._stimme_unterbricht)
+                self.assertIsNone(strategie._nur_endgueltig)
+                await b.session.cleanup()
 
     async def test_kontrolle_ein_admin_mit_pc_beruehrt_den_pc_weg(self):
         # Ohne diese Kontrolle bewiese der Test oben nichts: derselbe Aufbau mit einem Admin ruft den PC-Weg tatsächlich auf

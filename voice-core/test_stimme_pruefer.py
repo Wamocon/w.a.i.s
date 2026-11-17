@@ -23,7 +23,8 @@ from pipecat.frames.frames import (
 from pipecat.tests.utils import run_test
 
 import stimme_pruefer
-from stimme_gate import EIGEN, FREMD, UNKLAR, StimmGate
+from soft_interrupt import StimmUrteilFrame
+from stimme_gate import EIGEN, FREMD, UNKLAR, Schwellen, StimmGate
 from stimme_modell import DIM
 from stimme_pruefer import MAX_PRUEF_SECS, URTEIL_MAX_ALTER_SECS, Stimmpruefer
 
@@ -390,6 +391,145 @@ class FrameTests(PrueferBasis):
         v.on_turn_end.assert_called_once()
         self.assertEqual([c.args[0] for c in v.on_bot_speaking.call_args_list], [True, False])
         self.assertEqual(sum(isinstance(f, InputAudioRawFrame) for f in unten), 1)
+
+
+class FruehTests(PrueferBasis):
+    """Frühes Urteil, während W.A.I.S. spricht (seit 17.11.2026: nur die eigene Stimme unterbricht). Nach einer Sekunde Sprache und dann
+    jede Sekunde prüft der Prüfer die letzten zwei Sekunden der laufenden Äußerung; klingt sie nach der Person, meldet er das einmal
+    (StimmUrteilFrame mit frueh) und laufend_eigen sagt ja. Am Sprechende kommt das Urteil wie bisher, dazu ein StimmUrteilFrame ohne frueh."""
+
+    def setUp(self):
+        super().setUp()
+        self.frames: list = []
+
+        def merken(f, *a):
+            self.frames.append(f)
+            self.gesendet.append(getattr(f, "data", None))
+
+        self.v.push_frame = mock.AsyncMock(side_effect=merken)
+
+    def urteile(self):
+        return [(f.nr, f.eigen, f.frueh) for f in self.frames if isinstance(f, StimmUrteilFrame)]
+
+    async def reden(self, wert: int, secs: float):
+        """secs Sekunden Ton ohne VAD-Ende; eine angestoßene frühe Prüfung wird abgewartet."""
+        for _ in range(round(secs / 0.02)):
+            self.uhr.t += 0.02
+            await self.v.on_audio(audio(wert))
+            if self.v._frueh_task is not None:
+                await self.v._frueh_task
+
+    def beginnen(self, *, wamo_spricht: bool = True):
+        self.v.on_bot_speaking(wamo_spricht)
+        self.v.on_speech_start(self.uhr.t + 0.2, 0.2)
+
+    async def test_eigene_stimme_ist_nach_einer_sekunde_frueh_erkannt(self):
+        self.beginnen()
+        await self.reden(8000, 0.9)
+        self.assertEqual((self.urteile(), self.v.laufend_eigen()), ([], False))
+        await self.reden(8000, 0.2)
+        self.assertEqual(self.urteile(), [(1, True, True)])
+        self.assertTrue(self.v.laufend_eigen())
+        # nur fürs Unterbrechen: kein Eintrag im Gate, kein Urteil für das Transkript, keine Meldung an die Oberfläche
+        self.assertEqual(self.gate.grund_der_stimme(), "Stimme noch nicht erkannt")
+        self.assertEqual(self.meldungen("stimme"), [])
+        await self.reden(8000, 1.5)
+        self.assertEqual(len(self.urteile()), 1)  # einmal je Äußerung
+        self.v.on_speech_stop(self.uhr.t, 0.2)
+        self.assertFalse(self.v.laufend_eigen())  # nur solange die Äußerung läuft
+        self.assertTrue(self.v.frueh_eigen(1))  # für den Wächter: diese Äußerung hat W.A.I.S. unterbrochen
+        self.assertFalse(self.v.frueh_eigen(2))
+        urteil = await self.v.urteil_abwarten(5.0)
+        self.assertEqual(urteil.urteil, EIGEN)
+        self.assertEqual(self.urteile(), [(1, True, True), (1, True, False)])  # dazu das Urteil am Sprechende
+
+    async def test_das_fruehe_urteil_traegt_kein_transkript(self):
+        self.beginnen()
+        await self.reden(8000, 1.2)
+        self.assertTrue(self.v.laufend_eigen())
+        self.assertIsNone(await self.v.urteil_abwarten(0.05))  # das Transkript wartet auf das Urteil am Sprechende
+
+    async def test_fremde_stimme_gibt_kein_fruehes_urteil(self):
+        self.beginnen()
+        await self.reden(-8000, 2.5)
+        self.assertEqual((self.urteile(), self.v.laufend_eigen()), ([], False))
+        self.assertGreaterEqual(self.modell.rechner.aufrufe, 2)  # geprüft nach einer und nach zwei Sekunden
+        self.v.on_speech_stop(self.uhr.t, 0.2)
+        await self.v.urteil_abwarten(5.0)
+        self.assertEqual(self.urteile(), [(1, False, False)])  # am Sprechende: nicht eigen
+
+    async def test_frueh_zaehlen_die_letzten_zwei_sekunden(self):
+        """Beginnt die Äußerung fremd (oder mit Echo) und spricht dann die Person, erkennt eine spätere frühe Prüfung sie trotzdem."""
+        self.beginnen()
+        await self.reden(-8000, 1.2)
+        await self.reden(8000, 1.0)  # Prüfung bei 2 s: noch mehr fremd als eigen
+        self.assertEqual(self.urteile(), [])
+        await self.reden(8000, 1.0)  # bei 3 s: die letzten zwei Sekunden sind fast nur die Person
+        self.assertEqual(self.urteile(), [(1, True, True)])
+
+    async def test_ohne_rede_von_wamo_keine_fruehe_pruefung(self):
+        self.beginnen(wamo_spricht=False)
+        await self.reden(8000, 2.5)
+        self.assertEqual((self.modell.rechner.aufrufe, self.urteile()), (0, []))
+
+    async def test_schalter_aus_keine_fruehe_pruefung_und_kein_urteil_fuers_unterbrechen(self):
+        self.gate.schwellen = Schwellen(unterbrechen_nur_eigen=False)
+        self.beginnen()
+        await self.reden(8000, 2.5)
+        self.assertEqual(self.modell.rechner.aufrufe, 0)
+        self.v.on_speech_stop(self.uhr.t, 0.2)
+        await self.v.urteil_abwarten(5.0)
+        self.assertEqual(self.urteile(), [])
+        self.assertFalse(self.v.laufend_eigen())
+
+    async def test_beobachten_oder_ohne_abdruck_keine_fruehe_pruefung(self):
+        self.gate.modus = "beobachten"
+        self.beginnen()
+        await self.reden(8000, 1.5)
+        self.v.on_speech_stop(self.uhr.t, 0.2)
+        await self.v.urteil_abwarten(5.0)
+        self.gate.modus = "streng"
+        self.gate.setze_abdruck(None)
+        self.v.on_bot_speaking(False)
+        self.beginnen()
+        await self.reden(8000, 1.5)
+        self.assertEqual(self.urteile(), [])
+        self.assertEqual(self.modell.rechner.aufrufe, 1)  # nur die Prüfung am Sprechende im Modus beobachten
+
+    async def test_ein_spaetes_fruehes_ergebnis_nach_dem_sprechende_zaehlt_nicht(self):
+        self.modell.rechner.dauer = 0.2
+        self.beginnen()
+        for _ in range(55):
+            self.uhr.t += 0.02
+            await self.v.on_audio(audio(8000))
+        frueh = self.v._frueh_task
+        self.assertIsNotNone(frueh)
+        self.v.on_speech_stop(self.uhr.t, 0.2)
+        await frueh
+        await self.v.urteil_abwarten(5.0)
+        self.assertEqual(self.urteile(), [(1, True, False)])  # nur das Urteil am Sprechende
+
+    async def test_ein_urteil_nach_beginn_der_naechsten_aeusserung_geht_nicht_ans_unterbrechen(self):
+        """Das Urteil zur vorigen Äußerung darf den wartenden Zwischenstand der neuen nicht freigeben und ihre Dämpfung nicht beenden."""
+        self.modell.rechner.dauer = 0.1
+        self.beginnen()
+        await self.reden(8000, 0.5)
+        self.v.on_speech_stop(self.uhr.t, 0.2)
+        self.v.on_speech_start(self.uhr.t + 0.2, 0.2)  # die nächste Äußerung beginnt, bevor das Urteil da ist
+        await self.v.urteil_abwarten(5.0, 1)
+        self.assertEqual(self.urteile(), [])
+
+    async def test_aufraeumen_beendet_eine_laufende_fruehe_pruefung(self):
+        self.modell.rechner.dauer = 0.3
+        self.beginnen()
+        for _ in range(55):
+            self.uhr.t += 0.02
+            await self.v.on_audio(audio(8000))
+        laufend = self.v._frueh_task
+        self.assertIsNotNone(laufend)
+        await self.v.cleanup()
+        self.assertTrue(laufend.done())
+        self.assertEqual(self.urteile(), [])
 
 
 if __name__ == "__main__":

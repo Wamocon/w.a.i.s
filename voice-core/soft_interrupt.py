@@ -43,6 +43,14 @@ Ablauf
     nimmt das Gate eine schon gedämpfte Stimme zurück (wie nach jeder Entwarnung, danach eine Weile nicht erneut dämpfen), und alles
     gilt wieder wie vorher. Je Sitzung gehören ein Halt, ein Gate und ein Tracker zusammen, es gibt keinen gemeinsamen Zustand.
     Ohne Halt (WAMO_INNEHALTEN=aus, Sprachausgabe im Haus mit ganzen Sätzen, Ausgang ohne write_audio_frame) gilt alles wie vorher.
+  * Nur die eigene Stimme unterbricht (Entscheidung von Niko vom 17.11.2026, WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN, Standard an; nur im Modus
+    streng mit eingelerntem Abdruck, nie für Laborprofile, Regel in stimme_waechter.py): Während WAMO spricht, fragt die Start-Strategie die
+    Stimmprüfung (stimme_unterbricht). Bis das Urteil eigen da ist, wartet jeder Zwischenstand, auch ein Stoppwort; das Gate dämpft wie immer
+    sofort (Ducken), bricht aber nicht ab. Das Urteil kommt als StimmUrteilFrame vom Prüfer (stimme_pruefer.py): früh, sobald eine Prüfung
+    der laufenden Äußerung nach der Person klingt, oder am Sprechende. Eigen: der jüngste Zwischenstand wird mit den Regeln oben bewertet
+    (Rückmeldung, Stoppwort, Mindestzahl der Wörter, Echo, Innehalten) und unterbricht wie bisher. Nicht eigen: kein Abbruch, das Gate nimmt
+    die Dämpfung sofort zurück (fremde_stimme), der Wächter verwirft das Transkript. Gewollter Preis: Die eigene Stimme unterbricht rund
+    0,5 bis 1 Sekunde später als bisher. Ohne Abdruck, in anderen Modi oder mit dem Schalter aus gilt alles wie vorher.
 """
 
 from __future__ import annotations
@@ -53,6 +61,7 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -69,6 +78,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     InterimTranscriptionFrame,
     LLMContextFrame,
+    SystemFrame,
     UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -85,6 +95,19 @@ from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
 from wiedergabe_tracker import HALTEN, SCHNEIDEN, SPIELEN, PlaybackTracker  # noqa: F401
 
 SENTENCE_END = (".", "!", "?", "…", ":")
+
+
+@dataclass
+class StimmUrteilFrame(SystemFrame):
+    """Urteil der Stimmprüfung für das Unterbrechen (stimme_pruefer.py schickt es nur, wenn im Modus streng mit bereiter Prüfung nur die
+    eigene Stimme unterbricht). nr: Nummer der Äußerung beim Prüfer. eigen: klingt nach der Person (Wert ab EIGEN_MIN). frueh: aus einer
+    Prüfung, während die Äußerung noch läuft (nur mit eigen), sonst das Urteil am Sprechende. Die Start-Strategie bewertet damit den
+    wartenden Zwischenstand, das Gate nimmt bei nicht eigen die Dämpfung zurück und lässt das Frame dort enden. Systemframe: es überholt das
+    endgültige Transkript, das der Wächter bis zum Urteil anhält."""
+
+    nr: int = 0
+    eigen: bool = False
+    frueh: bool = False
 
 # Rueckmeldelaute: zeigen Zuhoeren, sind kein Einwurf. Alles andere zaehlt ("Doch", "Nein", "Stopp").
 BACKCHANNEL_WORDS = frozenset(
@@ -407,6 +430,7 @@ class MeaningfulWordsUserTurnStartStrategy(MinWordsUserTurnStartStrategy):
         on_partial: Callable[[str], None] | None = None,
         fragt: Callable[[], bool] | None = None,
         nur_endgueltig: Callable[[], bool] | None = None,
+        stimme_unterbricht: Callable[[], bool | None] | None = None,
         **kwargs,
     ):
         """beurteilt: wird mit "rueckmeldung" oder "echo" gerufen, wenn der erkannte Text kein Einwurf ist (das Gate
@@ -417,9 +441,14 @@ class MeaningfulWordsUserTurnStartStrategy(MinWordsUserTurnStartStrategy):
         fragt: sagt, ob WAMO gerade eine Frage stellt (SoftInterruptGate.fragt). Dann ist ein "Ja", "genau" oder "okay" die
         Antwort und kein Rückmeldelaut (ist_antwort): es startet den Zug und bleibt im Transkript. None: wie bisher.
         nur_endgueltig: Stimmprüfung (stimme_waechter.nur_endgueltig). Sagt sie ja, während WAMO nicht spricht, startet kein Zwischenstand
-        den Zug, erst das endgültige Transkript nach dem Urteil des Wächters. None: wie bisher."""
+        den Zug, erst das endgültige Transkript nach dem Urteil des Wächters. None: wie bisher.
+        stimme_unterbricht: Stimmprüfung (stimme_waechter.nur_eigen_unterbricht), nur gefragt, während WAMO spricht. None (oder die Abfrage
+        sagt None): wie bisher. True: die laufende Äußerung klingt schon nach der Person (frühes Urteil), es gilt alles wie bisher. False:
+        der Zwischenstand wartet auf das Urteil (StimmUrteilFrame) und startet bis dahin nichts (siehe Kopf der Datei)."""
         super().__init__(**kwargs)
         self._nur_endgueltig = nur_endgueltig
+        self._stimme_unterbricht = stimme_unterbricht
+        self._wartet: InterimTranscriptionFrame | None = None  # jüngster Zwischenstand, der auf das Urteil der Stimmprüfung wartet
         self._fragt = fragt
         self._on_partial = on_partial
         self._werkzeug_laeuft = werkzeug_laeuft
@@ -453,12 +482,45 @@ class MeaningfulWordsUserTurnStartStrategy(MinWordsUserTurnStartStrategy):
     def _werkzeug_aktiv(self) -> bool:
         return self._werkzeug_laeuft is not None and not self._bot_speaking and bool(self._werkzeug_laeuft())
 
+    async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+        if self._stimme_unterbricht is not None:
+            if isinstance(frame, StimmUrteilFrame):
+                return await self._stimm_urteil(frame)
+            if isinstance(frame, (VADUserStartedSpeakingFrame, BotStoppedSpeakingFrame)):
+                self._wartet = None  # eine neue Äußerung oder WAMO schweigt: ein alter Zwischenstand gehört nicht mehr dazu
+        return await super().process_frame(frame)
+
+    async def handle_user_turn_started(self):
+        self._wartet = None
+        await super().handle_user_turn_started()
+
+    async def _stimm_urteil(self, frame: StimmUrteilFrame) -> ProcessFrameResult:
+        """Urteil der Stimmprüfung (nur eigen unterbricht): eigen bewertet den wartenden Zwischenstand wie bisher, sonst wird er vergessen."""
+        wartet, self._wartet = self._wartet, None
+        if not frame.eigen or wartet is None or not self._bot_speaking or self._stimme_unterbricht() is None:
+            return ProcessFrameResult.CONTINUE
+        logger.info(f"{self}: eigene Stimme erkannt ({'früh' if frame.frueh else 'am Sprechende'}), der Einwurf zählt")
+        return await self._bewerten(wartet)
+
     async def _handle_transcription(self, frame) -> ProcessFrameResult:
         if (isinstance(frame, InterimTranscriptionFrame) and not self._bot_speaking and self._nur_endgueltig is not None
                 and self._nur_endgueltig()):
             # Ein Zwischenstand kommt am Stimmwächter vorbei. Startete er den Zug, bräche das Gate Antwort oder Werkzeug sofort ab, auch für
-            # eine fremde Stimme, deren Transkript der Wächter danach verwirft. Beim Sprechen bleibt der schnelle Weg (stimme_waechter.py).
+            # eine fremde Stimme, deren Transkript der Wächter danach verwirft. Beim Sprechen gilt die Abfrage unten (stimme_waechter.py).
             return ProcessFrameResult.CONTINUE
+        if (isinstance(frame, InterimTranscriptionFrame) and self._bot_speaking and self._stimme_unterbricht is not None
+                and self._stimme_unterbricht() is False):
+            # Nur die eigene Stimme unterbricht: der Zwischenstand wartet auf das Urteil (StimmUrteilFrame), auch ein Stoppwort. Das
+            # endgültige Transkript hat der Wächter schon geprüft (verworfen heißt leer), es zählt wie bisher. Echo der eigenen Rede
+            # entwarnt das Gate wie bisher (lange Sperre gegen das Pumpen der Dämpfung).
+            self._wartet = frame
+            if self._beurteilt is not None and self._urteil(frame.text) == "echo":
+                self._beurteilt("echo")
+            return ProcessFrameResult.CONTINUE
+        return await self._bewerten(frame)
+
+    async def _bewerten(self, frame) -> ProcessFrameResult:
+        """Die Regeln für einen Einwurf (Rückmeldung, Stoppwort, Mindestzahl der Wörter, Echo, Innehalten, Antwort auf eine Frage)."""
         werkzeug = self._werkzeug_aktiv()
         if not self._bot_speaking and not werkzeug:
             return await super()._handle_transcription(frame)
@@ -704,6 +766,20 @@ class SoftInterruptGate(FrameProcessor):
         if self._duckt and not (self._pending or self._firing):
             self._frist("_duck_ende_task", DUCK_BEURTEILT_SECS, grund, DUCK_SPERRE_ECHO_SECS if grund == "echo" else DUCK_SPERRE_SECS)
 
+    def fremde_stimme(self):
+        """Urteil der Stimmprüfung nicht eigen (StimmUrteilFrame, nur eigen unterbricht): kein Einwurf. Die vorsorgliche Dämpfung endet sofort,
+        statt auf das Ende der Sprache zu warten, und wird dann eine Weile nicht wiederholt (wie nach jeder Entwarnung). Läuft schon ein
+        bestätigter Einwurf, ändert sich nichts."""
+        if not self._ducken or self._pending or self._firing:
+            return
+        abgebrochen = self._duck_task is not None and not self._duck_task.done()
+        if abgebrochen:
+            self._duck_task.cancel()  # noch nicht gedämpft: in dieser Sprachphase gar nicht erst dämpfen
+        if abgebrochen or self._duckt:
+            self._duck_gesperrt_bis = max(self._duck_gesperrt_bis, self._uhr() + DUCK_SPERRE_SECS)
+        if self._duckt:
+            self._kurz(self._entducken("fremde Stimme"), "soft_interrupt_entducken")
+
     def _kurz(self, coro, name: str):
         """Kurze Hintergrundaufgabe, die cleanup noch beenden kann."""
         task = self.create_task(coro, name=name)
@@ -793,6 +869,12 @@ class SoftInterruptGate(FrameProcessor):
                 await self.push_frame(frame, direction)
                 self._start_fire("Antwort zu Ende", interrupt=False)
                 return
+        elif isinstance(frame, StimmUrteilFrame):
+            # Urteil der Stimmprüfung (nur eigen unterbricht): eigen entscheidet die Start-Strategie vor dem Gate, hier zählt nur nicht eigen.
+            # Das Frame endet hier, dahinter braucht es niemand.
+            if not frame.eigen:
+                self.fremde_stimme()
+            return
         elif isinstance(frame, InterruptionFrame):
             # Unterbrechung von anderer Stelle: nichts mehr zurueckhalten (den Ausgang öffnet der Tracker mit dem Abbruch).
             self._clear_ansatz()

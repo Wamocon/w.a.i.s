@@ -20,9 +20,12 @@ lesbar) Modell oder Abdruck nicht geladen sind oder die Prüfung länger als WAR
 Schwellen (alle als Schalter in der Umgebung, siehe schwellen_aus_env): WAMO_STIMME_EIGEN_MIN (ab hier die eigene Stimme, 0,5),
 WAMO_STIMME_FREMD_MAX (bis hier fremd, 0,3), WAMO_STIMME_MIN_SECS (kürzere Äußerungen reichen nicht für "eigen", 1 s),
 WAMO_STIMME_VERTRAUEN_SECS (so lange gilt "eigen" für Folgesätze, 120 s), WAMO_STIMME_KURZ_VERTRAUEN_SECS (so lange darf das Vertrauen nur aus
-kurzen Äußerungen weiterlaufen, 15 s nach der letzten sicheren Erkennung). Nur für das Verwerfen im Modus streng (stimme_waechter.py):
-WAMO_STIMME_VERWERFEN_MAX (unklare Äußerungen unter diesem Wert verwerfen, 0,4, an den Bereich FREMD_MAX bis EIGEN_MIN gesetzt) und
-WAMO_STIMME_VERWERFEN_MIN_SECS (so viel Sprache braucht eine Äußerung mindestens, damit sie verworfen wird, 0 s).
+kurzen Äußerungen weiterlaufen, 15 s nach der letzten sicheren Erkennung). Nur für den Modus streng mit bereiter Prüfung (stimme_waechter.py,
+Entscheidung vom 17.11.2026): WAMO_STIMME_NUR_EIGEN (an oder aus, Standard an: nur eine eigene Äußerung erreicht das Modell) und
+WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN (an oder aus, Standard an: während WAMO spricht, unterbricht nur die eigene Stimme). Mit
+WAMO_STIMME_NUR_EIGEN=aus gilt die Regel vom 16.11.2026 mit WAMO_STIMME_VERWERFEN_MAX (unklare Äußerungen unter diesem Wert verwerfen, 0,4,
+an den Bereich FREMD_MAX bis EIGEN_MIN gesetzt) und WAMO_STIMME_VERWERFEN_MIN_SECS (so viel Sprache braucht eine Äußerung mindestens, damit
+sie verworfen wird, 0 s).
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
-from env_schalter import zahl_im_bereich
+from env_schalter import schalter_an, zahl_im_bereich
 
 EIGEN, FREMD, UNKLAR, KURZ = "eigen", "fremd", "unklar", "kurz"
 GETIPPT = "getippt"
@@ -61,9 +64,13 @@ class Schwellen:
     vertrauen_secs: float = 120.0
     kurz_vertrauen_secs: float = 15.0
     # nur für den Wächter (stimme_waechter.verwerfen, Modus streng): unklare Äußerungen unter diesem Wert verwerfen (zwischen fremd_max
-    # und eigen_min), und nur Äußerungen mit mindestens so viel Sprache
+    # und eigen_min), und nur Äußerungen mit mindestens so viel Sprache; beides gilt nur mit nur_eigen aus
     verwerfen_max: float = 0.4
     verwerfen_min_secs: float = 0.0
+    # Regeln vom 17.11.2026 (Modus streng mit bereiter Prüfung): nur eine eigene Äußerung erreicht das Modell (WAMO_STIMME_NUR_EIGEN), und
+    # während WAMO spricht, unterbricht nur die eigene Stimme (WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN, stimme_waechter.py)
+    nur_eigen: bool = True
+    unterbrechen_nur_eigen: bool = True
 
 
 def stand_nachricht(modus: str, status: str) -> dict:
@@ -106,6 +113,8 @@ def schwellen_aus_env() -> Schwellen:
         kurz_vertrauen_secs=zahl_im_bereich("WAMO_STIMME_KURZ_VERTRAUEN_SECS", 1.0, 120.0) or standard.kurz_vertrauen_secs,
         verwerfen_max=_verwerfen_max(fremd_max, eigen_min, standard.verwerfen_max),
         verwerfen_min_secs=standard.verwerfen_min_secs if verwerfen_min_secs is None else verwerfen_min_secs,
+        nur_eigen=schalter_an("WAMO_STIMME_NUR_EIGEN", standard=standard.nur_eigen),
+        unterbrechen_nur_eigen=schalter_an("WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN", standard=standard.unterbrechen_nur_eigen),
     )
 
 
@@ -158,6 +167,16 @@ class StimmGate:
         if self.zustand == "laedt" or self.modell_ok is None:
             return "laedt"
         return "bereit"
+
+    @property
+    def verwirft(self) -> bool:
+        """Verwirft der Wächter Äußerungen (stimme_waechter.py)? Nur im Modus streng mit bereiter Prüfung (Abdruck und Modell geladen); ohne
+        Abdruck nie, und ein Laborprofil bekommt gar kein Gate."""
+        return self.modus == "streng" and self.status == "bereit"
+
+    def nur_eigen_unterbricht(self) -> bool:
+        """Unterbricht WAMO, während es spricht, nur für die eigene Stimme (WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN, stimme_waechter.py)?"""
+        return self.verwirft and self.schwellen.unterbrechen_nur_eigen
 
     def stand(self, status: str | None = None) -> dict:
         """Nachricht an die Oberfläche mit dem Stand dieses Gates (oder einem vorgegebenen, zum Beispiel laedt beim Modellstart)."""

@@ -68,6 +68,8 @@ ERLAUBT = set(PFLICHT) | {
     "WAMO_STIMME_KURZ_VERTRAUEN_SECS",
     # Verwerfen im Modus streng (voice-core/stimme_waechter.py): unklare Äußerungen unter diesem Wert (Standard 0,4), Mindestsprache (Standard 0)
     "WAMO_STIMME_VERWERFEN_MAX", "WAMO_STIMME_VERWERFEN_MIN_SECS",
+    # Nur die eigene Stimme hören und unterbrechen lassen (voice-core/stimme_waechter.py, seit 17.11.2026, beide Standard an)
+    "WAMO_STIMME_NUR_EIGEN", "WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN",
     "WAMO_STIMME_MODELL",
     # Sprachpakete A und B (voice-core/soniox_tts.py, persona.py, bot.py, learning.py, soft_interrupt.py, ja_waechter.py):
     # Tempo und Pausen der Stimme, Leerzeichen am Satzende, Persona, Pausen-Texte, Lernen, Rückmeldelaut bei Werkzeug, Ja-Wächter
