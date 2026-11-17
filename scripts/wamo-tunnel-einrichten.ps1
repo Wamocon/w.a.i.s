@@ -165,8 +165,11 @@ $ausloeserLogon = New-ScheduledTaskTrigger -AtLogOn -User $konto
 $ausloeserWiederkehr = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
 $ausloeser = @($ausloeserLogon, $ausloeserWiederkehr)
 $prinzipal = New-ScheduledTaskPrincipal -UserId $konto -LogonType Interactive -RunLevel Limited
+# Priorität 4 (normal): Ohne Angabe gilt 7, dann laufen Host und ssh unter normal, mit niedriger Speicher- und E/A-Priorität. Windows
+# lagerte den Host dann aus, und neben einer Sicherung oder einem Build antwortete er 12 bis 40 s nicht (Befund 17.11.2026).
 $einstellungen = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+  -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew `
+  -Priority 4
 Register-ScheduledTask -TaskName $Aufgabe -Action $aktion -Trigger $ausloeser -Principal $prinzipal -Settings $einstellungen `
   -Description "WAMO: Host und SSH-Rücktunnel zu Sokrates-2 (scripts\wamo-tunnel.ps1). Entfernen: scripts\wamo-tunnel-entfernen.ps1" `
   -Force | Out-Null

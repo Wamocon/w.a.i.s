@@ -25,7 +25,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export type OfficeAktionen = {
   /** eigenes, gespeichertes Canvas-Element als Datei am PC speichern (Nachricht canvas_export) */
   speichern: (canvasId: string, format: OfficeFormat) => boolean;
-  /** eine gespeicherte Datei öffnen (Nachricht datei_oeffnen, nur Dateien aus dem Register des Hosts) */
+  /** eine gespeicherte Datei im Explorer zeigen, Ordner Dokumente\WAIS (Nachricht datei_oeffnen mit ordner, nur Dateien aus dem Register des Hosts) */
   oeffnen: (kennung: string) => boolean;
   /** eigenes Canvas-Element als OneNote-Seite, erst nach der Freigabekarte (Nachricht onenote_seite, voice-core/onenote_werkzeuge.py) */
   onenote?: (canvasId: string) => boolean;

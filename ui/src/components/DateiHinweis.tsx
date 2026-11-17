@@ -8,7 +8,8 @@ import { schliesseDateiHinweis, wamo } from "@/lib/wamo";
 
 /**
  * Hinweis nach dem Speichern eines Canvas-Elements als Datei (Servernachricht "datei", voice-core/office_werkzeuge.py): Name, Ordner und
- * voller Pfad am PC, dazu "Öffnen" (öffnet genau diese Datei aus dem Register des Hosts) und "Schließen". Fehler zeigt der kurze Hinweis
+ * voller Pfad am PC, dazu "Im Ordner zeigen" (Explorer mit Dokumente\WAIS, genau diese Datei aus dem Register des Hosts markiert; Wunsch
+ * vom 17.11.2026, die Datei selbst öffnet sich schon beim Speichern) und "Schließen". Fehler zeigt der kurze Hinweis
  * oben (Toast). Die Live-Region bleibt im DOM, damit Screenreader den neuen Hinweis ansagen. Im Browser, der den Laptop aus der Ferne
  * steuert (usePcFern), liegt die Datei auf dem Laptop und öffnet sich dort; Text und Knopf sagen das. Beides läuft über den Kern, nicht
  * über die Desktop-Brücke.
@@ -30,7 +31,7 @@ export const DateiHinweis = memo(function DateiHinweis({ onOeffnen }: { onOeffne
           </div>
           {onOeffnen && (
             <button type="button" className="memo-undo" onClick={() => onOeffnen(datei.kennung)}>
-              {fern ? "Am Laptop öffnen" : "Öffnen"}
+              {fern ? "Am Laptop im Ordner zeigen" : "Im Ordner zeigen"}
             </button>
           )}
           <button type="button" className="memo-undo" aria-label="Hinweis schließen" onClick={schliesseDateiHinweis}>

@@ -163,7 +163,7 @@ describe("PC-Steuerung aus dem Browser", () => {
       applyServerMessage({ type: "datei", ok: true, kennung: "0123456789abcdef", name: "Angebot.docx", format: "word", ordner: "Dokumente\\WAIS", geoeffnet: false }),
     );
     expect(screen.getByText("Angebot.docx liegt auf deinem Laptop in Dokumente\\WAIS.")).toBeTruthy();
-    act(() => screen.getByRole("button", { name: "Am Laptop öffnen" }).click());
+    act(() => screen.getByRole("button", { name: "Am Laptop im Ordner zeigen" }).click());
     expect(oeffnen).toHaveBeenCalledExactlyOnceWith("0123456789abcdef");
   });
 
@@ -174,7 +174,7 @@ describe("PC-Steuerung aus dem Browser", () => {
       applyServerMessage({ type: "datei", ok: true, kennung: "0123456789abcdef", name: "Angebot.docx", format: "word", ordner: "Dokumente\\WAIS", geoeffnet: false }),
     );
     expect(screen.getByText("Angebot.docx liegt in Dokumente\\WAIS.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Öffnen" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Im Ordner zeigen" })).toBeTruthy();
   });
   it("Mail im neuen Outlook aus dem Browser: der Hinweis sagt, dass der Entwurf auf dem Laptop offen ist", () => {
     render(<MailVersandHinweis onZurueckholen={vi.fn(() => true)} />);

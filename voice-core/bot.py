@@ -56,7 +56,7 @@ Nachrichten von der Oberfläche:
   {"type": "bildstrom", "data": {"aktion", ...}}
                                           Live-Bild des eigenen Laptops (bildstrom.py; nur mit Stufe der PC-Steuerung und
                                           gebundenem Gerät)
-  {"type": "canvas_export", "data": {"canvas_id", "format"}} und {"type": "datei_oeffnen", "data": {"kennung"}}
+  {"type": "canvas_export", "data": {"canvas_id", "format"}} und {"type": "datei_oeffnen", "data": {"kennung", "ordner"}}
                                           eigenes Canvas-Element als Datei am PC speichern, gespeicherte Datei öffnen
                                           (office_werkzeuge.py; nur mit Stufe der PC-Steuerung und WAMO_OFFICE=dateien, nie im
                                           Labor). Antwort an die
