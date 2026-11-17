@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  MIKROFON_ERSATZ_TEXT,
+  MIKROFON_SCHLUESSEL,
+  MIKROFON_STANDARD,
   STILLE_DBFS,
   STILLE_MS,
   anzeigePegel,
@@ -14,6 +17,9 @@ import {
   kernStilleText,
   messen,
   mikrofonFehlerText,
+  mikrofonLesen,
+  mikrofonSchluessel,
+  mikrofonSchreiben,
   neueStille,
   pruefeStille,
   sendeSpurErsetzen,
@@ -23,6 +29,7 @@ import {
   stilleAusgeblendet,
   stilleText,
   stilleWiederAufnehmen,
+  standardText,
   tonLog,
   windowsGesperrt,
   windowsGesperrtText,
@@ -113,6 +120,103 @@ test("Geräteliste ohne Aliase, Startgerät nur, wenn noch angeschlossen", () =>
   assert.equal(startGeraet(liste, "abc"), "abc");
   assert.equal(startGeraet(liste, "weg"), null);
   assert.equal(startGeraet(liste, null), null);
+});
+
+test("Standardgerät: das Gerät hinter dem Alias default bekommt standard, über den Namen oder die einzige Gerätegruppe", () => {
+  // Chrome nennt den Alias "<Wort> - <Name>"; ein Gerät, dessen Name nur das Ende davon ist, zählt nicht
+  assert.deepEqual(
+    geraeteListe([
+      { kind: "audioinput", deviceId: "default", label: "Standard - Headset Mikrofon (USB)", groupId: "g2" },
+      { kind: "audioinput", deviceId: "a", label: "Mikrofon (USB)", groupId: "g1" },
+      { kind: "audioinput", deviceId: "b", label: "Headset Mikrofon (USB)", groupId: "g2" },
+    ]),
+    [
+      { id: "a", label: "Mikrofon (USB)" },
+      { id: "b", label: "Headset Mikrofon (USB)", standard: true },
+    ],
+  );
+  // ohne passenden Namen (andere Sprache, leer) entscheidet die Gruppe, wenn sie genau ein Eingabegerät hat
+  assert.deepEqual(
+    geraeteListe([
+      { kind: "audioinput", deviceId: "default", label: "", groupId: "g1" },
+      { kind: "audioinput", deviceId: "a", label: "Onboard", groupId: "g1" },
+      { kind: "audioinput", deviceId: "b", label: "Webcam", groupId: "g2" },
+    ]).filter((m) => m.standard),
+    [{ id: "a", label: "Onboard", standard: true }],
+  );
+  // zwei Geräte in der Gruppe: kein Raten
+  assert.equal(
+    geraeteListe([
+      { kind: "audioinput", deviceId: "default", label: "", groupId: "g1" },
+      { kind: "audioinput", deviceId: "a", label: "Eingang 1", groupId: "g1" },
+      { kind: "audioinput", deviceId: "b", label: "Eingang 2", groupId: "g1" },
+    ]).some((m) => m.standard),
+    false,
+  );
+  // vor der Freigabe liefert der Browser keine Kennungen: leere Liste
+  assert.deepEqual(geraeteListe([{ kind: "audioinput", deviceId: "", label: "" }]), []);
+});
+
+test("Standardgerät heißt im Browser anders als in der Desktop-App", () => {
+  assert.equal(standardText(false), "Standardgerät des Browsers");
+  assert.equal(standardText(true), "Standardgerät von Windows");
+  assert.match(MIKROFON_ERSATZ_TEXT, /Standardgerät/);
+});
+
+/** Speicher wie localStorage, mit Schalter für Lese- und Schreibfehler. */
+function speicher(start: Record<string, string> = {}) {
+  const werte = new Map(Object.entries(start));
+  return {
+    werte,
+    kaputt: false,
+    getItem(k: string) {
+      if (this.kaputt) throw new Error("gesperrt");
+      return werte.get(k) ?? null;
+    },
+    setItem(k: string, v: string) {
+      if (this.kaputt) throw new Error("gesperrt");
+      werte.set(k, v);
+    },
+  };
+}
+
+const PERSON_A = "0b7f3c1e-2d4a-4c55-9a10-1a2b3c4d5e6f";
+const PERSON_B = "9e8d7c6b-5a4f-4e3d-8c2b-1a0f9e8d7c6b";
+
+test("Mikrofonwahl je Person: eigener Schlüssel mit der user_id, nichts ohne brauchbare Kennung", () => {
+  assert.equal(mikrofonSchluessel(PERSON_A), `wamo.mikrofon.${PERSON_A}`);
+  assert.equal(mikrofonSchluessel(null), null);
+  assert.equal(mikrofonSchluessel("../x"), null);
+  const sp = speicher();
+  assert.equal(mikrofonSchreiben(sp, PERSON_A, "mic-a"), true);
+  assert.equal(mikrofonSchreiben(sp, PERSON_B, "mic-b"), true);
+  assert.equal(mikrofonLesen(sp, PERSON_A), "mic-a");
+  assert.equal(mikrofonLesen(sp, PERSON_B), "mic-b");
+  assert.equal(mikrofonSchreiben(sp, null, "mic-c"), false);
+  assert.equal(mikrofonSchreiben(sp, PERSON_A, "x".repeat(201)), false);
+  assert.equal(mikrofonLesen(sp, PERSON_A), "mic-a");
+});
+
+test("Mikrofonwahl: die alte Wahl je Gerät gilt, bis die Person selbst wählt; Standard verdeckt sie", () => {
+  const sp = speicher({ [MIKROFON_SCHLUESSEL]: "alt" });
+  assert.equal(mikrofonLesen(sp, PERSON_A), "alt");
+  assert.equal(mikrofonLesen(sp, null), "alt");
+  mikrofonSchreiben(sp, PERSON_A, null);
+  assert.equal(sp.werte.get(`wamo.mikrofon.${PERSON_A}`), MIKROFON_STANDARD);
+  assert.equal(mikrofonLesen(sp, PERSON_A), null); // ausdrücklich das Standardgerät
+  assert.equal(mikrofonLesen(sp, PERSON_B), "alt"); // andere Person: noch die alte Wahl
+  mikrofonSchreiben(sp, PERSON_A, "neu");
+  assert.equal(mikrofonLesen(sp, PERSON_A), "neu");
+});
+
+test("Mikrofonwahl: ohne Speicher, bei Fehlern oder fremden Werten gilt das Standardgerät", () => {
+  assert.equal(mikrofonLesen(null, PERSON_A), null);
+  assert.equal(mikrofonSchreiben(undefined, PERSON_A, "mic"), false);
+  const sp = speicher({ [`wamo.mikrofon.${PERSON_A}`]: "" });
+  assert.equal(mikrofonLesen(sp, PERSON_A), null);
+  sp.kaputt = true;
+  assert.equal(mikrofonLesen(sp, PERSON_A), null);
+  assert.equal(mikrofonSchreiben(sp, PERSON_A, "mic"), false);
 });
 
 function falscherTransport(spurAmSender: unknown) {

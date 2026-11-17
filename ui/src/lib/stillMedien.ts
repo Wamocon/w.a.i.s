@@ -1,6 +1,7 @@
 "use client";
 
 import { WavMediaManager } from "@pipecat-ai/small-webrtc-transport";
+import { istErsatzFall, recorderFehlerName } from "@/lib/geraeteMedien";
 
 /**
  * Medienmanager für den stillen Start beim Tippen (KP-1A): Er öffnet das Mikrofon erst, wenn die Person "Sprechen" verlangt.
@@ -12,7 +13,9 @@ import { WavMediaManager } from "@pipecat-ai/small-webrtc-transport";
  *
  * Sprechen: enableMic(true) holt das Mikrofon nach (begin, dann die Aufnahme des Standardmanagers). Der Rückruf onTrackStarted meldet die
  * neue Spur wie beim normalen Start, die Oberfläche legt sie auf den Sender (lib/mikrofon.ts, sendeSpurErsetzen). Scheitert das Öffnen
- * (gesperrt, kein Gerät), meldet die Bibliothek onDeviceError, und die Sitzung bleibt still.
+ * (gesperrt, kein Gerät), meldet die Bibliothek onDeviceError, und die Sitzung bleibt still. Das gewählte Mikrofon der Person (lib/mikrofon.ts)
+ * kommt über den Konstruktor; fehlt es beim Öffnen, öffnet der Manager das Standardgerät und meldet das über mikrofonErsatz (wie
+ * lib/geraeteMedien.ts für das normale Gespräch).
  *
  * Die Basisklasse hat nur lose Typen (die Typen ihres Pakets sind nicht eingebunden), deshalb greifen wir auf ihre Felder über einen Typ zu.
  */
@@ -24,6 +27,7 @@ type Basis = {
   _wavRecorder: {
     begin: (id?: string) => Promise<unknown>;
     end: () => Promise<unknown>;
+    stream?: { getTracks?: () => { stop: () => void }[] } | null;
     listenForDeviceChange: (f: ((d: unknown[]) => void) | null) => void;
     listenForDeviceErrors: (f: ((e: unknown) => void) | null) => void;
   };
@@ -47,9 +51,20 @@ export class StillMedienManager extends WavMediaManager {
   #abgebaut = false;
   /** Gerätewahl der Person, gilt erst beim Öffnen. */
   #wunschId: string | undefined;
+  #ersatz = false;
+
+  constructor(mikrofon?: string | null) {
+    super();
+    this.#wunschId = mikrofon || undefined;
+  }
 
   get #b(): Basis {
     return this as unknown as Basis;
+  }
+
+  /** Das gewählte Mikrofon ließ sich bei "Sprechen" nicht öffnen, es läuft das Standardgerät. */
+  get mikrofonErsatz(): boolean {
+    return this.#ersatz;
   }
 
   /** Kein WavRecorder.begin: nichts wird geöffnet, nichts abgefragt. */
@@ -103,9 +118,10 @@ export class StillMedienManager extends WavMediaManager {
     if (!enable || this.#abgebaut) return; // nach dem Ende der Sitzung öffnet nichts mehr
     try {
       const rec = this.#b._wavRecorder;
+      const melden = this.#b._handleDeviceError.bind(this);
       rec.listenForDeviceErrors(null);
-      rec.listenForDeviceErrors(this.#b._handleDeviceError.bind(this)); // vor begin: eine Ablehnung soll onDeviceError melden
-      await rec.begin(this.#wunschId); // erst hier getUserMedia
+      rec.listenForDeviceErrors(melden); // vor begin: eine Ablehnung soll onDeviceError melden
+      await this.#oeffnen(rec, melden); // erst hier getUserMedia
       if (this.#abgebaut) {
         // Die Sitzung endete, während die Person die Berechtigung erteilte: das eben geöffnete Mikrofon sofort wieder schließen
         await rec.end().catch(() => undefined);
@@ -129,5 +145,38 @@ export class StillMedienManager extends WavMediaManager {
       // Ein halb geöffnetes Mikrofon nie offen lassen (begin war gelungen, die Aufnahme nicht)
       if (warOffen) await super.disconnect().catch(() => undefined);
     }
+  }
+
+  /**
+   * Gewähltes Gerät öffnen; fehlt es (nicht: Berechtigung verweigert), das Standardgerät ("" statt undefined, sonst nähme begin die letzte
+   * Auswahl des Recorders). Fehler, nach denen nichts mehr folgt, gehen an onDeviceError.
+   */
+  async #oeffnen(rec: Basis["_wavRecorder"], melden: (e: unknown) => void): Promise<void> {
+    this.#ersatz = false;
+    const id = this.#wunschId;
+    if (!id) {
+      await rec.begin(undefined);
+      return;
+    }
+    let fehler: unknown = null;
+    rec.listenForDeviceErrors((e) => {
+      fehler = e;
+    });
+    try {
+      await rec.begin(id);
+    } catch (e) {
+      rec.listenForDeviceErrors(null);
+      rec.listenForDeviceErrors(melden);
+      if (!istErsatzFall(recorderFehlerName(fehler))) {
+        melden(fehler);
+        throw e;
+      }
+      for (const t of rec.stream?.getTracks?.() ?? []) t.stop(); // begin scheiterte vielleicht erst nach getUserMedia
+      this.#ersatz = true;
+      await rec.begin("");
+      return;
+    }
+    rec.listenForDeviceErrors(null);
+    rec.listenForDeviceErrors(melden);
   }
 }

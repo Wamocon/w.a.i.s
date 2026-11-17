@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { MikrofonWahl } from "@/components/MikrofonWahl";
+import { einstellungenOeffnen } from "@/lib/einstellungenHash";
 import { stilleAusblenden, type Mikrofon } from "@/lib/mikrofon";
 import { useSelect } from "@/lib/store";
 import { wamo } from "@/lib/wamo";
@@ -62,6 +63,18 @@ export const FehlerAnzeige = memo(function FehlerAnzeige({
               </button>
               <MikrofonWahl laden={onMikrofone} waehlen={onMikrofonWaehlen} />
             </>
+          )}
+          {error.aktion === "mikrofon_waehlen" && (
+            <button
+              type="button"
+              className="btn-secondary btn-small"
+              onClick={() => {
+                onSchliessen();
+                einstellungenOeffnen("sprache"); // Abschnitt "Sprache und Ton", Block "Eingabe" mit der Mikrofonwahl
+              }}
+            >
+              Mikrofon wählen
+            </button>
           )}
           <button type="button" className="error-close" onClick={onSchliessen}>
             Schließen

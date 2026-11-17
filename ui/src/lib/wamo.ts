@@ -123,6 +123,8 @@ export type Einwilligung = { version: string; text: string };
 export type Fehler = {
   text: string;
   art: "verbindung" | "dienst" | "anmeldung" | "mikrofon" | "sonst" | "hinweis";
+  /** zusätzlicher Knopf: "mikrofon_waehlen" öffnet die Mikrofonwahl in den Einstellungen (Pegelwarnung, lib/pegelWarnung.ts) */
+  aktion?: "mikrofon_waehlen";
 };
 
 /** Live-Bild des eigenen Laptops: nur der Zustand, nie ein Bild (die Bilder liegen kurz in lib/liveBild.ts). */

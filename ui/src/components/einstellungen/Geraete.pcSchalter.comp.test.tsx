@@ -1,6 +1,7 @@
 // Komponententest des Schalters "PC-Steuerung" ohne laufendes Gespräch (components/einstellungen/Geraete.tsx, lib/pcSchalter.ts):
 // In der Desktop-App und im Browser ist er für Admins auch ohne Sitzung bedienbar (die Rolle kommt dann aus der gemerkten Rolle dieser
-// Person), Laborkonten und Mitglieder sehen ihn nie. Wartet ein Klick auf Sitzung und PC, ist er gesperrt und sagt es; ein Hinweis nach
+// Person), Laborkonten nie, Mitglieder nur mit der Stufe "mitglied" vom Kern, ohne Sitzung mit der zuletzt gemerkten (Befund 17.11.2026).
+// Wartet ein Klick auf Sitzung und PC, ist er gesperrt und sagt es; ein Hinweis nach
 // der Wartezeit steht am Schalter. In einer Sitzung ohne verbundenen PC sagt ein Satz am Schalter, warum.
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { act, render, screen } from "@testing-library/react";
@@ -57,6 +58,36 @@ describe("Schalter PC-Steuerung ohne Gespräch", () => {
   it("die Rolle vom Kern gilt vor der gemerkten: Mitglied laut Kern sieht keinen Schalter", () => {
     person("niko@wamocon.com", "admin");
     wamo.set((s) => ({ ...s, profil: { name: "Niko", rolle: "mitglied" } }));
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(schalter()).toBeNull();
+  });
+
+  it("Mitglied mit gemerkter Stufe aus einer früheren Sitzung: Schalter ohne Sitzung bedienbar, der Klick geht an useWamo", async () => {
+    person("kollege@wamocon.com", "mitglied");
+    localStorage.setItem(`wamo.pcStufe.${ID}`, "mitglied");
+    const onSchalten = vi.fn(() => true);
+    render(<GeraeteAbschnitt onPcSteuerung={onSchalten} />);
+    const knopf = schalter() as HTMLButtonElement;
+    expect(knopf.disabled).toBe(false);
+    expect(screen.getByText(HINWEIS_OHNE_SITZUNG)).toBeTruthy();
+    await userEvent.click(knopf);
+    expect(onSchalten).toHaveBeenCalledWith(true);
+  });
+
+  it("Mitglied: meldet die Sitzung keine Stufe, gilt die gemerkte nicht; Mitglied ohne gemerkte Stufe sieht nichts", () => {
+    person("kollege@wamocon.com", "mitglied");
+    render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
+    expect(schalter()).toBeNull();
+    localStorage.setItem(`wamo.pcStufe.${ID}`, "mitglied");
+    act(() => {
+      wamo.set((s) => ({ ...s, presence: "idle", profil: { name: "Kollege", rolle: "mitglied" }, betrieb: { modus: "buero", modelle: {}, pc: "verbunden" } }));
+    });
+    expect(schalter()).toBeNull();
+  });
+
+  it("Laborkonten sehen den Schalter auch mit gemerkter Stufe nie", () => {
+    person("labor-04@wamo.test", "mitglied");
+    localStorage.setItem(`wamo.pcStufe.${ID}`, "mitglied");
     render(<GeraeteAbschnitt onPcSteuerung={() => true} />);
     expect(schalter()).toBeNull();
   });

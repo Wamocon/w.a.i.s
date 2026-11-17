@@ -2,7 +2,16 @@
 
 import { useSyncExternalStore } from "react";
 import { serverBrowser } from "@/lib/geraet";
-import { rolleLesen, rolleMerken, ROLLE_PRAEFIX, type Rolle } from "@/lib/pcSchalter";
+import {
+  pcStufeLesen,
+  pcStufeMerken,
+  PC_STUFE_PRAEFIX,
+  rolleLesen,
+  rolleMerken,
+  ROLLE_PRAEFIX,
+  type MitgliedStufe,
+  type Rolle,
+} from "@/lib/pcSchalter";
 import { schalterLesen, schalterSchluessel, schalterSchreiben, SCHALTER_PRAEFIX } from "@/lib/stillStart";
 import { untertitelLesen, untertitelSchluessel, untertitelSchreiben, UNTERTITEL_PRAEFIX } from "@/lib/untertitel";
 
@@ -131,6 +140,36 @@ function rolleAbonnieren(h: () => void) {
 /** Gemerkte Rolle dieser Person auf diesem Gerät (Server: unbekannt). */
 export function useRolleGemerkt(userId: string | null | undefined): Rolle | null {
   return useSyncExternalStore(rolleAbonnieren, () => rolleGemerktLesen(userId), () => null);
+}
+
+// ---------- Zuletzt gemeldete Stufe "mitglied" der PC-Steuerung (lib/pcSchalter.ts) ----------
+// Wie die Rolle: Damit ein freigeschaltetes Mitglied den Schalter "PC-Steuerung" auch ohne Sitzung findet, merkt sich die Oberfläche die
+// Stufe, die der Kern zuletzt gemeldet hat, je Person auf diesem Gerät. Nur eine Anzeigehilfe: Was gilt, prüft der Kern.
+
+export function pcStufeGemerktLesen(userId: string | null | undefined): MitgliedStufe | null {
+  return pcStufeLesen(lokalerSpeicher(), userId);
+}
+
+export function pcStufeGemerktSetzen(userId: string | null | undefined, stufe: MitgliedStufe | null) {
+  if (pcStufeGemerktLesen(userId) === stufe) return;
+  if (pcStufeMerken(lokalerSpeicher(), userId, stufe)) hoerer.forEach((h) => h());
+}
+
+function pcStufeAbonnieren(h: () => void) {
+  hoerer.add(h);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === null || e.key.startsWith(PC_STUFE_PRAEFIX)) h();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    hoerer.delete(h);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+/** Gemerkte Stufe "mitglied" dieser Person auf diesem Gerät (Server: unbekannt). */
+export function usePcStufeGemerkt(userId: string | null | undefined): MitgliedStufe | null {
+  return useSyncExternalStore(pcStufeAbonnieren, () => pcStufeGemerktLesen(userId), () => null);
 }
 
 // ---------- Live-Untertitel unter dem Kern (lib/untertitel.ts) ----------
