@@ -40,7 +40,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 - Am Labortag nur vier Besucher-Plätze (1 bis 4). Die Besucher wechseln sich ab. Die Profile `labor-05` bis `labor-08` bleiben eingerichtet und dienen als Reserve, Platz 9 bleibt Reserve-Laptop (17.11.).
 - Der Lasttest prüft weiter bis 8 Sitzungen, aber nur als Reserve. Realistisch sind 4 Sitzungen gleichzeitig (17.11.).
 - Keine Aufzeichnung fürs Schaufenster mehr (hebt die Aufzeichnung aus E9 auf). Der Rückfall ist die Vorführung am Betreuer-Platz oder die Texteingabe (Runbook 7, 17.11.).
-- Vorstufe des Lasttests mit 2 und 4 Sitzungen je 10 Minuten am Mi 18.11. früh. Der volle Lasttest bleibt Fr 20.11. (17.11.).
+- Vorstufe des Lasttests auf Wunsch von Niko schon am 17.11. gelaufen (Lauf last-20261117-114851, Stufen 2 und 4 Sitzungen je 10 Minuten): 0 Abbrüche, 0 Ablehnungen 429, 0 Soniox-Fehler, erster Ton p50 1,2 s und p95 bei 4 Sitzungen 2,5 s (Grenze 3,5 s), Speicher des Kerns 0,57 GiB. Das Werkzeug urteilte „durchgefallen“ nur wegen der Gesamt-CPU (108 Prozent eines Kerns bei 4 Sitzungen). Ein Messlauf mit 4 Sitzungen und CPU je Thread (last-20261117-121511) zeigt: Hauptthread 29 bis 34 Prozent, der Rest verteilt sich auf viele Hilfs-Threads unter je 4 Prozent. Kriterium deshalb auf den Hauptthread präzisiert (`docs/labor-lasttest.md`), hochgerechnet etwa 60 bis 68 Prozent bei 8 Sitzungen. Ausreißer bis 7,5 s erster Ton nur bei A1 und J1 (Werkzeugaufruf, nicht Last). Messlücke: Tokens je Minute zeigt nur 160. Zwei Fehlstarts behoben (Playwright am Mess-PC, #190). Der volle Lasttest bleibt Fr 20.11.
 - Freeze Mo 23.11. früh (E1 bleibt).
 - Die zweiten Faktoren der Laborprofile werden am Fr 20.11. nach dem Lasttest neu eingerichtet, nicht am 25.11. (E2 präzisiert).
 - Der Lasttest läuft voll am Fr 20.11., nicht am 24.11.
@@ -75,7 +75,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | Mi 18.11. | N3 bis N5 liefern: Preise und Ratenlimit, Fassung der Regeln, Büro-Adressen für die Ports 55446, 55322 und 56543 | Niko | erledigt 17.11. (N3 bis N5) |
 | Do 19.11. | Erwartungswerte des Trainers zu W1 und W2 (N8) | Niko, Trainer | Pflicht vor dem Ausdruck |
 | Fr 20.11. vormittags | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen, mit Preisen, Ratenlimit und `--kosten-obergrenze`. Vorher den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“, Starttickets zählen als belegt) | W.A.I.S., Niko | Ja von Niko, N3, E5 |
-| Mi 18.11. früh | Vorstufe Lasttest mit 2 und 4 Sitzungen je 10 Minuten (Entscheidung 17.11.), vorher Trockenlauf | W.A.I.S., Niko | Trockenlauf ohne Befund |
+| Di 17.11. (vorgezogen) | Vorstufe Lasttest mit 2 und 4 Sitzungen je 10 Minuten, dazu Messlauf CPU je Thread | W.A.I.S. | erledigt, siehe N.1a |
 | Fr 20.11. nachmittags | Zweite Faktoren neu auf die Betreuer-Geräte (E2), zuerst ein Profil, mit QR zum Scannen (`einrichten --profile labor-01 --neu --qr`, Ablauf Runbook 9.7). Die zweiten Faktoren der Profile 01 bis 08 bleiben eingerichtet (05 bis 08 als Reserve). ~~Aufzeichnung des Schaufensters~~ entfällt (17.11.) | W.A.I.S., Betreuer, Niko | Lasttest abgeschlossen |
 | Fr 20.11. | Finale Datenschutzrichtlinie der Betreuer (N11) liefern. Kommt sie bis dahin, wird sie als Fassung 2 vor dem Freeze eingebaut, sonst gilt Fassung 1 | Betreuer, W.A.I.S., Niko | N11 |
 | Sa 21.11. | Letzte Freischaltungen der Mitglieder (E4). Puffer für Befunde aus dem Lasttest | Niko, W.A.I.S. | E4 |
