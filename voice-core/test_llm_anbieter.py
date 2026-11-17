@@ -542,7 +542,9 @@ async def test_gespraech_llm_litellm(monkeypatch, cz):
     assert str(llm._client.base_url).rstrip("/") == BASIS
     assert llm.supports_developer_role is False
     assert llm._client.max_retries == 0
-    assert llm._client.timeout.read == la.GESPRAECH_LESE_TIMEOUT_SECS
+    # Hausmodelle liefern einen Werkzeugaufruf als Block (Befund 17.11.2026), die Lesefrist ist deshalb länger als bei Claude
+    assert llm._client.timeout.read == la.HAUS_GESPRAECH_LESE_TIMEOUT_SECS == 60.0
+    assert la.HAUS_GESPRAECH_LESE_TIMEOUT_SECS > la.GESPRAECH_LESE_TIMEOUT_SECS == 20.0
     assert llm._client.timeout.connect == la.VERBINDUNG_TIMEOUT_SECS
 
 
@@ -559,7 +561,7 @@ async def test_zusammenfassung(monkeypatch, cz, hz):
     assert isinstance(dienst, la.LiteLLMService) and dienst._settings.model == "gemma4-31b"
     assert dienst._client.timeout.read == la.ANFRAGE_TIMEOUT_SECS["zusammenfassung"]
     gespraech, _ = await la.gespraech_llm("WAMO", hz)
-    assert gespraech._client.timeout.read == la.GESPRAECH_LESE_TIMEOUT_SECS  # das Gespräch bleibt kurz
+    assert gespraech._client.timeout.read == la.HAUS_GESPRAECH_LESE_TIMEOUT_SECS  # Gespräch über das Hausmodell
     # claude-Profil mit Gespräch über das Hausmodell: Zusammenfassung nicht über den Gesprächsdienst
     monkeypatch.setenv("WAMO_LLM_ANBIETER", "litellm")
     dienst = await la.zusammenfassung_llm(cz)

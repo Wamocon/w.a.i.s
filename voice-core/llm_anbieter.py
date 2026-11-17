@@ -98,6 +98,10 @@ HAUS_VORVERSUCH_SECS = {"lernen": 15.0}
 HAUS_PAUSE_SECS = 300.0  # nach einer Zeitüberschreitung geht der Baustein so lange gleich zu Claude (je Modell, je Prozess)
 _haus_pause: dict[str, float] = {}
 GESPRAECH_LESE_TIMEOUT_SECS = 20.0  # längste Pause im Stream, bevor das Gespräch die Anfrage aufgibt
+# Gespräch über ein Hausmodell (Gateway): Das Gateway liefert einen Werkzeugaufruf erst als ganzen Block. Befund 17.11.2026:
+# gemma4-31b sprach den ersten Satz nach 0,7 s, der Aufruf von canvas_zeigen mit fünf Stories kam aber nicht innerhalb von
+# 20 s, die Anfrage brach in 3 von 3 Läufen ab (Messrunde Labor, Karte a1). Claude streamt die Argumente und behält 20 s.
+HAUS_GESPRAECH_LESE_TIMEOUT_SECS = 60.0
 ANTHROPIC_WOERTER = ("claude", "anthropic", "haiku", "sonnet", "opus")
 _CLAUDE_MODELL = re.compile(r"claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?")
 _ALLE = "*"  # Cache-Schlüssel für "Gateway ganz weg", gilt für jedes Modell
@@ -755,7 +759,7 @@ def gespraech_dienst(wahl: Wahl, system_instruction: str | None, zugang: Zugang,
             # Die Zusammenfassung läuft ohne Stream (Pipecat run_inference): die Lesezeit gilt dort für die
             # ganze Antwort, nicht für die Pause zwischen zwei Stücken
             lese_timeout=ANFRAGE_TIMEOUT_SECS["zusammenfassung"] if baustein == "zusammenfassung"
-            else GESPRAECH_LESE_TIMEOUT_SECS,
+            else HAUS_GESPRAECH_LESE_TIMEOUT_SECS,
             api_key=_env("LITELLM_API_KEY"),
             base_url=litellm_basis(),
             settings=LiteLLMService.Settings(
