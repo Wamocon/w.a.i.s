@@ -46,6 +46,8 @@ class SchrittErgebnis:
     einwurf: bool = False  # war ein Einwurf geplant
     einwurf_ausgeloest: bool = False  # lief WAMO lange genug, damit der Einwurf gespielt wurde
     verpasst: bool = False  # WAMO verstummte nach dem Einwurf nicht rechtzeitig
+    folgefrage: bool = False  # nach dem Einwurf wurde eine Frage gestellt (nur nach einwurf_a), sie ist kein eigener Schritt
+    folge_ton_ms: float | None = None  # Ende der Folgefrage bis zum ersten Ton, zählt für kein Kriterium
     falsche_unterbrechungen: int = 0
     abbruch: str = ""  # Grund, wenn die Sitzung unerwartet endete
     zeitueberschreitung: bool = False
@@ -129,6 +131,8 @@ def stufe_auswerten(stufe: pl.Stufe, schritte: Sequence[SchrittErgebnis], proben
         "erster_ton_je_karte": {k: kennzahlen([_ton(s) for s in schritte if s.karte == k]) for k in karten},
         "verstummen_ms": kennzahlen([s.verstummen_ms for s in schritte]), "verstummen_verpasst": sum(1 for s in schritte if s.verpasst),
         "einwuerfe": sum(1 for s in schritte if s.einwurf_ausgeloest),
+        "folgefragen": sum(1 for s in schritte if s.folgefrage), "folge_ohne_antwort": sum(1 for s in schritte if s.folgefrage and s.folge_ton_ms is None),
+        "folge_ton_ms": kennzahlen([s.folge_ton_ms for s in schritte if s.folgefrage]),
         "falsche_unterbrechungen": sum(s.falsche_unterbrechungen for s in schritte), "abbrueche": sum(1 for s in schritte if s.abbruch),
         "zeitueberschreitungen": sum(1 for s in schritte if s.zeitueberschreitung),
         "cpu_prozent": {"proben": len(cpu), "mittel": sum(cpu) / len(cpu) if cpu else None, "p95": quantil(cpu, 0.95), "max": max(cpu, default=None)},
@@ -270,6 +274,17 @@ def _n(wert: float | None, stellen: int = 0) -> str:
     return "nicht gemessen" if wert is None else f"{wert:.{stellen}f}".replace(".", ",")
 
 
+SATZ_EINWURF = (f"Einwurf und Folgefrage: Nach „Moment, stopp, ich habe da eine andere Frage.“ stellt die Probe nach "
+                f"{str(pl.FOLGE_PAUSE_MIN_S).replace('.', ',')} bis {str(pl.FOLGE_PAUSE_MAX_S).replace('.', ',')} s Pause eine kurze Faktenfrage. "
+                "Die Folgefrage ist kein eigener Schritt: Der erste Ton eines Schritts misst nur die Antwort auf seine Sprechprobe (bei A1 vor dem Einwurf), "
+                "der erste Ton nach der Folgefrage steht nur in dieser Tabelle und zählt für kein Kriterium.")
+
+
+def _folgefragen(s: dict) -> str:
+    ohne = f", {s['folge_ohne_antwort']} ohne Antwort" if s["folge_ohne_antwort"] else ""
+    return f"{s['folgefragen']}{ohne} | {_n(s['folge_ton_ms']['p95'])}"
+
+
 def _stufenzeile(s: dict) -> str:
     j = s["journal"]
     return (f"| {s['nummer']} | {s['name']} | {s['schritte']} | {_n(s['erster_ton_ms']['p50'])} | {_n(s['erster_ton_ms']['p95'])} | "
@@ -284,12 +299,15 @@ def _abschnitt_stufen(e: dict) -> list[str]:
             "| Stufe | Sitzungen | Schritte | erster Ton p50 | erster Ton p95 | Verstummen p95 | falsche Unterbrechungen | Abbrüche | CPU p95 | Speicher max | 429 | Soniox-Fehler |",
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     zeilen = [_stufenzeile(s) for s in e["stufen"]]
-    mehr = ["", "Weitere Zahlen je Stufe: Anfragen je Minute (Spitze), Unterbrechungen im Journal gegen die Einwürfe der Probe, Aufgaben, Zeitüberschreitungen.", "",
-            "| Stufe | Anfragen je Minute | Unterbrechungen im Journal | Einwürfe | Verstummen verpasst | Aufgaben max | ohne Antwort | Zeitüberschreitungen |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    mehr = ["", "Weitere Zahlen je Stufe: Anfragen je Minute (Spitze), Unterbrechungen im Journal gegen die Einwürfe der Probe, Folgefragen, Aufgaben, "
+            "Zeitüberschreitungen.", "",
+            "| Stufe | Anfragen je Minute | Unterbrechungen im Journal | Einwürfe | Verstummen verpasst | Folgefragen | erster Ton nach Folgefrage p95 | "
+            "Aufgaben max | ohne Antwort | Zeitüberschreitungen |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     mehr += [f"| {s['nummer']} | {s['journal']['anfragen_je_minute_max']} | {s['journal']['unterbrechungen']} | {s['einwuerfe']} | "
-             f"{s['verstummen_verpasst']} | {_n(s['aufgaben_max'])} | {s['ohne_antwort']} | {s['zeitueberschreitungen']} |" for s in e["stufen"]]
-    return kopf + zeilen + mehr + [""]
+             f"{s['verstummen_verpasst']} | {_folgefragen(s)} | {_n(s['aufgaben_max'])} | {s['ohne_antwort']} | {s['zeitueberschreitungen']} |"
+             for s in e["stufen"]]
+    return kopf + zeilen + mehr + ["", SATZ_EINWURF, ""]
 
 
 def _abschnitt_kriterien(e: dict) -> list[str]:

@@ -135,6 +135,14 @@ def test_sprechproben_decken_die_kette_und_den_einwurf_ab():
     assert set(au.benoetigte_clips()) == erwartet
 
 
+def test_folgefragen_sind_vorhandene_sprechproben_und_fehlen_im_trockenlauf_sichtbar(tmp_path):
+    assert pl.FOLGE_CLIPS and set(pl.FOLGE_CLIPS) <= set(au.benoetigte_clips())
+    for name in set(au.SPRECHPROBEN) - {pl.FOLGE_CLIPS[0]}:
+        au.schreibe_wav(tmp_path / f"{name}.wav", RATE, ton(0.2))
+    with pytest.raises(pl.EingabeFehler, match=pl.FOLGE_CLIPS[0]):
+        au.clips_pruefen(tmp_path)
+
+
 def test_texte_stimmen_mit_den_karten_und_dem_messskript_ueberein():
     faelle = (WURZEL / "voice-core" / "eval" / "faelle_labor.py").read_text(encoding="utf-8")
     assert au.SPRECHPROBEN["a1"] in faelle and au.SPRECHPROBEN["j1"] in faelle
