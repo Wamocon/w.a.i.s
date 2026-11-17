@@ -38,7 +38,7 @@ deshalb außerhalb von Gesprächen.
 ## Start des Containers (falls er neu angelegt werden muss)
 
 ```bash
-docker run -d --name wamo-qwen3-tts --restart unless-stopped --runtime nvidia --gpus all \
+docker run -d --name wamo-qwen3-tts --restart unless-stopped --runtime nvidia --gpus all --memory 4g --memory-swap 4g \
   -p 172.17.0.1:8104:8000 \
   -e TTS_STANDARD_SPRACHE=German -e HF_HUB_OFFLINE=1 \
   -v /home/wamocon/.cache/huggingface/hub:/models:ro \

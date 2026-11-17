@@ -1,6 +1,6 @@
-Glossar-Auszug Softwaretest. Entwurf, Fachlichkeit prüft der Trainer.
-- Verifikation: Prüft, ob das Produkt die festgelegten Anforderungen erfüllt, ob es also richtig gebaut wurde.
-- Validierung: Prüft, ob das Produkt für den vorgesehenen Zweck taugt und die Erwartungen der Nutzer erfüllt, ob es also das richtige Produkt ist.
+Glossar-Auszug nach ISTQB-Glossar (Version 2), bestätigt 17.11.2026.
+- Verifikation: Der Prozess der Bestätigung, dass ein Arbeitsergebnis seine Spezifikation erfüllt (im Glossar: Verifizierung).
+- Validierung: Bestätigung durch Überprüfung, dass ein Arbeitsergebnis den Bedürfnissen eines Stakeholders entspricht.
 - Äquivalenzklasse: Eine Gruppe von Eingabewerten, die sich nach Annahme gleich verhalten. Ein Testwert je Klasse steht dann für alle anderen.
 - Grenzwert: Ein Wert am Rand einer Äquivalenzklasse, etwa der kleinste und der größte erlaubte Wert. Dort passieren besonders oft Fehler, darum testet man ihn gezielt.
 - Testorakel: Eine Quelle, aus der man das richtige Ergebnis eines Tests ableitet, zum Beispiel die Spezifikation oder ein Vergleichssystem.
