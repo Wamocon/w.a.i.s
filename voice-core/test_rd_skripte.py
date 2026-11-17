@@ -805,16 +805,23 @@ class FirewallRegelnTests(Werkstatt):
         if ziele_text is not None:
             (self.wurzel / "ziele.toml").write_text(ziele_text, encoding="utf-8")
         env = {"PATH": os.environ["PATH"], "WAMO_FW_RD_ZIELE": str(self.wurzel / "ziele.toml"),
-               "WAMO_FW_CONF": str(self.wurzel / "gibt-es-nicht.conf")}
+               "WAMO_FW_CONF": str(self.wurzel / "gibt-es-nicht.conf"), "WAMO_FW_ADMIN_QUELLEN": str(self.wurzel / "admin-quellen"),
+               "WAMO_FW_LABOR_QUELLEN": str(self.wurzel / "plaetze-adressen")}
         return subprocess.run([BASH, str(SOKRATES2 / "wamo-firewall.sh"), "regeln"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
 
-    def test_port_55446_wie_die_anderen_lan_ports(self):
+    def test_port_55446_in_der_admin_kette(self):
+        """Seit Q13 (17.11.2026) wie der Pooler in WAMO-FW-ADMIN: Loopback und die Admin-Quellen, ohne Liste das Büro-LAN
+        (Einzelheiten in test_labor_betrieb_skripte.py, FirewallAdminTests)."""
         r = self.regeln()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 55446 -j WAMO-FW-LAN", r.stdout)
-        # die bisherigen Ports bleiben unverändert
-        for port in (55443, 55444, 55445, 55322, 56543):
+        self.assertIn("-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 55446 -j WAMO-FW-ADMIN", r.stdout)
+        self.assertIn("-A WAMO-FW-ADMIN -s 192.168.178.0/24 -j RETURN", r.stdout)  # ohne Liste wie vorher das Büro-LAN
+        for port in (55322, 56543):
+            self.assertIn(f"--ctorigdstport {port} -j WAMO-FW-ADMIN", r.stdout)
+        # die übrigen LAN-Ports bleiben unverändert
+        for port in (55443, 55444, 55445):
             self.assertIn(f"--ctorigdstport {port} -j WAMO-FW-LAN", r.stdout)
+        self.assertNotIn("--ctorigdstport 55446 -j WAMO-FW-LAN", r.stdout)
         self.assertIn("--ctorigdstport 55321 -j WAMO-FW-HTTP", r.stdout)
 
     def test_ohne_ziele_geht_nichts_hinaus(self):

@@ -141,7 +141,7 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | --- | --- | --- | --- |
 | N3 | Preise und Ratenlimit aus der Konsole für den Lasttest | Mi 18.11. | Eintragen, dann gilt `--kosten-obergrenze` |
 | N4 | Q6: Fassung der Regeln | Mi 18.11. | Standard (steht am Server) |
-| N5 | Q13: Büro-Adressen für 55446, 55322 und 56543 in `LAN_PORTS_ADMIN` | Mi 18.11. | Liste der Admin-Geräte nennen, Firewall-Änderung mit `--trocken` und Rückweg |
+| N5 | Q13: Büro-Adressen für 55446, 55322 und 56543 in `LAN_PORTS_ADMIN` (Liste `/etc/wamo/admin-quellen`, `infra/sokrates2/README.md` 6.1) | Mi 18.11. | Liste der Admin-Geräte nennen, Firewall-Änderung mit `--trocken` und Rückweg |
 | N6 | Weg des Betreuer-Tokens | Mi 18.11. | Persönliche Übergabe am Gerät, nie Chat, Mail oder Ausdruck |
 | N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | vor der Generalprobe |
 | N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste |

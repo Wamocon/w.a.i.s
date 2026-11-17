@@ -246,7 +246,7 @@ wortgleich wieder her, keine Daten gehen verloren). Der Dialog behält das Codef
 | --- | --- | --- |
 | Sokrates-2 | Keine WireGuard-Schnittstelle, keine `wg`-Werkzeuge, `ip_forward=1` (Docker), Standardroute über die Fritzbox 192.168.178.1 | Nichts auf Sokrates-2 ändern, WireGuard dort nicht aufsetzen |
 | Fritzbox | README und Firewall-Doku nennen "WireGuard-Clients der Fritzbox" im Büro-LAN (192.168.178.0/24). Zustand der Fritzbox wurde **nicht** gelesen | Nutzer prüft im Fritzbox-Menü, ob "WireGuard" für das Handy eingerichtet ist |
-| Firewall | `WAMO-FW-LAN` lässt 192.168.178.0/24 zu, damit auch jeden WireGuard-Client | Der VPN-Zugang ist so vertrauenswürdig wie das Büro-LAN. Darum zählen Admin und der zweite Faktor der Anmeldung im Gateway |
+| Firewall | `WAMO-FW-LAN` lässt 192.168.178.0/24 zu, damit auch jeden WireGuard-Client. Seit Q13 (17.11.2026) hängt 55446 an `WAMO-FW-ADMIN`: mit Einträgen in `/etc/wamo/admin-quellen` nur diese Quellen (`infra/sokrates2/README.md`, 6.1) | Der VPN-Zugang ist so vertrauenswürdig wie das Büro-LAN. Darum zählen Admin und der zweite Faktor der Anmeldung im Gateway. Ein VPN-Gerät, das 55446 braucht, steht mit seiner Adresse in der Liste |
 | Erreichbarkeit der Fritzbox von außen | Offen: öffentliche IPv4 oder IPv6, MyFRITZ-Name, keine Doppel-NAT (DS-Lite) | Entscheidung beim Nutzer, prüfbar nur an der Fritzbox |
 
 **Anleitung iPhone (ohne dass hier Schlüssel entstehen):**
@@ -293,7 +293,7 @@ wortgleich wieder her, keine Daten gehen verloren). Der Dialog behält das Codef
 | Härtung, alle drei | wie `wamo-ui`: Benutzer ohne Root, `read_only`, `cap_drop: ALL`, `no-new-privileges`, `mem_limit` (web 768 MB, guacd 256 MB, zugang 128 MB), `cpus`, `pids_limit`, `tmpfs` mit `noexec`, Healthcheck, `json-file` mit Größengrenze, `pull_policy: never`, Images über Digest |
 | Netze | `wamo-rd-netz` (172.26.0.0/24, `internal`, ohne Bridge-Adresse): Caddy, web, zugang. `wamo-rd-guacd-netz` (172.26.1.0/29, `internal`): nur web und guacd, guacd ist so für Caddy unerreichbar. `wamo-rd-ziel` (172.27.0.0/24, **nicht** `internal`, Ausgang nur zu den Zielen aus `ziele.toml`, nur TCP 3389): guacd und für dessen Probe der Zugangsdienst (Beleg: `infra/sokrates2/wamo-rd/docker-compose.yml`) |
 | Port und Site | 55446 (HTTPS) an `wamo-caddy`, eigene Datei `kern/wamo-rd.caddy`, Aufruf Methoden GET, HEAD, POST nur wo Guacamole es braucht, WebSocket durchgereicht |
-| Firewall | `wamo-firewall.sh`: 55446 in `WAMO-FW-LAN` (Loopback und Büro-LAN, damit auch WireGuard-Clients), neue Kette `WAMO-FW-RD` für das Netz 172.27.0.0/24 (erlaubt nur Ziel-Adressen:3389, alles andere verworfen und gezählt) |
+| Firewall | `wamo-firewall.sh`: 55446 in `WAMO-FW-LAN` (Loopback und Büro-LAN, damit auch WireGuard-Clients; seit Q13 in `WAMO-FW-ADMIN` mit den Quellen aus `/etc/wamo/admin-quellen`), neue Kette `WAMO-FW-RD` für das Netz 172.27.0.0/24 (erlaubt nur Ziel-Adressen:3389, alles andere verworfen und gezählt) |
 | Zugangsdienst | Unix-Socket `/run/wamo-rd/ctl.sock` (Gruppe `wamo-core`), `SO_PEERCRED`, kein Netzport |
 | Dateien | `/etc/wamo-rd/ziele.toml`, `/etc/wamo-rd/ziele.env`, `/etc/wamo-rd/json.key` (alle 0600/0640), `/var/lib/wamo-rd/audit.jsonl` |
 | Kern | `voice-core/rd_api.py` (Routen `/wamo/api/rd/ziele`, `/start`, `/ende`), Eintrag in `ROUTEN_MODULE`, Env `WAMO_RD_SOCKET`, `WAMO_RD_AKTIV` (Standard `nein`) |

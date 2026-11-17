@@ -11,11 +11,17 @@
 #
 #   Port 55321 (HTTP, Envoy)            127.0.0.0/8, 172.24.0.0/24 (Caddy, nur über eine Docker-Bridge),
 #                                       Stufe 1 zusätzlich 192.168.178.0/24
-#   Ports 55443, 55444, 55445, 55322, 56543    127.0.0.0/8, 192.168.178.0/24 (55444: HTTPS des Kerns, Phase P3;
+#   Ports 55443, 55444, 55445 (LAN_PORTS)          127.0.0.0/8, 192.168.178.0/24 (55444: HTTPS des Kerns, Phase P3;
 #                                       55445: HTTPS der Oberfläche, Browser-Betrieb)
+#   Ports 55446, 55322, 56543 (LAN_PORTS_ADMIN)    127.0.0.0/8 und die Admin-Quellen (Entscheidung Q13 vom 17.11.2026), Kette WAMO-FW-ADMIN:
+#     55446 ist das Remote-Desktop-Gateway wamo-rd (HTTPS über Caddy, docs/remote-desktop.md), 55322 und 56543 sind der Pooler (Session und
+#     Transaktion). Am Labortag sitzen Gäste-Laptops im selben flachen Büronetz, deshalb erreichen diese drei Ports aus dem LAN nur die Quellen
+#     aus /etc/wamo/admin-quellen (Format und Prüfung wie bei den Plätzen, siehe unten). Ohne Datei oder mit nur Kommentaren gilt das ganze
+#     Büro-LAN wie vor Q13 (damit auch WireGuard-Clients der Fritzbox); die Vorlage aus wamo-firewall-einrichten.sh hat nur Kommentare und
+#     ändert deshalb nichts. Loopback gilt immer: Der Kern läuft auf dem Server und spricht den Pooler vom Host aus an, solche Pakete laufen
+#     nicht durch FORWARD und damit nie durch DOCKER-USER. Docker- und Caddy-Netze haben dort wie in WAMO-FW-LAN keine eigene Freigabe.
+#     Nach einer Änderung der Datei:  wamo-firewall start --trocken  ansehen, dann  systemctl reload wamo-firewall.
 #   Absender aus 172.16.0.0/12, die nicht über eine Docker-Bridge (br-*) kommen, gelten als gefälscht.
-#   Port 55446 (HTTPS, Remote-Desktop-Gateway wamo-rd, docs/remote-desktop.md) wie die übrigen LAN-Ports: Loopback und Büro-LAN
-#   (damit auch WireGuard-Clients der Fritzbox), alles andere verworfen.
 #   Ausgang des Gateways (Netz wamo-rd-ziel 172.27.0.0/24, nur der Container wamo-rd-guacd): Kette WAMO-FW-RD. Durch kommt
 #   ausschließlich TCP 3389 zu den Adressen, die in /etc/wamo-rd/ziele.toml als  adresse = "..."  stehen; ohne Eintrag geht nichts
 #   hinaus. Für Pakete an den Host selbst (INPUT, z. B. sshd) gilt die Kette WAMO-FW-RDIN: aus dem Netz des Gateways nur TCP 3389
@@ -39,6 +45,8 @@
 #
 #   wamo-firewall start    Regeln setzen; wiederholbar und atomar (iptables-restore --noflush); legt DOCKER-USER
 #                          bei Bedarf selbst an, damit die Regeln schon vor dem Start von Docker stehen
+#   wamo-firewall start --trocken   nur die Statuszeile ausgeben, die start melden würde (mit den Admin-Quellen und
+#                          den Quellen der Plätze), dazu die Meldungen zu ungültigen Einträgen; ohne root, ändert nichts
 #   wamo-firewall stop     eigene Regeln und Ketten entfernen
 #   wamo-firewall status   Regeln mit Paketzählern anzeigen
 #   wamo-firewall regeln   nur ausgeben, was start setzen würde (Probelauf, ohne root)
@@ -51,7 +59,8 @@ set -euo pipefail
 
 CONF="${WAMO_FW_CONF:-/etc/wamo/firewall.conf}"
 HTTP_PORT=55321
-LAN_PORTS="55443 55444 55445 55446 55322 56543" # API (HTTPS), Kern (HTTPS, wamo-core über Caddy), Oberfläche (HTTPS, wamo-ui über Caddy), Remote-Desktop-Gateway (HTTPS, wamo-rd über Caddy), Pooler Session, Transaktion
+LAN_PORTS="55443 55444 55445"       # API (HTTPS), Kern (HTTPS, wamo-core über Caddy), Oberfläche (HTTPS, wamo-ui über Caddy)
+LAN_PORTS_ADMIN="55446 55322 56543" # Remote-Desktop-Gateway (HTTPS, wamo-rd über Caddy), Pooler Session, Transaktion (Q13)
 NETZ_LOOPBACK="127.0.0.0/8"
 NETZ_CADDY="172.24.0.0/24"          # wamo-caddy_default (fest in infra/sokrates2/wamo-caddy/docker-compose.yml)
 NETZ_DOCKER="172.16.0.0/12"         # alle Docker-Netze, nur zur Erkennung gefälschter Absender
@@ -59,7 +68,8 @@ NETZ_LAN="192.168.178.0/24"         # Büro-LAN, auch WireGuard-Clients der Frit
 KETTE=WAMO-FW
 KETTE_HTTP=WAMO-FW-HTTP
 KETTE_LAN=WAMO-FW-LAN
-KETTE_RD=WAMO-FW-RD                 # Ausgang des Gateways wamo-rd (FORWARD, über DOCKER-USER)
+KETTE_ADMIN=WAMO-FW-ADMIN           # Quellen für LAN_PORTS_ADMIN (FORWARD, über DOCKER-USER)
+KETTE_RD=WAMO-FW-RD                # Ausgang des Gateways wamo-rd (FORWARD, über DOCKER-USER)
 KETTE_RDIN=WAMO-FW-RDIN             # Pakete des Gateways an den Host selbst (INPUT)
 NETZ_RD_ZIEL="172.27.0.0/24"        # wamo-rd-ziel, fest in infra/sokrates2/wamo-rd/docker-compose.yml
 RD_PORT=3389
@@ -71,6 +81,7 @@ LABOR_LOOPBACK_PORT=18765           # Veröffentlichung des Dienstes nur für de
 NETZ_LABOR_INTERN="172.28.0.0/24"   # wamo-labor-netz, fest in infra/sokrates2/wamo-caddy/docker-compose.yml
 NETZ_LABOR_LOKAL="172.28.1.0/29"    # wamo-labor-lokal, fest in infra/sokrates2/wamo-labor/docker-compose.yml
 LABOR_QUELLEN_DATEI="${WAMO_FW_LABOR_QUELLEN:-/etc/wamo-labor/plaetze-adressen}"
+ADMIN_QUELLEN_DATEI="${WAMO_FW_ADMIN_QUELLEN:-/etc/wamo/admin-quellen}"
 ZIELE_DATEI="${WAMO_FW_RD_ZIELE:-/etc/wamo-rd/ziele.toml}"
 ALTE_KETTEN="WAMO-FW-INTERN"        # aus früheren Fassungen, wird beim Start entfernt
 LOG='-m limit --limit 6/min --limit-burst 10 -j LOG --log-prefix "WAMO-FW verworfen: " --log-level 4'
@@ -119,12 +130,15 @@ lies_ziele() {
   done < <(grep -E '^[[:space:]]*adresse[[:space:]]*=' "$ZIELE_DATEI" || true)
 }
 
-# Quellen für 55447 (Frage Q13): Zeilen  a.b.c.d  oder  a.b.c.d/n  in LABOR_QUELLEN_DATEI, Kommentare mit #. Keine Datei oder nur Kommentare: das
-# Büro-LAN. Eine Datei mit Einträgen ersetzt das Büro-LAN; sind alle ungültig, bleibt nur Loopback (zu streng ist besser als zu offen). Ungültiges
-# wird ausgelassen und gemeldet; höchstens 64. Gültig sind nur private Bereiche nach RFC 1918 mit mindestens /16 (10.x und 192.168.x, eine Adresse
+# Quellenlisten (Frage Q13): LABOR_QUELLEN_DATEI für 55447 und ADMIN_QUELLEN_DATEI für LAN_PORTS_ADMIN, beide im selben Format und mit demselben
+# Leser lies_quellen. Zeilen  a.b.c.d  oder  a.b.c.d/n , Kommentare mit #. Keine Datei oder nur Kommentare: das Büro-LAN (so bleibt eine Vorlage nur
+# mit Kommentaren ohne Wirkung). Eine Datei mit Einträgen ersetzt das Büro-LAN; sind alle ungültig, bleibt nur Loopback (zu streng ist besser als zu
+# offen: Eine kaputte Liste öffnet nie das ganze Büro-LAN, und Loopback, also der Server selbst mit dem Kern, verliert nichts). Ungültiges wird
+# ausgelassen und gemeldet; höchstens 64. Gültig sind nur private Bereiche nach RFC 1918 mit mindestens /16 (10.x und 192.168.x, eine Adresse
 # ohne Länge gilt als /32), vier Zahlen ohne führende Nullen (iptables läse sie als oktal). 172.16.0.0/12 ist der Docker-Bereich (dort sind
 # gefälschte Absender möglich) und nie erlaubt, damit auch kein Netz der Docker-Netze des Labors und keine Liste, die den ganzen Bereich überdeckt.
 LABOR_QUELLEN=""
+ADMIN_QUELLEN=""
 quelle_gueltig() {
   local o praefix
   [[ "$1" =~ ^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})(/([0-9]{1,2}))?$ ]] || return 1
@@ -136,20 +150,37 @@ quelle_gueltig() {
   return 1
 }
 
-lies_labor_quellen() {
-  LABOR_QUELLEN="$NETZ_LAN"
-  [ -r "$LABOR_QUELLEN_DATEI" ] || return 0
-  local zeile wert n=0 gelesen=nein liste=""
+# lies_quellen ZIEL DATEI: schreibt die gültigen Quellen aus DATEI (durch Leerzeichen getrennt) in die Variable ZIEL (LABOR_QUELLEN, ADMIN_QUELLEN)
+lies_quellen() {
+  local ziel="$1" datei="$2" zeile wert n=0 gelesen=nein liste=""
+  printf -v "$ziel" '%s' "$NETZ_LAN"
+  [ -r "$datei" ] || return 0
   while IFS= read -r zeile || [ -n "$zeile" ]; do
     wert="$(tr -d " \t\r\"'" <<<"${zeile%%#*}")"
     [ -n "$wert" ] || continue
     gelesen=ja
-    if ! quelle_gueltig "$wert"; then echo "Quelle '$wert' in $LABOR_QUELLEN_DATEI ist ungültig und wird ausgelassen." >&2; continue; fi
+    if ! quelle_gueltig "$wert"; then echo "Quelle '$wert' in $datei ist ungültig und wird ausgelassen." >&2; continue; fi
     n=$((n + 1))
-    if (( n > 64 )); then echo "Mehr als 64 Quellen in $LABOR_QUELLEN_DATEI, der Rest wird ausgelassen." >&2; break; fi
-    liste="$liste $wert"
-  done < "$LABOR_QUELLEN_DATEI"
-  [ "$gelesen" = nein ] || LABOR_QUELLEN="$liste"
+    if (( n > 64 )); then echo "Mehr als 64 Quellen in $datei, der Rest wird ausgelassen." >&2; break; fi
+    liste="${liste:+$liste }$wert"
+  done < "$datei"
+  [ "$gelesen" = nein ] || printf -v "$ziel" '%s' "$liste"
+}
+
+lies_labor_quellen() { lies_quellen LABOR_QUELLEN "$LABOR_QUELLEN_DATEI"; }
+lies_admin_quellen() { lies_quellen ADMIN_QUELLEN "$ADMIN_QUELLEN_DATEI"; }
+
+# Alles, was start, start --trocken und regeln lesen (Reihenfolge wie die Statuszeile)
+einlesen() {
+  lies_einstellung
+  lies_admin_quellen
+  lies_ziele
+  lies_labor_quellen
+}
+
+zusammenfassung() {
+  echo "HTTP $HTTP_PORT nur intern: $HTTP_NUR_INTERN; LAN-Ports $LAN_PORTS; Admin-Ports $LAN_PORTS_ADMIN aus: ${ADMIN_QUELLEN:-nur Loopback};" \
+    "Remote-Desktop-Ziele:${RD_ZIELE:- keine}; Labor-Dienst 55447 aus: ${LABOR_QUELLEN:-nur Loopback}"
 }
 
 ipt() { iptables -w 5 "$@"; }
@@ -175,10 +206,11 @@ regeln_labor() {
 }
 
 regeln() {
-  local port
+  local port q
   echo "*filter"
   echo ":$KETTE_HTTP - [0:0]"
   echo ":$KETTE_LAN - [0:0]"
+  echo ":$KETTE_ADMIN - [0:0]"
   echo ":$KETTE - [0:0]"
   echo ":$KETTE_RD - [0:0]"
   echo ":$KETTE_RDIN - [0:0]"
@@ -192,14 +224,22 @@ regeln() {
   [ "$HTTP_NUR_INTERN" = ja ] || echo "-A $KETTE_HTTP -s $NETZ_LAN -j RETURN"
   echo "-A $KETTE_HTTP $LOG"
   echo "-A $KETTE_HTTP -j DROP"
-  # 55443, 55444, 55445 und Pooler: Loopback und Büro-LAN
+  # 55443, 55444, 55445: Loopback und Büro-LAN
   echo "-A $KETTE_LAN -s $NETZ_LOOPBACK -j RETURN"
   echo "-A $KETTE_LAN -s $NETZ_LAN -j RETURN"
   echo "-A $KETTE_LAN $LOG"
   echo "-A $KETTE_LAN -j DROP"
+  # 55446 und Pooler (Q13): Loopback und die Admin-Quellen (ohne Liste das Büro-LAN), sonst wie WAMO-FW-LAN
+  echo "-A $KETTE_ADMIN -s $NETZ_LOOPBACK -j RETURN"
+  for q in $ADMIN_QUELLEN; do echo "-A $KETTE_ADMIN -s $q -j RETURN"; done
+  echo "-A $KETTE_ADMIN $LOG"
+  echo "-A $KETTE_ADMIN -j DROP"
   echo "-A $KETTE -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport $HTTP_PORT -j $KETTE_HTTP"
   for port in $LAN_PORTS; do
     echo "-A $KETTE -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport $port -j $KETTE_LAN"
+  done
+  for port in $LAN_PORTS_ADMIN; do
+    echo "-A $KETTE -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport $port -j $KETTE_ADMIN"
   done
   # Remote-Desktop-Gateway, Ausgang (Container wamo-rd-guacd im Netz wamo-rd-ziel): nur TCP 3389 zu den Zielen
   local ziel
@@ -246,16 +286,20 @@ sprung_input_labor() {
 
 start() {
   local k
-  lies_einstellung
-  lies_ziele
-  lies_labor_quellen
+  einlesen
   ipt -n -L DOCKER-USER >/dev/null 2>&1 || ipt -N DOCKER-USER  # Docker übernimmt die Kette später unverändert
   regeln | iptables-restore -w 5 --noflush
   sprung_an_position_1
   sprung_input_an_position_1
   sprung_input_labor
   for k in $ALTE_KETTEN; do ipt -F "$k" 2>/dev/null && ipt -X "$k" 2>/dev/null || true; done
-  echo "WAMO-Firewall aktiv: HTTP $HTTP_PORT nur intern: $HTTP_NUR_INTERN; LAN-Ports $LAN_PORTS; Remote-Desktop-Ziele:${RD_ZIELE:- keine}; Labor-Dienst 55447 aus:${LABOR_QUELLEN:- nur Loopback}"
+  echo "WAMO-Firewall aktiv: $(zusammenfassung)"
+}
+
+# Nur lesen und melden, was start melden würde (ohne root, ohne iptables); die Meldungen zu ungültigen Einträgen kommen auf stderr
+trocken() {
+  einlesen
+  echo "WAMO-Firewall trocken (nichts gesetzt): $(zusammenfassung)"
 }
 
 stop() {
@@ -263,15 +307,15 @@ stop() {
   while ipt -C DOCKER-USER -j "$KETTE" 2>/dev/null; do ipt -D DOCKER-USER -j "$KETTE"; done
   while ipt -C INPUT -s "$NETZ_RD_ZIEL" -j "$KETTE_RDIN" 2>/dev/null; do ipt -D INPUT -s "$NETZ_RD_ZIEL" -j "$KETTE_RDIN"; done
   while ipt -C INPUT -s "$NETZ_LABOR_LOKAL" -j "$KETTE_LABIN" 2>/dev/null; do ipt -D INPUT -s "$NETZ_LABOR_LOKAL" -j "$KETTE_LABIN"; done
-  for k in "$KETTE" "$KETTE_HTTP" "$KETTE_LAN" "$KETTE_RD" "$KETTE_RDIN" "$KETTE_LABOR" "$KETTE_LABAUS" "$KETTE_LABIN" $ALTE_KETTEN; do ipt -F "$k" 2>/dev/null || true; done
-  for k in "$KETTE" "$KETTE_HTTP" "$KETTE_LAN" "$KETTE_RD" "$KETTE_RDIN" "$KETTE_LABOR" "$KETTE_LABAUS" "$KETTE_LABIN" $ALTE_KETTEN; do ipt -X "$k" 2>/dev/null || true; done
+  for k in "$KETTE" "$KETTE_HTTP" "$KETTE_LAN" "$KETTE_ADMIN" "$KETTE_RD" "$KETTE_RDIN" "$KETTE_LABOR" "$KETTE_LABAUS" "$KETTE_LABIN" $ALTE_KETTEN; do ipt -F "$k" 2>/dev/null || true; done
+  for k in "$KETTE" "$KETTE_HTTP" "$KETTE_LAN" "$KETTE_ADMIN" "$KETTE_RD" "$KETTE_RDIN" "$KETTE_LABOR" "$KETTE_LABAUS" "$KETTE_LABIN" $ALTE_KETTEN; do ipt -X "$k" 2>/dev/null || true; done
   echo "WAMO-Firewall entfernt"
 }
 
 status() {
   local k
   ipt -n -v -L DOCKER-USER --line-numbers
-  for k in "$KETTE" "$KETTE_HTTP" "$KETTE_LAN" "$KETTE_RD" "$KETTE_RDIN" "$KETTE_LABOR" "$KETTE_LABAUS" "$KETTE_LABIN"; do
+  for k in "$KETTE" "$KETTE_HTTP" "$KETTE_LAN" "$KETTE_ADMIN" "$KETTE_RD" "$KETTE_RDIN" "$KETTE_LABOR" "$KETTE_LABAUS" "$KETTE_LABIN"; do
     echo
     ipt -n -v -L "$k" 2>/dev/null || echo "Kette $k fehlt"
   done
@@ -279,9 +323,14 @@ status() {
 
 als_root() { [ "$(id -u)" = 0 ] || { echo "Bitte als root ausführen (sudo)." >&2; exit 1; }; }
 case "${1:-}" in
-  start) als_root; start ;;
+  start)
+    case "${2:-}" in
+      "") als_root; start ;;
+      --trocken) trocken ;;  # ohne root, ändert nichts
+      *) echo "Aufruf: $0 start [--trocken]" >&2; exit 2 ;;
+    esac ;;
   stop) als_root; stop ;;
   status) als_root; status ;;
-  regeln) lies_einstellung; lies_ziele; lies_labor_quellen; regeln ;;  # nur anzeigen, was start setzen würde (ohne root, ändert nichts)
-  *) echo "Aufruf: $0 start|stop|status|regeln" >&2; exit 2 ;;
+  regeln) einlesen; regeln ;;  # nur anzeigen, was start setzen würde (ohne root, ändert nichts)
+  *) echo "Aufruf: $0 start [--trocken]|stop|status|regeln" >&2; exit 2 ;;
 esac

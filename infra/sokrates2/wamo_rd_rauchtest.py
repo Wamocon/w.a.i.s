@@ -680,7 +680,8 @@ def betrieb(args: argparse.Namespace) -> int:
         e.skip("INPUT-Sprung nach WAMO-FW-RDIN", "sudo -n iptables nicht möglich")
     r = sh("sudo", "-n", "iptables", "-w", "5", "-S", "WAMO-FW")
     if r.returncode == 0:
-        e.pruefe(re.search(r"--ctorigdstport 55446 (--ctdir ORIGINAL )?-j WAMO-FW-LAN", r.stdout) is not None, "Port 55446 nur für Loopback und Büro-LAN (WAMO-FW-LAN)")
+        e.pruefe(re.search(r"--ctorigdstport 55446 (--ctdir ORIGINAL )?-j WAMO-FW-ADMIN", r.stdout) is not None,
+                 "Port 55446 nur für Loopback und die Admin-Quellen (WAMO-FW-ADMIN, ohne Liste das Büro-LAN)")
     else:
         e.skip("Port 55446 in WAMO-FW", "sudo -n iptables nicht möglich")
     ausgang_proben(e, ziele)

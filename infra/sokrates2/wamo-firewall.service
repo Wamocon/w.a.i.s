@@ -1,4 +1,5 @@
-# WAMO-Firewall: WAMO-Ports (55321, 55443, 55444, 55445, 55322, 56543) nur für Loopback, Büro-LAN und das Caddy-Netz.
+# WAMO-Firewall: WAMO-Ports (55321, 55443, 55444, 55445) nur für Loopback, Büro-LAN und das Caddy-Netz; die Admin-Ports
+# (55446, 55322, 56543) nur für Loopback und die Quellen aus /etc/wamo/admin-quellen (ohne Einträge das Büro-LAN).
 # Installiert durch infra/sokrates2/wamo-firewall-einrichten.sh nach /etc/systemd/system/.
 #
 # Before=docker.service: Beim Systemstart und bei jedem Start von Docker stehen die Regeln, bevor Docker Ports
