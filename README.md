@@ -1145,11 +1145,20 @@ hinausgeht (rund 250 ms für 8 Sekunden Sprache auf einem PC, am Server nicht ge
 geht durch. Der Wächter ersetzt das Transkript einer fremden Stimme durch ein Leerzeichen, der Zug endet dann leer (`on_user_turn_stopped`
 in `bot.py` kehrt zurück).
 
-**Untertitel.** Pipecat meldet jedes Transkript an die Oberfläche, sobald es die Spracherkennung verlässt, also vor dem Urteil. Während
-jemand spricht, steht der Satz deshalb kurz im Untertitel. Verwirft der Wächter ihn, kommt dasselbe Transkript ohne Text mit dem
-Zeitstempel des Originals nach; die Oberfläche nimmt genau diesen Teil wieder aus dem Untertitel und, falls W.A.I.S. inzwischen zu sprechen
-begann, aus dem Verlauf (`ui/src/lib/wamo.ts`, `nutzerTranskript`). Eigene Sätze desselben Zugs bleiben stehen. Bleibt nichts übrig,
-zeigt die Oberfläche W.A.I.S. wieder wartend statt nachdenkend (`nutzerHoertAuf`), denn der Zug endet ohne Antwort.
+**Untertitel.** Pipecat meldet jedes Transkript an die Oberfläche, sobald es die Spracherkennung verlässt, also vor dem Urteil. Verwirft der
+Wächter es, kommt dasselbe Transkript ohne Text mit dem Zeitstempel des Originals nach; die Oberfläche nimmt genau diesen Teil wieder heraus
+(`ui/src/lib/wamo.ts`, `nutzerTranskript`). Eigene Sätze desselben Zugs bleiben stehen. Bleibt nichts übrig, zeigt die Oberfläche W.A.I.S.
+wieder wartend statt nachdenkend (`nutzerHoertAuf`), denn der Zug endet ohne Antwort. Seit dem 17.11.2026 (W.A.I.S. hört nur der
+eingelernten Stimme zu) gilt in der Oberfläche zusätzlich:
+
+- Die Live-Untertitel unter dem Kern sind standardmäßig aus; unter dem Kern steht dann nur der Hinweissatz, solange noch nichts gesagt ist.
+  Einschalten lassen sie sich je Person auf dem Gerät in den Einstellungen unter Darstellung, Block „Untertitel“ (`ui/src/lib/untertitel.ts`).
+  Eingeschaltet zeigen sie sofort, was das Mikrofon hört. Laborkonten behalten sie wie bisher (keine Stimmprüfung, kein Abschnitt Darstellung).
+- Der Chat links (Block „Gespräch“ und Verlauf) zeigt mit aktivem Filter (`stimme` meldet `bereit` und `streng`, kein Laborkonto) einen
+  gesprochenen Satz erst nach der Stimmprüfung (`ui/src/lib/stimmFilter.ts`): Er wartet auf `{"type": "stimme", "ergebnis", "ignoriert",
+  "zeit"}` mit dem Zeitstempel seines Transkripts. `ignoriert: false` zeigt ihn, `ignoriert: true` oder das leere Ersatztranskript verwirft
+  ihn still. Rückfall, damit kein eigener Satz verloren geht: nach 4 Sekunden ohne passendes Urteil (älterer Kern ohne `zeit`) oder sobald
+  W.A.I.S. antwortet (Modell beginnt oder W.A.I.S. spricht). Zwischenstände erscheinen dort nicht, getippter Text sofort.
 
 **Meldungen an die Oberfläche** (Servernachrichten, Details in der Kopfzeile von `voice-core/bot.py`):
 
@@ -1203,7 +1212,7 @@ einem unfertigen Satz bleibt es beim Zug, deshalb kann ein Einwurf einer fremden
 Eine Äußerung, die nicht sicher die Stimme der Person war (Profil mit Abdruck, Modus `streng`), färbt den Zug wie Fremdinhalte:
 WAMO lernt nichts daraus, der Ja-Wächter hängt keinen Hinweis an, und im Gesprächsprotokoll (`turns.speaker_label`) steht `stimme-unsicher`.
 Ohne Abdruck oder im Modus `beobachten` ändert sich nichts.
-Die Untertitel der Oberfläche können einen ignorierten Satz noch zeigen. Die Schwellen 0,5 und 0,3 sind Richtwerte aus Beispielaufnahmen
+Eingeschaltete Untertitel der Oberfläche können einen ignorierten Satz kurz zeigen, der Chat links nicht. Die Schwellen 0,5 und 0,3 sind Richtwerte aus Beispielaufnahmen
 des Modells, mit den Mikrofonen im Büro noch nicht gemessen: vor dem Einsatz einige Gespräche im Modus `beobachten` laufen lassen, die Werte im Log
 ansehen, die Schwellen bei Bedarf anpassen und danach wieder `streng` (Standard) einstellen.
 

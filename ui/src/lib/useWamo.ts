@@ -41,7 +41,8 @@ import {
   type SprachAnbieter,
 } from "@/lib/nachrichten";
 import type { SchluesselArt } from "@/lib/schluesselhilfe";
-import { abdruckGestartet, abdruckLaeuft, kannEinlernen, kannLoeschen, STIMME_LEER } from "@/lib/stimme";
+import { abdruckGestartet, abdruckLaeuft, kannEinlernen, kannLoeschen, STIMME_LEER, type StimmeStand } from "@/lib/stimme";
+import { fristFreigeben, naechsteFrist, stimmFilterAktiv } from "@/lib/stimmFilter";
 import { HAENGT_HINWEIS, HAENGT_NACH_MS, textAbschicken, unterstuetztText } from "@/lib/textEingabe";
 import { vorgaengeBeenden } from "@/lib/vorgaenge";
 import { aufgabeBeenden } from "@/lib/aufgabenanzeige";
@@ -90,8 +91,10 @@ import {
   HISTORY,
   LIVE_BILD_AUS,
   abdruckAnsichtSchliessen,
+  antwortBeginnt,
   applyServerMessage,
   beginneNutzerZug,
+  botSprichtAn,
   desktopZustand,
   entferneAblauf,
   entferneMemo,
@@ -327,9 +330,31 @@ function planeSchnitt(timer: { current: ReturnType<typeof setTimeout> | null }) 
   }, 2000);
 }
 
+/** Gilt der Stimmfilter für den Chat links (lib/stimmFilter.ts)? Der Kern meldet Abdruck und Modus streng, und es ist kein Laborkonto. */
+const filterFuer = (s: { stimme: StimmeStand }) => stimmFilterAktiv(s.stimme) && !istLaborKonto(nutzerLesen().email);
+
 /** Nutzertext einarbeiten (endgültig oder Zwischenstand, ein verworfener Teil wird zurückgenommen): lib/wamo.ts, nutzerTranskript. */
 function userText(d: { text: string; final: boolean; timestamp?: string }) {
-  wamo.set((s) => nutzerTranskript(s, d));
+  wamo.set((s) => nutzerTranskript(s, d, { filter: filterFuer(s) }));
+  if (d.final) planeFreigabe();
+}
+
+// Rückfall des Stimmfilters: ein zurückgehaltener Satz erscheint spätestens nach seiner Frist im Chat (lib/stimmFilter.ts). Die Uhr läuft
+// über das Ende der Sitzung hinaus weiter, damit auch dann kein eigener Satz verloren geht; ohne wartende Teile tut sie nichts.
+let freigabeUhr: ReturnType<typeof setTimeout> | null = null;
+function planeFreigabe() {
+  if (freigabeUhr) clearTimeout(freigabeUhr);
+  freigabeUhr = null;
+  const frist = naechsteFrist(wamo.get().caption);
+  if (frist === null) return;
+  freigabeUhr = setTimeout(() => {
+    freigabeUhr = null;
+    wamo.set((s) => {
+      const caption = fristFreigeben(s.caption, Date.now());
+      return caption === s.caption ? s : { ...s, caption };
+    });
+    planeFreigabe();
+  }, Math.max(0, frist - Date.now()) + 1);
 }
 
 /** Der Kern verlangt eine neue Anmeldung (zu alt): lokal abmelden, die Anmeldemaske zeigt den Grund. */
@@ -898,22 +923,14 @@ export function useWamo(): WamoAktionen {
           onUserStoppedSpeaking: () => {
             if (aktuell()) wamo.set(nutzerHoertAuf); // denkt nach, außer der Kern hat die Äußerung verworfen (Zeile leer)
           },
+          onBotLlmStarted: () => {
+            // Das Modell beginnt zu antworten: mit Stimmfilter erscheint Zurückgehaltenes jetzt im Chat (Rückfall, lib/stimmFilter.ts)
+            if (aktuell()) wamo.set(antwortBeginnt);
+          },
           onBotStartedSpeaking: () => {
             if (!aktuell()) return;
             restoreVolume(); // neue Antwort nach einem weichen Stopp wieder hörbar
-            wamo.set((s) => {
-              const c = s.caption;
-              // fertigen Nutzerbeitrag in den Verlauf (nur ganze Züge, nie Zwischenstände)
-              const userFertig = `${c.userDone} ${c.userLive}`.trim();
-              const log =
-                userFertig && !c.userLogged ? [...s.log, logEintrag({ wer: "nutzer", text: userFertig })] : s.log;
-              return {
-                ...s,
-                presence: "speaking",
-                log: log.slice(-200),
-                caption: userFertig ? { ...c, userLogged: true } : c,
-              };
-            });
+            wamo.set(botSprichtAn); // fertigen Nutzerbeitrag in den Verlauf (nur ganze Züge), Zurückgehaltenes erscheint
           },
           onBotStoppedSpeaking: () => {
             if (!aktuell()) return;

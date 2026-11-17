@@ -4,6 +4,7 @@
  * die Zeilen nach dem Zugende stehen bleiben. Reine Funktionen, deshalb ohne Browser prüfbar (gespraech.test.ts).
  * Importe relativ mit Endung, damit node:test diese Datei laden kann.
  */
+import { sichtbarerNutzerText } from "./stimmFilter.ts";
 import { gesprochen, type Caption, type LogEintrag } from "./wamo.ts";
 
 type Verlauf = readonly Pick<LogEintrag, "wer" | "text">[];
@@ -13,10 +14,15 @@ function letzter(log: Verlauf, wer: LogEintrag["wer"]): string {
   return "";
 }
 
-/** Letzte Zeile der Person: der laufende Beitrag (fertige und vorläufige Teile), sonst der letzte aus dem Verlauf. */
-export function menschZeile(c: Pick<Caption, "userDone" | "userLive">, log: Verlauf): string {
-  const jetzt = `${c.userDone} ${c.userLive}`.trim();
-  return jetzt || letzter(log, "nutzer");
+/**
+ * Letzte Zeile der Person: der laufende Beitrag (fertige und vorläufige Teile), sonst der letzte aus dem Verlauf. Mit Stimmfilter
+ * (lib/stimmFilter.ts) zählt vom laufenden Beitrag nur, was die Stimmprüfung freigegeben hat, ohne Zwischenstand.
+ */
+export function menschZeile(
+  c: Pick<Caption, "userDone" | "userLive"> & Partial<Pick<Caption, "userTeile" | "gefiltert">>,
+  log: Verlauf,
+): string {
+  return sichtbarerNutzerText(c) || letzter(log, "nutzer");
 }
 
 /** Letzte Zeile von WAMO: der laufende Zug (nach einer Unterbrechung nur das Gesprochene), sonst die letzte Antwort aus dem Verlauf. */

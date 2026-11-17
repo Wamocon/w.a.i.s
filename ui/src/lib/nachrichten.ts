@@ -385,8 +385,16 @@ export type ServerMessage =
   | { type: "stimme_status"; status: StimmeStatus; modus: StimmeModus | null }
   /** Stimmerkennung, Ergebnis der letzten Äußerung (auf dem Draht {type:"stimme", ergebnis, wert, modus}); wert 0 bis 1 oder leer.
    *  ignoriert (freiwillig): im strengen Modus hat der Kern eine fremde oder unklare Äußerung verworfen, sie erreicht das Sprachmodell
-   *  nicht (voice-core/stimme_waechter.py). */
-  | { type: "stimme_ergebnis"; ergebnis: StimmeErgebnis; wert: number | null; modus: StimmeModus | null; ignoriert?: boolean }
+   *  nicht (voice-core/stimme_waechter.py). zeit (freiwillig): Zeitstempel des endgültigen Transkripts dieser Äußerung (derselbe wie in
+   *  user-transcription); damit gibt der Chat links den zurückgehaltenen Satz frei oder verwirft ihn (lib/stimmFilter.ts). */
+  | {
+      type: "stimme_ergebnis";
+      ergebnis: StimmeErgebnis;
+      wert: number | null;
+      modus: StimmeModus | null;
+      ignoriert?: boolean;
+      zeit?: string;
+    }
   /** Einlernen des Stimmabdrucks: Zustand, aufgenommene Sekunden reiner Sprache, Ziel in Sekunden, bei fehler ein Satz dazu */
   | { type: "stimmabdruck"; status: AbdruckStatus; sekunden?: number; ziel?: number; text?: string }
   /** Einwilligungstext zum Stimmabdruck, kommt vom Kern; version geht beim Start in der Antwort mit zurück */
@@ -402,6 +410,8 @@ export const STIMME_MODI = ["aus", "beobachten", "streng"] as const;
 export type StimmeModus = (typeof STIMME_MODI)[number];
 export const STIMME_ERGEBNISSE = ["eigen", "fremd", "unklar"] as const;
 export type StimmeErgebnis = (typeof STIMME_ERGEBNISSE)[number];
+/** Obergrenze für zeit im Urteil (Zeitstempel eines Transkripts, ISO 8601 braucht rund 32 Zeichen) */
+const ZEIT_MAX = 64;
 export const ABDRUCK_STATUS = ["start", "aufnahme", "rechnet", "fertig", "fehler", "abgebrochen", "geloescht"] as const;
 export type AbdruckStatus = (typeof ABDRUCK_STATUS)[number];
 /** Obergrenze des Einwilligungstextes (Zeichen): ein längerer Text wird abgelehnt, nie gekürzt */
@@ -915,12 +925,16 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
       const wert = typeof m.wert === "number" ? Math.min(1, Math.max(0, m.wert)) : null;
       // ignoriert: freiwillig, null zählt wie fehlend, alles andere als ein Wahrheitswert lehnt die Nachricht ab
       if (m.ignoriert !== undefined && m.ignoriert !== null && typeof m.ignoriert !== "boolean") return null;
+      // zeit: freiwillig, null und leer zählen wie fehlend; kein Text oder ein überlanger lehnt die Nachricht ab
+      if (m.zeit !== undefined && m.zeit !== null && (!isStr(m.zeit) || m.zeit.length > ZEIT_MAX)) return null;
+      const zeit = isStr(m.zeit) ? m.zeit.trim() : "";
       return {
         type: "stimme_ergebnis",
         ergebnis: m.ergebnis,
         wert,
         modus,
         ...(typeof m.ignoriert === "boolean" ? { ignoriert: m.ignoriert } : {}),
+        ...(zeit ? { zeit } : {}),
       };
     }
     case "stimmabdruck": {

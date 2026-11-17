@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 /**
  * Darstellung der Oberfläche, je Gerät dauerhaft (localStorage, jeder Zugriff in try/catch):
  *   normal   drei Spalten (Hinweise, Kern, Aufträge)
- *   fokus    nur Kern und Untertitel
+ *   fokus    nur der Kern (und die Untertitel, wenn eingeschaltet, lib/untertitel.ts)
  *   zentrale große Kommandozentrale mit Statuszeilen und Zähler
  *   nacht    erzwungen dunkel, Kern gedämpft
  * Ohne nutzbaren Speicher (privates Fenster) gilt die Wahl bis zum Neuladen. Nie Geheimnisse hier ablegen.
@@ -25,7 +25,7 @@ export const DARSTELLUNG_TEXT: Record<Darstellung, string> = {
 /** Ein Satz je Darstellung für die Einstellungsseite. */
 export const DARSTELLUNG_BESCHREIBUNG: Record<Darstellung, string> = {
   normal: "Drei Spalten: Hinweise links, der Kern in der Mitte, Aufträge und Vorgänge rechts.",
-  fokus: "Nur der Kern und die Untertitel, alles andere ist ausgeblendet.",
+  fokus: "Nur der Kern und, wenn eingeschaltet, die Untertitel. Alles andere ist ausgeblendet.",
   zentrale: "Große Kommandozentrale mit Statuszeilen und Zähler.",
   nacht: "Erzwungen dunkel, der Kern ist gedämpft.",
 };

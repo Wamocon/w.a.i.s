@@ -70,6 +70,27 @@ test("stimme mit ergebnis: das freiwillige Feld ignoriert (strenger Modus, siche
   }
 });
 
+test("stimme mit ergebnis: das freiwillige Feld zeit (Zeitstempel des Transkripts, Stimmfilter im Chat) wird übernommen", () => {
+  const zeit = "2026-11-17T10:00:01.100+00:00";
+  assert.deepEqual(parseServerMessage({ type: "stimme", ergebnis: "eigen", wert: 0.81, modus: "streng", ignoriert: false, zeit }), {
+    type: "stimme_ergebnis",
+    ergebnis: "eigen",
+    wert: 0.81,
+    modus: "streng",
+    ignoriert: false,
+    zeit,
+  });
+  // ohne das Feld, mit null oder leer bleibt die Nachricht ohne zeit (älterer Kern: der Chat nimmt den Rückfall)
+  for (const fehlt of [undefined, null, "", "   "]) {
+    const m = parseServerMessage({ type: "stimme", ergebnis: "fremd", wert: 0.1, modus: "streng", ignoriert: true, zeit: fehlt });
+    assert.ok(m && m.type === "stimme_ergebnis" && !("zeit" in m), String(fehlt));
+  }
+  // kein Text oder ein überlanger lehnt die Nachricht ab
+  for (const unsinn of [1, true, {}, [], "x".repeat(65)]) {
+    assert.equal(parseServerMessage({ type: "stimme", ergebnis: "eigen", wert: 0.8, modus: "streng", zeit: unsinn }), null);
+  }
+});
+
 test("stimme: genau eine der beiden Formen, sonst wird die Nachricht abgelehnt", () => {
   assert.equal(parseServerMessage({ type: "stimme", modus: "streng" }), null);
   assert.equal(parseServerMessage({ type: "stimme", status: "bereit", ergebnis: "eigen", wert: 0.7, modus: "streng" }), null);

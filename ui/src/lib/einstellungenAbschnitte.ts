@@ -57,7 +57,7 @@ export const ABSCHNITTE: readonly Abschnitt[] = [
   { id: "stimme", titel: "Stimme", kurz: "Eigene Stimme erkennen und einlernen" },
   { id: "gedaechtnis", titel: "Gedächtnis", kurz: "Vorschläge für alle prüfen", nurAdmin: true },
   { id: "mitglieder", titel: "Neue Mitglieder", kurz: "Wie weit die Einrichtung je Person ist", nurAdmin: true },
-  { id: "darstellung", titel: "Darstellung", kurz: "Normal, Fokus, Zentrale und Nacht" },
+  { id: "darstellung", titel: "Darstellung", kurz: "Ansicht, Helligkeit und Untertitel" },
   { id: "geraete", titel: "Geräte und PC", kurz: "Verbindungen, Geräteverwaltung, PC-Steuerung und Betriebsart" },
   {
     id: "fernzugriff",

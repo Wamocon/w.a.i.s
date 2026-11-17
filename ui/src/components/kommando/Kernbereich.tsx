@@ -72,7 +72,8 @@ function Namensschild({
 
 /**
  * Obere Hälfte der Bühne: Kern, Namensschild (in der Zentrale großer Name mit Statuszeilen und Zähler)
- * und die Live-Untertitel, daneben die Aufgabenanzeige, sobald eine Aufgabe läuft. Der Hinweissatz kommt aus LiveCaption (Sag einfach, was du brauchst).
+ * und darunter die Live-Untertitel (standardmäßig aus, dann nur der Hinweissatz, lib/untertitel.ts), daneben die Aufgabenanzeige, sobald eine
+ * Aufgabe läuft. Der Hinweissatz kommt aus LiveCaption (Sag einfach, was du brauchst).
  */
 export const Kernbereich = memo(function Kernbereich() {
   const { effektiv } = useEffektiveDarstellung();
