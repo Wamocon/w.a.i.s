@@ -4,7 +4,7 @@ Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8
 
 ## 1. Was der Lauf tut
 
-1. **Vorprüfung** (nur lesend, vor jeder Änderung): feste Adresse, Sprechproben, Seeds in der Umschlag-Datei (nur ob da), Laborprofile im Kern (alle gesperrt, alle vorhanden), Plätze 1 bis N im Dienst (leer), Kern `wamo-core@b` (aktiv, Speicher unter 3 GiB, Journal, Speicher und CPU-Zeit lesbar). Scheitert eine Prüfung, wurde nichts verändert.
+1. **Vorprüfung** (nur lesend, vor jeder Änderung): feste Adresse, Sprechproben, Seeds in der Umschlag-Datei (nur ob da), Laborprofile im Kern (alle gesperrt, alle vorhanden), Plätze 1 bis N im Dienst (leer), Kern `wamo-core@<slot>` (aktiv, Speicher unter 3 GiB, Journal, Speicher und CPU-Zeit lesbar). Den Slot ermittelt der Echtlauf ohne `--slot` vorher am Server (Abschnitt 3). Scheitert eine Prüfung, wurde nichts verändert.
 2. **Vorbereitung** (einmal für die größte Stufe): Profile freischalten (`wamo_labor.py aktivieren`), je Platz einen Durchlauf öffnen (Betreuer-Schnittstelle, Einwilligung Version 1), je Sitzung eine eigene Chrome-Instanz mit virtuellem Mikrofon starten und mit E-Mail, Passwort und Code aus der Umschlag-Datei anmelden.
 3. **Stufen** (Standard 1, 2, 4, 8 Sitzungen, je 15 Minuten, auf Wunsch weitere Stufen mit 8 Sitzungen und Murmeln): je Sitzung die Kette A1, J1, G3 im Wechsel, nach jedem Schritt eine zufällige Denkpause von 8 bis 20 Sekunden. Die Folge ist mit festem Seed wiederholbar, die Sitzungen beginnen versetzt (A1, J1, G3). Am Kern wird alle 15 Sekunden gelesen.
 4. **Aufräumen** (immer, auch bei Fehlern, Grenzen und Strg+C): Gespräche beenden, Browser schließen, Profile sperren, Durchläufe beenden, Plätze leeren, Gesprächstexte der Profile im Kern ab Beginn des Laufs löschen, Nachweis (Profile gesperrt, Plätze leer), Temp-Dateien löschen. Jeder Schritt läuft für sich, ein gescheiterter hält die anderen nicht auf und steht im Bericht.
@@ -18,7 +18,7 @@ Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8
 | Chrome (installiert) und Node mit Playwright | `PLAYWRIGHT_MODUL` zeigt auf den Ordner von `playwright-core` (wie beim Messskript `scripts/wamo-stimme-messen.cjs`) |
 | WAMO-CA im Benutzerspeicher | Chrome prüft das Zertifikat, es gibt kein `ignoreHTTPSErrors` (Anleitung `docs/labor-platz-einrichten.md`) |
 | ssh-Alias `wamo-sokrates2`, Schlüssel ohne Passwortfrage | `ssh wamo-sokrates2 true` |
-| Am Server `sudo` ohne Passwort für `python3` und `journalctl` | gleiche Voraussetzung wie `scripts/wamo_labor_nachlauf.py`, dazu muss `journalctl -u wamo-core@b` lesbar sein (sonst bricht die Vorprüfung ab) |
+| Am Server `sudo` ohne Passwort für `python3` und `journalctl` | gleiche Voraussetzung wie `scripts/wamo_labor_nachlauf.py`, dazu muss `journalctl -u wamo-core@<slot>` des gemessenen Slots lesbar sein (sonst bricht die Vorprüfung ab) |
 | `WAMO_ADMIN_DATABASE_URL` gesetzt | für `wamo_labor.py aktivieren`, `sperren` und `loeschen` (Rolle `wamo_admin`) |
 | Laborprofile `labor-01` bis `labor-08` angelegt, **zweiter Faktor eingerichtet** | `python scripts/wamo_labor_faktoren.py pruefen` (Seed je Profil ja oder nein) |
 | Umschlag-Datei mit den Zugängen und den TOTP-Seeds | `%USERPROFILE%\.wamo-labor\umschlag-labor.txt`, nie im Repo, nur Niko darf sie lesen (Konzept 3.7: nie im Chat). Das Werkzeug öffnet sie nur in der Vorprüfung und im Trockenlauf (dort nur "Seed vorhanden") |
@@ -52,7 +52,8 @@ Der **Trockenlauf** ist der Standard. Er zeigt Plan, Zahl der Profile und Plätz
 | `--preis-eingabe USD`, `--preis-ausgabe USD` | Dollar je Million Tokens, nur damit gibt es eine Schätzung in Dollar |
 | `--kosten-obergrenze USD` | lehnt einen teureren Plan schon im Trockenlauf ab (braucht beide Preise) |
 | `--kerndaten-behalten` | die Gesprächstexte im Kern am Ende nicht löschen |
-| `--schema`, `--host`, `--slot` | Standard `wamo_dev`, `wamo-sokrates2`, `b` |
+| `--schema`, `--host` | Standard `wamo_dev`, `wamo-sokrates2` |
+| `--slot a\|b` | Kern-Slot vorgeben. Ohne die Option misst der Lasttest den aktiven Slot: Der Echtlauf fragt ihn vor allem anderen am Server ab (nur lesend, `systemctl is-active wamo-core@a.service wamo-core@b.service`, ohne sudo). Genau einer der beiden Slots muss laufen. Laufen beide (Auslaufzeit nach einem Kern-Wechsel, vor `ausleiten`) oder keiner, endet der Lauf mit Ausgang 2 und dem Grund, nichts wird angefasst. Der Trockenlauf fragt nie am Server, er nennt nur „der aktive Slot“ |
 | `--ausgabe-ordner`, `--clips-ordner`, `--umschlag-datei` | Standard unter `%USERPROFILE%\.wamo-labor`, nie im Repo (das Werkzeug lehnt Orte im Repo ab) |
 
 Ausgänge: 0 bestanden (oder Trockenlauf), 1 durchgefallen, vorzeitig beendet oder Aufräumen gescheitert, 2 Eingabe falsch (nichts angefasst), 3 vollständig gelaufen, Urteil offen, 130 Strg+C.
@@ -133,6 +134,7 @@ Der letzte Befehl leert alle 16 Plätze und alle Gesprächstexte der Laborprofil
 - **Dienst der Kollegen:** Gemessen wird, was der Kern und der Browser sehen. Mit der Attrappe statt des Dienstes (Konzept 3.7) ist die Dienstlast nicht belegt. Bei `--freigabe ablehnen` entstehen keine Tickets.
 - **Nicht gemessen:** Verzug der Ereignisschleife und Datenbankverbindungen des Kerns (kein lesender Weg, den das Werkzeug nutzt), Cache-Treffer und Websuchen, Tokens je Zug außerhalb der Latenzzeilen.
 - **Kein Ratenlimit ohne Parallellast:** Das gemeinsame Limit des einen Schlüssels (Entscheidung Q4) zeigt sich erst, wenn Nikos Büro-Betrieb gleichzeitig läuft.
+- **Kern-Wechsel während des Laufs:** Der Slot wird einmal vor dem Lauf festgelegt. Wechselt der Kern währenddessen (`umschalten-kern`), gehen neue Sitzungen auf den anderen Slot, gemessen wird weiter der alte. Am Lasttag keinen Kern-Wechsel starten; kommt in einer Stufe keine Anfrage mehr am gemessenen Kern an, bleiben CPU, Speicher und 429 dort offen (Abschnitt 7).
 - **Eine Stichprobe:** Ein Lauf ist keine Statistik. Bei wenigen Schritten je Stufe ist das p95 fast der größte Wert.
 - **Deutung von "Verstummen":** Das Konzept nennt Verstummen im Lastsatz ohne Definition. Hier ist es die Zeit vom Einwurf (Sprechprobe "Moment, stopp ...") bis zum Ende der Wiedergabe, gemessen in jeder dritten A1-Runde (Abweichung von der reinen Kette A1, J1, G3, abschaltbar nur durch Codeänderung `EINWURF_JEDE`). Spricht WAMO nach dem Einwurf länger als 4 Sekunden weiter, gilt das als verpasst.
 

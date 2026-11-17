@@ -27,7 +27,7 @@ class Einstellungen:
     ausgabe_ordner: Path
     schema: str = "wamo_dev"
     host: str = "wamo-sokrates2"
-    slot: str = "b"
+    slot: str | None = None  # Kern-Slot a oder b; None nur im Trockenlauf, der Echtlauf ermittelt den aktiven Slot am Server (oder --slot)
     einwilligung: int = 1
     url: str = WAMO_URL
     murmeln_datei: Path | None = None

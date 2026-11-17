@@ -21,6 +21,7 @@ import wamo_labor_last as cli  # noqa: E402
 import wamo_labor_last_attrappe as at  # noqa: E402
 import wamo_labor_last_audio as au  # noqa: E402
 import wamo_labor_last_plan as pl  # noqa: E402
+import wamo_labor_last_server as sv  # noqa: E402
 import wamo_labor_last_umgebung as um  # noqa: E402
 
 WURZEL = Path(__file__).resolve().parent.parent
@@ -58,6 +59,7 @@ class Fabrik:
 
     def __call__(self, ein, args):
         self.aufrufe += 1
+        self.ein = ein
         uhr = at.Zeitraffer()
         protokoll = at.Protokoll()
         verhalten = at.Verhalten()
@@ -75,6 +77,20 @@ class Fabrik:
 
         return um.Umgebung(uhr=uhr, treiber_fabrik=fabrik, server=at.ServerAttrappe(uhr, protokoll), dienst=at.DienstAttrappe(protokoll),
                            kern=at.KernAttrappe(protokoll), umschlag=at.UmschlagAttrappe(), tempordner_fabrik=temp, ausgabe=print, speichern=lambda e: None)
+
+
+class SlotQuelle:
+    """Attrappe für die Ermittlung des aktiven Kern-Slots am Server (sv.aktiven_slot_ermitteln)."""
+
+    def __init__(self, slot: str = "a", fehler: str = ""):
+        self.slot, self.fehler = slot, fehler
+        self.aufrufe: list[str] = []
+
+    def __call__(self, host: str) -> str:
+        self.aufrufe.append(host)
+        if self.fehler:
+            raise sv.ServerFehler(self.fehler)
+        return self.slot
 
 
 def basis(tmp_path, clips, *zusatz) -> list[str]:
@@ -97,7 +113,7 @@ def test_der_plan_nennt_profile_stufen_dauer_kosten_grenzen_und_das_schloss(tmp_
     cli.main(basis(tmp_path, clips), umgebung_bauen=Fabrik(tmp_path))
     aus = capsys.readouterr().out
     for teil in ("labor-01 bis labor-08", "8 Profile", "Plätze 1 bis 8", "1 Sitzung, 15 Minuten", "8 Sitzungen, 15 Minuten", "Dauer", "1 Stunde 20 Minuten",
-                 "Kosten", "nicht geschätzt", "Annahmen", "17000", "429", "mehr als 2 Abbrüche", "3 GiB", "wamo-core@b", "192.168.178.136:55445",
+                 "Kosten", "nicht geschätzt", "Annahmen", "17000", "429", "mehr als 2 Abbrüche", "3 GiB", "der aktive Slot", "192.168.178.136:55445",
                  "--ausfuehren --bestaetigung LASTTEST", "Seed 1"):
         assert teil in aus, teil
 
@@ -173,7 +189,7 @@ def test_echtlauf_mit_beiden_schloessern_laeuft_und_schreibt_json_und_bericht(tm
     monkeypatch.setattr(cli.wl, "admin_passwort", lambda: "x")
     fabrik = Fabrik(tmp_path)
     code = cli.main(basis(tmp_path, clips, "--sitzungen", "1", "--minuten", "1", "--ausfuehren", "--bestaetigung", "LASTTEST"),
-                    umgebung_bauen=fabrik, umschlag_oeffnen=lambda pfad: at.UmschlagAttrappe())
+                    umgebung_bauen=fabrik, umschlag_oeffnen=lambda pfad: at.UmschlagAttrappe(), slot_ermitteln=SlotQuelle("b"))
     assert code in (0, 3) and fabrik.aufrufe == 1
     daten = json.loads((tmp_path / "aus" / "last-t.json").read_text(encoding="utf-8"))
     assert daten["lauf"] == "last-t" and daten["stufen"] and daten["ausfuehrung"] == "echt"
@@ -287,3 +303,73 @@ def test_ergebnis_wird_atomar_geschrieben_und_ueberschreibt_nur_den_eigenen_lauf
                                            "ausgabe_tokens": 1, "anfragen": 1.0, "usd": None}, "aufraeumen": []})
     assert sorted(p.name for p in ziel.iterdir()) == ["last-a.json", "last-a.md"]
     assert not list(ziel.glob(".*tmp*"))
+
+
+# ---------- Kern-Slot (R8: ohne --slot misst der Lasttest den aktiven Slot, nicht fest b) ----------
+
+def test_trockenlauf_fragt_den_slot_nicht_ab_und_nennt_den_weg(tmp_path, clips, capsys):
+    quelle = SlotQuelle()
+    assert cli.main(basis(tmp_path, clips), umgebung_bauen=Fabrik(tmp_path), slot_ermitteln=quelle) == 0
+    out = capsys.readouterr().out
+    assert quelle.aufrufe == []   # der Trockenlauf ruft nie den Server an
+    assert "aktive Slot" in out and "im Echtlauf am Server ermittelt" in out and "--slot" in out
+    assert "wamo-core@b" not in out
+
+
+def test_trockenlauf_mit_slot_nennt_die_vorgabe(tmp_path, clips, capsys):
+    assert cli.main(basis(tmp_path, clips, "--slot", "a"), umgebung_bauen=Fabrik(tmp_path), slot_ermitteln=SlotQuelle()) == 0
+    out = capsys.readouterr().out
+    assert "wamo-core@a" in out and "vorgegeben mit --slot" in out
+
+
+def _echtlauf(tmp_path, clips, quelle, *zusatz):
+    fabrik = Fabrik(tmp_path)
+    code = cli.main(basis(tmp_path, clips, "--sitzungen", "1", "--minuten", "1", *zusatz, "--ausfuehren", "--bestaetigung", "LASTTEST"),
+                    umgebung_bauen=fabrik, umschlag_oeffnen=lambda pfad: at.UmschlagAttrappe(), slot_ermitteln=quelle)
+    return code, fabrik
+
+
+def test_echtlauf_ohne_slot_misst_den_aktiven_slot_des_servers(tmp_path, clips, capsys, monkeypatch):
+    monkeypatch.setattr(cli.wl, "admin_passwort", lambda: "x")
+    quelle = SlotQuelle("a")
+    code, fabrik = _echtlauf(tmp_path, clips, quelle)
+    assert code in (0, 3) and quelle.aufrufe == ["wamo-sokrates2"] and fabrik.ein.slot == "a"
+    assert json.loads((tmp_path / "aus" / "last-t.json").read_text(encoding="utf-8"))["slot"] == "a"
+    out = capsys.readouterr().out
+    assert "wamo-core@a" in out and "am Server ermittelt" in out
+
+
+def test_echtlauf_mit_slot_uebersteuert_ohne_abfrage(tmp_path, clips, capsys, monkeypatch):
+    monkeypatch.setattr(cli.wl, "admin_passwort", lambda: "x")
+    quelle = SlotQuelle("a")
+    code, fabrik = _echtlauf(tmp_path, clips, quelle, "--slot", "b")
+    assert code in (0, 3) and quelle.aufrufe == [] and fabrik.ein.slot == "b"
+    assert "vorgegeben mit --slot" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("fehler", ["Beide Kern-Slots laufen (a und b aktiv)", "Kein Kern-Slot ist aktiv (a: inactive, b: inactive)"])
+def test_echtlauf_ohne_eindeutigen_slot_startet_nicht(tmp_path, clips, capsys, monkeypatch, fehler):
+    monkeypatch.setattr(cli.wl, "admin_passwort", lambda: "x")
+    code, fabrik = _echtlauf(tmp_path, clips, SlotQuelle(fehler=fehler))
+    assert code == 2 and fabrik.aufrufe == 0
+    gesehen = capsys.readouterr()
+    assert fehler in gesehen.err and "ECHTLAUF" not in gesehen.out   # vor dem Plan des Echtlaufs, nichts angefasst
+
+
+@pytest.mark.parametrize("slot", ["c", "", "b;id"])
+def test_unerwarteter_slot_vom_server_startet_nicht(tmp_path, clips, capsys, monkeypatch, slot):
+    monkeypatch.setattr(cli.wl, "admin_passwort", lambda: "x")
+    code, fabrik = _echtlauf(tmp_path, clips, SlotQuelle(slot))
+    assert code == 2 and fabrik.aufrufe == 0 and "unerwartet" in capsys.readouterr().err
+
+
+def test_trockenlauf_mit_den_echten_wegen_startet_keinen_prozess(tmp_path, clips, capsys):
+    # die Falle aus keine_echten_aufrufe bricht ab, sobald ssh gestartet würde; hier gilt die echte Ermittlung als Standard
+    assert cli.main(basis(tmp_path, clips)) == 0
+    assert "der aktive Slot" in capsys.readouterr().out
+
+
+def test_standard_der_ermittlung_ist_der_lesende_weg_des_servers():
+    import inspect
+    assert inspect.signature(cli.main).parameters["slot_ermitteln"].default is sv.aktiven_slot_ermitteln
+    assert cli._parser().parse_args(["lauf"]).slot is None
