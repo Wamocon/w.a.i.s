@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -154,6 +156,32 @@ class AbrufAttrappe:
     def __call__(self, url: str, ca_datei: Path):
         self.aufrufe.append((url, str(ca_datei)))
         ergebnis = self.antworten.get(url, self.standard)
+        if isinstance(ergebnis, Exception):
+            raise ergebnis
+        return ergebnis
+
+
+class TcpAttrappe:
+    """Ersatz für den TCP-Versuch der Netzprobe (läuft aus mehreren Fäden). `ergebnisse` ordnet (Host, Port) ein Ergebnis oder einen Fehler
+    zu, `standard` gilt sonst. `dauer_s` hält jeden Versuch so lange auf, Ziele in `haengen` warten auf `freigabe` (höchstens 5 Sekunden)."""
+
+    def __init__(self, standard: object = "frist", ergebnisse: dict[tuple[str, int], object] | None = None, dauer_s: float = 0.0) -> None:
+        self.standard = standard
+        self.ergebnisse = ergebnisse or {}
+        self.dauer_s = dauer_s
+        self.haengen: set[tuple[str, int]] = set()
+        self.freigabe = threading.Event()
+        self.aufrufe: list[tuple[str, int, float]] = []
+        self._sperre = threading.Lock()
+
+    def __call__(self, host: str, port: int, frist_s: float) -> str:
+        with self._sperre:
+            self.aufrufe.append((host, port, frist_s))
+        if (host, port) in self.haengen:
+            self.freigabe.wait(5.0)
+        elif self.dauer_s:
+            time.sleep(self.dauer_s)
+        ergebnis = self.ergebnisse.get((host, port), self.standard)
         if isinstance(ergebnis, Exception):
             raise ergebnis
         return ergebnis

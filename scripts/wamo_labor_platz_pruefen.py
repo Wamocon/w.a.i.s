@@ -1,22 +1,29 @@
-"""`pruefen`: Ist dieser Laptop bereit für das Testlabor? (nur Standardbibliothek, Windows, nur lesend)
+"""`pruefen`: Ist dieser Laptop bereit für das Testlabor? (nur Standardbibliothek, Windows, ändert nichts)
 
 Geprüft werden: Platzdatei, Zertifikat der WAMO-CA im Benutzerspeicher, Chrome-Richtlinien, Chrome, die vier Adressen des Servers mit
-TLS-Prüfung gegen genau die CA-Datei, die Uhr (Kopf Date des Servers gegen die Uhr des Rechners, höchstens 5 Minuten Abweichung) und das
-Mikrofon. Das Mikrofon ist eine Heuristik: Die Eingabegeräte stehen lesbar in der Registrierung (HKLM\\...\\MMDevices\\Audio\\Capture, kein
-Administrator nötig, kein PowerShell). Ein aktives Bluetooth-Freisprechgerät bekommt eine Warnung, weil das Freisprechprofil unter
-Windows oft nur Stille liefert. Welches Gerät Chrome tatsächlich benutzt, ist von hier aus nicht sicher feststellbar.
+TLS-Prüfung gegen genau die CA-Datei, die Uhr (Kopf Date des Servers gegen die Uhr des Rechners, höchstens 5 Minuten Abweichung), die
+Netztrennung und das Mikrofon. Das Mikrofon ist eine Heuristik: Die Eingabegeräte stehen lesbar in der Registrierung
+(HKLM\\...\\MMDevices\\Audio\\Capture, kein Administrator nötig, kein PowerShell). Ein aktives Bluetooth-Freisprechgerät bekommt eine
+Warnung, weil das Freisprechprofil unter Windows oft nur Stille liefert. Welches Gerät Chrome tatsächlich benutzt, ist von hier aus nicht
+sicher feststellbar.
+
+Die Netztrennung ist die Gegenprobe zu den Adressen: je verbotenem Ziel (VERBOTENE_ZIELE in wamo_labor_platz_adressen.py) ein
+TCP-Verbindungsaufbau, alle gleichzeitig, mit kurzer Frist. Gesendet wird nichts, eine zustande gekommene Verbindung wird sofort
+geschlossen. Ein erreichbares verbotenes Ziel ist eine Warnung: Die Netztrennung fehlt dann noch. UDP wird nicht geprüft.
 
 Jede Zeile beginnt mit [ok], [WARNUNG] oder [FEHLER]. Ausgang 1 nur bei mindestens einem Fehler, Warnungen allein ergeben 0.
 """
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import wamo_labor_platz_registrierung as rg
 import wamo_labor_platz_zertifikat as zt
-from wamo_labor_platz_adressen import HERKUENFTE, adresse_zulaessig
+from wamo_labor_platz_adressen import HERKUENFTE, HOST, PORTS, VERBOTENE_ZIELE, Ziel, adresse_zulaessig
 from wamo_labor_platz_start import chrome_finden
 from wamo_labor_platz_umgebung import Abruf, AbrufFehler, Umgebung
 from wamo_labor_platz_zustand import ZustandFehler, platz_lesen
@@ -118,6 +125,52 @@ def pruefe_uhr(umg: Umgebung, daten: list[str]) -> Befund:
     return _ok("Uhr", f"Abweichung zum Server {int(abs(abweichung))} Sekunden (erlaubt {GRENZE_UHR_S // 60} Minuten)")
 
 
+# ---------- Netztrennung ----------
+
+_GESPERRT = {"frist": "keine Antwort", "abgewiesen": "abgewiesen", "unerreichbar": "nicht erreichbar",
+             None: "keine Antwort innerhalb der Gesamtfrist"}
+_ERLAUBT = f"{HOST} auf TCP {', '.join(str(p) for p in PORTS[:-1])} und {PORTS[-1]}"
+
+
+def _versuchen(umg: Umgebung, ziel: Ziel, ergebnisse: list, index: int) -> None:
+    try:
+        ergebnisse[index] = umg.tcp_versuch(ziel.host, ziel.port, umg.netz_frist_s)
+    except Exception as e:  # noqa: BLE001 (wird im aufrufenden Faden wieder ausgelöst)
+        ergebnisse[index] = e
+
+
+def netzprobe(umg: Umgebung) -> list[tuple[Ziel, str | None]]:
+    """Je verbotenem Ziel ein Versuch, alle gleichzeitig, zusammen höchstens `umg.netz_gesamt_s`. None: nicht fertig geworden."""
+    ergebnisse: list = [None] * len(VERBOTENE_ZIELE)
+    faeden = [threading.Thread(target=_versuchen, args=(umg, z, ergebnisse, i), name=f"netzprobe-{i}", daemon=True)
+              for i, z in enumerate(VERBOTENE_ZIELE)]
+    for faden in faeden:
+        faden.start()
+    ende = time.monotonic() + umg.netz_gesamt_s
+    for faden in faeden:
+        faden.join(max(0.0, ende - time.monotonic()))
+    stand = list(ergebnisse)  # ein Faden, der nach der Gesamtfrist fertig wird, ändert das Ergebnis nicht mehr
+    for wert in stand:
+        if isinstance(wert, Exception):
+            raise wert
+    return list(zip(VERBOTENE_ZIELE, stand))
+
+
+def pruefe_netztrennung(umg: Umgebung) -> list[Befund]:
+    befunde = []
+    for ziel, ergebnis in netzprobe(umg):
+        name = f"{ziel.host}:{ziel.port} ({ziel.name})"
+        if ergebnis == "offen":
+            befunde.append(_warnung("Netztrennung", f"{name} ist OFFEN. Die Netztrennung fehlt noch: Ein Platz darf nur {_ERLAUBT} und "
+                                    "den UDP-Bereich des Kerns erreichen. Platz nicht für Besucher freigeben, Netz trennen lassen und "
+                                    "dann neu prüfen"))
+        elif ergebnis in _GESPERRT:
+            befunde.append(_ok("Netztrennung", f"{name} gesperrt ({_GESPERRT[ergebnis]})"))
+        else:
+            befunde.append(_warnung("Netztrennung", f"{name} nicht prüfbar (Fehler beim Verbindungsaufbau auf diesem Rechner)"))
+    return befunde
+
+
 # ---------- Mikrofon ----------
 
 def _text(werte: dict, name: str) -> str:
@@ -176,7 +229,7 @@ def _platz_befund(umg: Umgebung) -> tuple[dict | None, Befund]:
     return daten, _ok("Platz", f"Platz {daten['platz']} ({umg.platz_datei})")
 
 
-def _befunde_sammeln(umg: Umgebung, ca_option: str | None) -> list[Befund]:
+def _befunde_sammeln(umg: Umgebung, ca_option: str | None, netz: bool = True) -> list[Befund]:
     daten, platz = _platz_befund(umg)
     ca, der, ca_fehler = _ca_finden(umg, ca_option)
     sha1 = daten["ca_sha1"] if daten else (zt.sha1_hex(der) if der else None)
@@ -191,11 +244,12 @@ def _befunde_sammeln(umg: Umgebung, ca_option: str | None) -> list[Befund]:
         adressen, daten_uhr = pruefe_adressen(umg, ca, daten["board_url"])
         befunde += adressen
     befunde.append(pruefe_uhr(umg, daten_uhr))
+    befunde += pruefe_netztrennung(umg) if netz else [_warnung("Netztrennung", "nicht geprüft (Schalter --ohne-netzprobe)")]
     return befunde + pruefe_mikrofon(umg)
 
 
-def cmd_pruefen(umg: Umgebung, ca_option: str | None = None, warten: bool = False) -> int:
-    befunde = _befunde_sammeln(umg, ca_option)
+def cmd_pruefen(umg: Umgebung, ca_option: str | None = None, warten: bool = False, netz: bool = True) -> int:
+    befunde = _befunde_sammeln(umg, ca_option, netz)
     for b in befunde:
         umg.ausgabe(b.zeile())
     zaehler = {s: sum(b.stufe == s for b in befunde) for s in _STUFE}

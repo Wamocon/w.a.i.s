@@ -1,11 +1,12 @@
 """Die echte Anbindung des Platz-Skripts an Windows (nur Standardbibliothek): baut die `Umgebung` für den Betrieb.
 
 Hier stehen die Teile, die den Rechner wirklich berühren: winreg (über WinRegistrierung), certutil, Prozessstart, Netzabruf mit TLS
-gegen die WAMO-CA, Eingabe ohne Anzeige, Desktop und Arbeitsbereich. Die Tests prüfen diese Teile mit Ersatzmodulen, der echte Lauf
+gegen die WAMO-CA, TCP-Versuch der Netzprobe, Eingabe ohne Anzeige, Desktop und Arbeitsbereich. Die Tests prüfen diese Teile mit Ersatzmodulen, der echte Lauf
 ist nur auf einem Laptop prüfbar (docs/labor-platz-einrichten.md).
 """
 from __future__ import annotations
 
+import errno
 import getpass
 import http.client
 import os
@@ -61,6 +62,35 @@ def abruf_https(url: str, ca_datei: Path, frist_s: float = ABRUF_FRIST_S) -> Abr
         raise AbrufFehler("frist", "keine Antwort") from None
     except (OSError, http.client.HTTPException) as e:
         raise AbrufFehler("verbindung", type(e).__name__) from None
+    finally:
+        verbindung.close()
+
+
+# Kein Weg zum Ziel (Windows meldet die Codes von Winsock, die Python nicht auf errno abbildet)
+_UNERREICHBAR = frozenset({errno.EHOSTUNREACH, errno.ENETUNREACH, getattr(errno, "WSAEHOSTUNREACH", 10065),
+                           getattr(errno, "WSAENETUNREACH", 10051)})
+
+
+def tcp_versuch_echt(host: str, port: int, frist_s: float) -> str:
+    """Ein TCP-Verbindungsaufbau für die Netzprobe: verbinden und sofort schließen, nie etwas senden oder lesen.
+
+    "offen" (Verbindung kam zustande), "frist" (keine Antwort), "abgewiesen", "unerreichbar" (kein Weg zum Ziel) oder "fehler"
+    (alles andere: dann ist das Ziel nicht geprüft, nicht gesperrt).
+    """
+    try:
+        verbindung = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        return "fehler"
+    try:
+        verbindung.settimeout(frist_s)
+        verbindung.connect((host, port))
+        return "offen"
+    except (socket.timeout, TimeoutError):
+        return "frist"
+    except ConnectionRefusedError:
+        return "abgewiesen"
+    except OSError as e:
+        return "unerreichbar" if e.errno in _UNERREICHBAR else "fehler"
     finally:
         verbindung.close()
 
@@ -135,4 +165,4 @@ def echte_umgebung() -> Umgebung:
         chrome_kandidaten=chrome_kandidaten(), ca_kandidaten=ca_kandidaten(), prozess_starten=prozess_starten_echt,
         verknuepfung=lambda pfad, ziel, argumente, ordner: verknuepfung_schreiben(pfad, ziel, argumente, ordner), abruf=abruf_https,
         jetzt=time.time, token_eingabe=token_eingabe_echt, warten=time.sleep, arbeitsbereich=arbeitsbereich_echt, ausgabe=print,
-        weiter_port=WEITER_PORT, taste=taste_echt, ist_admin=ist_admin_echt)
+        tcp_versuch=tcp_versuch_echt, weiter_port=WEITER_PORT, taste=taste_echt, ist_admin=ist_admin_echt)

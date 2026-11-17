@@ -78,6 +78,7 @@ class Welt:
         self.zert = at.FakeZertifikatsspeicher()
         self.prozesse = at.ProzessMitschnitt()
         self.lnk = at.VerknuepfungAttrappe()
+        self.tcp = at.TcpAttrappe()  # Netzprobe: jedes verbotene Ziel gesperrt, nie ein echter Verbindungsversuch
         self.zeilen: list[str] = []
         self.tasten: list[int] = []
         self.admin = False
@@ -87,7 +88,7 @@ class Welt:
             chrome_kandidaten=(self.chrome,), ca_kandidaten=(self.ca,),
             prozess_starten=self.prozesse, verknuepfung=self.lnk, abruf=_kein_abruf, jetzt=lambda: JETZT,
             token_eingabe=lambda: TOKEN, warten=lambda _s: None, arbeitsbereich=lambda: (0, 0, 1920, 1040),
-            ausgabe=self.zeilen.append, weiter_port=0, weiter_frist_s=3.0, chrome_wartezeit_s=0.0,
+            ausgabe=self.zeilen.append, tcp_versuch=self.tcp, weiter_port=0, weiter_frist_s=3.0, chrome_wartezeit_s=0.0,
             taste=lambda: self.tasten.append(1), ca_sha256=SHA256, ca_sha1=SHA1, ist_admin=lambda: self.admin)
 
     @property

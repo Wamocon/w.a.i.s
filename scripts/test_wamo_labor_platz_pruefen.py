@@ -1,11 +1,13 @@
-"""Tests für `wamo_labor_platz.py pruefen`: Zertifikat, Richtlinien, Chrome, Adressen mit TLS gegen die CA, Uhr, Mikrofon.
+"""Tests für `wamo_labor_platz.py pruefen`: Zertifikat, Richtlinien, Chrome, Adressen mit TLS gegen die CA, Uhr, Netztrennung, Mikrofon.
 
-Kein Netz: Der Abruf ist eine Attrappe. Die Eingabegeräte stehen in der Attrappe der Registrierung (nur lesend gelesen).
+Kein Netz: Abruf und TCP-Versuch der Netzprobe sind Attrappen. Die Eingabegeräte stehen in der Attrappe der Registrierung (nur lesend gelesen).
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import sys
+import time
 from email.utils import formatdate
 from pathlib import Path
 
@@ -134,6 +136,106 @@ def test_uhr_ohne_date_kopf_ist_nur_eine_warnung(welt):
 def test_uhr_mit_unlesbarem_date_kopf_ist_nur_eine_warnung(welt):
     welt.umg.abruf.standard = Abruf(200, "gestern gegen Abend")
     assert welt.lauf("pruefen") == 0 and any(z.startswith("[WARNUNG]") and "Uhr" in z for z in welt.zeilen)
+
+
+# ---------- Netztrennung (Gegenprobe: verbotene Ziele) ----------
+
+def _netz(welt) -> list[str]:
+    return [z for z in welt.zeilen if z.split("] ", 1)[-1].startswith("Netztrennung:")]
+
+
+def test_netzprobe_alle_gesperrt_ist_in_ordnung_und_trifft_genau_die_festen_ziele(welt):
+    import wamo_labor_platz_adressen as adr
+    assert welt.lauf("pruefen") == 0
+    zeilen = _netz(welt)
+    assert len(zeilen) == len(adr.VERBOTENE_ZIELE) and all(z.startswith("[ok]") and "gesperrt (keine Antwort)" in z for z in zeilen)
+    assert sorted((h, p) for h, p, _ in welt.tcp.aufrufe) == sorted((z.host, z.port) for z in adr.VERBOTENE_ZIELE)
+    assert {f for _, _, f in welt.tcp.aufrufe} == {1.5}
+    assert any("192.168.178.136:55446 (Sokrates-2, Remote-Desktop-Gateway) gesperrt" in z for z in zeilen)
+
+
+def test_offenes_verbotenes_ziel_ist_eine_warnung_mit_dem_satz(welt):
+    welt.tcp.ergebnisse[("192.168.178.75", 4000)] = "offen"
+    assert welt.lauf("pruefen") == 0  # Warnung, kein Fehler: Ausgang wie bei allen Warnungen von `pruefen`
+    offen = [z for z in _netz(welt) if "OFFEN" in z]
+    assert len(offen) == 1 and offen[0].startswith("[WARNUNG] Netztrennung: 192.168.178.75:4000 (Sokrates-1, zentrales LiteLLM-Gateway) ist OFFEN")
+    assert "Die Netztrennung fehlt noch" in offen[0] and "192.168.178.136 auf TCP 55443, 55444, 55445 und 55447 und den UDP-Bereich" in offen[0]
+    assert sum(z.startswith("[ok]") for z in _netz(welt)) == len(_netz(welt)) - 1
+    assert welt.zeilen[-1].endswith("1 Warnung(en), 0 Fehler.")
+
+
+def test_mehrere_offene_ziele_je_eine_warnung_und_daneben_ein_fehler_ergibt_ausgang_1(welt):
+    welt.tcp.standard = "offen"
+    welt.chrome.unlink()
+    assert welt.lauf("pruefen") == 1
+    assert all(z.startswith("[WARNUNG]") and "Die Netztrennung fehlt noch" in z for z in _netz(welt))
+
+
+@pytest.mark.parametrize("ergebnis,text", [("frist", "keine Antwort"), ("abgewiesen", "abgewiesen"), ("unerreichbar", "nicht erreichbar")])
+def test_jede_art_der_sperre_ist_in_ordnung(welt, ergebnis, text):
+    welt.tcp.standard = ergebnis
+    assert welt.lauf("pruefen") == 0
+    assert all(z.startswith("[ok]") and z.endswith(f"gesperrt ({text})") for z in _netz(welt))
+
+
+def test_fehler_beim_verbindungsaufbau_ist_nicht_gesperrt_sondern_nicht_pruefbar(welt):
+    welt.tcp.ergebnisse[("192.168.178.1", 443)] = "fehler"
+    assert welt.lauf("pruefen") == 0
+    zeile = next(z for z in _netz(welt) if "192.168.178.1:443" in z)
+    assert zeile.startswith("[WARNUNG]") and "nicht prüfbar" in zeile and "gesperrt" not in zeile
+
+
+def test_netzprobe_laeuft_gleichzeitig(welt):
+    import wamo_labor_platz_adressen as adr
+    welt.tcp.dauer_s = 0.3  # nacheinander wären es 12 mal 0,3 Sekunden
+    beginn = time.monotonic()
+    assert welt.lauf("pruefen") == 0
+    assert time.monotonic() - beginn < 0.3 * len(adr.VERBOTENE_ZIELE) / 2
+    assert len(welt.tcp.aufrufe) == len(adr.VERBOTENE_ZIELE)
+
+
+def test_gesamtdauer_ist_begrenzt_und_ein_haengendes_ziel_gilt_nicht_als_offen(welt):
+    welt.umg.netz_gesamt_s = 0.3
+    welt.tcp.haengen.add(("192.168.178.136", 22))
+    welt.tcp.ergebnisse[("192.168.178.136", 22)] = "offen"  # käme erst nach der Gesamtfrist und zählt nicht mehr
+    beginn = time.monotonic()
+    try:
+        assert welt.lauf("pruefen") == 0
+        assert time.monotonic() - beginn < 2.0
+    finally:
+        welt.tcp.freigabe.set()
+    zeile = next(z for z in _netz(welt) if "192.168.178.136:22" in z)
+    assert zeile.startswith("[ok]") and "keine Antwort innerhalb der Gesamtfrist" in zeile
+
+
+def test_ohne_netzprobe_kein_verbindungsversuch_und_ein_hinweis(welt):
+    assert welt.lauf("pruefen", "--ohne-netzprobe") == 0
+    assert welt.tcp.aufrufe == []
+    assert _netz(welt) == ["[WARNUNG] Netztrennung: nicht geprüft (Schalter --ohne-netzprobe)"]
+
+
+def test_netzprobe_laeuft_auch_ohne_platzdatei(welt):
+    welt.platz_datei.unlink()
+    assert welt.lauf("pruefen") == 1
+    assert len(_netz(welt)) == len(welt.tcp.aufrufe) > 0
+
+
+def test_fehler_der_attrappe_im_faden_kommt_beim_aufrufer_an(welt):
+    welt.tcp.ergebnisse[("192.168.178.64", 3389)] = AssertionError("Falle im Faden")
+    with pytest.raises(AssertionError, match="Falle im Faden"):
+        welt.lauf("pruefen")
+
+
+def test_verbotene_ziele_sind_fest_eindeutig_im_buero_und_nie_ein_erlaubter_port():
+    import wamo_labor_platz_adressen as adr
+    paare = [(z.host, z.port) for z in adr.VERBOTENE_ZIELE]
+    assert len(paare) == len(set(paare)) and len({z.name for z in adr.VERBOTENE_ZIELE}) == len(paare)
+    buero = ipaddress.ip_network("192.168.178.0/24")
+    assert all(ipaddress.ip_address(h) in buero and 0 < p < 65536 for h, p in paare)
+    assert not any(h == adr.HOST and p in adr.PORTS for h, p in paare)
+    for pflicht in [(adr.HOST, p) for p in (22, 55321, 55322, 56543, 55446)] + [("192.168.178.75", 4000), ("192.168.178.1", 80),
+                                                                                ("192.168.178.1", 443)]:
+        assert pflicht in paare, pflicht
 
 
 # ---------- Mikrofon ----------
