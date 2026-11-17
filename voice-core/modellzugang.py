@@ -349,6 +349,12 @@ async def _testanfrage(schluessel: str, workspace: str | None, modell: str) -> s
                 "Konto. Bitte in der Anthropic-Konsole prüfen oder einen neuen erzeugen")
     except anthropic.PermissionDeniedError:
         return "Der Schlüssel darf dieses Modell nicht nutzen (403): Workspace oder Berechtigung prüfen"
+    except anthropic.BadRequestError as e:
+        # Befund 17.11.2026: Ein Schlüssel ohne Workspace braucht die Workspace-ID; vorher stand dort nur "HTTP 400"
+        if "workspace" in str(getattr(e, "message", "") or "").lower():
+            return ("Dieser Schlüssel gehört zu keinem Workspace: Trag die Workspace-ID (beginnt mit wrkspc_) im Feld Workspace ein "
+                    "oder erzeuge in der Anthropic-Konsole einen Schlüssel innerhalb eines Workspace")
+        return "Anthropic lehnt die Testanfrage ab (400): Schlüssel, Workspace-ID und Modell in der Anthropic-Konsole prüfen"
     except anthropic.APIStatusError as e:
         return f"Anthropic antwortet mit HTTP {e.status_code}"
     except anthropic.APITimeoutError:
