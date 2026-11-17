@@ -1114,7 +1114,7 @@ außer `aus` nur mit Nachweis: Die Person wurde gerade sicher an der Stimme erka
 
 | Modus | Wirkung |
 | --- | --- |
-| `streng` (Standard) | Eine **fremde** Äußerung erreicht das Sprachmodell nicht: kein Zug, kein Eintrag im Verlauf und im Gedächtnis, eine Meldung an die Oberfläche (`ignoriert`), der Untertitel verschwindet wieder. Verworfen wird, wenn W.A.I.S. nicht gleichzeitig sprach: jedes fremde Urteil (Wert bis `FREMD_MAX`) unabhängig von der Länge und jedes unklare mit Wert unter `VERWERFEN_MAX` (seit 16.11.2026). Unklare Äußerungen mit höherem Wert und kurze, die nach der eigenen Stimme klingen ("Ja"), gehen durch, aber alle Werkzeuge außer Uhrzeit, Websuche und Canvas sind gesperrt, solange die Stimme nicht sicher die eigene war (oder die Person nicht getippt hat). |
+| `streng` (Standard) | **Nur die eigene Stimme** erreicht das Sprachmodell (Entscheidung vom 17.11.2026, `WAMO_STIMME_NUR_EIGEN`): durch geht nur eine Äußerung mit Wert ab `EIGEN_MIN`, auch ein kurzes eigenes "Ja". Alles andere wird verworfen: fremd, unklar mit jedem Wert, unklar ohne Wert (Prüfung fehlgeschlagen) und keine Antwort des Prüfers in der Frist; kein Zug, kein Eintrag im Verlauf und im Gedächtnis, eine Meldung an die Oberfläche (`ignoriert`). Während W.A.I.S. spricht, **unterbricht nur die eigene Stimme** (`WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN`): eine andere Stimme dämpft W.A.I.S. kurz, W.A.I.S. spricht weiter, ihr Satz wird verworfen. Werkzeuge außer Uhrzeit, Websuche und Canvas sind gesperrt, solange die Stimme nicht sicher die eigene war (oder die Person nicht getippt hat). |
 | `beobachten` | Misst, zeigt das Ergebnis in der Oberfläche und schreibt es ins Log, sperrt und verwirft nichts. Geeignet zum Einstellen der Schwellen. |
 | `aus` | Keine Prüfung, kein Einlernen. Löschen eines vorhandenen Abdrucks geht trotzdem. Ohne Datenbank ist die Prüfung ebenfalls aus. |
 
@@ -1127,23 +1127,35 @@ außer `aus` nur mit Nachweis: Die Person wurde gerade sicher an der Stimme erka
 | `WAMO_STIMME_MIN_SECS` | 1 | So viel reine Sprache braucht eine Äußerung für ein Urteil (0,3 bis 10); kürzere ("Ja", "mach") erben das Vertrauen nur, wenn sie nach der eigenen Stimme klingen (Wert ab `EIGEN_MIN`), sonst gilt die Stimme als nicht sicher erkannt |
 | `WAMO_STIMME_KURZ_VERTRAUEN_SECS` | 15 | So lange läuft das Vertrauen höchstens weiter, wenn seit der letzten sicheren Erkennung nur kurze Äußerungen kamen (1 bis 120); eine sichere Erkennung oder getippter Text beginnt neu |
 | `WAMO_STIMME_VERTRAUEN_SECS` | 120 | So lange gilt "eigen" für kurze Folgesätze und Werkzeuge (10 bis 3600) |
-| `WAMO_STIMME_VERWERFEN_MAX` | 0,4 | Nur Modus `streng`: unklare Äußerungen unter diesem Wert verwirft der Wächter (an den Bereich `FREMD_MAX` bis `EIGEN_MIN` gesetzt; 0 oder `FREMD_MAX` schaltet das Verwerfen unklarer Äußerungen ab) |
-| `WAMO_STIMME_VERWERFEN_MIN_SECS` | 0 | Nur Modus `streng`: so viel reine Sprache braucht eine Äußerung mindestens, damit sie verworfen wird (0 bis 10). Erster Regler, wenn kurze eigene Sätze überhört werden: 0,5 bis 1. Ganz wie vor dem 16.11.2026: `VERWERFEN_MAX=0` und `VERWERFEN_MIN_SECS` gleich `MIN_SECS` |
+| `WAMO_STIMME_NUR_EIGEN` | an | Nur Modus `streng` mit Abdruck: nur eine eigene Äußerung (Wert ab `EIGEN_MIN`) erreicht das Modell, alles andere verwirft der Wächter. `aus`: die Regel vom 16.11.2026 mit den beiden Schaltern darunter |
+| `WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN` | an | Nur Modus `streng` mit Abdruck: während W.A.I.S. spricht, unterbricht nur die eigene Stimme, erst nach dem Urteil eigen; eine andere Stimme dämpft W.A.I.S. nur kurz und ihr Satz wird verworfen, auch mit `NUR_EIGEN=aus`. `aus`: jede Stimme unterbricht sofort wie bisher, und was W.A.I.S. überlappt, geht durch |
+| `WAMO_STIMME_VERWERFEN_MAX` | 0,4 | Nur Modus `streng` und `NUR_EIGEN=aus`: unklare Äußerungen unter diesem Wert verwirft der Wächter (an den Bereich `FREMD_MAX` bis `EIGEN_MIN` gesetzt; 0 oder `FREMD_MAX` schaltet das Verwerfen unklarer Äußerungen ab) |
+| `WAMO_STIMME_VERWERFEN_MIN_SECS` | 0 | Nur Modus `streng` und `NUR_EIGEN=aus`: so viel reine Sprache braucht eine Äußerung mindestens, damit sie verworfen wird (0 bis 10). Ganz wie vor dem 16.11.2026: `NUR_EIGEN=aus`, `VERWERFEN_MAX=0` und `VERWERFEN_MIN_SECS` gleich `MIN_SECS` |
 | `WAMO_STIMME_MODELL` | Cache-Ordner | Pfad der Modelldatei, Standard `XDG_CACHE_HOME/wamo/sprecher/nemo_en_titanet_large.onnx`, sonst `voice-core/.cache/sprecher/` |
 
 **Wie geprüft wird.** Das Modell (NeMo TitaNet-Large als ONNX über `sherpa-onnx`, 192 Werte je Stimme) läuft im Kern auf der CPU, einmal je
 Prozess für alle Sitzungen. Abdruck und Prüfzustand gehören je Sitzung zum Profil, einen Abdruck-Zwischenspeicher über Profile hinweg gibt
 es nicht. Der Ton der letzten 10 Sekunden liegt nur im Arbeitsspeicher; beim Sprechende (VAD) wird die Äußerung (höchstens die letzten 8
-Sekunden) berechnet und mit dem Abdruck verglichen. Das Ergebnis steht im Log (`Stimme: 0.78 bei 2.3 s -> eigen`, nie Inhalte). Zum Einlernen
+Sekunden) berechnet und mit dem Abdruck verglichen. Das Ergebnis steht im Log (`Stimme: 0.78 bei 2.3 s -> eigen`, nie Inhalte). Spricht jemand,
+während W.A.I.S. spricht (Modus `streng` mit `UNTERBRECHEN_NUR_EIGEN`), rechnet der Kern schon während der Äußerung: nach einer Sekunde Sprache
+und dann jede Sekunde die letzten zwei Sekunden (`Stimme früh: 0.71 bei 1.0 s (WAMO spricht) -> eigen`). Unter einer Sekunde streut der
+Abdruck zu stark für ein Urteil; ein frühes "nicht eigen" entscheidet nichts, dann zählt das Urteil am Sprechende. Zum Einlernen
 teilt der Kern die Sprache in Stücke von 3 Sekunden, nimmt den Mittelwert und verwirft die Aufnahme, wenn die Stücke zu unterschiedlich
 klingen (zu unruhig oder mehrere Stimmen). Gespeichert werden nur 192 Zahlen, nie eine Aufnahme.
 
 **Antwortzeit.** Die Prüfung beginnt beim Sprechende und läuft parallel zur Spracherkennung. Der Wächter hält nur das **endgültige** Transkript
-einer Äußerung an, bis das Urteil da ist, höchstens 1 Sekunde; die Zwischenstände laufen ungebremst durch, Unterbrechen bleibt so schnell
-wie vorher. Die Antwort für die eigene Stimme wird also höchstens um den Teil der Prüfzeit später, der über die Wartezeit der Spracherkennung
-hinausgeht (rund 250 ms für 8 Sekunden Sprache auf einem PC, am Server nicht gemessen). Läuft die Frist ab, gilt die Äußerung als unklar und
-geht durch. Der Wächter ersetzt das Transkript einer fremden Stimme durch ein Leerzeichen, der Zug endet dann leer (`on_user_turn_stopped`
-in `bot.py` kehrt zurück).
+einer Äußerung an, bis das Urteil da ist, höchstens 1 Sekunde; die Zwischenstände laufen ungebremst durch. Die Antwort für die eigene Stimme
+wird also höchstens um den Teil der Prüfzeit später, der über die Wartezeit der Spracherkennung hinausgeht (rund 250 ms für 8 Sekunden Sprache
+auf einem PC, am Server nicht gemessen). Läuft die Frist ab, wartet der Wächter noch eine Sekunde Nachfrist (der Rechner ist für alle
+Sitzungen einer); kommt auch dann kein Urteil, gilt die Äußerung als unklar und wird verworfen (mit `NUR_EIGEN=aus`: geht ohne Nachfrist
+durch). Der Wächter ersetzt das Transkript einer fremden Stimme durch ein Leerzeichen, der Zug endet dann leer (`on_user_turn_stopped` in
+`bot.py` kehrt zurück). **Unterbrechen:** Während W.A.I.S. spricht, dämpft jede Stimme W.A.I.S. sofort (Ducken), abgebrochen wird aber erst
+nach dem Urteil eigen. Das ist so gewollt und kostet die eigene Stimme rund 0,5 bis 1 Sekunde: Ein längerer Einwurf unterbricht nach gut
+einer Sekunde Sprache (frühes Urteil), ein kurzes "Stopp" erst nach dem Sprechende (Sprachpause 0,2 s plus Prüfung) und der nächsten
+Wortgrenze. Stoppwörter wirken erst nach dem Urteil eigen. Ist das Urteil fremd oder unklar, endet die Dämpfung sofort und W.A.I.S. spricht weiter.
+Beginnt der Zug erst mit dem Urteil am Sprechende (kurzes "Stopp"), entscheidet die Stop-Strategie das Satzende ohne Smart-Turn und wartet
+ihre Frist ab: Die Antwort auf ein kurzes eigenes "Stopp" kommt dann rund eine Sekunde später als bisher, W.A.I.S. verstummt aber schon nach
+dem Urteil.
 
 **Untertitel.** Pipecat meldet jedes Transkript an die Oberfläche, sobald es die Spracherkennung verlässt, also vor dem Urteil. Verwirft der
 Wächter es, kommt dasselbe Transkript ohne Text mit dem Zeitstempel des Originals nach; die Oberfläche nimmt genau diesen Teil wieder heraus
@@ -1163,7 +1175,8 @@ eingelernten Stimme zu) gilt in der Oberfläche zusätzlich:
 **Meldungen an die Oberfläche** (Servernachrichten, Details in der Kopfzeile von `voice-core/bot.py`):
 
 - `{"type": "stimme", "status": "aus"|"fehlt"|"laedt"|"kaputt"|"bereit", "modus": "..."}` Stand beim Verbinden und nach jeder Änderung. `fehlt`: nichts eingelernt (nichts wird geprüft oder gesperrt), `kaputt`: Modell oder Datenbank nicht verfügbar (streng sperrt dann Werkzeuge, Tippen geht; war die Datenbank nicht lesbar, liest der Kern den Stand nach 30 s, 1, 2 und dann alle 5 Minuten neu, bis er bekannt ist).
-- `{"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert": 0.78, "modus": "..."}` je Äußerung; zusätzlich eine Meldung mit `"ignoriert": true` (Ergebnis `fremd` oder `unklar`), wenn der Wächter die Äußerung nicht ans Modell gab.
+- `{"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert": 0.78, "modus": "..."}` je Äußerung (vom Prüfer, auch im Modus `beobachten`).
+- `{"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert": 0.78 oder null, "modus": "streng", "ignoriert": true|false, "zeit": "..."}` vom Wächter nach jedem Urteil zu einem endgültigen Transkript (Modus `streng` mit Abdruck), auch bei Annahme (`ignoriert: false`, zu jedem Transkript) und bei Verwerfen (`ignoriert: true`, einmal je Äußerung). `zeit` ist genau der `timestamp`, den dasselbe Transkript in `user-transcription` trägt (Pipecat gibt `TranscriptionFrame.timestamp` unverändert aus), höchstens 64 Zeichen, sonst `null`. Kurz und keine Antwort in der Frist heißen `unklar` (ohne Wert: `null`).
 - `{"type": "stimmabdruck", "status": "start"|"aufnahme"|"rechnet"|"fertig"|"fehler"|"abgebrochen"|"geloescht", "sekunden": 8.4, "ziel": 20, "text": "..."}` beim Einlernen und Löschen.
 - `{"type": "stimmabdruck_einwilligung", "version": "stimme-1", "text": "..."}` beim Verbinden (nicht im Modus aus, nie im Labor; im Labor kommt nur `{"type": "stimme", "status": "aus", "modus": "aus"}`).
 - Von der Oberfläche: Client-Nachricht `stimmabdruck` mit `{"aktion": "start", "einwilligung": "stimme-1"}`, `{"aktion": "abbrechen"}` oder `{"aktion": "loeschen"}`. Der Start gilt nur mit genau der aktuellen Version der Einwilligung.
@@ -1200,13 +1213,18 @@ Liegt die Datei woanders, nennt `WAMO_STIMME_MODELL` (über `wamo-core-env`) den
 laut PyPI am 14.11.2026). Ein echter Lauf auf dem Server steht aus.
 
 **Grenzen.** Die Stimmprüfung ersetzt keine Freigabe: Aktionen mit Risiko brauchen weiter die Freigabe per Klick. Sie schützt nicht gegen
-Aufnahmen oder geklonte Stimmen. Sie kann sich irren (Erkältung, Lärm, Mikrofon): Eine eigene Äußerung mit niedrigem Wert (fremd oder unklar
-unter `VERWERFEN_MAX`) wird im Modus streng ignoriert, auch eine sehr kurze; die Oberfläche zeigt dann einen Hinweis, getippter Text geht
-immer. Werden kurze eigene Sätze überhört, zuerst `WAMO_STIMME_VERWERFEN_MIN_SECS` auf 0,5 bis 1 setzen; bei häufigen Fehlurteilen
-`WAMO_STIMME_VERWERFEN_MAX=0` (verwirft nur noch fremde), `WAMO_STIMME_FREMD_MAX` senken, `beobachten` einschalten oder neu einlernen.
-`WAMO_STIMME_MIN_SECS` wirkt seit dem 16.11.2026 nicht mehr auf das Verwerfen, nur noch auf die Grenze zwischen eigen und kurz. Spricht jemand Fremdes, während WAMO redet, ist das Urteil unklar (Echo): der Satz geht durch, nur die Werkzeuge bleiben
-gesperrt. Kurze Äußerungen (unter einer Sekunde Sprache, etwa "Ja") tragen das Vertrauen nur weiter, wenn sie nach der eigenen Stimme klingen, und höchstens
-15 Sekunden nach der letzten sicheren Erkennung; klingen sie anders, ist die Stimme nicht sicher erkannt (Werkzeuge gesperrt, die Äußerung geht ans Modell).
+Aufnahmen oder geklonte Stimmen. Sie kann sich irren (Erkältung, Lärm, Mikrofon): Eine eigene Äußerung mit einem Wert unter `EIGEN_MIN` wird
+im Modus streng ignoriert, auch eine sehr kurze, und während W.A.I.S. spricht, unterbricht sie W.A.I.S. dann nicht; die Oberfläche zeigt einen
+Hinweis, getippter Text geht immer. Werden eigene Sätze überhört, zuerst `WAMO_STIMME_EIGEN_MIN` senken (etwa 0,45) oder neu einlernen;
+`WAMO_STIMME_NUR_EIGEN=aus` stellt die Regel vom 16.11.2026 wieder her (dann wirken `VERWERFEN_MAX` und `VERWERFEN_MIN_SECS`),
+`WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN=aus` lässt jede Stimme wieder sofort unterbrechen. **Lautsprecher statt Headset:** Das Mikrofon hört
+W.A.I.S. mit. Ein Einwurf mischt sich dann mit dem Echo, der Wert sinkt, und besonders ein kurzes eigenes "Stopp" kann unter `EIGEN_MIN`
+fallen: W.A.I.S. spricht dann weiter. Hält das Echo die Sprachpausenerkennung offen, gibt es kein Sprechende und nur die frühen Urteile;
+ein längerer Satz der Person kommt über das Fenster der letzten zwei Sekunden meist trotzdem durch. Mit Headset tritt das nicht auf. Hat das
+frühe Urteil die Person erkannt und W.A.I.S. deshalb unterbrochen, geht ihr Satz ans Modell, auch wenn das Urteil am Sprechende schwächer
+ausfällt (Echo am Anfang, eine zweite Stimme); die Werkzeuge bleiben dann gesperrt. `WAMO_STIMME_MIN_SECS` wirkt nur auf die Grenze zwischen eigen und kurz.
+Kurze Äußerungen (unter einer Sekunde Sprache, etwa "Ja") tragen das Vertrauen nur weiter, wenn sie nach der eigenen Stimme klingen, und höchstens
+15 Sekunden nach der letzten sicheren Erkennung; klingen sie anders, ist die Stimme nicht sicher erkannt (Werkzeuge gesperrt, die Äußerung wird verworfen).
 Ein neues Stück Sprache nach einem fertigen Satz (Satzzeichen im Transkript), nach Ende des Zuges oder nach Rede von WAMO wird für sich geprüft; mitten in
 einem unfertigen Satz bleibt es beim Zug, deshalb kann ein Einwurf einer fremden Stimme innerhalb eines Satzes der Person noch am Urteil des Satzes hängen.
 Eine Äußerung, die nicht sicher die Stimme der Person war (Profil mit Abdruck, Modus `streng`), färbt den Zug wie Fremdinhalte:

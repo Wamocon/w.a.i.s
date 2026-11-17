@@ -471,6 +471,36 @@ class SchalterTests(unittest.TestCase):
             with mock.patch.dict("os.environ", {"WAMO_STIMME_VERWERFEN_MIN_SECS": roh}, clear=True):
                 self.assertEqual(schwellen_aus_env().verwerfen_min_secs, 0.0, roh)
 
+    def test_nur_eigen_schalter(self):
+        """WAMO_STIMME_NUR_EIGEN und WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN (17.11.2026): Standard an, aus heißt das Verhalten davor."""
+        with mock.patch.dict("os.environ", {}, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.nur_eigen, s.unterbrechen_nur_eigen), (True, True))
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_NUR_EIGEN": "aus", "WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN": "0"}, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.nur_eigen, s.unterbrechen_nur_eigen), (False, False))
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_NUR_EIGEN": "aus"}, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.nur_eigen, s.unterbrechen_nur_eigen), (False, True))  # unabhängig voneinander
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN": "vielleicht"}, clear=True):
+            self.assertTrue(schwellen_aus_env().unterbrechen_nur_eigen)  # Tippfehler: bleibt an (env_schalter)
+
+    def test_nur_eigen_gilt_nur_im_strengen_modus_mit_bereiter_pruefung(self):
+        gate = StimmGate(modus="streng", uhr=Uhr())
+        self.assertFalse(gate.verwirft or gate.nur_eigen_unterbricht())  # Abdruck noch nicht geladen
+        gate.setze_abdruck(ABDRUCK)
+        gate.modell_ok = True
+        self.assertTrue(gate.verwirft and gate.nur_eigen_unterbricht())
+        gate.schwellen = Schwellen(unterbrechen_nur_eigen=False)
+        self.assertEqual((gate.verwirft, gate.nur_eigen_unterbricht()), (True, False))
+        gate.schwellen = Schwellen()
+        for modus in ("beobachten", "aus"):
+            gate.modus = modus
+            self.assertFalse(gate.verwirft or gate.nur_eigen_unterbricht(), modus)
+        gate.modus = "streng"
+        gate.setze_abdruck(None)  # kein Abdruck (auch jedes Laborprofil: es bekommt nie ein Gate)
+        self.assertFalse(gate.verwirft or gate.nur_eigen_unterbricht())
+
 
 class WerkzeugTests(unittest.IsolatedAsyncioTestCase):
     async def test_gesperrt_ruft_den_handler_nicht_auf(self):

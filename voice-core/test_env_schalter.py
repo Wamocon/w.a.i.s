@@ -117,10 +117,11 @@ NEUE_NAMEN = (
 )
 
 # Stimmabdruck (stimme_gate.py, stimme_modell.py): Modus, Schwellen und Modellpfad, alle seit 14.11.2026; die Schwellen zum Verwerfen
-# (stimme_waechter.py) seit 16.11.2026
+# (stimme_waechter.py) seit 16.11.2026; nur die eigene Stimme hören und unterbrechen lassen seit 17.11.2026
 STIMME_UEBERTRAGEN = (
     "WAMO_STIMME_PRUEFUNG", "WAMO_STIMME_EIGEN_MIN", "WAMO_STIMME_FREMD_MAX", "WAMO_STIMME_MIN_SECS", "WAMO_STIMME_VERTRAUEN_SECS",
     "WAMO_STIMME_KURZ_VERTRAUEN_SECS", "WAMO_STIMME_VERWERFEN_MAX", "WAMO_STIMME_VERWERFEN_MIN_SECS",
+    "WAMO_STIMME_NUR_EIGEN", "WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN",
 )
 # Der Modellpfad gilt je Rechner: er steht in der Liste des Servers (dort setzbar), aber nie in der Liste, die der PC aus seiner .env übernimmt
 STIMME_MODELL = "WAMO_STIMME_MODELL"

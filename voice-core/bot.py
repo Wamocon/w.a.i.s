@@ -13,7 +13,8 @@ einen eigenen, engen Zweig: nur Zeit, Websuche und Canvas, kein Gedächtnis, kei
 Unterbrechungen:
   * Während WAMO spricht, laufen VAD und STT weiter.
   * MeaningfulWordsUserTurnStartStrategy: Rückmeldelaute ("mhm", "ja genau") stoppen WAMO
-    nicht, jedes andere Wort schon ("Doch", "Stopp").
+    nicht, jedes andere Wort schon ("Doch", "Stopp"). Im Modus streng mit Abdruck erst nach dem
+    Urteil eigen der Stimmprüfung (nur die eigene Stimme unterbricht, stimme_waechter.py).
   * Pipecat schreibt nur die TATSÄCHLICH gesprochenen Wörter in den Kontext (Soniox TTS liefert
     Wort-Zeitstempel). Nach einer Unterbrechung sieht Claude genau, wo WAMO aufgehört hat.
   * on_assistant_turn_stopped(interrupted=True) hängt zusätzlich eine kurze Systemnotiz an,
@@ -29,10 +30,15 @@ Nachrichten an die Oberfläche (RTVI-Servernachrichten, zusätzlich zu canvas, a
                                                                    10 s nur digitale Stille vom Mikrofon, "fehlt": 5 s gar
                                                                    keine Audiopakete, "ok": wieder Ton (audio_monitor.py)
   {"type": "stimme", "status": "aus"|"fehlt"|"laedt"|"kaputt"|"bereit", "modus"}
-  {"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert", "modus", "ignoriert"?}
-                                                                   Stimmprüfung (stimme_*.py): Stand und Ergebnis je Äußerung;
-                                                                   "ignoriert": eine fremde oder unklare Äußerung ging nicht ans
-                                                                   Modell (Regel in stimme_waechter.py)
+  {"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert", "modus"}
+                                                                   Stimmprüfung (stimme_*.py): Stand und Ergebnis je Äußerung
+  {"type": "stimme", "ergebnis", "wert" (Zahl oder null), "modus", "ignoriert": true|false, "zeit"}
+                                                                   Modus streng mit Abdruck (nie im Labor): nach jedem Urteil zu
+                                                                   einem endgültigen Transkript, auch bei Annahme; "ignoriert":
+                                                                   die Äußerung ging nicht ans Modell (nur die eigene Stimme geht
+                                                                   durch, Regel in stimme_waechter.py); "zeit": genau der timestamp
+                                                                   dieses Transkripts in user-transcription (höchstens 64 Zeichen,
+                                                                   sonst null), damit gibt der Chat links den Satz frei
   {"type": "stimmabdruck", "status": "start"|"aufnahme"|"rechnet"|"fertig"|"fehler"|"abgebrochen"|"geloescht",
    "sekunden"?, "ziel"?, "text"?}                                  Einlernen des Stimmabdrucks (nie in Laborsitzungen)
   {"type": "stimmabdruck_einwilligung", "version", "text"}         Text der Einwilligung beim Verbinden (stimme_einwilligung.py)
@@ -237,7 +243,7 @@ from soft_interrupt import (
 from soniox_tts import LazySonioxTTSService, stimme_einstellung
 from stimme_gate import schemas_absichern, tippen_beobachten, werkzeuge_absichern
 from stimme_sitzung import SPRECHER_UNSICHER, StimmSitzung, nachricht_aus
-from stimme_waechter import nur_endgueltig
+from stimme_waechter import nur_eigen_unterbricht, nur_endgueltig
 from tools import CANVAS_TYPE, TurnState, gemerkt_message, register_tools
 from wiedergabe import WiedergabeStart, halt_fuer, innehalten_max_secs, innehalten_weiter_secs
 
@@ -999,6 +1005,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                         # Stimmprüfung streng: arbeiten Werkzeug oder Modell, startet erst das endgültige Transkript den Zug (stimme_waechter.py)
                         nur_endgueltig=nur_endgueltig(stimme.waechter, soft_gate.werkzeug_laeuft, wache.modell_beschaeftigt)
                         if stimme else None,
+                        # Stimmprüfung streng: während W.A.I.S. spricht, unterbricht nur die eigene Stimme (WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN,
+                        # stimme_waechter.py); Laborprofile haben keine Stimmprüfung (None, alles wie bisher)
+                        stimme_unterbricht=nur_eigen_unterbricht(stimme.waechter) if stimme else None,
                     )
                 ],
                 # Satzende: Smart-Turn schlägt vor, Claude entscheidet, ob die Person fertig ist.

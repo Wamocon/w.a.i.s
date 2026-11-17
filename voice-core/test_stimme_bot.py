@@ -364,6 +364,56 @@ async def test_startstrategie_fragt_bei_laufender_arbeit_den_waechter():
     await session.cleanup()
 
 
+async def test_startstrategie_fragt_beim_sprechen_ob_die_eigene_stimme_unterbricht():
+    """Seit 17.11.2026: Während W.A.I.S. spricht, unterbricht im Modus streng mit Abdruck nur die eigene Stimme (stimme_waechter.nur_eigen_unterbricht)."""
+    store = m.MemoryStore(USER, BotDb())
+    session, stufen, _llm = await bauen(Identity(USER, "Erika", "mitglied", "sie"), store=store)
+    nutzer = next(p for p in stufen if isinstance(p, LLMUserAggregator))
+    abfrage = nutzer._params.user_turn_strategies.start[0]._stimme_unterbricht
+    assert abfrage is not None and abfrage() is None  # Abdruck noch nicht geladen: die Regel greift nicht, jede Stimme unterbricht
+    gate = bereit_machen(session)
+    assert (gate.schwellen.nur_eigen, gate.schwellen.unterbrechen_nur_eigen) == (True, True)  # Standard an
+    assert abfrage() is False  # bereit, noch kein Urteil eigen für eine laufende Äußerung
+    await session.cleanup()
+
+
+async def test_beide_schalter_aus_heisst_wie_bisher(monkeypatch):
+    monkeypatch.setenv("WAMO_STIMME_NUR_EIGEN", "aus")
+    monkeypatch.setenv("WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN", "aus")
+    store = m.MemoryStore(USER, BotDb())
+    session, stufen, _llm = await bauen(Identity(USER, "Erika", "admin", "sie"), store=store)
+    nutzer = next(p for p in stufen if isinstance(p, LLMUserAggregator))
+    gate = bereit_machen(session)
+    assert (gate.schwellen.nur_eigen, gate.schwellen.unterbrechen_nur_eigen) == (False, False)
+    assert nutzer._params.user_turn_strategies.start[0]._stimme_unterbricht() is None
+    await session.cleanup()
+
+
+@pytest.mark.parametrize("art", ["platz", "schaufenster"])
+async def test_laborprofil_hat_nie_einen_abdruck_auch_mit_allen_schaltern_an(art, monkeypatch):
+    """Laborprofile bekommen keine Stimmsitzung: kein Abdruck wird gelesen, kein Prüfer, kein Wächter, die Startstrategie fragt nichts.
+    Auch mit Modus streng und beiden Schaltern vom 17.11.2026 an bleibt das Unterbrechen wie bisher."""
+    for name, wert in (("WAMO_STIMME_PRUEFUNG", "streng"), ("WAMO_STIMME_NUR_EIGEN", "an"), ("WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN", "an")):
+        monkeypatch.setenv(name, wert)
+    b = Beobachter()
+    with labor_testhilfe.dienst(b.app), mock.patch.object(labor_werkzeuge, "labor_sitzung", b), \
+            mock.patch.object(bot, "Pipeline", wraps=bot.Pipeline) as pipeline, \
+            mock.patch("stimme_sitzung.abdruck_laden", mock.AsyncMock(return_value=(True, None))) as laden:
+        session = await bot.build_session(smoke.FakeTransport(), laborprofil(art))
+        session.task.queue_frames = mock.AsyncMock()
+        await session.task.rtvi._call_event_handler("on_client_ready")
+        await abwarten()
+    stufen = pipeline.call_args.args[0]
+    strategie = next(p for p in stufen if isinstance(p, LLMUserAggregator))._params.user_turn_strategies.start[0]
+    assert strategie._stimme_unterbricht is None and strategie._nur_endgueltig is None
+    assert session.stimme is None
+    assert not [p for p in stufen if isinstance(p, (Stimmpruefer, StimmWaechter))]
+    laden.assert_not_awaited()
+    assert not [x for x in gesendet(session.task.queue_frames) if x.get("type") == "stimme" and "ergebnis" in x]
+    await session.cleanup()
+    await b.client.aclose()
+
+
 def test_bot_laedt_den_abdruck_bis_der_stand_bekannt_ist():
     """Ein Fehler beim ersten Laden darf Werkzeuge nicht bis zum Sitzungsende sperren (stimme_sitzung.laden_bis_bekannt)."""
     assert "asyncio.create_task(stimme.laden_bis_bekannt())" in BOT_QUELLE
@@ -373,3 +423,9 @@ def test_bot_laedt_den_abdruck_bis_der_stand_bekannt_ist():
 def test_bot_nennt_die_neuen_nachrichten_in_der_kopfzeile():
     for text in ("stimmabdruck_einwilligung", '"type": "stimme"', '"type": "stimmabdruck"'):
         assert text in BOT_QUELLE.split("Start lokal:")[0], text
+
+
+def test_bot_nennt_ignoriert_und_zeit_der_stimmmeldung_in_der_kopfzeile():
+    kopf = BOT_QUELLE.split("Start lokal:")[0]
+    for text in ('"ignoriert"', '"zeit"'):
+        assert text in kopf, text

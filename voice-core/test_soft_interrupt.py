@@ -3,6 +3,7 @@
 import asyncio
 import time
 import unittest
+from unittest import mock
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -25,6 +26,7 @@ from soft_interrupt import (
     MeaningfulWordsUserTurnStartStrategy,
     PlaybackTracker,
     SoftInterruptGate,
+    StimmUrteilFrame,
     echo_filter_an,
     echo_urteil,
     ducken_an,
@@ -870,6 +872,172 @@ class DuckenTest(_GateTest):
         self.assertFalse(ducken_an("aus"))
         self.assertTrue(stopp_grenze_an(""))
         self.assertFalse(stopp_grenze_an("0"))
+
+
+class StimmeUnterbrichtStrategieTest(unittest.IsolatedAsyncioTestCase):
+    """Startstrategie mit der Abfrage der Stimmprüfung (stimme_unterbricht, stimme_waechter.nur_eigen_unterbricht, seit 17.11.2026): während
+    W.A.I.S. spricht, zählt ein Zwischenstand erst nach dem Urteil eigen; davor wartet er (der jüngste wird beim Urteil bewertet)."""
+
+    def strategie(self, abfrage, spricht=True):
+        s = MeaningfulWordsUserTurnStartStrategy(min_words=2, enable_interruptions=False, stimme_unterbricht=abfrage)
+        s._bot_speaking = spricht
+        self.ausgeloest = []
+
+        async def start():
+            self.ausgeloest.append(True)
+
+        async def reset():
+            pass
+
+        s.trigger_user_turn_started, s.trigger_reset_aggregation = start, reset
+        return s
+
+    async def test_ohne_abfrage_oder_mit_regel_aus_wie_bisher(self):
+        for abfrage in (None, lambda: None):
+            s = self.strategie(abfrage)
+            await s.process_frame(InterimTranscriptionFrame("Stopp", "u", "t"))
+            self.assertEqual(self.ausgeloest, [True])
+
+    async def test_zwischenstand_wartet_auf_das_urteil_eigen(self):
+        s = self.strategie(lambda: False)
+        ergebnis = await s.process_frame(InterimTranscriptionFrame("Stopp, warte mal", "u", "t"))
+        self.assertEqual((ergebnis.name, self.ausgeloest), ("CONTINUE", []))
+        ergebnis = await s.process_frame(StimmUrteilFrame(nr=1, eigen=True, frueh=True))
+        self.assertEqual((ergebnis.name, self.ausgeloest), ("STOP", [True]))
+
+    async def test_stoppwort_wartet_ebenso(self):
+        s = self.strategie(lambda: False)
+        await s.process_frame(InterimTranscriptionFrame("Stopp", "u", "t"))
+        self.assertEqual(self.ausgeloest, [])
+        await s.process_frame(StimmUrteilFrame(nr=1, eigen=True))
+        self.assertEqual(self.ausgeloest, [True])
+
+    async def test_urteil_nicht_eigen_vergisst_den_zwischenstand(self):
+        s = self.strategie(lambda: False)
+        await s.process_frame(InterimTranscriptionFrame("Stopp, warte mal", "u", "t"))
+        await s.process_frame(StimmUrteilFrame(nr=1, eigen=False))
+        await s.process_frame(StimmUrteilFrame(nr=2, eigen=True))
+        self.assertEqual(self.ausgeloest, [])
+
+    async def test_neue_aeusserung_vergisst_den_alten_zwischenstand(self):
+        s = self.strategie(lambda: False)
+        await s.process_frame(InterimTranscriptionFrame("Stopp, warte mal", "u", "t"))
+        await s.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+        await s.process_frame(StimmUrteilFrame(nr=2, eigen=True))
+        self.assertEqual(self.ausgeloest, [])
+
+    async def test_ende_der_rede_vergisst_den_zwischenstand(self):
+        s = self.strategie(lambda: False)
+        await s.process_frame(InterimTranscriptionFrame("Stopp, warte mal", "u", "t"))
+        await s.process_frame(BotStoppedSpeakingFrame())
+        await s.process_frame(StimmUrteilFrame(nr=1, eigen=True))
+        self.assertEqual(self.ausgeloest, [])
+
+    async def test_nach_dem_urteil_eigen_gelten_die_regeln_wie_bisher(self):
+        """Rückmeldung, Mindestzahl der Wörter und Stoppwort entscheiden wie bisher."""
+        s = self.strategie(lambda: True)
+        for text in ("mhm", "ja genau", "Hier"):
+            await s.process_frame(InterimTranscriptionFrame(text, "u", "t"))
+        self.assertEqual(self.ausgeloest, [])
+        await s.process_frame(InterimTranscriptionFrame("Stopp", "u", "t"))
+        self.assertEqual(self.ausgeloest, [True])
+        s = self.strategie(lambda: False)
+        await s.process_frame(InterimTranscriptionFrame("mhm", "u", "t"))
+        await s.process_frame(StimmUrteilFrame(nr=1, eigen=True))
+        self.assertEqual(self.ausgeloest, [])  # die eigene Rückmeldung unterbricht auch nach dem Urteil nicht
+
+    async def test_endgueltiges_transkript_zaehlt_wie_bisher(self):
+        """Das hat der Wächter schon geprüft: was mit Text ankommt, darf unterbrechen."""
+        s = self.strategie(lambda: False)
+        await s.process_frame(TranscriptionFrame("Stopp, warte mal", "u", "t"))
+        self.assertEqual(self.ausgeloest, [True])
+
+    async def test_echo_beim_warten_nimmt_die_daempfung_zurueck(self):
+        """Auch ein wartender Zwischenstand, der Echo der eigenen Rede ist, entwarnt das Gate wie bisher (lange Sperre gegen Pumpen)."""
+        beurteilt = []
+        s = MeaningfulWordsUserTurnStartStrategy(min_words=2, enable_interruptions=False, stimme_unterbricht=lambda: False,
+                                                 gesprochen=lambda secs: ["die", "hauptstadt", "von", "frankreich", "ist", "paris"],
+                                                 beurteilt=beurteilt.append)
+        s._bot_speaking = True
+        ausgeloest = []
+
+        async def start():
+            ausgeloest.append(True)
+
+        async def reset():
+            pass
+
+        s.trigger_user_turn_started, s.trigger_reset_aggregation = start, reset
+        await s.process_frame(InterimTranscriptionFrame("Frankreich ist Paris", "u", "t"))
+        self.assertEqual((beurteilt, ausgeloest), (["echo"], []))
+        await s.process_frame(InterimTranscriptionFrame("Stopp, warte mal", "u", "t"))
+        self.assertEqual(beurteilt, ["echo"])  # kein Echo: wartet still auf das Urteil
+
+    async def test_schweigt_wamo_fragt_die_strategie_nicht(self):
+        abfrage = mock.Mock(return_value=False)
+        s = self.strategie(abfrage, spricht=False)
+        await s.process_frame(InterimTranscriptionFrame("Hallo", "u", "t"))
+        self.assertEqual(self.ausgeloest, [True])
+        abfrage.assert_not_called()
+
+
+class StimmUrteilGateTest(_GateTest):
+    """Urteil nicht eigen, während W.A.I.S. spricht: die vorsorgliche Dämpfung endet sofort (StimmUrteilFrame vom Prüfer)."""
+
+    def setUp(self):
+        self._alt = (soft_interrupt.DUCK_VERZOEGERUNG_SECS, soft_interrupt.DUCK_MAX_SECS)
+        soft_interrupt.DUCK_VERZOEGERUNG_SECS = 0.02
+        soft_interrupt.DUCK_MAX_SECS = 1.0
+
+    def tearDown(self):
+        soft_interrupt.DUCK_VERZOEGERUNG_SECS, soft_interrupt.DUCK_MAX_SECS = self._alt
+
+    def nachrichten(self):
+        return [f.data for f in self.gesendet if isinstance(f, RTVIServerMessageFrame)]
+
+    async def test_fremde_stimme_nimmt_die_daempfung_sofort_zurueck_und_sperrt(self):
+        g = self.gate(ducken=True)
+        g._vad_spricht = True
+        g._duck_planen()
+        await asyncio.sleep(0.06)
+        g.fremde_stimme()
+        await asyncio.sleep(0.02)
+        self.assertEqual([m["an"] for m in self.nachrichten()], [True, False])
+        g._duck_planen()
+        await asyncio.sleep(0.06)
+        self.assertEqual(len(self.nachrichten()), 2, "in der Sperrzeit wird nicht erneut gedämpft")
+
+    async def test_fremde_stimme_vor_dem_daempfen_verhindert_es(self):
+        g = self.gate(ducken=True)
+        g._vad_spricht = True
+        g._duck_planen()
+        g.fremde_stimme()
+        await asyncio.sleep(0.08)
+        self.assertEqual(self.nachrichten(), [])
+
+    async def test_nach_bestaetigtem_einwurf_aendert_sich_nichts(self):
+        g = self.gate(ducken=True, playback_lag_secs=0.05)
+        g._vad_spricht = True
+        g._duck_planen()
+        await asyncio.sleep(0.06)
+        g._arm()
+        g.fremde_stimme()
+        await asyncio.sleep(0.1)
+        self.assertEqual([m["an"] for m in self.nachrichten() if "an" in m], [True])
+
+    async def test_ohne_ducken_geschieht_nichts(self):
+        g = self.gate(ducken=False)
+        g.fremde_stimme()
+        await asyncio.sleep(0.02)
+        self.assertEqual((self.nachrichten(), g._duck_gesperrt_bis), ([], 0.0))
+
+    async def test_urteile_enden_im_gate(self):
+        gate = SoftInterruptGate(ducken=True, max_wait_secs=0)
+        unten, _ = await run_test(gate, frames_to_send=[
+            BotStartedSpeakingFrame(), SleepFrame(0.05), VADUserStartedSpeakingFrame(start_secs=0.2), SleepFrame(0.35),
+            StimmUrteilFrame(nr=1, eigen=False), SleepFrame(0.05), StimmUrteilFrame(nr=2, eigen=True, frueh=True)])
+        self.assertFalse([f for f in unten if isinstance(f, StimmUrteilFrame)])
+        self.assertEqual([f.data["an"] for f in unten if isinstance(f, RTVIServerMessageFrame)], [True, False])
 
 
 if __name__ == "__main__":
