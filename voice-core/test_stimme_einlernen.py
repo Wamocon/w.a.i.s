@@ -57,7 +57,7 @@ def audio(wert: int, secs: float = 0.02) -> bytes:
     return np.full(int(RATE * secs), wert, dtype=np.int16).tobytes()
 
 
-class EinlernenTests(unittest.IsolatedAsyncioTestCase):
+class EinlernenBasis(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.uhr = Uhr()
         self.gate = StimmGate(modus="streng", uhr=self.uhr)
@@ -89,6 +89,8 @@ class EinlernenTests(unittest.IsolatedAsyncioTestCase):
         self.e.bot_spricht(True)
         self.e.bot_spricht(False)
 
+
+class EinlernenTests(EinlernenBasis):
     async def test_einlernen_nach_ihrer_anleitung(self):
         await self.e.starten("stimme-1", EINWILLIGUNG_AM)
         self.sagen.assert_awaited_once_with(ANLEITUNG)
@@ -235,7 +237,7 @@ class EinlernenTests(unittest.IsolatedAsyncioTestCase):
         freigabe = asyncio.Event()
         speichert = asyncio.Event()
 
-        async def langsam(abdruck, version, am):
+        async def langsam(abdruck, version, am, **_):
             speichert.set()
             await freigabe.wait()
             return True
@@ -314,7 +316,7 @@ class EinlernenTests(unittest.IsolatedAsyncioTestCase):
     async def test_zu_wenig_gesprochen_wird_nicht_gespeichert(self):
         await self.e.starten("stimme-1", EINWILLIGUNG_AM)
         await self.anleitung_vorbei()
-        with mock.patch.object(se, "sprachbloecke", return_value=audio(8000, 5.0)):  # nach dem Schneiden bleiben nur 5 s
+        with mock.patch.object(se, "ohne_pausen", return_value=audio(8000, 5.0)):  # ohne die Pausen bleiben nur 5 s (3 Stücke)
             await self.aufnehmen(ZIEL_SECS + 0.1)
             await self.e.warten()
         self.speichern.assert_not_awaited()
@@ -398,14 +400,79 @@ class EinlernenTests(unittest.IsolatedAsyncioTestCase):
         self.speichern.assert_not_awaited()
 
     async def test_die_aufnahme_wird_nirgends_gespeichert(self):
-        """Nur der Abdruck geht an speichern: drei Argumente, kein Ton."""
+        """Nur der Abdruck geht an speichern: drei Argumente und die persönliche Schwelle, kein Ton."""
         await self.e.starten("stimme-1", EINWILLIGUNG_AM)
         await self.anleitung_vorbei()
         await self.aufnehmen(ZIEL_SECS + 0.1)
         await self.e.warten()
         abdruck, version, am = self.speichern.await_args.args
         self.assertEqual(abdruck.shape, (DIM,))
-        self.assertEqual(self.speichern.await_args.kwargs, {})
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.5})
+
+
+class EinlernenWiePruefenTests(EinlernenBasis):
+    """Einlernen passend zum Prüfen (17.11.2026): Stücke von 1,5 s ohne Schnitt in Blöcke, nur Pausen über 0,3 s fallen weg; dazu die
+    persönliche Schwelle aus den Stücken (stimme_modell.schwelle_einlernen)."""
+
+    async def saetze(self, pause_secs: float):
+        """Sätze von einer Sekunde mit Pausen dazwischen, bis das Ziel an Sprache erreicht ist."""
+        await self.e.starten("stimme-1", EINWILLIGUNG_AM)
+        await self.anleitung_vorbei()
+        while self.e.aktiv:
+            await self.aufnehmen(1.0)
+            if self.e.aktiv:
+                await self.aufnehmen(pause_secs, wert=0)
+        await self.e.warten()
+
+    async def test_lange_pausen_fallen_weg(self):
+        await self.saetze(0.5)
+        self.assertEqual(self.modell.rechner.aufrufe, 13)  # 20 s Sprache, Stücke von 1,5 s
+        self.speichern.assert_awaited_once()
+
+    async def test_kurze_pausen_bleiben_im_ton(self):
+        await self.saetze(0.2)
+        self.assertIn(self.modell.rechner.aufrufe, (15, 16))  # 20 s Sprache und 19 oder 20 Pausen von 0,2 s (Rundung der Pakete)
+
+    async def test_persoenliche_schwelle_geht_an_speicher_und_gate(self):
+        with mock.patch.object(se.logger, "info") as info:
+            await self.saetze(0.5)
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.5})  # gleiche Stücke: die Obergrenze
+        self.assertEqual(self.gate.schwelle_kurz, 0.5)
+        zeilen = [c.args for c in info.call_args_list if "Stücke" in c.args[0]]
+        self.assertEqual(len(zeilen), 1)
+        self.assertEqual(zeilen[0][1:], (13, 1.0, 1.0, 0.5))  # Stücke, Streuung, 10-%-Quantil, persönliche Schwelle
+        self.assertIn("Schwelle", zeilen[0][0])
+
+    async def test_schwelle_folgt_den_stuecken(self):
+        rng = np.random.default_rng(4)
+        basis = EIGENER + 0.0
+
+        class Streuend(Rechner):
+            def embed(self, pcm, rate):
+                self.aufrufe += 1
+                v = basis + 0.8 * rng.normal(size=DIM) / np.sqrt(DIM)
+                return (v / np.linalg.norm(v)).astype(np.float32)
+
+        rechner = Streuend()
+        e = self.e = self.neu(Modell(rechner))
+        await e.starten("stimme-1", EINWILLIGUNG_AM)
+        await self.anleitung_vorbei()
+        await self.aufnehmen(ZIEL_SECS + 0.1)
+        await e.warten()
+        schwelle = self.speichern.await_args.kwargs["schwelle"]
+        self.assertIsInstance(schwelle, float)
+        self.assertTrue(0.30 <= schwelle <= 0.50, schwelle)
+        self.assertEqual(self.gate.schwelle_kurz, schwelle)
+
+    async def test_zu_wenig_stuecke_nach_dem_entfernen_der_pausen(self):
+        self.assertEqual(se.MIN_STUECKE, 8)
+        await self.e.starten("stimme-1", EINWILLIGUNG_AM)
+        await self.anleitung_vorbei()
+        with mock.patch.object(se, "ohne_pausen", return_value=audio(8000, 11.9)):  # 7 Stücke
+            await self.aufnehmen(ZIEL_SECS + 0.1)
+            await self.e.warten()
+        self.speichern.assert_not_awaited()
+        self.assertIn("zu wenig", self.meldungen()[-1]["text"])
 
 
 if __name__ == "__main__":

@@ -59,23 +59,122 @@ class EinstufungTests(unittest.TestCase):
         gate = StimmGate()
         self.assertEqual(gate.einstufen(0.7, 2.0, False), EIGEN)
         self.assertEqual(gate.einstufen(0.9, 0.5, False), KURZ)  # zu kurz für "eigen", klingt aber nach der Person
-        self.assertEqual(gate.einstufen(0.4, 0.5, False), UNKLAR)  # kurz und nicht nach der Person: das Vertrauen geht
-        self.assertEqual(gate.einstufen(0.4, 0.5, True), UNKLAR)
+        self.assertEqual(gate.einstufen(0.33, 0.5, False), UNKLAR)  # kurz und nicht nach der Person: das Vertrauen geht
+        self.assertEqual(gate.einstufen(0.33, 0.5, True), UNKLAR)
         self.assertEqual(gate.einstufen(0.1, 0.5, False), FREMD)  # auch kurz klar fremd
         self.assertEqual(gate.einstufen(0.1, 2.0, False), FREMD)
         self.assertEqual(gate.einstufen(0.1, 2.0, True), UNKLAR)  # WAMO sprach gleichzeitig, es kann Echo sein
-        self.assertEqual(gate.einstufen(0.4, 2.0, False), UNKLAR)
+        self.assertEqual(gate.einstufen(0.4, 3.5, False), UNKLAR)
 
     def test_grenzen_gehoeren_zur_besseren_seite(self):
         gate = StimmGate()
-        self.assertEqual(gate.einstufen(0.5, 1.0, False), EIGEN)
+        self.assertEqual(gate.einstufen(0.35, 1.0, False), EIGEN)
+        self.assertEqual(gate.einstufen(0.45, 3.0, False), EIGEN)
         self.assertEqual(gate.einstufen(0.3, 1.0, False), FREMD)
 
     def test_eigene_schwellen(self):
-        gate = StimmGate(schwellen=Schwellen(eigen_min=0.6, fremd_max=0.2, min_secs=2.0))
+        gate = StimmGate(schwellen=Schwellen(eigen_min_kurz=0.6, eigen_min_lang=0.6, fremd_max=0.2, min_secs=2.0))
         self.assertEqual(gate.einstufen(0.55, 3.0, False), UNKLAR)
         self.assertEqual(gate.einstufen(0.25, 3.0, False), UNKLAR)
         self.assertEqual(gate.einstufen(0.65, 1.5, False), KURZ)
+
+
+class SchwelleNachLaengeTests(unittest.TestCase):
+    """Befund vom 17.11.2026: kurze eigene Äußerungen (0,4 bis 1,8 s) lagen meist bei 0,35 bis 0,60, eine zweite Person bei 0,10 bis 0,30.
+    Die Schwelle für "eigen" hängt deshalb von der Länge ab: bis KURZ_BIS_SECS die kurze, ab LANG_AB_SECS die lange, dazwischen linear."""
+
+    def test_standard_kurz_0_35_lang_0_45_fremd_0_3(self):
+        s = Schwellen()
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang, s.fremd_max), (0.35, 0.45, 0.3))
+        self.assertEqual((stimme_gate.KURZ_BIS_SECS, stimme_gate.LANG_AB_SECS), (1.5, 3.0))
+
+    def test_schwelle_waechst_linear_mit_der_laenge(self):
+        gate = StimmGate()
+        for secs, soll in ((0.4, 0.35), (1.0, 0.35), (1.5, 0.35), (2.25, 0.40), (3.0, 0.45), (4.5, 0.45), (8.0, 0.45)):
+            self.assertAlmostEqual(gate.schwelle_fuer(secs), soll, places=6, msg=secs)
+
+    def test_einstufung_nach_laenge(self):
+        gate = StimmGate()
+        self.assertEqual(gate.einstufen(0.36, 1.2, False), EIGEN)  # kurz, aber genug Sprache für ein Urteil
+        self.assertEqual(gate.einstufen(0.36, 0.6, False), KURZ)
+        self.assertEqual(gate.einstufen(0.34, 0.6, False), UNKLAR)
+        self.assertEqual(gate.einstufen(0.39, 2.25, False), UNKLAR)
+        self.assertEqual(gate.einstufen(0.40, 2.25, False), EIGEN)
+        self.assertEqual(gate.einstufen(0.44, 3.0, False), UNKLAR)
+        self.assertEqual(gate.einstufen(0.46, 4.5, False), EIGEN)
+        for secs in (0.4, 1.0, 2.0, 4.5):  # fremd bis 0,3 für alle Längen
+            self.assertEqual(gate.einstufen(0.3, secs, False), FREMD, secs)
+            self.assertEqual(gate.einstufen(0.3, secs, True), UNKLAR, secs)
+
+    def test_befund_vom_17_11(self):
+        """Die eigenen Werte (0,35 bis 0,60 bei 0,4 bis 1,5 s) gelten als eigen oder kurz, die zweite Person (0,10 bis 0,30) nie."""
+        gate = StimmGate()
+        for wert in (0.35, 0.41, 0.6):
+            for secs in (0.4, 0.9, 1.5):
+                self.assertIn(gate.einstufen(wert, secs, False), (EIGEN, KURZ), (wert, secs))
+        for wert in (0.1, 0.2, 0.3):
+            for secs in (0.4, 0.9, 1.8):
+                self.assertEqual(gate.einstufen(wert, secs, False), FREMD, (wert, secs))
+
+    def test_kurz_bewertet_immer_mit_der_kurzen_schwelle(self):
+        """Unter WAMO_STIMME_MIN_SECS gilt die kurze Schwelle, auch wenn MIN_SECS über KURZ_BIS_SECS liegt."""
+        gate = StimmGate(schwellen=Schwellen(min_secs=2.5))
+        self.assertEqual(gate.einstufen(0.36, 2.0, False), KURZ)
+        self.assertAlmostEqual(gate.schwelle_fuer(2.0), 0.35)
+        self.assertEqual(gate.einstufen(0.36, 2.6, False), UNKLAR)
+
+    def test_persoenliche_schwelle_ersetzt_die_kurze(self):
+        gate = bereites_gate()
+        gate.setze_abdruck(ABDRUCK, schwelle=0.42)
+        self.assertEqual(gate.schwelle_kurz, 0.42)
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.42)
+        self.assertAlmostEqual(gate.schwelle_fuer(3.0), 0.45)  # die lange bleibt aus der Umgebung
+        self.assertEqual(gate.einstufen(0.41, 1.2, False), UNKLAR)
+        self.assertEqual(gate.einstufen(0.42, 1.2, False), EIGEN)
+        gate.setze_abdruck(ABDRUCK, schwelle=0.31)
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.31)
+        self.assertAlmostEqual(gate.schwelle_fuer(2.25), 0.38)
+        self.assertEqual(gate.einstufen(0.32, 0.8, False), KURZ)
+
+    def test_die_lange_schwelle_liegt_nie_unter_der_persoenlichen(self):
+        gate = bereites_gate()
+        gate.setze_abdruck(ABDRUCK, schwelle=0.48)
+        for secs in (1.0, 2.25, 3.0, 6.0):
+            self.assertAlmostEqual(gate.schwelle_fuer(secs), 0.48, msg=secs)
+
+    def test_persoenliche_schwelle_nie_unter_fremd_max(self):
+        gate = StimmGate(schwellen=Schwellen(fremd_max=0.33))
+        gate.setze_abdruck(ABDRUCK, schwelle=0.30)
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.33)
+
+    def test_ohne_abdruck_oder_ohne_angabe_keine_persoenliche_schwelle(self):
+        gate = bereites_gate()
+        gate.setze_abdruck(ABDRUCK, schwelle=0.42)
+        gate.setze_abdruck(ABDRUCK)  # neu eingelernt oder geladen ohne Schwelle (Migration 0025 fehlt)
+        self.assertIsNone(gate.schwelle_kurz)
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.35)
+        gate.setze_abdruck(ABDRUCK, schwelle=0.42)
+        gate.setze_abdruck(None, geloescht=True)
+        self.assertIsNone(gate.schwelle_kurz)
+        gate.setze_abdruck(ABDRUCK, schwelle=0.42)
+        gate.setze_abdruck(ABDRUCK, ok=False, schwelle=0.42)  # nicht lesbar: nichts davon gilt
+        self.assertIsNone(gate.schwelle_kurz)
+
+    def test_ohne_speicherbare_schwelle_gilt_keine(self):
+        """Fehlt die Spalte in der Datenbank (Migration 0025), setzt die Sitzung schwelle_erlaubt auf False: dann wirkt auch eine gerade
+        berechnete Schwelle nicht, alles läuft wie mit der Schwelle aus der Umgebung."""
+        gate = bereites_gate()
+        gate.schwelle_erlaubt = False
+        gate.setze_abdruck(ABDRUCK, schwelle=0.48)
+        self.assertIsNone(gate.schwelle_kurz)
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.35)
+
+    def test_unbrauchbare_persoenliche_schwelle_gilt_nicht(self):
+        gate = bereites_gate()
+        for falsch in (float("nan"), float("inf"), 0.1, 0.9, -0.4):
+            gate.setze_abdruck(ABDRUCK, schwelle=falsch)
+            self.assertIsNone(gate.schwelle_kurz, falsch)
+            self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.35)
 
 
 class VertrauenTests(unittest.TestCase):
@@ -371,14 +470,15 @@ class SchalterTests(unittest.TestCase):
     def test_schwellen_standard(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             s = schwellen_aus_env()
-        self.assertEqual((s.eigen_min, s.fremd_max, s.min_secs, s.vertrauen_secs), (0.5, 0.3, 1.0, 120.0))
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang, s.fremd_max, s.min_secs, s.vertrauen_secs), (0.35, 0.45, 0.3, 1.0, 120.0))
 
     def test_schwellen_aus_der_umgebung_mit_komma(self):
         umgebung = {"WAMO_STIMME_EIGEN_MIN": "0,6", "WAMO_STIMME_FREMD_MAX": "0.25", "WAMO_STIMME_MIN_SECS": "1.5",
                     "WAMO_STIMME_VERTRAUEN_SECS": "60"}
         with mock.patch.dict("os.environ", umgebung, clear=True):
             s = schwellen_aus_env()
-        self.assertEqual((s.eigen_min, s.fremd_max, s.min_secs, s.vertrauen_secs), (0.6, 0.25, 1.5, 60.0))
+        # nur das alte WAMO_STIMME_EIGEN_MIN gesetzt: es gilt für beide Längen wie bisher
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang, s.fremd_max, s.min_secs, s.vertrauen_secs), (0.6, 0.6, 0.25, 1.5, 60.0))
 
     def test_unbrauchbare_zahlen_heissen_standard(self):
         umgebung = {"WAMO_STIMME_VERTRAUEN_SECS": "nan", "WAMO_STIMME_EIGEN_MIN": "x", "WAMO_STIMME_MIN_SECS": "inf",
@@ -404,13 +504,49 @@ class SchalterTests(unittest.TestCase):
         umgebung = {"WAMO_STIMME_EIGEN_MIN": "0.4", "WAMO_STIMME_FREMD_MAX": "0.45", "WAMO_STIMME_KURZ_VERTRAUEN_SECS": "30"}
         with mock.patch.dict("os.environ", umgebung, clear=True):
             s = schwellen_aus_env()
-        self.assertEqual((s.eigen_min, s.fremd_max, s.kurz_vertrauen_secs), (0.5, 0.3, 30.0))
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang, s.fremd_max, s.kurz_vertrauen_secs), (0.35, 0.45, 0.3, 30.0))
 
     def test_eigen_min_hat_die_untergrenze_0_35(self):
         with mock.patch.dict("os.environ", {"WAMO_STIMME_EIGEN_MIN": "0.3", "WAMO_STIMME_FREMD_MAX": "0.1"}, clear=True):
-            self.assertEqual(schwellen_aus_env().eigen_min, 0.5)  # zu niedrig: Standard
+            s = schwellen_aus_env()
+            self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang), (0.35, 0.45))  # zu niedrig: Standard
         with mock.patch.dict("os.environ", {"WAMO_STIMME_EIGEN_MIN": "0.35", "WAMO_STIMME_FREMD_MAX": "0.2"}, clear=True):
-            self.assertEqual(schwellen_aus_env().eigen_min, 0.35)
+            s = schwellen_aus_env()
+            self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang), (0.35, 0.35))
+
+    def test_kurz_und_lang_aus_der_umgebung(self):
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_EIGEN_MIN_KURZ": "0,4", "WAMO_STIMME_EIGEN_MIN_LANG": "0.5"}, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang), (0.4, 0.5))
+
+    def test_neue_schalter_gehen_vor_das_alte_gilt_fuer_den_rest(self):
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_EIGEN_MIN": "0.5", "WAMO_STIMME_EIGEN_MIN_LANG": "0.6"}, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang), (0.5, 0.6))
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_EIGEN_MIN": "0.5", "WAMO_STIMME_EIGEN_MIN_KURZ": "0.4"}, clear=True):
+            s = schwellen_aus_env()
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang), (0.4, 0.5))
+
+    def test_kurz_nie_ueber_lang(self):
+        stimme_gate._GEWARNT.clear()
+        umgebung = {"WAMO_STIMME_EIGEN_MIN_KURZ": "0.5", "WAMO_STIMME_EIGEN_MIN_LANG": "0.4"}
+        with mock.patch.dict("os.environ", umgebung, clear=True), mock.patch.object(stimme_gate.logger, "warning") as warnung:
+            s = schwellen_aus_env()
+            schwellen_aus_env()
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang), (0.5, 0.5))  # die lange steigt auf die kurze
+        self.assertEqual(warnung.call_count, 1)
+
+    def test_kurz_und_lang_haben_denselben_bereich_wie_eigen_min(self):
+        for name, standard in (("WAMO_STIMME_EIGEN_MIN_KURZ", 0.35), ("WAMO_STIMME_EIGEN_MIN_LANG", 0.45)):
+            for roh in ("0.3", "0.96", "x", "nan"):
+                with mock.patch.dict("os.environ", {name: roh}, clear=True):
+                    s = schwellen_aus_env()
+                self.assertEqual(s.eigen_min_kurz if name.endswith("KURZ") else s.eigen_min_lang, standard, (name, roh))
+
+    def test_fremd_muss_unter_der_kurzen_liegen(self):
+        umgebung = {"WAMO_STIMME_EIGEN_MIN_KURZ": "0.4", "WAMO_STIMME_FREMD_MAX": "0.42"}
+        with mock.patch.dict("os.environ", umgebung, clear=True):
+            self.assertEqual(schwellen_aus_env(), Schwellen())
 
     def test_vertrauen_hat_eine_grenze_nach_unten(self):
         with mock.patch.dict("os.environ", {"WAMO_STIMME_VERTRAUEN_SECS": "0"}, clear=True):
@@ -434,10 +570,11 @@ class SchalterTests(unittest.TestCase):
             self.assertEqual(schwellen_aus_env().verwerfen_min_secs, 10.0)  # die Obergrenze gilt noch
 
     def test_verwerfen_max_liegt_zwischen_fremd_und_eigen(self):
-        """Beide Ränder sind erlaubt: FREMD_MAX schaltet das Verwerfen unklarer Äußerungen ab, EIGEN_MIN verwirft jede unklare. Zahlen
-        außerhalb werden an den Rand gesetzt ("0" heißt also: nur fremde verwerfen), keine Zahl heißt Standard."""
-        for roh, soll in (("0.3", 0.3), ("0.5", 0.5), ("0.29", 0.3), ("0", 0.3), ("0.51", 0.5), ("0.9", 0.5), ("x", 0.4), ("nan", 0.4),
-                          ("-1", 0.4)):
+        """Beide Ränder sind erlaubt: FREMD_MAX schaltet das Verwerfen unklarer Äußerungen ab, EIGEN_MIN_LANG (die höchste Schwelle für
+        eigen) verwirft jede unklare. Zahlen außerhalb werden an den Rand gesetzt ("0" heißt also: nur fremde verwerfen), keine Zahl heißt
+        Standard."""
+        for roh, soll in (("0.3", 0.3), ("0.45", 0.45), ("0.29", 0.3), ("0", 0.3), ("0.5", 0.45), ("0.9", 0.45), ("x", 0.4),
+                          ("nan", 0.4), ("-1", 0.4)):
             with mock.patch.dict("os.environ", {"WAMO_STIMME_VERWERFEN_MAX": roh}, clear=True):
                 self.assertEqual(schwellen_aus_env().verwerfen_max, soll, roh)
 
@@ -464,7 +601,8 @@ class SchalterTests(unittest.TestCase):
                     "WAMO_STIMME_VERWERFEN_MIN_SECS": "0.5"}
         with mock.patch.dict("os.environ", umgebung, clear=True):
             s = schwellen_aus_env()
-        self.assertEqual((s.eigen_min, s.fremd_max, s.verwerfen_max, s.verwerfen_min_secs), (0.5, 0.3, 0.42, 0.5))
+        self.assertEqual((s.eigen_min_kurz, s.eigen_min_lang, s.fremd_max, s.verwerfen_max, s.verwerfen_min_secs),
+                         (0.35, 0.45, 0.3, 0.42, 0.5))
 
     def test_verwerfen_min_secs_unbrauchbar_heisst_standard(self):
         for roh in ("-1", "x", "nan", "11"):

@@ -24,7 +24,7 @@ from pipecat.tests.utils import run_test
 
 import stimme_pruefer
 from soft_interrupt import StimmUrteilFrame
-from stimme_gate import EIGEN, FREMD, UNKLAR, Schwellen, StimmGate
+from stimme_gate import EIGEN, FREMD, KURZ, UNKLAR, Schwellen, StimmGate
 from stimme_modell import DIM
 from stimme_pruefer import MAX_PRUEF_SECS, URTEIL_MAX_ALTER_SECS, Stimmpruefer
 
@@ -41,7 +41,12 @@ class Uhr:
         return self.t
 
 
-HALB = np.array([0.4, np.sqrt(1 - 0.16)] + [0.0] * (DIM - 2), dtype=np.float32)  # Kosinus 0,4 zum eigenen Abdruck
+def mit_kosinus(wert: float) -> np.ndarray:
+    """Ein Abdruck mit genau diesem Kosinus zum eigenen."""
+    return np.array([wert, np.sqrt(1 - wert * wert)] + [0.0] * (DIM - 2), dtype=np.float32)
+
+
+HALB = mit_kosinus(0.33)  # unter der kurzen Schwelle 0,35, über fremd 0,3
 
 
 class Rechner:
@@ -245,6 +250,47 @@ class PruefenTests(PrueferBasis):
         self.assertIsNone(await zweiter.urteil_abwarten(0.05))
 
 
+class KalibrierungsLogTests(PrueferBasis):
+    """Die Logzeile des Prüfers nennt Wert, Länge, Urteil und die angewandte Schwelle (Kalibrierung vom 17.11.2026), nie Inhalte."""
+
+    def zeilen(self, info):
+        return [c.args for c in info.call_args_list if c.args and str(c.args[0]).startswith("Stimme")]
+
+    async def test_zeile_nennt_die_schwelle_nach_laenge(self):
+        self.modell.rechner.festes_ergebnis = mit_kosinus(0.41)
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            urteil = await self.sprechen(8000, 0.9)
+        self.assertEqual(urteil.urteil, KURZ)
+        self.assertAlmostEqual(urteil.schwelle, 0.35)
+        (zeile,) = self.zeilen(info)
+        self.assertIn("Schwelle", zeile[0])
+        wert, secs, _, art, schwelle = zeile[1:]
+        self.assertAlmostEqual(wert, 0.41, places=4)
+        self.assertAlmostEqual(secs, 0.9, places=4)
+        self.assertEqual((art, schwelle), (KURZ, 0.35))
+
+    async def test_lange_aeusserung_mit_der_langen_schwelle(self):
+        self.modell.rechner.festes_ergebnis = mit_kosinus(0.41)
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            urteil = await self.sprechen(8000, 3.2)
+        self.assertEqual(urteil.urteil, UNKLAR)
+        self.assertAlmostEqual(urteil.schwelle, 0.45)
+        self.assertAlmostEqual(self.zeilen(info)[0][-1], 0.45)
+
+    async def test_persoenliche_schwelle_steht_in_der_zeile(self):
+        self.gate.setze_abdruck(EIGENER, schwelle=0.42)
+        self.modell.rechner.festes_ergebnis = mit_kosinus(0.41)
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            urteil = await self.sprechen(8000, 1.2)
+        self.assertEqual((urteil.urteil, urteil.schwelle), (UNKLAR, 0.42))
+        self.assertAlmostEqual(self.zeilen(info)[0][-1], 0.42)
+
+    async def test_fehlgeschlagene_pruefung_hat_keine_schwelle(self):
+        self.modell.rechner.embed = mock.Mock(side_effect=RuntimeError("kaputt"))
+        urteil = await self.sprechen(8000, 1.2)
+        self.assertEqual((urteil.urteil, urteil.wert, urteil.schwelle), (UNKLAR, None, None))
+
+
 class UrteilAbwartenTests(PrueferBasis):
     async def test_ohne_pruefung_gibt_es_kein_urteil(self):
         self.assertIsNone(await self.v.urteil_abwarten(0.05))
@@ -422,6 +468,15 @@ class FruehTests(PrueferBasis):
     def beginnen(self, *, wamo_spricht: bool = True):
         self.v.on_bot_speaking(wamo_spricht)
         self.v.on_speech_start(self.uhr.t + 0.2, 0.2)
+
+    async def test_fruehe_zeile_nennt_die_schwelle(self):
+        self.beginnen()
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            await self.reden(8000, 1.1)
+        zeilen = [c.args for c in info.call_args_list if c.args and str(c.args[0]).startswith("Stimme früh")]
+        self.assertEqual(len(zeilen), 1)
+        self.assertIn("Schwelle", zeilen[0][0])
+        self.assertAlmostEqual(zeilen[0][-1], 0.35)
 
     async def test_eigene_stimme_ist_nach_einer_sekunde_frueh_erkannt(self):
         self.beginnen()

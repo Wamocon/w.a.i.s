@@ -392,13 +392,15 @@ async def test_beide_schalter_aus_heisst_wie_bisher(monkeypatch):
 @pytest.mark.parametrize("art", ["platz", "schaufenster"])
 async def test_laborprofil_hat_nie_einen_abdruck_auch_mit_allen_schaltern_an(art, monkeypatch):
     """Laborprofile bekommen keine Stimmsitzung: kein Abdruck wird gelesen, kein Prüfer, kein Wächter, die Startstrategie fragt nichts.
-    Auch mit Modus streng und beiden Schaltern vom 17.11.2026 an bleibt das Unterbrechen wie bisher."""
-    for name, wert in (("WAMO_STIMME_PRUEFUNG", "streng"), ("WAMO_STIMME_NUR_EIGEN", "an"), ("WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN", "an")):
+    Auch mit Modus streng und beiden Schaltern vom 17.11.2026 an bleibt das Unterbrechen wie bisher, und mit den Schwellen nach Länge wird
+    weder ein Abdruck noch eine persönliche Schwelle gelesen."""
+    for name, wert in (("WAMO_STIMME_PRUEFUNG", "streng"), ("WAMO_STIMME_NUR_EIGEN", "an"), ("WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN", "an"),
+                       ("WAMO_STIMME_EIGEN_MIN_KURZ", "0.4"), ("WAMO_STIMME_EIGEN_MIN_LANG", "0.5")):
         monkeypatch.setenv(name, wert)
     b = Beobachter()
     with labor_testhilfe.dienst(b.app), mock.patch.object(labor_werkzeuge, "labor_sitzung", b), \
             mock.patch.object(bot, "Pipeline", wraps=bot.Pipeline) as pipeline, \
-            mock.patch("stimme_sitzung.abdruck_laden", mock.AsyncMock(return_value=(True, None))) as laden:
+            mock.patch("stimme_sitzung.abdruck_mit_schwelle_laden", mock.AsyncMock(return_value=(True, None, None))) as laden:
         session = await bot.build_session(smoke.FakeTransport(), laborprofil(art))
         session.task.queue_frames = mock.AsyncMock()
         await session.task.rtvi._call_event_handler("on_client_ready")

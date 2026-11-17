@@ -1,13 +1,21 @@
-"""Stimmabdruck einlernen: 20 Sekunden reine Sprache aufnehmen, in Stücke von 3 s teilen, den Mittelwert als Abdruck speichern.
+"""Stimmabdruck einlernen: 20 Sekunden Sprache aufnehmen, lange Pausen entfernen, in Stücke von 1,5 s teilen, den Mittelwert als Abdruck
+und eine persönliche Schwelle für kurze Äußerungen speichern.
 
 Das Einlernen beginnt nur auf Klick in der angemeldeten Oberfläche (Client-Nachricht stimmabdruck mit aktion start und gültiger Einwilligung,
 siehe stimme_sitzung.py), nie per Sprache: sonst könnte eine fremde Stimme den Abdruck ersetzen. Gibt es schon einen Abdruck (oder gab es in
 dieser Sitzung einen), braucht es außer im Modus aus einen Nachweis: die Person ist gerade an der Stimme erkannt oder frisch angemeldet. Während der Aufnahme hört die Spracherkennung nur Stille (der Aufrufer ersetzt den Ton,
 wenn sammeln True meldet), WAMO antwortet also nicht auf den Vorlesetext.
 
-Ablauf: starten (Modell laden, Anleitung sprechen) -> sammeln je Tonpaket bis ZIEL_SECS reine Sprache -> rechnen (Stücke, Mittelwert,
-Streuung) -> speichern -> Abdruck und Vertrauen im Gate setzen. Abbrechen geht jederzeit, auch während des Rechnens (dann wird nichts
-gespeichert). Der Rohton liegt nur im Arbeitsspeicher und wird nach dem Rechnen verworfen.
+Ablauf: starten (Modell laden, Anleitung sprechen) -> sammeln je Tonpaket bis ZIEL_SECS Sprache -> rechnen (Pausen über 0,3 s entfernen,
+Stücke von 1,5 s, Mittelwert, Streuung, persönliche Schwelle) -> speichern -> Abdruck, Schwelle und Vertrauen im Gate setzen. Abbrechen geht
+jederzeit, auch während des Rechnens (dann wird nichts gespeichert). Der Rohton liegt nur im Arbeitsspeicher und wird nach dem Rechnen verworfen.
+
+Passend zum Prüfen (seit 17.11.2026): Der Prüfer vergleicht ganze Äußerungen, wie die Sprachpausenerkennung sie ausschneidet (mit kurzen
+Pausen und leisen Stellen, meist 0,4 bis 2 s). Früher entstand der Abdruck aus Stücken von 3 s, aus denen jeder leise 20-ms-Block entfernt
+war; das passte schlecht zu kurzen Äußerungen. Jetzt fallen nur Pausen über 0,3 s weg (stimme_modell.ohne_pausen), und die Stücke sind 1,5 s
+lang (stimme_modell.STUECK_SECS). Die persönliche Schwelle (stimme_modell.schwelle_einlernen) misst, wie ähnlich ein Stück dieser Person
+ihrem Abdruck ist (je Stück gegen den Mittelpunkt der übrigen, 10-%-Quantil minus 0,03, 0,30 bis 0,50); das Gate nimmt sie als Schwelle
+für kurze Äußerungen (stimme_gate.StimmGate.schwelle_fuer). Ins Log gehen nur Zahl der Stücke, Streuung, Quantil und Schwelle.
 
 Meldungen an die Oberfläche (über senden): {"type": "stimmabdruck", "status": start | aufnahme | rechnet | fertig | fehler | abgebrochen,
 "sekunden", "ziel", "text"} und den Stand (StimmGate.stand) beim Laden des Modells und nach dem Einlernen.
@@ -21,12 +29,13 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Protocol
 
 import numpy as np
 from loguru import logger
 
 from stimme_gate import EIGEN, StimmGate
-from stimme_modell import MIN_STUECKE, SPRACHE_DBFS, ModellQuelle, dbfs, einlern_stuecke, mittelpunkt, sprachbloecke
+from stimme_modell import MIN_STUECKE, SPRACHE_DBFS, ModellQuelle, dbfs, einlern_stuecke, mittelpunkt, ohne_pausen, schwelle_einlernen
 
 ZIEL_SECS = 20.0  # so viel reine Sprache für den Abdruck
 MAX_SECS = 90.0
@@ -52,7 +61,10 @@ ERST_ERKENNEN = (
     "Oder bitte neu anmelden, mit zweitem Faktor, dann geht es auch."
 )
 
-Speichern = Callable[[np.ndarray, str, datetime], Awaitable[bool]]
+class Speichern(Protocol):
+    """Speichert Abdruck, Version und Zeitpunkt der Einwilligung und die persönliche Schwelle (None: keine), nie Ton. True: gespeichert."""
+
+    def __call__(self, abdruck: np.ndarray, version: str, am: datetime, *, schwelle: float | None = None) -> Awaitable[bool]: ...
 
 
 @dataclass
@@ -232,23 +244,25 @@ class Einlernen:
         if rechner is None:
             await self._fehler(KEIN_MODELL)
             return
-        stuecke = einlern_stuecke(sprachbloecke(pcm, rate), rate)
+        stuecke = einlern_stuecke(ohne_pausen(pcm, rate), rate)
         if len(stuecke) < MIN_STUECKE:
             await self._fehler(ZU_WENIG)
             return
         abdruecke = await asyncio.to_thread(lambda: [rechner.embed(s, rate) for s in stuecke])
         abdruck, streuung = mittelpunkt(abdruecke)
-        logger.info("Stimmabdruck: {} Stücke, Streuung {:.2f}", len(stuecke), streuung)
+        schwelle, quantil = schwelle_einlernen(abdruecke)  # MIN_STUECKE ist größer als 2: beide sind Zahlen
+        logger.info("Stimmabdruck: {} Stücke, Streuung {:.2f}, 10-%-Quantil {:.2f}, persönliche Schwelle {:.2f}", len(stuecke),
+                    round(streuung, 2), round(quantil or 0.0, 2), round(schwelle or 0.0, 2))
         if streuung < MIN_STREUUNG:
             await self._fehler(ZU_UNRUHIG)
             return
         if gen != self._gen:  # direkt vor dem Speichern: abgebrochen oder gelöscht, dann wird nichts gespeichert
             logger.info("Stimmabdruck: abgebrochen, nichts gespeichert")
             return
-        if not await self._speichern(abdruck, version, am):
+        if not await self._speichern(abdruck, version, am, schwelle=schwelle):
             await self._fehler(NICHT_GESPEICHERT)
             return
-        self._gate.setze_abdruck(abdruck)
+        self._gate.setze_abdruck(abdruck, schwelle=schwelle)
         self._gate.modell_ok = True
         if gen != self._gen:
             # Abbruch oder Löschen, während gespeichert wurde: der Abdruck steht schon in der Datenbank. Das Gate gibt den Stand wieder
