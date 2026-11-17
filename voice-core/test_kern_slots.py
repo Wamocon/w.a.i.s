@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -154,6 +155,17 @@ class Skript(unittest.TestCase):
             self.assertIn(muss, a, muss)
         self.assertLess(a.index("Die Bewährung läuft noch"), a.index("systemctl stop"))   # beendet wird zuletzt
 
+    def test_ausleiten_uebersteht_die_zeitgrenze_des_stopps(self):
+        # R7 (16.11.2026): Der Stopp lief in TimeoutStopSec, systemd beendete mit SIGKILL, die Unit blieb failed und niemand erfuhr es
+        t = SKRIPT.read_text(encoding="utf-8")
+        a = t[t.index("cmd_ausleiten() {"):t.index("\ncase \"$befehl\" in")]
+        self.assertIn('systemctl stop "wamo-core@$alt.service" || rc=$?', a)   # ein Fehlercode des Stopps beendet das Skript nicht über set -e
+        self.assertNotRegex(a, r'(?m)^\s*systemctl stop "wamo-core@\$alt\.service"\s*$')
+        for muss in ("ActiveState", "Result", 'systemctl reset-failed "wamo-core@$alt.service"', "SIGKILL", "nach dem Stopp nicht beendet"):
+            self.assertIn(muss, a, muss)
+        self.assertLess(a.index("reset-failed"), a.index('systemctl disable "wamo-core@$alt.service"'))
+        self.assertIn('CADDY_ETC="${WAMO_CADDY_ETC:-/home/wamocon/wamo-tls/caddy/etc/kern}"', t)   # Probelauf, am Server unverändert
+
     def test_probe_ist_eine_einzelne_gesundheitsprobe_des_aktiven_slots(self):
         t = SKRIPT.read_text(encoding="utf-8")
         p = t[t.index("cmd_probe() {"):t.index("cmd_rueckweg_kern() {")]
@@ -284,6 +296,130 @@ class DropinsSpiegeln(unittest.TestCase):
         for funktion in ("cmd_umstellen", "cmd_umschalten_kern", "cmd_einrichten"):
             kopf = t[t.index(funktion + "() {"):][:200]
             self.assertIn("dropins_spiegeln", kopf, funktion)
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "braucht bash unter Linux")
+class AusleitenStopp(unittest.TestCase):
+    """R7 (16.11.2026): systemctl stop lief in TimeoutStopSec, systemd beendete den Kern mit SIGKILL (Result=timeout, Zustand failed).
+
+    Probelauf mit Attrappen für systemctl, id und journalctl: ausleiten meldet das, setzt den Fehlerzustand zurück und wählt den Slot
+    trotzdem für den Neustart ab. Läuft die Instanz nach dem Stopp noch, bricht es ab und ändert nichts.
+    """
+
+    SYSTEMCTL = """#!/usr/bin/env bash
+Z="$WAMO_PROBE_Z"
+echo "$*" >> "$Z/aufrufe"
+unit="${!#}"
+case "$1" in
+  is-active) [ "$(cat "$Z/zustand_$unit" 2>/dev/null)" = active ] ;;
+  stop) cp "$Z/stop_zustand" "$Z/zustand_$unit"; cp "$Z/stop_ergebnis" "$Z/ergebnis_$unit"; exit "$(cat "$Z/stop_rc")" ;;
+  show) case "$3" in ActiveState) cat "$Z/zustand_$unit" ;; Result) cat "$Z/ergebnis_$unit" ;; *) exit 1 ;; esac ;;
+  reset-failed) if [ -f "$Z/reset_kaputt" ]; then exit 1; fi
+    if [ "$(cat "$Z/zustand_$unit")" = failed ]; then echo inactive > "$Z/zustand_$unit"; fi; echo success > "$Z/ergebnis_$unit" ;;
+  disable|enable) ;;
+  *) exit 1 ;;
+esac
+"""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        wurzel = Path(tmp.name)
+        self.bin, self.z, self.caddy = wurzel / "bin", wurzel / "z", wurzel / "caddy"
+        for d in (self.bin, self.z, self.caddy):
+            d.mkdir()
+        for name, text in (("systemctl", self.SYSTEMCTL), ("id", "#!/bin/sh\necho 0\n"), ("journalctl", "#!/bin/sh\nexit 0\n")):
+            (self.bin / name).write_text(text, encoding="utf-8", newline="\n")
+            (self.bin / name).chmod(0o755)
+        inc = inc_text("b", "auslaufend", "a")
+        self.assertEqual(inc.returncode, 0, inc.stderr)
+        slot_inc = self.caddy / "slot.inc"
+        slot_inc.write_text(inc.stdout, encoding="utf-8")
+        alt = time.time() - 7200   # geschaltet vor zwei Stunden: die Bewährung ist vorbei
+        os.utime(slot_inc, (alt, alt))
+        self.setze("zustand_wamo-core@a.service", "active")
+        self.setze("zustand_wamo-core@b.service", "active")
+        self.setze("ergebnis_wamo-core@a.service", "success")
+
+    def setze(self, name: str, wert: str) -> None:
+        (self.z / name).write_text(wert + "\n", encoding="utf-8")
+
+    def lies(self, name: str) -> str:
+        return (self.z / name).read_text(encoding="utf-8").strip()
+
+    def aufrufe(self) -> list[str]:
+        p = self.z / "aufrufe"
+        return p.read_text(encoding="utf-8").splitlines() if p.exists() else []
+
+    def lauf(self, rc: int, zustand: str, ergebnis: str) -> subprocess.CompletedProcess:
+        self.setze("stop_rc", str(rc))
+        self.setze("stop_zustand", zustand)
+        self.setze("stop_ergebnis", ergebnis)
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "WAMO_PROBE_Z": str(self.z), "WAMO_CADDY_ETC": str(self.caddy),
+               "RUHE_MIN": "1"}
+        return subprocess.run(["bash", "wamo-core-slots.sh", "ausleiten"], cwd=str(INFRA), env=env, capture_output=True, text=True)
+
+    def test_zeitgrenze_wird_gemeldet_zurueckgesetzt_und_der_slot_abgewaehlt(self):
+        p = self.lauf(0, "failed", "timeout")   # so am 16.11.: systemctl stop kam mit 0 zurück, die Unit stand auf failed
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("timeout", p.stderr)
+        self.assertIn("SIGKILL", p.stderr)
+        a = self.aufrufe()
+        reihenfolge = ["stop wamo-core@a.service", "reset-failed wamo-core@a.service", "disable wamo-core@a.service", "enable wamo-core@b.service"]
+        self.assertEqual([x for x in a if x in reihenfolge], reihenfolge)
+        self.assertEqual(self.lies("zustand_wamo-core@a.service"), "inactive")
+        self.assertIn("abgewählt", p.stdout)
+        self.assertIn("Zeitgrenze", p.stdout)
+
+    def test_fehlercode_des_stopps_scheitert_nicht_an_set_e(self):
+        p = self.lauf(1, "failed", "timeout")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Exit 1", p.stderr)
+        a = self.aufrufe()
+        self.assertIn("reset-failed wamo-core@a.service", a)
+        self.assertIn("disable wamo-core@a.service", a)
+        self.assertIn("enable wamo-core@b.service", a)
+
+    def test_geordneter_stopp_ohne_warnung(self):
+        p = self.lauf(0, "inactive", "success")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("WARNUNG", p.stderr)
+        self.assertNotIn("Zeitgrenze", p.stdout)
+        a = self.aufrufe()
+        self.assertFalse([x for x in a if x.startswith("reset-failed")])
+        self.assertIn("disable wamo-core@a.service", a)
+        self.assertIn("enable wamo-core@b.service", a)
+
+    def test_laeuft_die_instanz_noch_wird_nichts_abgewaehlt(self):
+        for zustand in ("active", "deactivating", ""):   # leer: systemctl show lieferte nichts, also nicht sicher beendet
+            with self.subTest(zustand=zustand):
+                self.setze("zustand_wamo-core@a.service", "active")
+                (self.z / "aufrufe").unlink(missing_ok=True)
+                p = self.lauf(1, zustand, "success")
+                self.assertNotEqual(p.returncode, 0)
+                self.assertIn("nach dem Stopp nicht beendet", p.stderr)
+                self.assertFalse([x for x in self.aufrufe() if x.startswith(("disable", "enable", "reset-failed"))])
+
+    def test_scheitert_reset_failed_wird_trotzdem_abgewaehlt(self):
+        self.setze("reset_kaputt", "ja")
+        p = self.lauf(0, "failed", "timeout")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("reset-failed für wamo-core@a ging nicht", p.stderr)
+        self.assertIn("disable wamo-core@a.service", self.aufrufe())
+
+    def test_anderes_ergebnis_wird_ohne_sigkill_gemeldet(self):
+        p = self.lauf(0, "failed", "exit-code")   # z. B. die Notbremse des Kerns (Exit 1)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Ergebnis exit-code", p.stderr)
+        self.assertNotIn("SIGKILL", p.stderr)
+        self.assertIn("reset-failed wamo-core@a.service", self.aufrufe())
+
+    def test_nichts_auszuleiten_ohne_laufende_alte_instanz(self):
+        self.setze("zustand_wamo-core@a.service", "inactive")
+        p = self.lauf(0, "inactive", "success")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Nichts auszuleiten", p.stdout)
+        self.assertFalse([x for x in self.aufrufe() if x.startswith("stop")])
 
 
 class CaddySite(unittest.TestCase):

@@ -5,6 +5,8 @@ enthält Gesprächsinhalte (Transkripte, Werkzeugargumente) und gehört nicht in
 Runner ruft am Ende uvicorn.run(app, host=..., port=...) auf; dieser Aufruf läuft über die Hülle hier:
 
   * Direkt vor dem Serverstart wird die Log-Stufe aus WAMO_LOG_LEVEL wiederhergestellt (Standard INFO).
+  * Das Herunterfahren bekommt Fristen deutlich unter TimeoutStopSec der Unit (abschaltung.py): uvicorn wartet nur
+    begrenzt auf Verbindungen, der Lifespan (WebRTC-Verbindungen, Hintergrundaufgaben) endet spätestens nach seiner Frist.
   * Ohne Zugangskontrolle (auth_gate.AccessMiddleware) startet der Server nicht.
   * Ist WAMO_CORE_UDS gesetzt (Betriebsart Büro, systemd-Dienst wamo-core), lauscht der Kern nur auf diesem
     Unix-Socket. Caddy (wamo-caddy, HTTPS 55444) spricht ihn an; einen TCP-Port gibt es dann nicht. uvicorn legt
@@ -22,6 +24,8 @@ import stat
 from collections.abc import Callable
 from pathlib import PurePosixPath
 from types import ModuleType
+
+import abschaltung
 
 ZUGANG_MIDDLEWARE = "AccessMiddleware"
 
@@ -58,7 +62,10 @@ class _UvicornHuelle:
 
     def run(self, app, host: str | None = None, port: int | None = None, **kwargs) -> None:
         self._logging_neu()
-        pruefe_zugang(app)
+        # Herunterfahren mit Fristen unter TimeoutStopSec (abschaltung.py, R7). Erst hier hängen alle Teile des Lifespans.
+        abschaltung.lifespan_begrenzen(app)
+        kwargs.setdefault("timeout_graceful_shutdown", abschaltung.FRIST_VERBINDUNGEN_S)
+        pruefe_zugang(app)   # zuletzt: nach dieser Prüfung ändert nichts mehr die App
         if self._uds:
             # Unix-Socket gibt es nur auf Linux (Sokrates-2): absoluter POSIX-Pfad, keine Teile mit ".."
             pfad = PurePosixPath(self._uds)

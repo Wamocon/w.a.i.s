@@ -29,6 +29,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 
+import abschaltung
 from auth_gate import AccessGate, Identity, erstanmeldung_sperre
 
 PRAEFIX = "/wamo/api"
@@ -146,9 +147,8 @@ def _hintergrund_lifespan(app, aufgaben: list[Callable[[], Awaitable[None]]]) ->
             else:
                 yield
         finally:
-            for t in tasks:
-                t.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # begrenzt: eine Aufgabe, die den Abbruch nicht annimmt, hält das Herunterfahren nicht auf (abschaltung.py, R7)
+            await abschaltung.aufgaben_beenden(tasks, abschaltung.FRIST_AUFGABEN_S)
 
     app.router.lifespan_context = lifespan
 
