@@ -6,6 +6,33 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.6.0] - 2026-11-17
+
+### Hinzugefügt
+
+- Admin-Ports 55446, 55322 und 56543 nur für freigegebene Quellen (Q13)
+- Netzprobe in pruefen, verbotene Ziele müssen vom Platz aus gesperrt sein
+- Faktoren der Laborprofile mit QR zum Scannen einrichten (einrichten --qr)
+- Chat links zeigt Sätze erst nach der Stimmprüfung, Live-Untertitel standardmäßig aus
+- W.A.I.S. hört nur die eingelernte Stimme, und nur sie unterbricht
+- Werkzeug zum Löschen der Laborkonten und Widerrufen ihrer Sitzungen
+- Mikrofonwahl je Person, Pegelwarnung und PC-Schalter für Mitglieder ohne Sitzung
+
+### Behoben
+
+- Kern endet beim Stopp mit Fristen, ausleiten übersteht die Zeitgrenze (R7)
+- Lasttest misst ohne --slot den aktiven Kern-Slot statt fest b (R8)
+- Längere Lesefrist im Gespräch über Hausmodelle (R9)
+- Betreuer-Geräte flattern nicht mehr, mDNS-Adressen nur mit ARP-Eintrag
+- MDNS-Probe der Betreuer-Geräte ohne ping, über ein UDP-Paket
+- Lasttest gibt ProgramFiles unabhängig von der Schreibweise an den Browser weiter
+- Lasttest stellt nach dem Einwurf „Moment, stopp …“ eine echte Folgefrage
+- Satz vor einem Werkzeugaufruf sofort sprechen (WAMO_TTS_VOR_WERKZEUG)
+- Erwartungswerte W1 und W2 nach ISTQB-Glossar und CTFL-Prüfung, Speichergrenze der TTS-Instanz (R5)
+- Sprachausgabe ohne Ton bei Pausen des Hausmodells, Deutsch im Haus, Websuche ohne Schleife
+- Klare Meldung bei Claude-Schlüssel ohne Workspace statt nur HTTP 400
+- Host bleibt erreichbar, Knopf zeigt die Datei im Ordner
+
 ## [0.5.0] - 2026-11-16
 
 ### Hinzugefügt
@@ -834,10 +861,11 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/w.a.i.s/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.1...v0.5.0
-[0.4.1]: https://github.com/Wamocon/w.a.i.s/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/Wamocon/w.a.i.s/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Wamocon/w.a.i.s/releases/tag/v0.1.0
+[Unveröffentlicht]: https://github.com/Wamocon/wamo/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Wamocon/wamo/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Wamocon/wamo/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/Wamocon/wamo/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/Wamocon/wamo/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Wamocon/wamo/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Wamocon/wamo/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Wamocon/wamo/releases/tag/v0.1.0
