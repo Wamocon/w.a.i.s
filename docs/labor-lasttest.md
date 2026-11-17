@@ -60,14 +60,32 @@ Der **Trockenlauf** ist der Standard. Er zeigt Plan, Zahl der Profile und Plätz
 
 Ausgänge: 0 bestanden (oder Trockenlauf), 1 durchgefallen, vorzeitig beendet oder Aufräumen gescheitert, 2 Eingabe falsch (nichts angefasst), 3 vollständig gelaufen, Urteil offen, 130 Strg+C.
 
-## 4. Empfohlene Reihenfolge am Fr 20.11.
+## 4. Ablaufblatt Fr 20.11. (Stand 17.11.2026, mit den Lehren aus der Vorstufe)
 
-1. Vorbereitung bis Do 19.11.: Sprechproben erzeugen, Trockenlauf. Ratenlimit und Preise aus der Konsole (N3, erledigt 17.11.) in den Aufruf eintragen.
-1a. Vorstufe am Mi 18.11. früh (Entscheidung von Niko, 17.11.): Stufen 2 und 4 mit je 10 Minuten. Zuerst den Trockenlauf mit `--sitzungen 2,4 --minuten 10` ansehen, danach den Echtlauf mit `--sitzungen 2,4 --minuten 10 --ausfuehren --bestaetigung LASTTEST`. Vorher wie in Schritt 2 den Kern-Kanal sperren und die Plätze leeren. Der volle Lauf bleibt am Fr 20.11.
-2. Vormittags vor dem Lauf den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“). Dann kurzer Probelauf: `--sitzungen 1 --minuten 3` (Urteil bleibt "offen", der Umfang fehlt). Er prüft Anmeldung, Browser, Messung und Aufräumen, bevor die Stunden beginnen.
-3. Voller Lauf ohne Murmeln (Stufen 1, 2, 4, 8, etwa 1 Stunde 20 Minuten mit Vorbereitung und Aufräumen).
-4. Murmeln: entweder gleich im vollen Aufruf (`--murmeln 20,10,5`, etwa 2 Stunden 10 Minuten) oder danach allein (`--sitzungen 8 --murmeln 20,10,5`). Ein Lauf nur mit Murmelstufen bleibt "offen", weil ihm der Umfang fehlt, das ist gewollt: Die Murmelstufen ergänzen den vollen Lauf.
-5. Nikos Büro-Betrieb als parallele Last: Das Werkzeug erzeugt sie nicht. Nur wenn Niko während des Laufs arbeitet, sagt die Spitze der Anfragen je Minute etwas über das gemeinsame Ratenlimit (Konzept 3.7, Entscheidung Q4).
+**Vorstufe:** am 17.11. vorgezogen und bestanden (Stufen 2 und 4, 0 Abbrüche, 0 Ablehnungen 429, erster Ton p95 2,25 s bei 4 Sitzungen nach #195, Hauptthread etwa 32 Prozent), siehe `docs/labor-restplan.md` N.1a.
+
+**Am Mess-PC einmalig (Do 19.11.):**
+
+1. Playwright außerhalb des Repos installieren, zum Beispiel `npm install playwright-core@1.49.1` in einem eigenen Ordner. Chrome als Systeminstallation unter `C:\Program Files` wird seit #190 gefunden.
+2. Alle Aufrufe in **PowerShell**, nicht in Git Bash: In Git Bash zerlegen die ssh-Aufrufe der Werkzeuge die Anführungszeichen (`wamo_labor.py`, `wamo_labor_nachlauf.py`).
+3. Im Hauptordner des Repos starten (dort liegt die `.env` mit `WAMO_ADMIN_DATABASE_URL`), vorher `$env:PLAYWRIGHT_MODUL = "<Ordner>
+ode_modules\playwright-core"`.
+4. Trockenlauf mit den Werten aus N3: `python scripts\wamo_labor_last.py lauf --sitzungen 1,2,4,8 --minuten 15 --ratenlimit-anfragen 4000 --ratenlimit-tokens 2000000 --preis-eingabe 0.10 --preis-ausgabe 0.50 --kosten-obergrenze 5`.
+
+**Fr 20.11. vormittags:**
+
+1. Kein Kern-Wechsel am Vormittag. Laufen nach einem Wechsel noch beide Slots, bricht das Werkzeug ab; dann den aktiven Slot mit `--slot a` oder `--slot b` vorgeben (welcher neue Sitzungen bekommt, steht in `wamo-core-slots.sh status`).
+2. Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`, Entscheidung E5, bleibt bis nach dem Labortag zu).
+3. Plätze 1 bis 8 leeren: Betreuer-Seite „Daten löschen“ je Platz, oder am Server je Platz `POST /api/betreuer/plaetze/<n>/daten-loeschen` mit dem Betreuer-Token. Starttickets zählen als belegt. Kontrolle: alle Plätze 0 Tickets, keine Einwilligung.
+4. Laborprofile müssen gesperrt sein: `python scripts\wamo_labor.py status` (PowerShell).
+5. Thread-Messung am Server parallel starten: PID mit `systemctl show -p MainPID --value wamo-core@<slot>`, dann `top -H -b -d 15 -n 400 -w 200 -p <PID> > /var/tmp/wamo-threads-<datum>.log`. Maßgeblich ist der Hauptthread (gleiche Nummer wie die PID) unter 70 Prozent eines Kerns, die Gesamt-CPU steht nur zur Information im Bericht.
+6. Probelauf `--sitzungen 1 --minuten 3` (Urteil bleibt „offen“), danach der volle Lauf `--sitzungen 1,2,4,8 --minuten 15` mit den Werten aus dem Trockenlauf und `--ausfuehren --bestaetigung LASTTEST`. Während des Laufs gehen am Mess-PC bis zu 8 Chrome-Fenster auf, nicht schließen.
+7. Murmeln: danach allein mit `--sitzungen 8 --murmeln 20,10,5` (bleibt „offen“, ergänzt den vollen Lauf).
+8. Auswertung: Bericht unter `%USERPROFILE%\.wamo-labor\last\`, dazu der Hauptthread aus dem Log von Schritt 5. Ausreißer im ersten Ton gegen die Latenzzeilen im Journal prüfen (`LATENZ_JSON`, Abstand `tts_audio` minus `llm_token`).
+
+**Fr 20.11. nachmittags (nach dem Lasttest):** zweite Faktoren der Profile 1 bis 4 neu, mit QR für die Handys beider Betreuer (Runbook 9.7, `wamo_labor_faktoren.py einrichten --profile labor-01 --neu --qr`, zuerst ein Profil, dann die übrigen). Die neuen Seeds stehen danach in der Umschlag-Datei, spätere Lasttests laufen damit weiter.
+
+**Nikos Büro-Betrieb als parallele Last:** Das Werkzeug erzeugt sie nicht. Nur wenn Niko während des Laufs arbeitet, sagt die Spitze der Anfragen je Minute etwas über das gemeinsame Ratenlimit (Konzept 3.7, Entscheidung Q4).
 
 ## 5. Kosten
 
