@@ -583,7 +583,9 @@ def test_die_schluesselzeile_hat_in_skript_und_rauchtest_dieselbe_form():
 # Slot-Vorlage gehören zum selben Vertrag. Zeilenenden sind auf LF vereinheitlicht (ein Checkout unter Windows ändert die Summe nicht).
 # Es gibt keinen Vergleich mit einem Git-Zweig: Nach dem Merge bliebe er leer, und jede spätere Änderung würde ihn rot färben.
 PRUEFSUMMEN = {
-    "infra/sokrates2/wamo-core-slots.sh": "e725f4e515dda4ce6f72fa39a5346ba132b19f39f8babc3867be590fc577f150",
+    # 17.11.2026 bewusst geändert (R7): ausleiten übersteht einen Stopp in TimeoutStopSec (WARNUNG, reset-failed, Slot trotzdem abgewählt),
+    # dazu WAMO_CADDY_ETC nur für den Probelauf. Die Kopien des Ankers (schritte/kern-slots, rueckweg-kern) folgen mit anker-einrichten.sh.
+    "infra/sokrates2/wamo-core-slots.sh": "8dc56e54f686d36cc025a0e1d6741fd4b6b0e7f31800347b0f89c4661fbeceb6",
     "infra/sokrates2/wamo-core-vorpruefung.sh": "32235d048877a3e2626530537c60e03dabf1ee667ef85c01e6055b32c81673c6",
     "infra/sokrates2/wamo-core@.service": "46b22cc0bfdf9000eb08431a61537ede65b3b3d7ab15f452cf3deca3bf239953",
 }
