@@ -408,9 +408,15 @@ _PRUEFER = {"w1": _pruefe_w1, "w2": _pruefe_w2, "w3": _pruefe_w3, "a1": _pruefe_
             "j1": _nur_werkzeug, "j2": _nur_werkzeug, "j3": _nur_werkzeug, "m1": _nur_werkzeug}
 
 
+# Erwartungswerte für W2 (CTFL 4.0: 40 Fragen, 60 Minuten), bestätigt am 17.11.2026; gelten, wenn der Aufruf keine eigene Referenz nennt
+REFERENZ_W2 = ("40", "60")
+
+
 def karte_pruefen(karte_id: str, antwort: str, aufrufe=(), referenz: list[str] | None = None) -> list[str]:
     """Textkriterien (hartes Kriterium der Karte), die bewertung.py nicht kennt. Leer heißt: kein Fehler gefunden.
     aufrufe sind die Werkzeugaufrufe des Zuges als (Name, Argumente), referenz die Zahlen des Trainers für W2."""
+    if referenz is None and karte_id == "w2":
+        referenz = list(REFERENZ_W2)
     return _PRUEFER[karte_id](antwort, list(aufrufe), referenz)
 
 

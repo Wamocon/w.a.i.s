@@ -56,7 +56,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | R2 | Die Marker-Regel gilt auch im Labor, a1 steht bei 5 von 10 Läufen. Messrunde mit 20 weiteren Läufen | gemessen 17.11. auf Kern v0.5.0-ddada3f (20 Läufe, 420 Züge, 0,15 USD): a1 13 von 20, alle 7 Befunde sind Inhalt (eine Story mit nur einem Kriterium), kein Schweigen; w2 19, m1 19, j1 19, m2 19, s1 16 von 20 (4-mal unerwartet `canvas_zeigen`), w1, s2, i1, i2 je 20 von 20; erstes Token p50 0,51 s, p95 0,57 s. Die Karten mit erwartetem Fehler a3 und `m3_antwort` bleiben wie unter 0.4.1 bei 0 von 20 |
 | R3 | `think` auf false gilt für alle LiteLLM-Anfragen, nicht nur für Hausmodelle | offen |
 | R4 | Migrationen 0023 und 0024 in `wamo_dev` und `wamo_test` | geprüft: je zweimal angewendet, Test OK |
-| R5 | Die TTS-Instanz hat keine Speichergrenze, sie hat nur ein Lock | offen |
+| R5 | Die TTS-Instanz hat keine Speichergrenze, sie hat nur ein Lock | teilweise behoben am 17.11.: Speichergrenze 4 GiB für den Container (`docker update`, im Startbefehl der README nachgezogen); belegt sind 0,5 GiB Hauptspeicher. Der GPU-Speicher (5,2 GiB) zählt nicht in diese Grenze und bleibt ohne Grenze |
 | R6 | Gateway-Änderungen sind nur in unserem Repo dokumentiert | teilweise: Betriebsnotiz `infra/sokrates1/gateway-wamo.md` angelegt, Pflege beim Betreiber |
 | R7 | Geordnetes Abschalten des Kerns: Fristen, Timeout bei `ausleiten` | behoben mit #181 |
 | R8 | Lasttest nahm einen festen Slot b an | behoben mit #182 |

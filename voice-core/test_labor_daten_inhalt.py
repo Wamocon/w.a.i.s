@@ -232,7 +232,7 @@ def test_die_anforderungsvorlage_nennt_das_muster():
 
 def test_das_glossar_traegt_den_vermerk_und_alle_begriffe_mit_ein_bis_zwei_saetzen():
     text = lies("wissen-istqb.md")
-    assert "Entwurf, Fachlichkeit prüft der Trainer" in text.splitlines()[0]
+    assert "ISTQB-Glossar (Version 2)" in text.splitlines()[0]
     eintraege = {}
     for zeile in text.splitlines()[1:]:
         assert zeile.startswith("- ") and ": " in zeile, zeile
