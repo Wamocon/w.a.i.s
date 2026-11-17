@@ -46,6 +46,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | R7 | Geordnetes Abschalten des Kerns: Fristen, Timeout bei `ausleiten` | behoben mit #181 |
 | R8 | Lasttest nahm einen festen Slot b an | behoben mit #182 |
 | R9 | Ausweichweg Hausmodell `gemma4-31b` (3 Läufe am 17.11.): a1 bricht in 3 von 3 Läufen ab. Der erste Satz kommt nach 0,7 s, der Aufruf von `canvas_zeigen` mit den Stories kommt als Block und überschreitet die Lesefrist des Gesprächs von 20 s (`GESPRAECH_LESE_TIMEOUT_SECS`). Gilt auch im Büro für Nutzer mit Hausmodellen. Vorschlag: längere Lesefrist nur für Hausmodelle, Entscheidung durch Niko vor dem Freeze-Kandidaten | offen |
+| R10 | Büro-Fall I04 („Puh, das ist schwierig.“ soll warten): am 17.11. 4 von 17 Läufen bestanden (vor #176 4 von 5, danach 3 von 5). W.A.I.S. antwortet sofort mit einer freundlichen Rückfrage statt zu warten. Betrifft nur das Büro, das Labor hat diesen Fall nicht. Vorschlag: ein Beispiel in der Marker-Regel ergänzen und mit der Messrunde gegenprüfen, Entscheidung durch Niko | offen |
 
 ### N.4 Fahrplan Di 17.11. bis Fr 11.12.
 
