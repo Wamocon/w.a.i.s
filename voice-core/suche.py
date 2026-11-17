@@ -66,6 +66,14 @@ def suchmodus() -> str:
     return modus
 
 
+def anbieter_problem(*, haus: bool) -> str | None:
+    """Warum es für diese Sitzung keine Websuche gibt (ohne Netz geprüft), sonst None. Profile nur mit Hausmodellen (haus) und
+    WAMO_SUCHE=searxng suchen nur über SearXNG und brauchen dafür eine gültige WAMO_SEARXNG_URL; sonst sucht Anthropic."""
+    if (haus or suchmodus() == "searxng") and not searxng_url():
+        return "WAMO_SEARXNG_URL fehlt oder ist keine http(s)-Adresse"
+    return None
+
+
 def _rein(text: object, limit: int) -> str:
     """Eine Zeile ohne Steuer- und Formatzeichen und ohne Satzende-Marker, gekürzt."""
     return clean_inline(str(text or "").translate(_MARKER), limit)

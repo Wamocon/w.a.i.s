@@ -32,7 +32,9 @@ führt dann ohnehin nur den letzten Werkzeugaufruf aus). Der Text geht dann in e
 eigene Nachricht ohne ● in den Verlauf, mit einem zweiten Antwortende (test_satz_vor_werkzeug.py hält das genau so fest).
 
 Hausmodelle (LiteLLMService) schicken den Frame nicht: Das Gateway liefert einen Werkzeugaufruf erst als ganzen Block (llm_anbieter.py,
-HAUS_GESPRAECH_LESE_TIMEOUT_SECS), sein Beginn fällt also mit dem Ende der Argumente und dem Antwortende zusammen.
+HAUS_GESPRAECH_LESE_TIMEOUT_SECS), sein Beginn fällt also mit dem Ende der Argumente und dem Antwortende zusammen. Während das Modell
+die Argumente schreibt, schweigt der Strom; liegt dann schon Text bei Soniox, schließt die Soniox-Sprachausgabe den Stream nach einer
+Sekunde Stille auf demselben Weg ab (_vor_werkzeug_sprechen mit anlass "Modell schweigt", soniox_tts.py, Befund 17.11.2026).
 
 Schalter: WAMO_TTS_VOR_WERKZEUG (an oder aus, Standard an, gelesen je Antwort). Aus heißt: der Antwortstrom bleibt unberührt, kein
 Frame, alles wie vor dem 17.11.2026.
@@ -183,7 +185,8 @@ class SatzVorWerkzeugTTS:
             logger.warning("Satz vor dem Werkzeug nicht möglich: Pipecats TTSService hat andere Attribute als erwartet")
         return False
 
-    async def _vor_werkzeug_sprechen(self) -> None:
+    async def _vor_werkzeug_sprechen(self, anlass: str = "Werkzeugaufruf beginnt") -> None:
+        """anlass steht nur im Log: der Frame vor einem Werkzeug oder der Stille-Abschluss der Soniox-Sprachausgabe (soniox_tts.py)."""
         if not self._pipecat_passt():
             return  # der Satz erklingt wie bisher mit dem Antwortende
         rest = await self._text_aggregator.flush()
@@ -198,7 +201,7 @@ class SatzVorWerkzeugTTS:
         abgeschlossen = self.stream_vor_werkzeug_beenden and await self._stream_abschliessen()
         if gesendet or abgeschlossen:
             self.wamo_vor_werkzeug_gesprochen += 1
-            logger.info("Werkzeugaufruf beginnt: Text vorher sofort an die Sprachausgabe{} ({})",
+            logger.info("{}: Text vorher sofort an die Sprachausgabe{} ({})", anlass,
                         ", Stream abgeschlossen" if abgeschlossen else "", self.wamo_vor_werkzeug_gesprochen)
 
     async def _stream_abschliessen(self) -> bool:
