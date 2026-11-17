@@ -45,8 +45,10 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | R6 | Gateway-Änderungen sind nur in unserem Repo dokumentiert | teilweise: Betriebsnotiz `infra/sokrates1/gateway-wamo.md` angelegt, Pflege beim Betreiber |
 | R7 | Geordnetes Abschalten des Kerns: Fristen, Timeout bei `ausleiten` | behoben mit #181 |
 | R8 | Lasttest nahm einen festen Slot b an | behoben mit #182 |
-| R9 | Ausweichweg Hausmodell `gemma4-31b` (3 Läufe am 17.11.): a1 bricht in 3 von 3 Läufen ab. Der erste Satz kommt nach 0,7 s, der Aufruf von `canvas_zeigen` mit den Stories kommt als Block und überschreitet die Lesefrist des Gesprächs von 20 s (`GESPRAECH_LESE_TIMEOUT_SECS`). Gilt auch im Büro für Nutzer mit Hausmodellen. Vorschlag: längere Lesefrist nur für Hausmodelle, Entscheidung durch Niko vor dem Freeze-Kandidaten | offen |
-| R10 | Büro-Fall I04 („Puh, das ist schwierig.“ soll warten): am 17.11. 4 von 17 Läufen bestanden (vor #176 4 von 5, danach 3 von 5). W.A.I.S. antwortet sofort mit einer freundlichen Rückfrage statt zu warten. Betrifft nur das Büro, das Labor hat diesen Fall nicht. Vorschlag: ein Beispiel in der Marker-Regel ergänzen und mit der Messrunde gegenprüfen, Entscheidung durch Niko | offen |
+| R9 | Ausweichweg Hausmodell `gemma4-31b` (3 Läufe am 17.11.): a1 bricht in 3 von 3 Läufen ab. Der erste Satz kommt nach 0,7 s, der Aufruf von `canvas_zeigen` mit den Stories kommt als Block und überschreitet die Lesefrist des Gesprächs von 20 s (`GESPRAECH_LESE_TIMEOUT_SECS`). Gilt auch im Büro für Nutzer mit Hausmodellen. Vorschlag: längere Lesefrist nur für Hausmodelle, Entscheidung durch Niko vor dem Freeze-Kandidaten | behoben mit #184 (Lesefrist 60 s für Hausmodelle, Claude bleibt bei 20 s), a1 mit `gemma4-31b` danach 3 von 3, ausgerollt 17.11. als Kern v0.5.0-7fc7a84 (Bewährung bestanden, Labor-Rauchtest 20 OK) |
+| R10 | Büro-Fall I04 („Puh, das ist schwierig.“ soll warten): am 17.11. 4 von 17 Läufen bestanden (vor #176 4 von 5, danach 3 von 5). W.A.I.S. antwortet sofort mit einer freundlichen Rückfrage statt zu warten. Betrifft nur das Büro, das Labor hat diesen Fall nicht. Vorschlag: ein Beispiel in der Marker-Regel ergänzen und mit der Messrunde gegenprüfen, Entscheidung durch Niko | verschoben auf nach dem Labortag (Entscheidung 17.11.: die Marker-Regel vor dem Freeze nicht mehr ändern, Schweigen wiegt schwerer als eine zu schnelle Antwort im Büro) |
+| R11 | Soniox-Grenzen der Organisation: Sprachausgabe 3 gleichzeitige Streams (über alle Verbindungen, darüber Ablehnung 429), Spracherkennung 10. Für 8 Plätze, Schau-Profil und Büro zu wenig | Erhöhung auf 15 und 20 am 17.11. beantragt, Region USA genehmigt, Region EU (unser Projekt) offen. Prüfung im vollen Lasttest Fr 20.11. |
+| R12 | Betreuer-Geräte flatterten: mDNS lieferte abwechselnd tote Adressen, jede abweichende Antwort entzog die zugelassene sofort (492 Paare in 24 h, je ein Caddy-Reload, `/betreuer` je eine Minute gesperrt) | behoben mit #186 (ersetzte Adresse bleibt 15 Minuten, Adresse nur aus mDNS erst nach ARP-Nachweis per UDP-Probe), eingespielt 17.11., danach kein Flattern mehr |
 
 ### N.4 Fahrplan Di 17.11. bis Fr 11.12.
 
@@ -54,7 +56,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | --- | --- | --- | --- |
 | Di 17.11. | Installer 0.5.0: Signatur durch Niko, danach Verteilung am Server und GitHub-Release v0.5.0 | Niko, W.A.I.S. | erledigt 07:00 |
 | Di 17.11. | Messrunde mit 20 weiteren Läufen (R2, Marker bei a1) | W.A.I.S. | erledigt 07:07, Ergebnis unter R2, Ausweichweg unter R9 |
-| Mi 18.11. | N3 bis N5 liefern: Preise und Ratenlimit, Fassung der Regeln, Büro-Adressen für die Ports 55446, 55322 und 56543 | Niko | Abschnitt 5 |
+| Mi 18.11. | N3 bis N5 liefern: Preise und Ratenlimit, Fassung der Regeln, Büro-Adressen für die Ports 55446, 55322 und 56543 | Niko | erledigt 17.11. (N3 bis N5) |
 | Do 19.11. | Erwartungswerte des Trainers zu W1 und W2 (N8) | Niko, Trainer | Pflicht vor dem Ausdruck |
 | Fr 20.11. vormittags | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen, mit Preisen, Ratenlimit und `--kosten-obergrenze`. Vorher den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“, Starttickets zählen als belegt) | W.A.I.S., Niko | Ja von Niko, N3, E5 |
 | Fr 20.11. nachmittags | Zweite Faktoren neu auf die Betreuer-Geräte (E2), zuerst ein Profil. Aufzeichnung des Schaufensters | W.A.I.S., Betreuer, Niko | Lasttest abgeschlossen |
@@ -139,12 +141,12 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 
 | Nr | Was | Frist | Empfehlung |
 | --- | --- | --- | --- |
-| N3 | Preise und Ratenlimit aus der Konsole für den Lasttest | Mi 18.11. | Eintragen, dann gilt `--kosten-obergrenze` |
-| N4 | Q6: Fassung der Regeln | Mi 18.11. | Standard (steht am Server) |
-| N5 | Q13: Büro-Adressen für 55446, 55322 und 56543 in `LAN_PORTS_ADMIN` (Liste `/etc/wamo/admin-quellen`, PR #185, `infra/sokrates2/README.md` 6.1) | Mi 18.11. | Liste der Admin-Geräte nennen, Firewall-Änderung mit `--trocken` und Rückweg |
+| N3 | Preise und Ratenlimit aus der Konsole für den Lasttest | Mi 18.11. | erledigt 17.11.: Ausgabenlimit 100 USD; Ratenlimit des Schlüssels für Haiku 5.5 4.000 Anfragen, 2 Mio. Eingabe- und 400.000 Ausgabe-Tokens je Minute; Preise 0,10 und 0,50 USD je Mio. Tokens |
+| N4 | Q6: Fassung der Regeln | Mi 18.11. | erledigt 17.11.: Standard bestätigt |
+| N5 | Q13: Büro-Adressen für 55446, 55322 und 56543 in `LAN_PORTS_ADMIN` (Liste `/etc/wamo/admin-quellen`, PR #185, `infra/sokrates2/README.md` 6.1) | Mi 18.11. | erledigt 17.11.: Liste mit dem Laptop des Admins (WLAN und feste WireGuard-Adresse), eingespielt mit `--trocken` und Rauchtests |
 | N6 | Weg des Betreuer-Tokens | Mi 18.11. | Persönliche Übergabe am Gerät, nie Chat, Mail oder Ausdruck |
 | N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | vor der Generalprobe |
-| N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste |
+| N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste; Entwurf mit Musterantworten an den verantwortlichen Trainer am 17.11., Seminar-Angaben sind kein Muss (`ausgang.md` verweist sonst auf den Stand) |
 | N10 | Gateway (zentrales LiteLLM auf Sokrates-1): kein Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut es selbst, Betriebsnotiz `infra/sokrates1/gateway-wamo.md` | Fr 27.11. 12:00 | Keine Änderung am Gateway in dieser Zeit |
 | E5 | Kern-Kanal während Lasttest und Labortag sperren | Fr 20.11. | Ja, das Schaufenster zeigt nur die Aufzeichnung |
 
