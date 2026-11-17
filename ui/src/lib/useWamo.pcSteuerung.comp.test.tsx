@@ -1,6 +1,7 @@
 // Komponententest des Ablaufs "PC-Steuerung ohne Gespräch einschalten" in useWamo (lib/pcSchalter.ts): Ein Klick auf "an" ohne Sitzung
 // startet in der Desktop-App und im Browser still eine Sitzung (Regeln des stillen Starts), schickt den Wunsch, sobald der Kern den PC
-// als verbunden meldet, und nennt nach der Wartezeit den Grund, wenn es nicht klappt. Mitglieder und Laborkonten starten nichts.
+// als verbunden meldet, und nennt nach der Wartezeit den Grund, wenn es nicht klappt. Laborkonten starten nichts, Mitglieder nur mit der
+// Stufe "mitglied", die der Kern zuletzt gemeldet hat (je Person gemerkt, eine Sitzung ohne Stufe vergisst sie, Befund 17.11.2026).
 // Pipecat-Client und Transport sind Attrappen, der Kern wird über Rückrufe und Betriebsmeldungen nachgestellt; es gibt kein Netz.
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { act, renderHook } from "@testing-library/react";
@@ -324,7 +325,7 @@ describe("useWamo, PC-Steuerung ohne Gespräch einschalten", () => {
       expect(clients()).toHaveLength(0);
     });
 
-    it("Mitglied (gemerkte Rolle) und unbekannte Rolle: kein Start", async () => {
+    it("Mitglied (gemerkte Rolle, ohne gemerkte Stufe) und unbekannte Rolle: kein Start", async () => {
       for (const gemerkt of ["mitglied", null] as const) {
         localStorage.clear();
         person("niko@wamocon.com", gemerkt);
@@ -360,6 +361,74 @@ describe("useWamo, PC-Steuerung ohne Gespräch einschalten", () => {
       });
       await fluss();
       expect(clients()).toHaveLength(0);
+    });
+  });
+
+  describe("freigeschaltetes Mitglied", () => {
+    async function mitgliedBereit(c: AttrappenClient, betrieb: Partial<Betrieb>) {
+      await act(async () => {
+        c.opts.callbacks.onBotReady({ version: "2.0.0" });
+        applyServerMessage({ type: "profil", name: "Kollege", rolle: "mitglied" });
+        wamo.set((s) => ({ ...s, betrieb: { modus: "buero", modelle: {}, pc: "verbindet", pcSteuerung: "aus", ...betrieb } }));
+      });
+    }
+
+    it("mit gemerkter Stufe: Klick ohne Sitzung startet still und schickt den Wunsch, sobald der Kern den PC als verbunden meldet", async () => {
+      person("kollege@wamocon.com", "mitglied");
+      localStorage.setItem(`wamo.pcStufe.${ID}`, "mitglied");
+      const { result } = renderHook(() => useWamo());
+      await act(async () => {
+        expect(result.current.pcSteuerung(true)).toBe(true);
+      });
+      await fluss();
+      expect(clients()).toHaveLength(1);
+      const c = letzter();
+      expect(c.opts.enableMic).toBe(false);
+      await mitgliedBereit(c, { pc: "verbunden", pcStufe: "mitglied" });
+      expect(pcGesendet(c)).toHaveLength(1);
+      expect(localStorage.getItem(`wamo.pcStufe.${ID}`)).toBe("mitglied");
+    });
+
+    it("der Kern meldet die Stufe: gemerkt; eine Sitzung ohne Stufe vergisst sie; ohne Sitzung bleibt sie", async () => {
+      person("kollege@wamocon.com", "mitglied");
+      const { result } = renderHook(() => useWamo());
+      await act(async () => {
+        void result.current.connect();
+      });
+      await fluss();
+      await mitgliedBereit(letzter(), { pc: "verbunden", pcStufe: "mitglied" });
+      expect(localStorage.getItem(`wamo.pcStufe.${ID}`)).toBe("mitglied");
+      await act(async () => {
+        await result.current.disconnect();
+      });
+      expect(localStorage.getItem(`wamo.pcStufe.${ID}`)).toBe("mitglied"); // Ende der Sitzung: nichts vergessen
+      await act(async () => {
+        void result.current.connect();
+      });
+      await fluss();
+      await mitgliedBereit(letzter(), { pc: "aus" }); // der Kern meldet keine Stufe mehr (Freischaltung entzogen)
+      expect(localStorage.getItem(`wamo.pcStufe.${ID}`)).toBeNull();
+      await act(async () => {
+        await result.current.disconnect();
+      });
+      await act(async () => {
+        expect(result.current.pcSteuerung(true)).toBe(false);
+      });
+    });
+
+    it("Laborkonto: die Stufe wird nie gemerkt und startet nichts", async () => {
+      person("labor-02@wamo.test", "mitglied");
+      localStorage.setItem(`wamo.pcStufe.${ID}`, "mitglied");
+      const { result } = renderHook(() => useWamo());
+      await act(async () => {
+        expect(result.current.pcSteuerung(true)).toBe(false);
+      });
+      await fluss();
+      expect(clients()).toHaveLength(0);
+      await act(async () => {
+        wamo.set((s) => ({ ...s, betrieb: { modus: "buero", modelle: {}, pc: "verbunden", pcStufe: "mitglied" } }));
+      });
+      expect(localStorage.getItem(`wamo.pcStufe.${ID}`)).toBeNull();
     });
   });
 

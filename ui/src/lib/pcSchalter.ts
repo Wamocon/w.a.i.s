@@ -1,5 +1,5 @@
 /**
- * Schalter "PC-Steuerung" auch ohne laufendes Gespräch (Desktop-App und Browser gleich, nur Admins). Reine Logik ohne Browser und ohne
+ * Schalter "PC-Steuerung" auch ohne laufendes Gespräch (Desktop-App und Browser gleich, Admins und freigeschaltete Mitglieder). Reine Logik ohne Browser und ohne
  * React, damit sie sich mit node:test prüfen lässt (pcSchalter.test.ts). Alle Importe relativ.
  *
  * Ablauf: Ein Klick auf "an" ohne Sitzung startet still eine Sitzung (wie der Start beim Tippen, mit allen Regeln aus
@@ -15,6 +15,12 @@
  * Rolle ohne Sitzung: Das Profil (admin oder mitglied) meldet erst der Kern. Damit der Schalter schon vor dem ersten Gespräch da ist,
  * merkt sich die Oberfläche die zuletzt gemeldete Rolle je Person auf diesem Gerät (localStorage, Schlüssel mit der user_id). Das ist
  * nur eine Anzeigehilfe: Einschalten darf nur, wen der Kern als Admin mit eingerichtetem PC-Host kennt (voice-core/bot.py).
+ *
+ * Mitglieder (Befund 17.11.2026): Ein freigeschaltetes Mitglied erkennt die Oberfläche erst an der Stufe "mitglied", die der Kern in der
+ * Sitzung meldet (betrieb.pc_stufe, voice-core/rechte.py). Ohne Sitzung fehlte der Schalter, und ein Mitglied fand nie einen Weg, die
+ * PC-Steuerung einzuschalten. Deshalb merkt sich die Oberfläche auch diese Stufe je Person auf diesem Gerät (wie die Rolle) und zeigt den
+ * Schalter ohne Sitzung, mit stillem Start wie bei Admins. Der Kern entscheidet weiter: Meldet eine spätere Sitzung keine Stufe "mitglied",
+ * vergisst die Oberfläche sie wieder. Laborkonten nie.
  */
 
 import type { Betrieb, Rolle } from "./nachrichten.ts"; // nur Typen: werden beim Laden gestrichen
@@ -91,19 +97,67 @@ export function rolleMerken(speicher: Speicher | null | undefined, userId: strin
   }
 }
 
+// ---------- Stufe "mitglied" je Person merken ----------
+export const PC_STUFE_PRAEFIX = "wamo.pcStufe.";
+export type MitgliedStufe = "mitglied";
+
+/** Schlüssel für diese Person; null ohne brauchbare Kennung (wie bei der Rolle). */
+export function pcStufeSchluessel(userId: string | null | undefined): string | null {
+  if (typeof userId !== "string" || !/^[A-Za-z0-9-]{1,64}$/.test(userId)) return null;
+  return `${PC_STUFE_PRAEFIX}${userId}`;
+}
+
+/** Hat der Kern dieser Person auf diesem Gerät zuletzt die Stufe "mitglied" gemeldet? null: nein, unbekannt oder unlesbar. */
+export function pcStufeLesen(speicher: Speicher | null | undefined, userId: string | null | undefined): MitgliedStufe | null {
+  const k = pcStufeSchluessel(userId);
+  if (!k || !speicher) return null;
+  try {
+    return speicher.getItem(k) === "mitglied" ? "mitglied" : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stufe merken ("mitglied") oder vergessen (null). true, wenn der Speicher es angenommen hat. */
+export function pcStufeMerken(speicher: Speicher | null | undefined, userId: string | null | undefined, stufe: MitgliedStufe | null): boolean {
+  const k = pcStufeSchluessel(userId);
+  if (!k || !speicher) return false;
+  try {
+    if (stufe === "mitglied") speicher.setItem(k, stufe);
+    else speicher.removeItem(k);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Sieht diese Person den Schalter? Die Rolle vom Kern gilt zuerst, ohne Sitzung die gemerkte. Laborkonten nie. Ein Mitglied nur, wenn der Kern
- * in der laufenden Sitzung die Stufe "mitglied" meldet (pcStufeKern aus betrieb.pc_stufe, Freischaltung je Profil, voice-core/rechte.py); ohne
- * Sitzung sieht ein Mitglied den Schalter nicht (kein stiller Start). Entscheiden tut immer der Kern.
+ * Was aus der Betriebsmeldung der laufenden Sitzung für die gemerkte Stufe folgt: "mitglied" merken, jede andere Meldung (ohne pc_stufe
+ * oder Stufe admin) vergessen; ohne Betriebsmeldung (keine Sitzung) undefined, also nichts ändern. Laborkonten nie.
+ */
+export function pcStufeAusBetrieb(betrieb: Pick<Betrieb, "pcStufe"> | null | undefined, laborKonto: boolean): MitgliedStufe | null | undefined {
+  if (laborKonto) return null;
+  if (!betrieb) return undefined;
+  return betrieb.pcStufe === "mitglied" ? "mitglied" : null;
+}
+
+/**
+ * Sieht diese Person den Schalter? Die Rolle vom Kern gilt zuerst, ohne Sitzung die gemerkte. Laborkonten nie. Ein Mitglied, wenn der Kern
+ * in der laufenden Sitzung die Stufe "mitglied" meldet (pcStufeKern aus betrieb.pc_stufe, Freischaltung je Profil, voice-core/rechte.py), oder
+ * ohne Betriebsmeldung (keine Sitzung, betriebDa false), wenn er sie zuletzt gemeldet hat (pcStufeGemerkt); dann mit stillem Start wie bei
+ * Admins. Mit Betriebsmeldung zählt nur, was der Kern jetzt meldet. Entscheiden tut immer der Kern.
  */
 export function pcAdmin(l: {
   rolleKern: Rolle | null;
   rolleGemerkt: Rolle | null;
   laborKonto: boolean;
   pcStufeKern?: "admin" | "mitglied" | null;
+  pcStufeGemerkt?: MitgliedStufe | null;
+  betriebDa?: boolean;
 }): boolean {
   if (l.laborKonto) return false;
   if (l.pcStufeKern === "mitglied") return true;
+  if (!l.betriebDa && l.pcStufeGemerkt === "mitglied") return true;
   return (l.rolleKern ?? l.rolleGemerkt) === "admin";
 }
 

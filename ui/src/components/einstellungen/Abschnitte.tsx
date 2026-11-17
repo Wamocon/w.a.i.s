@@ -2,7 +2,7 @@
 
 import { memo, useId, useState } from "react";
 import { HinweiseListe } from "@/components/Hinweise";
-import { useMikrofonListe } from "@/components/MikrofonWahl";
+import { mikrofonFreigeben, useMikrofonListe } from "@/components/MikrofonWahl";
 import { useEffektiveDarstellung } from "@/components/kommando/ansicht";
 import {
   DARSTELLUNGEN,
@@ -13,14 +13,14 @@ import {
 import { KERN, kernUrl, useBetriebsart } from "@/lib/betriebsart";
 import { rolleText } from "@/lib/einstellungenAbschnitte";
 import { useDesktopApp, useServerBrowser } from "@/lib/geraet";
-import { gewaehltesMikrofon, merkeMikrofon, type Mikrofon } from "@/lib/mikrofon";
+import { gewaehltesMikrofon, standardText, type Mikrofon } from "@/lib/mikrofon";
 import { untertitelSetzen, useUntertitel } from "@/lib/einstellungen";
 import { useNutzer } from "@/lib/nutzer";
 import { zurGeraeteverwaltung } from "@/lib/einstellungenHash";
 import { useSelect } from "@/lib/store";
 import { THEMEN, themaWaehlen, type Thema } from "@/lib/thema";
 import { useThema } from "@/lib/useThema";
-import { istOnline, wamo, zeigeToast } from "@/lib/wamo";
+import { istOnline, wamo } from "@/lib/wamo";
 import { Block, Daten } from "./Block";
 import { StillStartEinstellung } from "./StillStart";
 
@@ -74,14 +74,47 @@ export const KontoAbschnitt = memo(function KontoAbschnitt({
 });
 
 // ---------- Sprache und Ton ----------
+/**
+ * Mikrofonwahl (lib/mikrofon.ts): gespeichert je Person auf diesem Gerät, in diesem Browser oder dieser App. Die Auswahl nennt das
+ * Standardgerät (im Browser das des Browsers, das nicht dem von Windows folgen muss, in der Desktop-App das von Windows) mit Namen und
+ * sagt, welches Gerät gerade läuft oder beim nächsten Gespräch läuft. Ohne Freigabe nennt der Browser keine Geräte: Dann gibt es einen
+ * Knopf, der das Mikrofon kurz öffnet und gleich wieder schließt.
+ */
 function MikrofonEinstellung({ laden, waehlen }: { laden: () => Promise<Mikrofon[]>; waehlen: (id: string) => boolean }) {
   const id = useId();
-  const liste = useMikrofonListe(laden);
+  const nutzer = useNutzer();
+  const desktop = useDesktopApp();
+  const [anstoss, setAnstoss] = useState(0);
+  const [freigabe, setFreigabe] = useState<"bereit" | "laeuft" | "abgelehnt">("bereit");
+  const [, setGewechselt] = useState(0); // nach einer Wahl neu zeichnen; die Wahl selbst liegt in lib/mikrofon.ts
+  const liste = useMikrofonListe(laden, anstoss);
   const online = useSelect(wamo, istOnline);
   const aktuell = useSelect(wamo, (s) => s.mikrofon);
-  // Die Wahl liegt in localStorage (lib/mikrofon.ts); hier nur der Wert für die Anzeige
-  const [gewaehlt, setGewaehlt] = useState(() => gewaehltesMikrofon() ?? "");
-  const wert = liste?.some((m) => m.id === gewaehlt) ? gewaehlt : "";
+  const gewaehlt = gewaehltesMikrofon(nutzer.id);
+  const angeschlossen = liste?.find((m) => m.id === gewaehlt) ?? null;
+  const standard = liste?.find((m) => m.standard) ?? null;
+  const standardName = standard ? `${standardText(desktop)} (${standard.label})` : standardText(desktop);
+  const fehlt = gewaehlt !== null && liste !== null && liste.length > 0 && angeschlossen === null;
+  const ohneGeraete = liste !== null && liste.length === 0;
+
+  const freigeben = async () => {
+    setFreigabe("laeuft");
+    const ok = await mikrofonFreigeben();
+    setFreigabe(ok ? "bereit" : "abgelehnt");
+    setAnstoss((n) => n + 1);
+  };
+
+  const stand = !liste
+    ? "Mikrofone werden gesucht …"
+    : ohneGeraete
+      ? aktuell
+        ? "Keine Mikrofone gefunden. Schließe ein Mikrofon oder Headset an."
+        : "Noch keine Mikrofone sichtbar."
+      : online
+        ? aktuell
+          ? `In Benutzung: ${aktuell}. Ein Wechsel gilt sofort.`
+          : "Im Gespräch ist gerade kein Mikrofon offen. Die Wahl gilt, sobald es läuft."
+        : `Beim nächsten Gespräch: ${angeschlossen ? angeschlossen.label : standardName}. Die Wahl gilt für dich auf diesem Gerät.`;
 
   return (
     <>
@@ -89,20 +122,13 @@ function MikrofonEinstellung({ laden, waehlen }: { laden: () => Promise<Mikrofon
         <label htmlFor={id}>Mikrofon</label>
         <select
           id={id}
-          value={wert}
-          disabled={!liste || liste.length === 0}
+          value={angeschlossen ? angeschlossen.id : ""}
+          disabled={!liste || ohneGeraete}
           onChange={(e) => {
-            const neu = e.target.value;
-            if (neu === "") {
-              merkeMikrofon(null);
-              setGewaehlt("");
-              zeigeToast("Standardgerät gilt ab dem nächsten Gespräch");
-            } else if (waehlen(neu)) {
-              setGewaehlt(neu);
-            }
+            if (waehlen(e.target.value)) setGewechselt((n) => n + 1);
           }}
         >
-          <option value="">Standardgerät von Windows</option>
+          <option value="">{standardName}</option>
           {liste?.map((m) => (
             <option key={m.id} value={m.id}>
               {m.label}
@@ -111,14 +137,34 @@ function MikrofonEinstellung({ laden, waehlen }: { laden: () => Promise<Mikrofon
         </select>
       </div>
       <p className="ez-klein" role="status">
-        {!liste
-          ? "Mikrofone werden gesucht …"
-          : liste.length === 0
-            ? "Keine Mikrofone gefunden oder noch keine Freigabe des Browsers. Die Liste erscheint nach dem Start eines Gesprächs."
-            : online && aktuell
-              ? `In Benutzung: ${aktuell}. Ein Wechsel gilt sofort.`
-              : "Gerade läuft kein Gespräch. Die Wahl gilt ab dem nächsten Gespräch auf diesem Gerät."}
+        {stand}
       </p>
+      {fehlt && (
+        <p className="ez-klein" data-rueckfall>
+          Dein gewähltes Mikrofon ist gerade nicht angeschlossen. Bis es wieder da ist, nimmt W.A.I.S. das {standardText(desktop)}.
+        </p>
+      )}
+      {/* ohne offenes Mikrofon (auch in einer still gestarteten Sitzung) fehlt oft nur die Freigabe */}
+      {ohneGeraete && !aktuell && (
+        <>
+          <p className="ez-klein">
+            Die Namen der Mikrofone zeigt {desktop ? "die App" : "der Browser"} erst, wenn du W.A.I.S. das Mikrofon einmal freigegeben hast.
+            Beim Freigeben öffnet sich das Mikrofon kurz und schließt sofort wieder, aufgenommen wird nichts.
+          </p>
+          <div>
+            <button type="button" className="btn-secondary btn-small" disabled={freigabe === "laeuft"} onClick={() => void freigeben()}>
+              Mikrofon freigeben
+            </button>
+          </div>
+          {freigabe === "abgelehnt" && (
+            <p className="ez-klein" role="alert">
+              {desktop
+                ? "Windows hat das Mikrofon nicht freigegeben. Erlaube es unter Einstellungen > Datenschutz und Sicherheit > Mikrofon."
+                : "Der Browser hat das Mikrofon nicht freigegeben. Erlaube es für diese Seite (Symbol links neben der Adresse) und versuche es noch einmal."}
+            </p>
+          )}
+        </>
+      )}
     </>
   );
 }

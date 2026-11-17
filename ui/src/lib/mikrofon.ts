@@ -171,43 +171,138 @@ export function fehlerName(e: unknown): string | undefined {
   return typeof n === "string" ? n.slice(0, 40) : undefined;
 }
 
-// ---------- Gerätewahl (je Gerät gespeichert) ----------
+// ---------- Gerätewahl (je Person und Gerät gespeichert) ----------
+/**
+ * 17.11.2026: Im Browser nahm W.A.I.S. ein anderes Mikrofon als die Desktop-App (Stimmprüfung im Browser 0,02 bis 0,28, in der App 0,33
+ * bis 0,74). Browser und Desktop-App haben je einen eigenen Speicher, und Chrome hat ein eigenes Standardgerät (chrome://settings/content/
+ * microphone), das nicht dem von Windows folgen muss. Die Wahl gilt deshalb je Person auf diesem Gerät, in diesem Browser oder dieser App
+ * (Schlüssel mit der user_id wie lib/untertitel.ts), und die Einstellungen zeigen, welches Gerät Standard ist und welches benutzt wird.
+ *
+ * Bis 17.11.2026 gab es nur eine Wahl je Gerät für alle Personen (MIKROFON_SCHLUESSEL). Sie gilt weiter, solange die Person selbst nichts
+ * gewählt hat; wählt sie das Standardgerät, steht MIKROFON_STANDARD in ihrem Schlüssel und verdeckt die alte Wahl.
+ */
 export const MIKROFON_SCHLUESSEL = "wamo.mikrofon";
+export const MIKROFON_PRAEFIX = "wamo.mikrofon.";
+export const MIKROFON_STANDARD = "standard";
 
-export type Mikrofon = { id: string; label: string };
+export type Mikrofon = {
+  id: string;
+  label: string;
+  /** dieses Gerät steckt hinter dem Alias "default": das Standardgerät des Browsers (in der Desktop-App das von Windows) */
+  standard?: boolean;
+};
 
-/** Nur echte Geräte mit Kennung; "default" und "communications" sind Aliase von Windows. */
-export function geraeteListe(geraete: ArrayLike<{ kind: string; deviceId: string; label: string }>): Mikrofon[] {
-  const liste: Mikrofon[] = [];
+type Geraet = { kind: string; deviceId: string; label: string; groupId?: string };
+
+/**
+ * Nur echte Geräte mit Kennung; "default" und "communications" sind Aliase von Windows. Das Gerät hinter "default" bekommt standard:
+ * Chrome nennt den Alias "<Wort> - <Name des Geräts>" (das Wort hängt von der Sprache ab), also zählt das Ende der Bezeichnung; ohne
+ * Treffer die Gerätegruppe, wenn sie genau ein Eingabegerät hat.
+ */
+export function geraeteListe(geraete: ArrayLike<Geraet>): Mikrofon[] {
+  const liste: (Mikrofon & { gruppe?: string })[] = [];
+  let alias: Geraet | null = null;
   for (let i = 0; i < geraete.length; i++) {
     const g = geraete[i];
-    if (g.kind !== "audioinput" || !g.deviceId || g.deviceId === "default" || g.deviceId === "communications") continue;
-    liste.push({ id: g.deviceId, label: (g.label || "Mikrofon").slice(0, 120) });
+    if (g.kind !== "audioinput" || !g.deviceId || g.deviceId === "communications") continue;
+    if (g.deviceId === "default") {
+      alias = g;
+      continue;
+    }
+    liste.push({ id: g.deviceId, label: (g.label || "Mikrofon").slice(0, 120), gruppe: g.groupId });
   }
-  return liste;
+  const standard = alias ? standardIndex(liste, alias) : -1;
+  return liste.map((m, i) => (i === standard ? { id: m.id, label: m.label, standard: true } : { id: m.id, label: m.label }));
 }
 
-/** Gewähltes Gerät, wenn es noch angeschlossen ist; sonst null (dann gilt das Standardgerät von Windows). */
+function standardIndex(liste: readonly (Mikrofon & { gruppe?: string })[], alias: Geraet): number {
+  const name = alias.label ?? "";
+  // "Standard - Mikrofon (USB)" passt zu "Mikrofon (USB)", aber nicht zu einem Gerät, dessen Name nur das Ende davon ist
+  const nachName = liste.findIndex(
+    (m) => name.length > m.label.length && name.endsWith(m.label) && /[-–]\s*$/.test(name.slice(0, name.length - m.label.length)),
+  );
+  if (nachName >= 0) return nachName;
+  if (!alias.groupId) return -1;
+  const gleich = liste.flatMap((m, i) => (m.gruppe === alias.groupId ? [i] : []));
+  return gleich.length === 1 ? gleich[0] : -1;
+}
+
+/** Gewähltes Gerät, wenn es noch angeschlossen ist; sonst null (dann gilt das Standardgerät). */
 export function startGeraet(liste: Mikrofon[], gewuenscht: string | null): string | null {
   return gewuenscht && liste.some((m) => m.id === gewuenscht) ? gewuenscht : null;
 }
 
-export function gewaehltesMikrofon(): string | null {
+/** Name des Standardgeräts für die Auswahl: im Browser das des Browsers, in der Desktop-App das von Windows. */
+export const standardText = (desktop: boolean): string => (desktop ? "Standardgerät von Windows" : "Standardgerät des Browsers");
+
+/** Kurzer Hinweis, wenn das gewählte Mikrofon fehlt (abgezogen, belegt) und W.A.I.S. deshalb das Standardgerät nimmt. */
+export const MIKROFON_ERSATZ_TEXT = "Das gewählte Mikrofon ist nicht verfügbar, W.A.I.S. nutzt das Standardgerät.";
+
+type Lesen = { getItem(k: string): string | null };
+type Schreiben = { setItem(k: string, v: string): void };
+
+const gueltigeKennung = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 200;
+
+/** Schlüssel im Speicher für diese Person; null, wenn die Kennung fehlt oder nicht wie eine user_id aussieht. */
+export function mikrofonSchluessel(userId: string | null | undefined): string | null {
+  if (typeof userId !== "string" || !/^[A-Za-z0-9-]{1,64}$/.test(userId)) return null;
+  return `${MIKROFON_PRAEFIX}${userId}`;
+}
+
+/**
+ * Gewähltes Mikrofon dieser Person auf diesem Gerät (Kennung des Geräts), null für das Standardgerät. Ohne eigene Wahl gilt die alte Wahl je
+ * Gerät. Ohne Speicher, bei einem Lesefehler oder einem unbrauchbaren Wert: null.
+ */
+export function mikrofonLesen(speicher: Lesen | null | undefined, userId: string | null | undefined): string | null {
+  if (!speicher) return null;
   try {
-    const v = localStorage.getItem(MIKROFON_SCHLUESSEL);
-    return v && v.length <= 200 ? v : null;
+    const k = mikrofonSchluessel(userId);
+    const eigen = k ? speicher.getItem(k) : null;
+    if (eigen !== null) return eigen !== MIKROFON_STANDARD && gueltigeKennung(eigen) ? eigen : null;
+    const alt = speicher.getItem(MIKROFON_SCHLUESSEL);
+    return gueltigeKennung(alt) && alt !== MIKROFON_STANDARD ? alt : null;
   } catch {
     return null;
   }
 }
 
-export function merkeMikrofon(id: string | null) {
+/** Wahl schreiben (null: Standardgerät). true, wenn der Speicher sie angenommen hat (sonst gilt sie nur bis zum Neuladen). */
+export function mikrofonSchreiben(speicher: Schreiben | null | undefined, userId: string | null | undefined, id: string | null): boolean {
+  const k = mikrofonSchluessel(userId);
+  if (!k || !speicher || (id !== null && !gueltigeKennung(id))) return false;
   try {
-    if (id) localStorage.setItem(MIKROFON_SCHLUESSEL, id);
-    else localStorage.removeItem(MIKROFON_SCHLUESSEL);
+    speicher.setItem(k, id ?? MIKROFON_STANDARD);
+    return true;
   } catch {
-    // privater Modus o. ä.: dann gilt die Wahl nur für dieses Gespräch
+    return false;
   }
+}
+
+/** Wahl, die der Speicher nicht annahm (privates Fenster, gesperrte Website-Daten): gilt bis zum Neuladen. */
+const rueckfall = new Map<string, string>();
+
+function lokalerSpeicher(): (Lesen & Schreiben) | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Gewähltes Mikrofon der angemeldeten Person auf diesem Gerät (null: Standardgerät). */
+export function gewaehltesMikrofon(userId: string | null | undefined): string | null {
+  const k = mikrofonSchluessel(userId);
+  const gemerkt = k ? rueckfall.get(k) : undefined;
+  if (gemerkt !== undefined) return gemerkt === MIKROFON_STANDARD ? null : gemerkt;
+  return mikrofonLesen(lokalerSpeicher(), userId);
+}
+
+/** Wahl merken (null: Standardgerät). Ohne Kennung der Person wird nichts gemerkt, die Wahl wirkt dann nur im laufenden Gespräch. */
+export function merkeMikrofon(userId: string | null | undefined, id: string | null): void {
+  const k = mikrofonSchluessel(userId);
+  if (!k || (id !== null && !gueltigeKennung(id))) return;
+  if (mikrofonSchreiben(lokalerSpeicher(), userId, id)) rueckfall.delete(k);
+  else rueckfall.set(k, id ?? MIKROFON_STANDARD);
 }
 
 // ---------- "Ohne Mikrofon weiter" ----------

@@ -1,7 +1,7 @@
 "use client";
 
 import { useBetriebsart } from "@/lib/betriebsart";
-import { useRolleGemerkt } from "@/lib/einstellungen";
+import { usePcStufeGemerkt, useRolleGemerkt } from "@/lib/einstellungen";
 import { useDesktopApp } from "@/lib/geraet";
 import { useNutzer } from "@/lib/nutzer";
 import { pcAdmin, pcFern, schalterAnzeige, type SchalterAnzeige } from "@/lib/pcSchalter";
@@ -23,8 +23,9 @@ export function usePcFern(): boolean {
 
 /**
  * Wie der Schalter "PC-Steuerung" erscheint (lib/pcSchalter.ts, schalterAnzeige): für den Schalter in den Einstellungen, den Block
- * "PC-Steuerung" und den Weg aus der Kopfzeile. admin: die Rolle vom Kern, ohne Sitzung die gemerkte; Laborkonten nie. Desktop-App und
- * Browser gleich; fern: der Browser steuert den Laptop aus dem Geräteregister (usePcFern).
+ * "PC-Steuerung" und den Weg aus der Kopfzeile. admin: die Rolle vom Kern, ohne Sitzung die gemerkte; ein Mitglied mit der Stufe "mitglied"
+ * vom Kern, ohne Sitzung mit der gemerkten Stufe; Laborkonten nie. Desktop-App und Browser gleich; fern: der Browser steuert den Laptop aus
+ * dem Geräteregister (usePcFern).
  */
 export function usePcSchalter(): { admin: boolean; anzeige: SchalterAnzeige; fern: boolean } {
   const nutzer = useNutzer();
@@ -36,9 +37,17 @@ export function usePcSchalter(): { admin: boolean; anzeige: SchalterAnzeige; fer
   const pc = useSelect(wamo, (s) => s.betrieb?.pc ?? null);
   const pcSteuerung = useSelect(wamo, (s) => s.betrieb?.pcSteuerung ?? "aus");
   const pcStufeKern = useSelect(wamo, (s) => s.betrieb?.pcStufe ?? null);
+  const pcStufeGemerkt = usePcStufeGemerkt(nutzer.id);
   const fern = usePcFern();
   const { erlaubt: stillErlaubt } = useStillStartErlaubt();
-  const admin = pcAdmin({ rolleKern, rolleGemerkt, laborKonto: istLaborKonto(nutzer.email), pcStufeKern });
+  const admin = pcAdmin({
+    rolleKern,
+    rolleGemerkt,
+    laborKonto: istLaborKonto(nutzer.email),
+    pcStufeKern,
+    pcStufeGemerkt,
+    betriebDa: pc !== null,
+  });
   const betrieb = pc ? { pc, pcSteuerung } : null;
   return { admin, anzeige: schalterAnzeige({ admin, presence, stillErlaubt, wartet, betrieb }), fern };
 }

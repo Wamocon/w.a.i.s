@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { PipecatClient, RTVIError } from "@pipecat-ai/client-js";
-import { SmallWebRTCTransport, WavMediaManager } from "@pipecat-ai/small-webrtc-transport";
+import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 import { betriebsartFuerStart, KERN, kernUrl, type Betriebsart, type BetriebsartBruecke } from "@/lib/betriebsart";
 import { alleFristenLoeschen, fristStarten } from "@/lib/auftragFrist";
 import { auftragLaeuft, auftraegeNachFrist, auftraegeNachStart, auftragStartbar, auftragVerwerfbar } from "@/lib/auftragStart";
@@ -10,13 +10,31 @@ import { abgelaufenHinweis } from "@/lib/laborKarte";
 import { useNeuladenWarnung } from "@/lib/useNeuladenWarnung";
 import { neuladenPlanen } from "@/lib/laborNeuladen";
 import { aktiverSlot, startUrl } from "@/lib/kernSlot";
-import { pcAutoLesen, rolleGemerktLesen, rolleGemerktSetzen, stillStartLesen } from "@/lib/einstellungen";
+import {
+  pcAutoLesen,
+  pcStufeGemerktLesen,
+  pcStufeGemerktSetzen,
+  rolleGemerktLesen,
+  rolleGemerktSetzen,
+  stillStartLesen,
+} from "@/lib/einstellungen";
 import { einstellungenOeffnen } from "@/lib/einstellungenHash";
 import type { GeraetBruecke } from "@/lib/geraet";
 import { bildAnzeigen, liveBildFuerProfil, liveBildLoeschen } from "@/lib/liveBild";
 import { nutzerLesen, useNutzerHalten } from "@/lib/nutzer";
-import { klickWeg, pcAdmin, PC_EIN_LEER, PC_WUNSCH_NEU, stillNeinHinweis, wunschSchritt, type PcWunsch } from "@/lib/pcSchalter";
+import {
+  klickWeg,
+  pcAdmin,
+  PC_EIN_LEER,
+  PC_WUNSCH_NEU,
+  pcStufeAusBetrieb,
+  stillNeinHinweis,
+  wunschSchritt,
+  type PcWunsch,
+} from "@/lib/pcSchalter";
 import { StillMedienManager } from "@/lib/stillMedien";
+import { GeraeteMedienManager } from "@/lib/geraeteMedien";
+import { LEISE_TEXT, leiseNeuMessen, neueLeise, PEGEL_TAKT_MS, pruefeLeise } from "@/lib/pegelWarnung";
 import {
   HINWEIS_RUHE,
   istLaborKonto,
@@ -59,6 +77,7 @@ import {
   kernStilleText,
   merkeMikrofon,
   messen,
+  MIKROFON_ERSATZ_TEXT,
   mikrofonFehlerText,
   neueStille,
   pruefeStille,
@@ -67,7 +86,6 @@ import {
   SPUR_MS,
   spurEndeText,
   STILLE_DBFS,
-  startGeraet,
   stilleAusgeblendet,
   stilleText,
   stilleWiederAufnehmen,
@@ -410,28 +428,9 @@ function fehlerText(
   }
 }
 
-/**
- * Nach dem Verbinden auf das auf diesem Gerät gewählte Mikrofon wechseln, wenn es angeschlossen ist und nicht schon
- * läuft. Ohne Wahl oder ohne das Gerät bleibt das Standardgerät von Windows.
- */
-async function gewuenschtesMikrofon(client: PipecatClient, spur: MediaStreamTrack | undefined, aktuell: () => boolean) {
-  const wunsch = gewaehltesMikrofon();
-  if (!wunsch || !navigator.mediaDevices?.enumerateDevices) return;
-  try {
-    const geraete = await navigator.mediaDevices.enumerateDevices();
-    const id = startGeraet(geraeteListe(geraete), wunsch);
-    if (!id || !aktuell()) return;
-    const laeuft = spur?.getSettings?.() ?? {};
-    const ziel = geraete.find((g) => g.deviceId === id);
-    // "default" ist nur ein Alias: dasselbe Gerät, wenn die groupId übereinstimmt
-    const schon = laeuft.deviceId === id || (laeuft.deviceId === "default" && !!ziel && laeuft.groupId === ziel.groupId);
-    if (!schon) client.updateMic(id);
-  } catch {
-    // Geräteliste nicht lesbar: dann bleibt das Standardgerät
-  }
-}
-
-const TOKEN_REST_MS = 60_000; // so lange vor Ablauf gilt ein Token als "läuft ab"
+const TOKEN_REST_MS = 60_000;
+/** Kein Gespräch ohne Anmeldung: Text, wenn die Sitzung fehlt (abgemeldet in einem anderen Fenster, abgelaufen, gelöscht). */
+export const OHNE_ANMELDUNG = "Nicht angemeldet: Bitte melde dich neu an, dann startet das Gespräch."; // so lange vor Ablauf gilt ein Token als "läuft ab"
 
 /** Was die Leerlaufregel (lib/stillStart.ts, Befund L1) vom Zustand wissen muss. */
 function leerlaufLage(s: ReturnType<typeof wamo.get>): LeerlaufLage {
@@ -467,6 +466,11 @@ export function useWamo(): WamoAktionen {
     ton: boolean;
   } | null>(null);
   const stille = useRef(neueStille());
+  // Pegelwarnung (lib/pegelWarnung.ts): sehr leises Mikrofon beim Sprechen, einmal je Gespräch
+  const leise = useRef(neueLeise());
+  // Medienmanager der laufenden Verbindung: meldet, ob statt des gewählten Mikrofons das Standardgerät läuft (lib/geraeteMedien.ts)
+  const medien = useRef<{ readonly mikrofonErsatz: boolean } | null>(null);
+  const ersatzGemeldet = useRef(false); // den Hinweis dazu gibt es einmal je Verbindung
   // Fehler beim Öffnen des Mikrofons (onDeviceError): Name wie NotAllowedError, für eine passende Meldung
   const geraetFehler = useRef<string | null>(null);
   // Kern meldet nur Stille (Servernachricht "mikrofon")
@@ -527,6 +531,9 @@ export function useWamo(): WamoAktionen {
     micMeter.current = null;
     if (mic) void mic.ctx.close().catch(() => undefined);
     stille.current = neueStille();
+    leise.current = neueLeise();
+    medien.current = null;
+    ersatzGemeldet.current = false;
     geraetFehler.current = null;
     kernStille.current = false;
     warnungNachWechsel.current = false;
@@ -688,6 +695,19 @@ export function useWamo(): WamoAktionen {
           if (ergebnis === "wieder_da") stilleWiederAufnehmen(mic.track.label); // liefert es wieder Ton, warnt WAMO bei der nächsten Stille wieder
           if (!kernStille.current && wamo.get().error?.art === "mikrofon") setFehler(null);
         }
+        // Pegelwarnung: sehr leise beim Sprechen (der Kern meldet "spricht"), nie während W.A.I.S. spricht, nie über einer anderen Meldung
+        const jetztSt = wamo.get();
+        const lage = {
+          pegel: lv.user,
+          nutzerSpricht: jetztSt.presence === "listening",
+          wamoSpricht: jetztSt.presence === "speaking",
+          aktiv,
+          frei: jetztSt.error === null,
+        };
+        if (pruefeLeise(leise.current, lage, PEGEL_TAKT_MS)) {
+          console.warn("[WAMO] Mikrofon sehr leise beim Sprechen:", mic.track.label || "unbekanntes Gerät");
+          setFehler({ art: "hinweis", text: LEISE_TEXT, aktion: "mikrofon_waehlen" });
+        }
       }
       // Weicher Stopp nach "leiser_stopp": in der nächsten Wortpause, spätestens nach 600 ms ausblenden.
       // Hier im Takt mit dem eigenen Pegel, weil SmallWebRTC keinen Pegel der Gegenseite meldet.
@@ -705,7 +725,7 @@ export function useWamo(): WamoAktionen {
       h.samples.push(s);
       if (h.samples.length > HISTORY) h.samples.shift();
       h.seq++;
-    }, 50);
+    }, PEGEL_TAKT_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -861,6 +881,13 @@ export function useWamo(): WamoAktionen {
         wamo.set((s) => ({ ...s, mikrofon: track.label ? track.label.slice(0, 120) : null }));
         if (!bekannt) {
           console.info("[WAMO] Mikrofon geöffnet:", track.label || "unbekanntes Gerät");
+          leiseNeuMessen(leise.current); // neues Gerät: die Pegelwarnung misst von vorn
+          // Das gewählte Mikrofon fehlte beim Öffnen, es läuft das Standardgerät: einmal kurz sagen (lib/geraeteMedien.ts)
+          if (medien.current?.mikrofonErsatz && !ersatzGemeldet.current) {
+            ersatzGemeldet.current = true;
+            console.info("[WAMO] Gewähltes Mikrofon fehlt, Standardgerät:", track.label || "unbekanntes Gerät");
+            zeigeToast(MIKROFON_ERSATZ_TEXT);
+          }
           // Endet die Spur von außen (Gerät abgezogen, Windows entzieht es) und folgt keine neue, sagt es die Oberfläche
           track.addEventListener("ended", () => {
             setTimeout(() => {
@@ -880,12 +907,19 @@ export function useWamo(): WamoAktionen {
             }
           });
       };
+      // Das gewählte Mikrofon dieser Person auf diesem Gerät (lib/mikrofon.ts) öffnet der Medienmanager gleich beim Verbinden; fehlt es,
+      // nimmt er das Standardgerät und die Oberfläche sagt es kurz (eigeneSpur)
+      const wunsch = gewaehltesMikrofon(nutzerLesen().id);
+      // WavMediaManager (hier GeraeteMedienManager) statt des Standards DailyMediaManager: Mikrofon rein lokal per getUserMedia.
+      // Der Daily-Manager lädt zur Laufzeit Code vom Daily-CDN; das blockt die CSP, und fremden Code
+      // aus dem Netz wollen wir in WAMO nicht ausführen.
+      // Still (Start beim Tippen): StillMedienManager öffnet das Mikrofon erst bei "Sprechen" (lib/stillMedien.ts)
+      const medienManager = still ? new StillMedienManager(wunsch) : new GeraeteMedienManager(wunsch);
+      medien.current = medienManager;
+      ersatzGemeldet.current = false;
+      leise.current = neueLeise();
       const client = new PipecatClient({
-        // WavMediaManager statt des Standards DailyMediaManager: Mikrofon rein lokal per getUserMedia.
-        // Der Daily-Manager lädt zur Laufzeit Code vom Daily-CDN; das blockt die CSP, und fremden Code
-        // aus dem Netz wollen wir in WAMO nicht ausführen.
-        // Still (Start beim Tippen): StillMedienManager öffnet das Mikrofon erst bei "Sprechen" (lib/stillMedien.ts)
-        transport: new SmallWebRTCTransport({ mediaManager: still ? new StillMedienManager() : new WavMediaManager() }),
+        transport: new SmallWebRTCTransport({ mediaManager: medienManager }),
         enableMic: !still,
         enableCam: false,
         callbacks: {
@@ -1095,6 +1129,13 @@ export function useWamo(): WamoAktionen {
         const { data } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
         if (!aktuell()) return;
         const session = data.session;
+        if (supabase && !session?.access_token) {
+          // Ohne gültige Anmeldung schickt die Oberfläche kein /start: Der Kern lehnte es nur mit 401 ab, und Erneuern hilft ohne Sitzung
+          // nicht. Die Anmeldemaske übernimmt (LoginGate hört auf die Sitzung). Ohne Supabase (Entwicklung ohne Anmeldung) gilt das nicht.
+          clientRef.current = null;
+          wamo.set((s) => ({ ...s, presence: "offline", stillStart: STILL_AUS, micOn: true, error: { art: "anmeldung", text: OHNE_ANMELDUNG } }));
+          return;
+        }
         if (session && anmeldungAbgelaufen(session.access_token, Date.now(), maxStundenHier())) {
           // zu alt: gar nicht erst verbinden, sondern abmelden (die Anmeldemaske nennt den Grund)
           clientRef.current = null;
@@ -1112,7 +1153,6 @@ export function useWamo(): WamoAktionen {
         await client.startBotAndConnect({ endpoint: startUrl(kern, slot), headers });
         // inzwischen abgebrochen: die gerade entstandene Sitzung sofort wieder schließen
         if (!aktuell()) void client.disconnect().catch(() => undefined);
-        else if (!still) void gewuenschtesMikrofon(client, micMeter.current?.track, aktuell);
       } catch (e) {
         if (!aktuell()) {
           void client.disconnect().catch(() => undefined);
@@ -1339,11 +1379,16 @@ export function useWamo(): WamoAktionen {
     };
   }, [pcWunschPruefen]);
 
-  // Die Rolle, die der Kern meldet, merkt sich die Oberfläche je Person: Der Schalter "PC-Steuerung" steht dann schon vor dem nächsten Gespräch da
+  // Die Rolle, die der Kern meldet, merkt sich die Oberfläche je Person: Der Schalter "PC-Steuerung" steht dann schon vor dem nächsten Gespräch da.
+  // Ebenso die Stufe "mitglied" eines freigeschalteten Mitglieds (lib/pcSchalter.ts); meldet eine Sitzung sie nicht, ist sie wieder vergessen.
   useEffect(() => {
     const merken = () => {
-      const rolle = wamo.get().profil?.rolle;
-      if (rolle) rolleGemerktSetzen(nutzerLesen().id, rolle);
+      const s = wamo.get();
+      const nutzer = nutzerLesen();
+      const rolle = s.profil?.rolle;
+      if (rolle) rolleGemerktSetzen(nutzer.id, rolle);
+      const stufe = pcStufeAusBetrieb(s.betrieb, istLaborKonto(nutzer.email));
+      if (stufe !== undefined) pcStufeGemerktSetzen(nutzer.id, stufe);
     };
     merken();
     return wamo.subscribe(merken);
@@ -1391,6 +1436,8 @@ export function useWamo(): WamoAktionen {
           rolleGemerkt: rolleGemerktLesen(nutzer.id),
           laborKonto: istLaborKonto(nutzer.email),
           pcStufeKern: s.betrieb?.pcStufe ?? null,
+          pcStufeGemerkt: pcStufeGemerktLesen(nutzer.id),
+          betriebDa: s.betrieb !== null,
         }),
       });
       const wunschBeginnen = () => {
@@ -1774,10 +1821,11 @@ export function useWamo(): WamoAktionen {
     }
   }, []);
 
-  // Gerät wechseln: der Medienmanager öffnet das neue Gerät, onTrackStarted legt die Spur auf die Verbindung
+  // Gerät wechseln ("" heißt Standardgerät): gemerkt je Person auf diesem Gerät (lib/mikrofon.ts). Im Gespräch öffnet der Medienmanager
+  // das neue Gerät sofort (PipecatClient.updateMic, siehe lib/geraeteMedien.ts), onTrackStarted legt die Spur auf die Verbindung
   const mikrofonWaehlen = useCallback((id: string) => {
-    if (!id || id.length > 200) return false;
-    merkeMikrofon(id);
+    if (typeof id !== "string" || id.length > 200 || id === "default" || id === "communications") return false;
+    merkeMikrofon(nutzerLesen().id, id || null);
     const client = clientRef.current;
     if (!client || !istOnline(wamo.get())) return true; // gilt ab dem nächsten Gespräch
     try {
@@ -1786,7 +1834,7 @@ export function useWamo(): WamoAktionen {
       setFehler({ art: "mikrofon", text: "Das Mikrofon ließ sich nicht wechseln. Bitte das Gespräch neu starten." });
       return false;
     }
-    zeigeToast("Mikrofon gewechselt");
+    zeigeToast(id ? "Mikrofon gewechselt" : "Standardgerät eingestellt");
     return true;
   }, []);
 

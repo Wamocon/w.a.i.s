@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useId, useRef, useState } from "react";
 import { einlernOeffnerMerken } from "@/components/kommando/einlernFokus";
-import { einstellungenSchliessen } from "@/lib/einstellungenHash";
+import { einstellungenOeffnen, einstellungenSchliessen } from "@/lib/einstellungenHash";
 import {
   ergebnisText,
   kannEinlernen,
@@ -71,63 +71,94 @@ export const StimmeAbschnitt = memo(function StimmeAbschnitt({ aktionen }: { akt
   };
 
   return (
-    <Block titel="Stimmerkennung">
-      <Daten
-        zeilen={[
-          { name: "Status", wert: stimmeStatusText(stand) },
-          { name: "Betriebsart", wert: modusText(stand.modus) },
-          { name: "Letzte Äußerung", wert: ergebnisText(stand) },
-        ]}
-      />
-      <p className="ez-text">
-        W.A.I.S. erkennt an deinem Stimmabdruck, ob du sprichst. Dafür liest du einmal einen kurzen Text vor. Gespeichert wird nur der Abdruck,
-        keine Aufnahme, und du kannst ihn jederzeit löschen.
-      </p>
-      {!online ? (
-        <p className="ez-klein">Starte ein Gespräch, dann lässt sich die Stimme einlernen oder der Abdruck löschen.</p>
-      ) : stand.status === "aus" ? (
-        <p className="ez-klein">Die Stimmerkennung ist in dieser Sitzung nicht eingeschaltet.</p>
-      ) : stand.status === "laedt" ? (
-        <p className="ez-klein">Die Stimmerkennung wird gerade geladen. Einlernen geht gleich.</p>
-      ) : null}
-      <div className="ez-tasten">
-        <button type="button" ref={einlernKnopf} className="btn-primary" disabled={!einlernenOk} onClick={einlernen}>
-          {stand.status === "bereit" ? "Neu einlernen" : "Stimme einlernen"}
-        </button>
-        {loeschenOk && (
-          <button
-            type="button"
-            ref={loeschKnopf}
-            className="btn-secondary"
-            aria-expanded={frage}
-            aria-controls={frage ? rueckfrageId : undefined}
-            onClick={() => {
-              setNachricht(null);
-              setFrage(true);
-            }}
-          >
-            Abdruck löschen
-          </button>
-        )}
-      </div>
-      {frage && (
-        <div className="ez-rueckfrage" id={rueckfrageId} role="group" aria-labelledby={frageId}>
-          <p id={frageId}>Abdruck wirklich löschen? Danach erkennt W.A.I.S. deine Stimme nicht mehr, bis du sie neu einlernst.</p>
-          <div className="ez-tasten">
-            <button type="button" ref={behalten} className="btn-secondary" onClick={frageSchliessen}>
-              Behalten
-            </button>
-            <button type="button" className="btn-secondary ez-gefahr" onClick={loeschen}>
-              Ja, Abdruck löschen
-            </button>
-          </div>
-        </div>
-      )}
-      {nachricht && (
-        <p ref={meldung} tabIndex={-1} className="ez-klein" role={nachricht.art === "alert" ? "alert" : "status"}>
-          {nachricht.text}
+    <>
+      <Block titel="Stimmerkennung">
+        <Daten
+          zeilen={[
+            { name: "Status", wert: stimmeStatusText(stand) },
+            { name: "Betriebsart", wert: modusText(stand.modus) },
+            { name: "Letzte Äußerung", wert: ergebnisText(stand) },
+          ]}
+        />
+        <p className="ez-text">
+          W.A.I.S. erkennt an deinem Stimmabdruck, ob du sprichst. Dafür liest du einmal einen kurzen Text vor. Gespeichert wird nur der Abdruck,
+          keine Aufnahme, und du kannst ihn jederzeit löschen.
         </p>
-      )}
-    </Block>
+        {!online ? (
+          <p className="ez-klein">Starte ein Gespräch, dann lässt sich die Stimme einlernen oder der Abdruck löschen.</p>
+        ) : stand.status === "aus" ? (
+          <p className="ez-klein">Die Stimmerkennung ist in dieser Sitzung nicht eingeschaltet.</p>
+        ) : stand.status === "laedt" ? (
+          <p className="ez-klein">Die Stimmerkennung wird gerade geladen. Einlernen geht gleich.</p>
+        ) : null}
+        <div className="ez-tasten">
+          <button type="button" ref={einlernKnopf} className="btn-primary" disabled={!einlernenOk} onClick={einlernen}>
+            {stand.status === "bereit" ? "Neu einlernen" : "Stimme einlernen"}
+          </button>
+          {loeschenOk && (
+            <button
+              type="button"
+              ref={loeschKnopf}
+              className="btn-secondary"
+              aria-expanded={frage}
+              aria-controls={frage ? rueckfrageId : undefined}
+              onClick={() => {
+                setNachricht(null);
+                setFrage(true);
+              }}
+            >
+              Abdruck löschen
+            </button>
+          )}
+        </div>
+        {frage && (
+          <div className="ez-rueckfrage" id={rueckfrageId} role="group" aria-labelledby={frageId}>
+            <p id={frageId}>Abdruck wirklich löschen? Danach erkennt W.A.I.S. deine Stimme nicht mehr, bis du sie neu einlernst.</p>
+            <div className="ez-tasten">
+              <button type="button" ref={behalten} className="btn-secondary" onClick={frageSchliessen}>
+                Behalten
+              </button>
+              <button type="button" className="btn-secondary ez-gefahr" onClick={loeschen}>
+                Ja, Abdruck löschen
+              </button>
+            </div>
+          </div>
+        )}
+        {nachricht && (
+          <p ref={meldung} tabIndex={-1} className="ez-klein" role={nachricht.art === "alert" ? "alert" : "status"}>
+            {nachricht.text}
+          </p>
+        )}
+      </Block>
+      <MikrofonFuerStimme />
+    </>
   );
 });
+
+/**
+ * Die Stimmprüfung hängt am Mikrofon (Befund 17.11.2026: im Browser lief ein anderes, leises Gerät, der Besitzer galt als fremd). Deshalb
+ * steht hier, welches Mikrofon läuft, mit dem Weg zur Wahl im Abschnitt "Sprache und Ton". Die Wahl selbst gibt es nur dort (auch in der
+ * Laborsicht, die diesen Abschnitt nicht hat).
+ */
+function MikrofonFuerStimme() {
+  const online = useSelect(wamo, istOnline);
+  const mikrofon = useSelect(wamo, (s) => s.mikrofon);
+  return (
+    <Block titel="Mikrofon">
+      {online && mikrofon ? (
+        <Daten zeilen={[{ name: "In Benutzung", wert: mikrofon }]} />
+      ) : (
+        <p className="ez-klein">Welches Mikrofon läuft, steht hier während eines Gesprächs.</p>
+      )}
+      <p className="ez-text">
+        Die Stimmerkennung vergleicht mit dem Abdruck, den du eingelernt hast. Ein anderes oder sehr leises Mikrofon senkt die Übereinstimmung.
+        Wähle das Mikrofon, mit dem du sprichst, und lerne die Stimme mit genau diesem Mikrofon ein.
+      </p>
+      <div>
+        <button type="button" className="btn-secondary btn-small" onClick={() => einstellungenOeffnen("sprache")}>
+          Mikrofon wählen
+        </button>
+      </div>
+    </Block>
+  );
+}

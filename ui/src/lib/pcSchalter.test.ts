@@ -19,6 +19,10 @@ import {
   klickWeg,
   pcAdmin,
   pcFern,
+  pcStufeAusBetrieb,
+  pcStufeLesen,
+  pcStufeMerken,
+  pcStufeSchluessel,
   pcLageHinweis,
   PC_VERBINDEN_MS,
   PC_WUNSCH_NEU,
@@ -85,6 +89,53 @@ test("Mitglied: nur mit der Stufe mitglied vom Kern in der laufenden Sitzung, La
   assert.equal(pcAdmin({ rolleKern: "mitglied", rolleGemerkt: "mitglied", laborKonto: false }), false);
   assert.equal(pcAdmin({ rolleKern: "mitglied", rolleGemerkt: null, laborKonto: true, pcStufeKern: "mitglied" }), false);
   assert.equal(pcAdmin({ rolleKern: "admin", rolleGemerkt: null, laborKonto: false, pcStufeKern: null }), true);
+});
+
+// ---------- Stufe "mitglied" merken (Befund 17.11.2026: ein Mitglied fand den Schalter ohne Sitzung nie) ----------
+test("gemerkte Stufe: je Person, nur der Wert mitglied, vergessen löscht den Eintrag, Fehler zählen als unbekannt", () => {
+  assert.equal(pcStufeSchluessel(ID), `wamo.pcStufe.${ID}`);
+  assert.equal(pcStufeSchluessel("../x"), null);
+  const sp = speicher();
+  assert.equal(pcStufeLesen(sp, ID), null);
+  assert.equal(pcStufeMerken(sp, ID, "mitglied"), true);
+  assert.equal(pcStufeLesen(sp, ID), "mitglied");
+  assert.equal(pcStufeLesen(sp, "anderer-0000"), null);
+  assert.equal(pcStufeMerken(sp, ID, null), true);
+  assert.equal(sp.daten.has(`wamo.pcStufe.${ID}`), false);
+  assert.equal(pcStufeLesen(speicher({ [`wamo.pcStufe.${ID}`]: "admin" }), ID), null);
+  assert.equal(pcStufeMerken(sp, null, "mitglied"), false);
+  const kaputt = { getItem: () => { throw new Error("gesperrt"); }, setItem: () => { throw new Error("gesperrt"); }, removeItem: () => { throw new Error("gesperrt"); } };
+  assert.equal(pcStufeLesen(kaputt, ID), null);
+  assert.equal(pcStufeMerken(kaputt, ID, "mitglied"), false);
+});
+
+test("Stufe aus der Betriebsmeldung: mitglied merken, jede andere Meldung vergisst, ohne Meldung bleibt alles; Laborkonten nie", () => {
+  assert.equal(pcStufeAusBetrieb({ pcStufe: "mitglied" }, false), "mitglied");
+  assert.equal(pcStufeAusBetrieb({}, false), null); // Sitzung ohne pc_stufe: der Kern lehnt ab
+  assert.equal(pcStufeAusBetrieb({ pcStufe: "admin" }, false), null);
+  assert.equal(pcStufeAusBetrieb(null, false), undefined); // keine Sitzung: nichts ändern
+  assert.equal(pcStufeAusBetrieb({ pcStufe: "mitglied" }, true), null);
+  assert.equal(pcStufeAusBetrieb(null, true), null);
+});
+
+test("Mitglied ohne Sitzung: mit gemerkter Stufe sichtbar und still startbar; mit Betriebsmeldung zählt nur der Kern", () => {
+  const mitglied = { rolleKern: null, rolleGemerkt: "mitglied" as const, laborKonto: false };
+  assert.equal(pcAdmin({ ...mitglied, pcStufeGemerkt: "mitglied" }), true);
+  assert.equal(pcAdmin({ ...mitglied, pcStufeGemerkt: null }), false);
+  // in einer Sitzung, die schon Betriebsdaten hat, entscheidet allein die Meldung
+  assert.equal(pcAdmin({ ...mitglied, rolleKern: "mitglied", pcStufeGemerkt: "mitglied", betriebDa: true, pcStufeKern: null }), false);
+  assert.equal(pcAdmin({ ...mitglied, rolleKern: "mitglied", pcStufeGemerkt: "mitglied", betriebDa: true, pcStufeKern: "mitglied" }), true);
+  // Sitzung baut sich auf (Profil da, noch keine Betriebsdaten): die gemerkte Stufe gilt weiter
+  assert.equal(pcAdmin({ ...mitglied, rolleKern: "mitglied", pcStufeGemerkt: "mitglied", betriebDa: false }), true);
+  assert.equal(pcAdmin({ ...mitglied, laborKonto: true, pcStufeGemerkt: "mitglied" }), false);
+  // mit der gemerkten Stufe wie ein Admin: bedienbar ohne Sitzung, der Klick startet still
+  assert.deepEqual(schalterAnzeige({ admin: true, presence: "offline", stillErlaubt: true, wartet: false, betrieb: null }), {
+    art: "bedienbar",
+    ohneSitzung: true,
+  });
+  assert.deepEqual(klickWeg({ an: true, online: false, presence: "offline", admin: pcAdmin({ ...mitglied, pcStufeGemerkt: "mitglied" }) }), {
+    art: "still_starten",
+  });
 });
 
 const lage = (p: Partial<Parameters<typeof schalterAnzeige>[0]> = {}): Parameters<typeof schalterAnzeige>[0] => ({
