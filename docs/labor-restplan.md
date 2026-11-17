@@ -77,6 +77,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | Fr 20.11. vormittags | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen, mit Preisen, Ratenlimit und `--kosten-obergrenze`. Vorher den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“, Starttickets zählen als belegt) | W.A.I.S., Niko | Ja von Niko, N3, E5 |
 | Mi 18.11. früh | Vorstufe Lasttest mit 2 und 4 Sitzungen je 10 Minuten (Entscheidung 17.11.), vorher Trockenlauf | W.A.I.S., Niko | Trockenlauf ohne Befund |
 | Fr 20.11. nachmittags | Zweite Faktoren neu auf die Betreuer-Geräte (E2), zuerst ein Profil. Die zweiten Faktoren der Profile 01 bis 08 bleiben eingerichtet (05 bis 08 als Reserve). ~~Aufzeichnung des Schaufensters~~ entfällt (17.11.) | W.A.I.S., Betreuer, Niko | Lasttest abgeschlossen |
+| Fr 20.11. | Finale Datenschutzrichtlinie der Betreuer (N11) liefern. Kommt sie bis dahin, wird sie als Fassung 2 vor dem Freeze eingebaut, sonst gilt Fassung 1 | Betreuer, W.A.I.S., Niko | N11 |
 | Sa 21.11. | Letzte Freischaltungen der Mitglieder (E4). Puffer für Befunde aus dem Lasttest | Niko, W.A.I.S. | E4 |
 | So 22.11. abends | Freeze-Kandidat ist ausgerollt: Kern mit Bewährung, Oberfläche, Labor-Rauchtest, Lasttest-Probelauf mit einer Sitzung. Ab hier nur noch Sicherheitskorrekturen mit Nikos Ja | W.A.I.S. | E1 |
 | Mo 23.11. früh | **Freeze** (E1): Etikett `labor-freeze` auf den ausgerollten Stand. Kiosk-Test des Platz-Skripts auf einem echten Platz-Laptop im Kiosk-Konto und auf einem Ersatzgerät (`einrichten`, CA, `pruefen`, Board), Termin `[offen: Niko]`, muss vor dem Freeze liegen | W.A.I.S., Niko, Kollegen | Geräte da |
@@ -91,7 +92,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 
 ### N.5 Offene Lieferungen
 
-Stand am 17.11.2026, Nachmittag: N3 bis N5 erledigt. Offen sind N6 bis N8 und N10 (Abschnitt 5). N10 ist neu: Gateway ohne Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut das Gateway selbst (`infra/sokrates1/gateway-wamo.md`).
+Stand am 17.11.2026, Nachmittag: N3 bis N5 erledigt. Datenschutz: Fassung 1 des Hinweises am 17.11. von Niko freigegeben, die finale Datenschutzrichtlinie liefern die Betreuer (N11, Fassung 2 nur bis Fr 20.11.). Offen sind N6 bis N8, N10 und N11 (Abschnitt 5). N10 ist neu: Gateway ohne Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut das Gateway selbst (`infra/sokrates1/gateway-wamo.md`).
 
 ---
 
@@ -165,6 +166,7 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | vor der Generalprobe |
 | N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste; Entwurf mit Musterantworten an den verantwortlichen Trainer am 17.11., Seminar-Angaben sind kein Muss (`ausgang.md` verweist sonst auf den Stand) |
 | N10 | Gateway (zentrales LiteLLM auf Sokrates-1): kein Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut es selbst, Betriebsnotiz `infra/sokrates1/gateway-wamo.md` | Fr 27.11. 12:00 | Keine Änderung am Gateway in dieser Zeit |
+| N11 | Datenschutz: finale Datenschutzrichtlinie der Betreuer. Fassung 1 des Hinweises ist am 17.11. von Niko freigegeben (`docs/labor-datenschutz-entwurf.md`, Dienst `labor-dienst/wamo_labor_dienst/web/datenschutz.html`) | Fr 20.11. für Fassung 2, sonst gilt am Labortag Fassung 1 | Kommt sie bis Fr 20.11., wird sie als Fassung 2 vor dem Freeze eingebaut: neuer Text im Dienst, Versionsnummer 2 auf der Betreuer-Seite, `WAMO_LABOR_EINWILLIGUNG_MIN=2` am Kern mit dem Freeze-Kandidaten So 22.11. |
 | E5 | Kern-Kanal während Lasttest und Labortag sperren | Fr 20.11. | Ja. Der Grund Schaufenster entfällt (17.11.), der gemeinsame Server bleibt (Abschnitt 6, Punkt 4) |
 
 ## 6. Lücken und Risiken
