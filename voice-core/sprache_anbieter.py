@@ -40,6 +40,7 @@ from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame
 from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
@@ -48,6 +49,10 @@ from satz_vor_werkzeug import SatzVorWerkzeugTTS
 
 ANBIETER = ("soniox", "haus")
 HAUS_TIMEOUT_SECS = 20.0  # eine Äußerung bzw. ein Satz; danach Fehler statt Hänger
+# Steht immer vorn im Feld prompt der Spracherkennung im Haus. Befund 17.11.2026 am Server: Qwen3-ASR-1.7B hinter vLLM 0.22.1 übergeht
+# language=de, ein deutscher Satz kam mit und ohne die Angabe als Niederländisch zurück ("Wie wordt het weer am Wachtenende in
+# Ashbourne?"); mit einem deutschen Hinweissatz im prompt kam Deutsch. language=de geht trotzdem mit.
+STT_HAUS_HINWEIS = "Die folgende Aufnahme ist auf Deutsch."
 WAV_KOPF_BYTES = 44
 # Antworten des Gateways, die heißen "Durchreiche nicht eingerichtet oder für diesen Schlüssel nicht frei": dann der Modellweg
 DURCHREICHE_ABGELEHNT = frozenset({401, 403, 404})
@@ -239,15 +244,20 @@ class HausSTTService(OpenAISTTService):
         return await self._client.audio.transcriptions.create(**anfrage)
 
 
+def stt_haus_prompt(begriffe: list[str]) -> str:
+    """Hinweis für die Spracherkennung im Haus: immer erst der deutsche Satz (STT_HAUS_HINWEIS), dann die Fachbegriffe wie bei Whisper."""
+    return f"{STT_HAUS_HINWEIS} {', '.join(begriffe)}" if begriffe else STT_HAUS_HINWEIS
+
+
 def haus_stt(b: Baustein, begriffe: list[str]) -> HausSTTService:
-    """STT im Haus: OpenAI-kompatibel über LiteLLM; Fachbegriffe als Hinweis (prompt) wie bei Whisper."""
+    """STT im Haus: OpenAI-kompatibel über LiteLLM; vorn der deutsche Hinweissatz, dahinter die Fachbegriffe (prompt)."""
     return HausSTTService(
         api_key=_env("LITELLM_API_KEY"),
         base_url=litellm_basis(),
         settings=OpenAISTTService.Settings(
             model=b.modell,
             language=Language.DE,
-            prompt=", ".join(begriffe) if begriffe else None,
+            prompt=stt_haus_prompt(begriffe),
         ),
     )
 
@@ -298,6 +308,10 @@ class HausTTSService(SatzVorWerkzeugTTS, TTSService):
 
     def __init__(self, *, modell: str, stimme: str, basis: str | None = None, schluessel: str | None = None,
                  client: httpx.AsyncClient | None = None, stream: bool | None = None, **kwargs):
+        # Vollständige Einstellungen aus der eigenen Konfiguration (Pipecat prüft beim Start jeder Sitzung, ob keine fehlt, sonst
+        # "TTSSettings: the following fields are NOT_GIVEN"). language None: die Anfrage nennt keine Sprache (der Dienst im Haus hat
+        # seine eigene), und Pipecat trennt die Sätze wie bisher ohne Sprachangabe.
+        kwargs.setdefault("settings", TTSSettings(model=modell, voice=stimme, language=None))
         super().__init__(push_text_frames=True, push_start_frame=True, push_stop_frames=True, **kwargs)
         self._modell = modell
         self._stimme = stimme

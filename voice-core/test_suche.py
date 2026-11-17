@@ -245,3 +245,129 @@ def test_merken_nach_fremdinhalten(letzter_satz, bereich, tainted, gesperrt):
     assert tools.merken_gesperrt(bereich, letzter_satz, tainted) is gesperrt
     if bereich == "gemeinsam" and tainted:
         assert tools.merken_status(bereich, "admin", letzter_satz, tainted) == "vorgeschlagen"
+
+
+# --- Werkzeug websuche im Zug: ohne Anbieter, nach Fehlern, gleichzeitige gleiche Anfragen (Befund 17.11.2026) -------------------
+# Im Journal rief das Hausmodell websuche im selben Zug drei bis vier Mal auf (0 Treffer, die Suche war nicht eingerichtet), und einmal
+# liefen zwei Suchen gleichzeitig (je 10 bis 13 s).
+
+
+class _LLM:
+    def __init__(self):
+        self.handler = {}
+
+    def register_function(self, name, handler, **kw):
+        self.handler[name] = handler
+
+
+def _websuche(zugang, turn=None):
+    from types import SimpleNamespace
+
+    llm = _LLM()
+    identity = SimpleNamespace(name="Niko", rolle="admin", is_admin=True)
+    tools.register_tools(llm, None, identity, turn, zugang=zugang)
+
+    async def aufruf(anfrage: str) -> dict:
+        antworten: list = []
+
+        async def antwort(wert, **_kw):
+            antworten.append(wert)
+
+        await llm.handler["websuche"](SimpleNamespace(arguments={"anfrage": anfrage}, result_callback=antwort))
+        return antworten[0]
+
+    return aufruf
+
+
+def _zaehlende_suche(monkeypatch, ergebnis: dict, tor=None) -> list[str]:
+    gesucht: list[str] = []
+
+    async def suche_attrappe(anfrage, zugang):
+        gesucht.append(anfrage)
+        if tor is not None:
+            await tor.wait()
+        return dict(ergebnis)
+
+    monkeypatch.setattr(tools, "websuche_ergebnis", suche_attrappe)
+    return gesucht
+
+
+async def test_ohne_suchanbieter_klarer_satz_ohne_versuch(monkeypatch):
+    monkeypatch.delenv("WAMO_SEARXNG_URL", raising=False)
+    monkeypatch.delenv("WAMO_SUCHE", raising=False)
+    gesucht = _zaehlende_suche(monkeypatch, {"ergebnis": "sollte nie kommen"})
+    aufruf = _websuche(HAUS)
+    for _ in range(3):
+        assert await aufruf("Wetter Eschborn") == {"ergebnis": tools.SUCHE_NICHT_VERFUEGBAR}
+    assert gesucht == []
+    assert "nicht verfügbar" in tools.SUCHE_NICHT_VERFUEGBAR and "nicht noch einmal" in tools.SUCHE_NICHT_VERFUEGBAR
+
+
+def test_anbieter_problem(monkeypatch):
+    monkeypatch.delenv("WAMO_SUCHE", raising=False)
+    monkeypatch.delenv("WAMO_SEARXNG_URL", raising=False)
+    assert suche.anbieter_problem(haus=False) is None  # Anthropic-Suche mit dem Schlüssel des Profils
+    assert "WAMO_SEARXNG_URL" in suche.anbieter_problem(haus=True)
+    monkeypatch.setenv("WAMO_SUCHE", "searxng")
+    assert suche.anbieter_problem(haus=False) is not None
+    monkeypatch.setenv("WAMO_SEARXNG_URL", "http://127.0.0.1:8888")
+    assert suche.anbieter_problem(haus=False) is None and suche.anbieter_problem(haus=True) is None
+
+
+async def test_nach_einem_fehler_hoechstens_ein_neuer_versuch_im_zug(monkeypatch):
+    monkeypatch.setenv("WAMO_SEARXNG_URL", "http://127.0.0.1:8888")
+    gesucht = _zaehlende_suche(monkeypatch, {"ergebnis": "Die Suche ist gerade fehlgeschlagen."})
+    turn = tools.TurnState()
+    turn.new_user_turn("Wie wird das Wetter?")
+    aufruf = _websuche(HAUS, turn)
+    ergebnisse = [await aufruf(a) for a in ("Wetter Eschborn", "Wetter Eschborn Wochenende", "Wetter", "Wetter Hessen")]
+    assert ergebnisse[0] == {"ergebnis": "Die Suche ist gerade fehlgeschlagen."}
+    assert ergebnisse[1:] == [{"ergebnis": tools.SUCHE_NICHT_VERFUEGBAR}] * 3
+    assert gesucht == ["Wetter Eschborn", "Wetter Eschborn Wochenende"], "ein Versuch und ein erneuter, dann keiner mehr"
+    turn.new_user_turn("Versuch es nochmal.")  # ein neuer Beitrag der Person darf wieder suchen
+    assert await aufruf("Wetter Eschborn") == {"ergebnis": "Die Suche ist gerade fehlgeschlagen."}
+    assert len(gesucht) == 3
+
+
+async def test_treffer_zaehlen_nicht_als_fehler(monkeypatch):
+    monkeypatch.setenv("WAMO_SEARXNG_URL", "http://127.0.0.1:8888")
+    gesucht = _zaehlende_suche(monkeypatch, suche.als_daten("x", []))  # SearXNG antwortet, nur ohne Treffer
+    aufruf = _websuche(HAUS)
+    for anfrage in ("a", "b", "c"):
+        assert (await aufruf(anfrage))["ergebnis"] == "Nichts Brauchbares gefunden."
+    assert len(gesucht) == 3
+
+
+async def test_gleichzeitige_gleiche_anfrage_laeuft_nur_einmal(monkeypatch):
+    import asyncio
+
+    monkeypatch.setenv("WAMO_SEARXNG_URL", "http://127.0.0.1:8888")
+    tor = asyncio.Event()
+    gesucht = _zaehlende_suche(monkeypatch, suche.als_daten("Wetter", suche.kuerzen(_treffer(2))), tor)
+    aufruf = _websuche(HAUS)
+    erste = asyncio.create_task(aufruf("Wetter Eschborn Wochenende"))
+    zweite = asyncio.create_task(aufruf("wochenende, Wetter Eschborn?"))  # dieselben Wörter: gilt als gleiche Anfrage
+    andere = asyncio.create_task(aufruf("Öffnungszeiten Hallenbad"))
+    await asyncio.sleep(0.05)
+    tor.set()
+    a, b, c = await asyncio.gather(erste, zweite, andere)
+    assert gesucht == ["Wetter Eschborn Wochenende", "Öffnungszeiten Hallenbad"]
+    assert a == b and len(a["treffer"]) == 2
+    assert c["treffer"]
+    # danach läuft dieselbe Anfrage wieder normal (nur gleichzeitige Aufrufe werden gebündelt)
+    assert (await aufruf("Wetter Eschborn Wochenende"))["treffer"] and len(gesucht) == 3
+
+
+def test_such_schluessel():
+    assert tools.such_schluessel("Wetter Eschborn Wochenende") == tools.such_schluessel("wochenende, WETTER eschborn?")
+    assert tools.such_schluessel("Wetter Eschborn") != tools.such_schluessel("Wetter Eschborn morgen")
+
+
+@pytest.mark.parametrize("ergebnis,erwartet", [
+    ({"ergebnis": "Laut DWD wird es sonnig.", "quelle": "anthropic"}, "anthropic, Text, 24 Zeichen"),
+    (suche.als_daten("x", suche.kuerzen(_treffer(3))), "searxng, 3 Treffer"),
+    (suche.als_daten("x", []), "searxng, 0 Treffer"),
+    ({"ergebnis": "Die Suche ist gerade fehlgeschlagen."}, "-, fehlgeschlagen"),
+])
+def test_logzeile_der_websuche(ergebnis, erwartet):
+    assert tools.ergebnis_fuer_log(ergebnis) == erwartet

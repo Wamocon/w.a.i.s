@@ -32,24 +32,64 @@ Gemessen und verworfen: den Stream frueher oeffnen (234 ms bis zum ersten Audio,
 0,3 s vorher kommt), den Text tokenweise reichen (Pipecat-Modus TOKEN: nach einer Unterbrechung stand nur ein Wort im
 Verlauf, Oberflaeche und Kontext waeren falsch) und einen Satzteil am Komma freigeben (unter der Schwelle startet
 Soniox nichts).
+
+Pause im Antwortstrom (Befund im Journal des Kerns am 17.11.2026, Hausmodell gemma4-31b über LiteLLM): Das Gateway liefert einen
+Werkzeugaufruf erst als ganzen Block, während das Modell ihn schreibt, kommt kein Zeichen. Lag schon ein kurzer Satz bei Soniox, hielt
+Soniox ihn zurück (Rückhalt am Textende), und Pipecat erklärte den Kontext nach stop_frame_timeout_s (3 s) ohne Ton für beendet:
+"audio context ... completed with no audio", ein ErrorFrame bis in die Oberfläche, ein eigenes Antwortende vor dem des Modells, Wörter
+fielen aus dem Verlauf. Der Stream blieb bei Soniox offen und endete rund 10 s später mit 408 request_timeout (noch ein ErrorFrame).
+Nach drei solchen Kontexten in Folge schreibt Pipecat die Sprachausgabe ganz ab (max_consecutive_zero_audio_contexts), die Sitzung
+wäre dann stumm. Deshalb:
+  * Ein offener Stream (Text bei Soniox, noch kein text_end) wird nach STILLE_ABSCHLUSS_SECS ohne neuen Text des Modells
+    abgeschlossen, wie beim Satz vor dem Werkzeug (satz_vor_werkzeug.py): Rest des Aggregators in denselben Stream, dann text_end.
+    Soniox spricht sofort, weiterer Text derselben Antwort öffnet einen neuen Stream. Ohne offenen Stream ändert sich nichts.
+  * Solange das Modell Text liefert (auch nur in den Aggregator), bleibt der Kontext des offenen Streams wach (Pipecats Wartezeit
+    beginnt mit jedem Text von vorn).
+  * Text ohne Buchstaben und Ziffern (Leerraum, Satzende-Marker, Satzzeichen) öffnet keinen Stream: Soniox spricht ihn nicht, der
+    Kontext bliebe ohne Ton.
+
+Neuverbindung kurz nach dem Start (Journal 17.11.2026: "connection closed by server", dann "reconnecting (attempt: 1)", rund 11 s nach
+jedem Sitzungsstart): Soniox schließt die Verbindung, wenn nach der Begrüßung kein Stream mehr läuft, früher als in seiner Doku (dort
+rund 40 s ohne Stream und ohne Nachricht); Pipecats keep_alive kommt erst nach 20 s. Pipecat verbindet sofort neu, und weil die
+Verbindung länger als 5 s hielt, zählt das nicht als Schnellfehler. Ohne laufenden Stream bleibt das folgenlos: der nächste Satz
+öffnet seinen Stream auf der neuen Verbindung. Fiele die Neuverbindung in eine laufende Antwort, verwürfe Pipecat den gerade
+spielenden Kontext (remove_active_audio_context) und vergäße offene Streams. Im Leerlauf folgenlos, deshalb nicht geändert; trifft
+es doch eine Antwort, wäre ein früheres keep_alive die Abhilfe.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 
 from loguru import logger
 from websockets.protocol import State
 
 from env_schalter import schalter_an, schalter_oder_none, zahl_im_bereich
-from satz_vor_werkzeug import SatzVorWerkzeugTTS
+from satz_vor_werkzeug import SatzVorWerkzeugFrame, SatzVorWerkzeugTTS
 
+from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    Frame,
+    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    TextFrame,
+    TTSSpeakFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.soniox.tts import SonioxTTSService
 from pipecat.services.tts_service import TextAggregationMode
 from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 START_ZEICHEN_STANDARD = 68
+# Stille des Modells, nach der ein offener Stream abgeschlossen wird. Unter Pipecats Wartezeit auf Ton (3 s), damit Soniox danach
+# noch Zeit für den ersten Ton bleibt; länger als die Pause zwischen zwei Tokens eines langsamen Modells (gemma4-31b, rund 10 Token/s).
+STILLE_ABSCHLUSS_SECS = 1.0
+_uhr = time.monotonic  # Zeitquelle der Stille, in Tests ersetzbar
+# Frames, deren Verarbeitung Text an Soniox schicken oder den Stream schließen kann: nie gleichzeitig mit dem Stille-Abschluss
+_TEXT_FRAMES = (TextFrame, AggregatedTextFrame, LLMFullResponseEndFrame, TTSSpeakFrame, SatzVorWerkzeugFrame)
 TEMPO_MIN, TEMPO_MAX = 0.7, 1.3  # Bereich, den Soniox für speed annimmt
 
 
@@ -89,6 +129,12 @@ def start_zeichen(wert: str | None = None) -> int:
         return max(0, int(w.strip()))
     except ValueError:
         return START_ZEICHEN_STANDARD
+
+
+def sprechbar(text: str) -> bool:
+    """Hat der Text etwas, das Soniox spricht (Buchstabe oder Ziffer)? Leerraum, Satzende-Marker (●, ◐, ○), Satz- und Sonderzeichen
+    allein ergeben bei Soniox keinen Ton."""
+    return any(c.isalnum() for c in text)
 
 
 def _zeichen(text: str) -> int:
@@ -145,6 +191,10 @@ class LazySonioxTTSService(SatzVorWerkzeugTTS, SonioxTTSService):
     # Antwort öffnet einen neuen Stream (run_tts schickt die Konfiguration für jeden neuen Kontext), Text nach dem Werkzeug kommt
     # in einer neuen Antwort und damit ohnehin in einem neuen Stream.
     stream_vor_werkzeug_beenden = True
+    stille_abschluss_secs = STILLE_ABSCHLUSS_SECS
+    wamo_stille_abgeschlossen = 0  # für Tests und das Log
+    _wamo_letzter_text = 0.0  # _uhr(): letzter Text des Modells an diese Sprachausgabe
+    _wamo_stille_waechter: asyncio.Task | None = None
 
     def _stream_abgeschlossen(self, context_id: str) -> None:
         # Nach text_end kein cancel mehr für diesen Stream, auch nicht bei einer Unterbrechung (Pipecat, SonioxTTSService._close_stream:
@@ -160,6 +210,73 @@ class LazySonioxTTSService(SatzVorWerkzeugTTS, SonioxTTSService):
                 aggregation_type=self._text_aggregation_mode,
                 language=self._text_aggregator.language,
             )
+        self._wamo_sperre = asyncio.Lock()  # Text an Soniox und der Stille-Abschluss nie gleichzeitig
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, InterruptionFrame):
+            await self._stille_waechter_beenden()  # den Stream verwirft Pipecat selbst (cancel)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, _TEXT_FRAMES):
+            async with self._wamo_sperre:
+                await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame):
+                self._wamo_letzter_text = _uhr()
+                self._wach_halten(self._offener_stream())
+            return
+        await super().process_frame(frame, direction)
+
+    async def _push_tts_frames(self, src_frame: AggregatedTextFrame, *args, **kwargs):
+        # Nur im Satzmodus: beim Streamen einzelner Tokens gehört ein Satzzeichen zum Satz. Aggregationen, die Pipecat ohnehin nicht
+        # spricht (skip_aggregator_types), behandelt Pipecat selbst.
+        if (not self._is_streaming_tokens and src_frame.aggregated_by not in self._skip_aggregator_types
+                and not sprechbar(src_frame.text)):
+            if src_frame.text.strip():
+                logger.debug("{}: kein sprechbarer Text, kein Stream ({} Zeichen)", self, len(src_frame.text.strip()))
+            return
+        await super()._push_tts_frames(src_frame, *args, **kwargs)
+
+    def _offener_stream(self) -> str | None:
+        """Stream dieser Antwort, der Text bekommen hat und noch auf text_end wartet, sonst None."""
+        kontext = self._turn_context_id
+        if kontext and self.audio_context_available(kontext) and kontext in self._configured_contexts:
+            return kontext
+        return None
+
+    def _wach_halten(self, kontext: str | None) -> None:
+        """Pipecats Wartezeit auf Ton für diesen Kontext beginnt von vorn (Pipecat 1.12, _refresh_audio_context; fehlt es, bleibt es beim
+        Stille-Abschluss)."""
+        wach = getattr(self, "_refresh_audio_context", None)
+        if kontext is not None and wach is not None:
+            wach(kontext)
+
+    def _stille_waechter_starten(self) -> None:
+        if self._wamo_stille_waechter is None or self._wamo_stille_waechter.done():
+            self._wamo_stille_waechter = self.create_task(self._stille_waechter(), name="stille_abschluss")
+
+    async def _stille_waechter_beenden(self) -> None:
+        waechter, self._wamo_stille_waechter = self._wamo_stille_waechter, None
+        if waechter is not None and not waechter.done() and waechter is not asyncio.current_task():
+            await self.cancel_task(waechter)
+
+    async def _stille_waechter(self) -> None:
+        """Läuft, solange ein Stream offen ist. Schweigt das Modell stille_abschluss_secs, geht der Rest des Aggregators in den Stream,
+        und der Stream bekommt text_end (derselbe Weg wie beim Satz vor dem Werkzeug)."""
+        while self._offener_stream() is not None:
+            rest = self._wamo_letzter_text + self.stille_abschluss_secs - _uhr()
+            if rest > 0:
+                await asyncio.sleep(rest)
+                continue
+            async with self._wamo_sperre:
+                kontext = self._offener_stream()
+                if kontext is None or _uhr() - self._wamo_letzter_text < self.stille_abschluss_secs:
+                    continue  # inzwischen abgeschlossen oder neuer Text: neu prüfen
+                self.wamo_stille_abgeschlossen += 1
+                await self._vor_werkzeug_sprechen(anlass="Modell schweigt")
+                self._wach_halten(kontext if self.audio_context_available(kontext) else None)  # volle Wartezeit für den ersten Ton
+            return
+
+    async def cleanup(self):
+        await self._stille_waechter_beenden()
+        await super().cleanup()
 
     async def on_turn_context_created(self, context_id: str):
         # Bewusst nichts tun: kein Stream ohne Text (siehe Modul-Docstring).
@@ -174,3 +291,6 @@ class LazySonioxTTSService(SatzVorWerkzeugTTS, SonioxTTSService):
             logger.warning(f"{self}: Soniox-Stream {context_id} konnte nicht geoeffnet werden: {e}")
         async for frame in super().run_tts(fuer_soniox(text), context_id):
             yield frame
+        if context_id == self._turn_context_id:  # Text einer Antwort des Modells (ein TTSSpeakFrame bekommt sofort text_end)
+            self._wamo_letzter_text = max(self._wamo_letzter_text, _uhr())
+            self._stille_waechter_starten()

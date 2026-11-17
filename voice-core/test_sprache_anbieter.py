@@ -109,6 +109,58 @@ class HausSTTTest(unittest.IsolatedAsyncioTestCase):
             stt = sa.haus_stt(sa.Baustein("haus", "haus", "wamo-stt-haus"), [])
         self.assertIsInstance(stt, sa.HausSTTService)
 
+    async def test_deutsch_steht_immer_vorn_im_prompt(self):
+        """Befund 17.11.2026 am Server: Qwen3-ASR hinter vLLM übergeht language=de ("Wie wordt het weer am Wachtenende in Ashbourne?"),
+        mit einem deutschen Hinweis im Feld prompt kommt Deutsch zurück. Der Hinweis steht deshalb immer vorn, auch ohne Fachbegriffe."""
+        with mock.patch.dict("os.environ", UMGEBUNG):
+            ohne = sa.haus_stt(sa.Baustein("haus", "haus", "wamo-stt-haus"), [])
+            mit = sa.haus_stt(sa.Baustein("haus", "haus", "wamo-stt-haus"), ["WAMO", "Eschborn"])
+        self.assertEqual(ohne._settings.prompt, sa.STT_HAUS_HINWEIS)
+        self.assertEqual(mit._settings.prompt, f"{sa.STT_HAUS_HINWEIS} WAMO, Eschborn")
+        self.assertIn("Deutsch", sa.STT_HAUS_HINWEIS)
+        self.assertEqual(ohne._settings.language, "de", "language=de bleibt")
+
+        anfragen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            anfragen.append(request)
+            return httpx.Response(200, json={"text": "Wie wird das Wetter am Wochenende in Eschborn?"})
+
+        ohne._client = sa.HausSTTService(api_key="k", base_url="http://litellm.test.invalid:4000/v1",
+                                         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))._client
+        await ohne._transcribe(wav(16000))
+        teile = anfragen[0].content.decode("latin-1")  # mit der WAV im Körper; der Hinweissatz selbst ist ASCII
+        self.assertIn(f'name="prompt"\r\n\r\n{sa.STT_HAUS_HINWEIS}\r\n', teile)
+        self.assertIn('name="language"\r\n\r\nde\r\n', teile)
+
+
+class HausTTSEinstellungenTest(unittest.TestCase):
+    """Befund im Journal 17.11.2026: "TTSSettings: the following fields are NOT_GIVEN: model, voice, language" bei jedem Start einer
+    Sitzung mit Sprachausgabe im Haus. Der Dienst trägt seine Konfiguration jetzt als Pipecat-Einstellungen."""
+
+    def test_einstellungen_vollstaendig_aus_der_konfiguration(self):
+        from pipecat.utils.types import is_given
+
+        fehler: list[str] = []
+        senke = sa.logger.add(lambda m: fehler.append(str(m)), level="ERROR")
+        try:
+            dienst = sa.HausTTSService(modell="wamo-tts-haus", stimme="sohee", basis="http://litellm.test.invalid:4000/v1",
+                                       schluessel="k")
+            dienst._settings.validate_complete()  # ruft Pipecat beim Start der Sitzung auf (AIService.start)
+        finally:
+            sa.logger.remove(senke)
+        self.assertEqual(fehler, [])
+        s = dienst._settings
+        self.assertTrue(all(is_given(getattr(s, f)) for f in ("model", "voice", "language")))
+        self.assertEqual((s.model, s.voice, s.language), ("wamo-tts-haus", "sohee", None))
+
+    def test_verhalten_bleibt_satzgrenzen_und_anfrage_wie_bisher(self):
+        """language None: der Dienst schickt keine Sprache (der Dienst im Haus hat seine eigene), und Pipecat trennt die Sätze wie
+        vorher (Standard ohne Sprache)."""
+        dienst = sa.HausTTSService(modell="wamo-tts-haus", stimme="sohee", basis="http://litellm.test.invalid:4000/v1", schluessel="k")
+        self.assertEqual(dienst._text_aggregator.language, "en")
+        self.assertEqual(sa.haus_tts(sa.Baustein("haus", "haus", "wamo-tts-haus", stimme="uncle_fu"))._settings.voice, "uncle_fu")
+
 
 class HausTTSTest(unittest.IsolatedAsyncioTestCase):
     def dienst(self, handler) -> sa.HausTTSService:
