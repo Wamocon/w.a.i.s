@@ -220,7 +220,19 @@ def test_worker_umgebung_enthaelt_nur_die_erlaubten_namen(monkeypatch):
     monkeypatch.setenv("WAMO_ADMIN_DATABASE_URL", "x")
     monkeypatch.setenv("PLAYWRIGHT_MODUL", "pfad")
     env = br.worker_umgebung()
-    assert "WAMO_ADMIN_DATABASE_URL" not in env and env["PLAYWRIGHT_MODUL"] == "pfad" and set(env) <= set(br.ENV_ERLAUBT)
+    erlaubt = {n.upper() for n in br.ENV_ERLAUBT}
+    assert "WAMO_ADMIN_DATABASE_URL" not in env and env["PLAYWRIGHT_MODUL"] == "pfad" and {k.upper() for k in env} <= erlaubt
+
+
+def test_worker_umgebung_nimmt_namen_unabhaengig_von_der_schreibweise(monkeypatch):
+    # Windows liefert os.environ mit großgeschriebenen Namen (PROGRAMFILES statt ProgramFiles). Ohne ProgramFiles sucht
+    # Playwright Chrome nur unter LOCALAPPDATA und findet eine Installation unter C:\Program Files nicht (Befund 17.11.2026).
+    monkeypatch.setenv("PROGRAMFILES", r"C:\Program Files")
+    monkeypatch.setenv("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
+    monkeypatch.setenv("WAMO_TEST_SCHLUESSEL", "geheim")
+    env = br.worker_umgebung()
+    assert env["PROGRAMFILES"] == r"C:\Program Files" and env["PROGRAMFILES(X86)"] == r"C:\Program Files (x86)"
+    assert "WAMO_TEST_SCHLUESSEL" not in env
 
 
 def test_json_aus_der_antwort_enthaelt_nie_die_anfrage_zurueck(treiber):
