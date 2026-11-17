@@ -1,7 +1,7 @@
 # Testlabor 28.11.2026: Vertrag Kern zu Test-Jira-Dienst, Version 1
 
 Übergabedatei von WAMO an die Kollegen, die den Test-Jira-Dienst bauen. Stand: Entwurf vom 11.11.2026 (vorläufige Version 1). Übergabe und Einfrieren: **Fr 13.11.2026, 12:00**.
-Danach ändert sich der Vertrag nur noch im Dienst, nie im Kern, denn der Kern von WAMO ist ab Fr 20.11.2026 eingefroren. Quelle der Wahrheit ist dieses Papier, die Abnahme prüft jeden Satz davon.
+Danach ändert sich der Vertrag nur noch im Dienst, nie im Kern, denn der Kern von WAMO ist ab Mo 23.11.2026 früh eingefroren (Entscheidung von Niko am 16.11.2026, vorher Fr 20.11.). Quelle der Wahrheit ist dieses Papier, die Abnahme prüft jeden Satz davon.
 
 ## 1. Worum es geht
 

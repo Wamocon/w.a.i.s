@@ -16,7 +16,7 @@ Das Testlabor am 28.11.2026 hat Vorrang. Der Freeze für Kern, Migration, Oberfl
 
 **Wunsch von Niko vom 15.11.2026 (wörtlich).** "Für die Zukunft müssen wir W.A.I.S. auch komplett auf die haueigenen Modelle in der UI umstellen können, also alles
 über Sokrates und seine Modelle! Dafür muss du die besten bestehenden Modelle auf den Sparks dafür finden oder neuen Modelle dafür installieren! Es gibt auch ein Projekt
-das heißt KiKollege von Erwin er hat schon Hermes eingebunden und viele Angenten, die Anbindung daran kannst du auch planen! Nutze dafür immer ECC und REA!"
+das heißt KiKollege von [Name des Verantwortlichen] er hat schon Hermes eingebunden und viele Angenten, die Anbindung daran kannst du auch planen! Nutze dafür immer ECC und REA!"
 
 ## Kurzfassung
 
@@ -439,7 +439,7 @@ nach M5. Bis dahin ist der Haus-Modus ein Datenschutzmodus mit spürbarem Qualit
 
 ### 4.1 Kurzbeschreibung
 
-KiKollege ist das Vorhaben "KI-Mitarbeiter" der WAMOCON (verantwortet von Erwin). Das Repository `Wamocon/kiKollege` (öffentlich, letzter Merge 13.11.2026, 3709191)
+KiKollege ist das Vorhaben "KI-Mitarbeiter" der WAMOCON (mit eigenem Verantwortlichen in der WAMOCON). Das Repository `Wamocon/kiKollege` (öffentlich, letzter Merge 13.11.2026, 3709191)
 enthält nur die Seiten des Vorhabens (Next.js, statischer Export, Daten aus `data/projektstand.json`), nicht die Laufzeit (**B**). Die Laufzeit steht auf Caesar.
 
 - **Prinzip:** "Ein KI-Mitarbeiter arbeitet zu. Ein Mensch entscheidet." Jeder KI-Mitarbeiter hat eine Akte (Auftrag, Haltung, Grenze als Dateien), ein eigenes Programm,
@@ -576,7 +576,7 @@ nur dieses Papier.
 | F4 | Gilt "Alles über Sokrates" auch für Laborprofile? | Nein. Das Labor bleibt bei seinem gemessenen Stand; eine Änderung dort nur mit eigener Messrunde |
 | F5 | Agent für Entwicklungsaufträge im Haus: Claude Code über das Gateway oder ein offener Agent? | Erst der Spike H6. Vorab neige ich zu OpenCode oder Qwen Code, weil Anthropic den Weg über fremde Modelle nicht unterstützt \[30\] und das Gateway beim Denken der Modelle offene Fehler hat \[34\]\[36\] |
 | F6 | Bleibt der Prüfer der Selbstüberarbeitung im Haus-Modus bei Claude? | Ja, als Betreiberfunktion ohne Personendaten, sichtbar im Abschnitt "Modelle im Betrieb". Eine Hausvariante erst nach H6 |
-| F7 | KiKollege: Variante V2 mit Erwin besprechen und nach seinem M2 umsetzen? | Ja. Zuerst ein Termin zur Abstimmung (Brücke, Auftraggeberliste, Update auf 0.23.1), dann K1 |
+| F7 | KiKollege: Variante V2 mit dem Verantwortlichen von KiKollege besprechen und nach seinem M2 umsetzen? | Ja. Zuerst ein Termin zur Abstimmung (Brücke, Auftraggeberliste, Update auf 0.23.1), dann K1 |
 | F8 | Streaming-STT im Haus (Voxtral, 16 GB auf Sokrates-2) installieren, auch wenn das Gateway Realtime nicht durchreicht? | Erst H5 mit Qwen3-ASR messen. H5b nur, wenn Niko die Stimme im Haus wirklich nutzen will; eine Ausnahme von der Hausregel nur für diesen einen Dienst |
 | F9 | Hinweise an KiKollege (Dashboard im LAN, offener Statusendpunkt) und an den Betreiber des OCR-Dienstes (Schlüssel in der Prozessliste) weitergeben? | Ja, mündlich oder per Mail, ohne Werte; keine Änderung durch W.A.I.S. |
 | F10 | Wie darf der Admin aus der Oberfläche `nur_haus`, Stimme und Modell eines Profils setzen, obwohl Migration 0010 das dem Kern bewusst verwehrt? | Eine `security definer`-Funktion in Migration 0021, die nur für ein Profil mit Rolle `admin` schreibt und jede Änderung protokolliert; Entscheidung als ADR, Review durch `database-reviewer` und `security-reviewer`. Keine pauschalen Spaltenrechte für `wamo_core` |

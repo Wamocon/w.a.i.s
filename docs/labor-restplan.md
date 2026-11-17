@@ -11,7 +11,7 @@
 | Kern | Version 0.5.0. Slot a `v0.5.0-ddada3f` aktiv, Slot b `v0.5.0-d12ba6f` inaktiv (Rückweg-Ziel, mit Erstanmeldung) | `wamo-core-slots.sh status` am Server |
 | Oberfläche | 0.5.0 (Commit `d12ba6f`) | `version.json` am Server |
 | Labor-Dienst | Labor-Rauchtest ohne Fehler | `wamo_labor_rauchtest.py` |
-| Installer | 0.5.0 gebaut. Die Signatur durch Niko steht aus, danach Verteilung am Server und GitHub-Release v0.5.0 | `[offen: Signatur]` |
+| Installer | 0.5.0 von Niko signiert (SHA-256 `40a372e8…92d1`), am Server eingesetzt (aktuell 0.5.0, vorher 0.4.1), die Oberfläche bietet ihn an; GitHub-Release v0.5.0 mit Installer | `wamo_installer_sokrates2.py status`, Release v0.5.0 |
 
 Seit dem Restplan vom 16.11. am Nachmittag sind live:
 
@@ -38,20 +38,21 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | Nr | Risiko | Stand |
 | --- | --- | --- |
 | R1 | Der Stimmwächter kann kurze eigene Sätze neuer Mitglieder verwerfen. Regler `WAMO_STIMME_VERWERFEN_MIN_SECS` | offen |
-| R2 | Die Marker-Regel gilt auch im Labor, a1 steht bei 5 von 10 Läufen. Messrunde mit 20 weiteren Läufen | offen, `[offen: Messrunde 17.11.]` |
+| R2 | Die Marker-Regel gilt auch im Labor, a1 steht bei 5 von 10 Läufen. Messrunde mit 20 weiteren Läufen | gemessen 17.11. auf Kern v0.5.0-ddada3f (20 Läufe, 420 Züge, 0,15 USD): a1 13 von 20, alle 7 Befunde sind Inhalt (eine Story mit nur einem Kriterium), kein Schweigen; w2 19, m1 19, j1 19, m2 19, s1 16 von 20 (4-mal unerwartet `canvas_zeigen`), w1, s2, i1, i2 je 20 von 20; erstes Token p50 0,51 s, p95 0,57 s. Die Karten mit erwartetem Fehler a3 und `m3_antwort` bleiben wie unter 0.4.1 bei 0 von 20 |
 | R3 | `think` auf false gilt für alle LiteLLM-Anfragen, nicht nur für Hausmodelle | offen |
 | R4 | Migrationen 0023 und 0024 in `wamo_dev` und `wamo_test` | geprüft: je zweimal angewendet, Test OK |
 | R5 | Die TTS-Instanz hat keine Speichergrenze, sie hat nur ein Lock | offen |
 | R6 | Gateway-Änderungen sind nur in unserem Repo dokumentiert | teilweise: Betriebsnotiz `infra/sokrates1/gateway-wamo.md` angelegt, Pflege beim Betreiber |
 | R7 | Geordnetes Abschalten des Kerns: Fristen, Timeout bei `ausleiten` | behoben mit #181 |
 | R8 | Lasttest nahm einen festen Slot b an | behoben mit #182 |
+| R9 | Ausweichweg Hausmodell `gemma4-31b` (3 Läufe am 17.11.): a1 bricht in 3 von 3 Läufen ab. Der erste Satz kommt nach 0,7 s, der Aufruf von `canvas_zeigen` mit den Stories kommt als Block und überschreitet die Lesefrist des Gesprächs von 20 s (`GESPRAECH_LESE_TIMEOUT_SECS`). Gilt auch im Büro für Nutzer mit Hausmodellen. Vorschlag: längere Lesefrist nur für Hausmodelle, Entscheidung durch Niko vor dem Freeze-Kandidaten | offen |
 
 ### N.4 Fahrplan Di 17.11. bis Fr 11.12.
 
 | Wann | Was | Wer | Bedingung |
 | --- | --- | --- | --- |
-| Di 17.11. | Installer 0.5.0: Signatur durch Niko, danach Verteilung am Server und GitHub-Release v0.5.0 | Niko, W.A.I.S. | `[offen: Signatur]` |
-| Di 17.11. | Messrunde mit 20 weiteren Läufen (R2, Marker bei a1) `[offen: Messrunde 17.11.]` | W.A.I.S. | Ergebnis trägt der Koordinator nach |
+| Di 17.11. | Installer 0.5.0: Signatur durch Niko, danach Verteilung am Server und GitHub-Release v0.5.0 | Niko, W.A.I.S. | erledigt 07:00 |
+| Di 17.11. | Messrunde mit 20 weiteren Läufen (R2, Marker bei a1) | W.A.I.S. | erledigt 07:07, Ergebnis unter R2, Ausweichweg unter R9 |
 | Mi 18.11. | N3 bis N5 liefern: Preise und Ratenlimit, Fassung der Regeln, Büro-Adressen für die Ports 55446, 55322 und 56543 | Niko | Abschnitt 5 |
 | Do 19.11. | Erwartungswerte des Trainers zu W1 und W2 (N8) | Niko, Trainer | Pflicht vor dem Ausdruck |
 | Fr 20.11. vormittags | **Lasttest voll**: Stufen 1, 2, 4, 8 mit je 15 Minuten, danach Murmelstufen, mit Preisen, Ratenlimit und `--kosten-obergrenze`. Vorher den Kern-Kanal sperren (`wamo-job-kern-rueckweg.sh notaus`) und die Plätze 1 bis 8 leeren (Betreuer-Aktion „Daten löschen“, Starttickets zählen als belegt) | W.A.I.S., Niko | Ja von Niko, N3, E5 |
