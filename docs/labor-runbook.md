@@ -1,6 +1,6 @@
 # Testlabor 28.11.2026: Runbook für die Betreuer
 
-**Stand:** 17.11.2026, Entwurf für die Generalprobe am 26.11.2026. Nachtrag: Abschnitte 5.3, 5.4 und 6.1 auf Version 0.5.0 und die Abschaltung nach #181 gebracht. Nachtrag 17.11.2026 (Entscheidungen von Niko): am Labortag nur vier Besucher-Plätze (1 bis 4), Reserveprofile 05 bis 08, Wartende (3.7), keine Aufzeichnung fürs Schaufenster mehr (Abschnitt 7). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
+**Stand:** 17.11.2026, Entwurf für die Generalprobe am 26.11.2026. Nachtrag: Abschnitte 5.3, 5.4 und 6.1 auf Version 0.5.0 und die Abschaltung nach #181 gebracht. Nachtrag 17.11.2026 (Entscheidungen von Niko): am Labortag nur vier Besucher-Plätze (1 bis 4), Reserveprofile 05 bis 08, Wartende (3.7), keine Aufzeichnung fürs Schaufenster mehr (Abschnitt 7). Nachtrag 17.11.2026: zweite Faktoren mit QR auf die Betreuer-Handys bringen (9.7, Fr 20.11.). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
 
 **So liest du es.** Jeder Ablauf besteht aus kurzen nummerierten Schritten. Mach sie in dieser Reihenfolge. Steht bei einem Schritt "Erwartet", vergleiche, bevor du weitermachst. Passt es nicht, höre auf und gehe zu Abschnitt 6 (Störungen) oder rufe die Leitung (Abschnitt 8). Ein Abbruch ist nie ein Fehler.
 
@@ -419,6 +419,27 @@ Voraussetzungen: PC mit dem Repo, ssh-Alias `wamo-sokrates2`, `WAMO_ADMIN_DATABA
 ### 9.6 Schlüsseltausch für das Sprachmodell
 
 Fällt der Schlüssel des Servers aus (Limit, Guthaben), kann der Schlüssel eines Kollegen die Aufgabe übernehmen: die Zeile `ANTHROPIC_API_KEY` in `/etc/wamo/core.env` mit dem Hilfsprogramm `wamo-core-env` ändern (der Wert geht nur über stdin) und danach `wamo-core-slots.sh umschalten-kern <release>` ausführen. Es gibt kein neues Release. Der Ablauf ist nicht geprüft `[offen: genaue Befehlszeile und Dauer in der Rückwegübung am 27.11. festhalten]`.
+
+### 9.7 Zweite Faktoren neu einrichten, QR auf die Betreuer-Handys (Fr 20.11. nachmittags)
+
+Nach dem Lasttest bekommen die Profile der vier Besucher-Plätze `labor-01` bis `labor-04` einen neuen zweiten Faktor (Restplan, E2). Danach gelten die Seeds des Mess-PCs nicht mehr. Die beiden Betreuer scannen den neuen Faktor je Profil mit ihrer Authenticator-App. Der Seed kommt wie bisher in die Umschlag-Datei, `codes` und der Lasttest brauchen ihn. Die Reserveprofile `labor-05` bis `labor-08` bleiben, wie sie sind.
+
+Dabei sind: T am PC mit der Umschlag-Datei, beide Betreuer mit Handy und installierter Authenticator-App. Kein Besucher, kein Bildschirm, den andere sehen: Der QR ist der Schlüssel des Profils.
+
+1. Plan ansehen, ohne Netz: `python scripts/wamo_labor_faktoren.py einrichten --profile labor-01,labor-02,labor-03,labor-04 --neu --qr --trocken`. Erwartet: je Profil "würde anmelden und den Faktor neu einrichten ..., danach den QR-Code zum Scannen im Browser zeigen" und "Seed in der Datei: ja".
+2. Zuerst ein Profil: `python scripts/wamo_labor_faktoren.py einrichten --profile labor-01 --neu --qr` in einem normalen Konsolenfenster. Erwartet: "labor-01: Faktor eingerichtet, aal2 geprüft", dann öffnet der Browser eine Seite mit dem QR, die Konsole meldet "QR für labor-01 angezeigt, nach dem Scannen Enter drücken".
+3. Beide Betreuer scannen den QR. Der neue Eintrag heißt "WAMO" mit `labor-01@wamo.test`. Erst wenn beide gescannt haben, im Konsolenfenster Enter drücken. Das Skript löscht die QR-Datei, danach den Tab im Browser schließen.
+4. Code prüfen: `python scripts/wamo_labor_faktoren.py codes --profil labor-01`. Erwartet: Beide Apps zeigen denselben Code wie die Konsole (springt gerade das 30-Sekunden-Fenster, noch einmal aufrufen). Einen älteren Eintrag für `labor-01` in der App löschen, er zeigt einen anderen Code.
+5. Die übrigen drei: `python scripts/wamo_labor_faktoren.py einrichten --profile labor-02,labor-03,labor-04 --neu --qr`, je Profil Schritt 3 und 4.
+6. Zum Schluss: `python scripts/wamo_labor_faktoren.py pruefen --profile labor-01,labor-02,labor-03,labor-04`. Erwartet: viermal "ja".
+
+Wenn etwas schiefgeht:
+
+- "QR nicht angezeigt": Der Faktor dieses Profils ist eingerichtet und der Seed steht in der Datei, der Lauf hält an und die übrigen Profile bleiben unberührt (die Meldung nennt sie). Für einen neuen QR `einrichten --profile labor-0N --neu --qr` wiederholen, dann mit den übrigen weiter.
+- Enter zu früh gedrückt, ein Betreuer hat nicht gescannt: dasselbe Profil mit `--neu --qr` noch einmal einrichten. Beide scannen neu und löschen den vorigen Eintrag.
+- Strg+C, während der QR angezeigt wird: Die QR-Datei wird gelöscht, das Profil ist eingerichtet, die übrigen nicht. Hatten beide schon gescannt, ist das Profil fertig, sonst wie oben einen neuen QR holen.
+- "--qr braucht eine Konsole": Den Befehl in einem normalen Konsolenfenster starten, ohne Umleitung der Eingabe. Es wurde nichts geändert.
+- Bleibt nach einem harten Abbruch (Fenster geschlossen) ein Ordner `wamo-labor-qr-...` unter `%LOCALAPPDATA%\WAMO` liegen, löscht ihn der nächste Lauf mit `--qr`.
 
 ## 10. Nach dem Labortag
 

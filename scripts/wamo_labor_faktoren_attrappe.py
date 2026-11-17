@@ -9,12 +9,15 @@ geschrieben, damit die Tests nicht sich selbst prüfen.
 
 Fehler lassen sich gezielt einspielen (fehler(...)): je Methode, Pfadteil und auf Wunsch je E-Mail, einmal oder dauerhaft.
 Ein Code gilt je Faktor nur einmal (wie in GoTrue). Seeds und Tokens entstehen zur Laufzeit aus Hashwerten, nie als Zeichenfolge im Quelltext.
+Der QR-Code beim Anlegen (totp.qr_code) ist wie bei GoTrue eine rohe SVG-Daten-URL mit Zeilenumbruch am Ende, aber kein echter QR:
+Die SVG trägt die otpauth-URI als Text (desc), damit die Tests sehen, ob sie irgendwo in einer Ausgabe landet.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
+import html
 import json
 import ssl
 import threading
@@ -51,6 +54,8 @@ class GoTrueAttrappe:
         self.verzoegerung = 0.0        # Sekunden, bevor die Attrappe antwortet
         self.tropfen = 0.0             # Sekunden zwischen den einzelnen Bytes des Antworttexts (eine zähe Antwort)
         self.seed_darstellung = None   # Funktion: wie der Server den Seed in der Antwort schreibt (Leerraum, Kleinschreibung)
+        self.qr_form = "daten"         # totp.qr_code: "daten" (Daten-URL wie GoTrue), "roh" (nur die SVG), "kaputt", "fehlt"
+        self.qr_svgs: dict[str, str] = {}      # Faktorkennung -> SVG der Antwort beim Anlegen
         self.nutzer: dict[str, dict] = {}      # E-Mail -> Nutzer
         self.sitzungen: dict[str, dict] = {}   # Sitzungskennung -> Sitzung
         self.tokens: dict[str, str] = {}       # Access- oder Refresh-Token -> Sitzungskennung
@@ -276,7 +281,14 @@ class _Handler(BaseHTTPRequestHandler):
         fid, seed = o.faktor_anlegen(s["email"], "unverified", name)
         uri = f"otpauth://totp/WAMO:{s['email']}?secret={seed}&issuer=WAMO"
         gezeigt = o.seed_darstellung(seed) if o.seed_darstellung else seed
-        self._senden(200, {"id": fid, "type": "totp", "friendly_name": name, "totp": {"qr_code": "<svg/>", "secret": gezeigt, "uri": uri}})
+        svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 10 10"><desc>{html.escape(uri)}</desc>'
+               '<path d="M0 0h4v4H0zM6 6h4v4H6z"/></svg>')
+        o.qr_svgs[fid] = svg
+        totp = {"secret": gezeigt, "uri": uri}
+        qr = {"daten": f"data:image/svg+xml;utf-8,{svg}\n", "roh": svg, "kaputt": "data:text/plain,kein Bild"}.get(o.qr_form)
+        if qr is not None:
+            totp["qr_code"] = qr
+        self._senden(200, {"id": fid, "type": "totp", "friendly_name": name, "totp": totp})
 
     def _challenge(self, f: dict) -> None:
         o = self.owner

@@ -19,16 +19,26 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import wamo_labor_faktoren_qr as qr  # noqa: E402
 import wamo_labor_faktoren_totp as tt  # noqa: E402
+
+
+def _nie(*args, **kwargs):
+    raise AssertionError("In Tests öffnet sich nie ein Browser und niemand wartet auf Enter")
 
 
 @pytest.fixture(autouse=True)
 def kein_echtes_home(monkeypatch, tmp_path):
-    """Selbst ein Fehler im Skript trifft nie das echte Verzeichnis .wamo-labor des Benutzers."""
+    """Selbst ein Fehler im Skript trifft nie das echte Verzeichnis .wamo-labor des Benutzers. Ebenso öffnet --qr nie einen echten
+    Browser, wartet nie auf eine echte Eingabe und legt QR-Dateien nur im temporären Ordner an (LOCALAPPDATA zeigt dorthin)."""
     heim = tmp_path / "heim"
     heim.mkdir()
     monkeypatch.setenv("USERPROFILE", str(heim))
     monkeypatch.setenv("HOME", str(heim))
+    monkeypatch.setenv("LOCALAPPDATA", str(heim / "lokal"))
+    monkeypatch.setattr(qr, "OEFFNEN", _nie)
+    monkeypatch.setattr(qr, "WARTEN", _nie)
+    monkeypatch.setattr(qr, "KONSOLE", lambda: False)
 
 
 # ---------- TOTP nach RFC 6238 ----------
