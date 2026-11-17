@@ -452,6 +452,7 @@ function beispiel(): { state: WamoState; presence: Presence } {
             userLive: presence === "listening" ? "und sortier sie nach" : "",
             userLogged: presence !== "listening",
             userTeile: [],
+            gefiltert: false,
             text: presence === "speaking" ? botText : "",
             spoken: presence === "speaking" ? 7 : 0,
             turnEnd: false,

@@ -14,6 +14,8 @@ import { KERN, kernUrl, useBetriebsart } from "@/lib/betriebsart";
 import { rolleText } from "@/lib/einstellungenAbschnitte";
 import { useDesktopApp, useServerBrowser } from "@/lib/geraet";
 import { gewaehltesMikrofon, merkeMikrofon, type Mikrofon } from "@/lib/mikrofon";
+import { untertitelSetzen, useUntertitel } from "@/lib/einstellungen";
+import { useNutzer } from "@/lib/nutzer";
 import { zurGeraeteverwaltung } from "@/lib/einstellungenHash";
 import { useSelect } from "@/lib/store";
 import { THEMEN, themaWaehlen, type Thema } from "@/lib/thema";
@@ -221,6 +223,38 @@ function HelligkeitBlock() {
   );
 }
 
+/**
+ * Live-Untertitel unter dem Kern, je Person auf diesem Gerät, Standard aus (lib/untertitel.ts). Der Hinweis sagt, warum: Die
+ * Untertitel zeigen alles, was das Mikrofon hört, der Chat links nur Sätze nach der Stimmprüfung (lib/stimmFilter.ts).
+ */
+function UntertitelBlock() {
+  const id = useId();
+  const { id: userId } = useNutzer();
+  const an = useUntertitel(userId);
+  return (
+    <Block titel="Untertitel">
+      <label className="pc-auto" htmlFor={`${id}-untertitel`}>
+        <input
+          id={`${id}-untertitel`}
+          type="checkbox"
+          checked={an}
+          disabled={userId === null}
+          aria-describedby={`${id}-hinweis`}
+          onChange={(e) => untertitelSetzen(userId, e.target.checked)}
+        />
+        <span>Live-Untertitel unter dem Kern zeigen (dieses Gerät)</span>
+      </label>
+      <div id={`${id}-hinweis`}>
+        <p className="ez-klein">
+          Standard aus. Die Untertitel zeigen sofort, was das Mikrofon hört, auch Sätze einer fremden Stimme, bevor W.A.I.S. sie verwirft. Im
+          Gespräch links erscheinen nur Sätze, die die Stimmprüfung angenommen hat.
+        </p>
+        {userId === null && <p className="ez-klein">Wählbar, sobald du angemeldet bist.</p>}
+      </div>
+    </Block>
+  );
+}
+
 export const DarstellungAbschnitt = memo(function DarstellungAbschnitt() {
   const id = useId();
   const { gewaehlt, pausiert } = useEffektiveDarstellung();
@@ -257,6 +291,7 @@ export const DarstellungAbschnitt = memo(function DarstellungAbschnitt() {
         </p>
         <p className="ez-klein">Die Wahl gilt für dieses Gerät und bleibt erhalten. Im Gespräch wechselst du oben in der Mitte.</p>
       </Block>
+      <UntertitelBlock />
     </>
   );
 });

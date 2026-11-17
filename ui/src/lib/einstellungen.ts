@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import { serverBrowser } from "@/lib/geraet";
 import { rolleLesen, rolleMerken, ROLLE_PRAEFIX, type Rolle } from "@/lib/pcSchalter";
 import { schalterLesen, schalterSchluessel, schalterSchreiben, SCHALTER_PRAEFIX } from "@/lib/stillStart";
+import { untertitelLesen, untertitelSchluessel, untertitelSchreiben, UNTERTITEL_PRAEFIX } from "@/lib/untertitel";
 
 /**
  * Gerätebezogene Einstellungen (nur dieser Browser bzw. diese Desktop-App), gespeichert in
@@ -130,4 +131,40 @@ function rolleAbonnieren(h: () => void) {
 /** Gemerkte Rolle dieser Person auf diesem Gerät (Server: unbekannt). */
 export function useRolleGemerkt(userId: string | null | undefined): Rolle | null {
   return useSyncExternalStore(rolleAbonnieren, () => rolleGemerktLesen(userId), () => null);
+}
+
+// ---------- Live-Untertitel unter dem Kern (lib/untertitel.ts) ----------
+// Schalter je Gerät und je Person, Standard aus, kein Server-Zustand. Ohne localStorage gilt der Wert bis zum Neuladen.
+const untertitelSpeicher = new Map<string, boolean>(); // Rückfall, wenn localStorage nicht verfügbar ist
+
+export function untertitelGemerkt(userId: string | null | undefined): boolean {
+  const k = untertitelSchluessel(userId);
+  if (!k) return false;
+  if (untertitelSpeicher.has(k)) return untertitelSpeicher.get(k) === true;
+  return untertitelLesen(lokalerSpeicher(), userId);
+}
+
+export function untertitelSetzen(userId: string | null | undefined, an: boolean) {
+  const k = untertitelSchluessel(userId);
+  if (!k) return;
+  if (untertitelSchreiben(lokalerSpeicher(), userId, an)) untertitelSpeicher.delete(k);
+  else untertitelSpeicher.set(k, an);
+  hoerer.forEach((h) => h());
+}
+
+function untertitelAbonnieren(h: () => void) {
+  hoerer.add(h);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === null || e.key.startsWith(UNTERTITEL_PRAEFIX)) h();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    hoerer.delete(h);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+/** Zeigt die Mitte die Live-Untertitel für diese Person auf diesem Gerät? (Server: aus) */
+export function useUntertitel(userId: string | null | undefined): boolean {
+  return useSyncExternalStore(untertitelAbonnieren, () => untertitelGemerkt(userId), () => false);
 }

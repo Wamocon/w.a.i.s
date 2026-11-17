@@ -5,8 +5,10 @@
 import { act, render, screen, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { WamoAnsicht } from "@/components/WamoAnsicht";
+import { untertitelSetzen } from "@/lib/einstellungen";
 import { geraeteAnzeige } from "@/lib/geraeteAnzeige";
 import { KernFehler } from "@/lib/kernApi";
+import { nutzerSetzen } from "@/lib/nutzer";
 import type { WamoAktionen } from "@/lib/useWamo";
 import { abdruckAnsichtOeffnen, applyServerMessage, nutzerTranskript, resetWamo, wamo } from "@/lib/wamo";
 
@@ -25,6 +27,7 @@ beforeAll(() => {
 beforeEach(() => {
   resetWamo();
   localStorage.clear();
+  nutzerSetzen({ id: null, email: null });
   history.replaceState(null, "", "#");
   geraeteAnzeige.set(() => ({ zustand: "nicht_noetig", tunnel: null, kennung: null }));
   attrappe.getSupabase.mockReset().mockReturnValue(null);
@@ -136,6 +139,9 @@ describe("Fremde Stimme ignoriert (strenger Modus)", () => {
   });
 
   it("nimmt den Untertitel einer verworfenen Äußerung wieder heraus, eigene Sätze bleiben", async () => {
+    // die Untertitel sind seit dem 17.11.2026 standardmäßig aus (lib/untertitel.ts): für diesen Test eingeschaltet
+    nutzerSetzen({ id: "7d1c2b3a-4e5f-4a6b-8c9d-0e1f2a3b4c5d", email: ADMIN });
+    untertitelSetzen("7d1c2b3a-4e5f-4a6b-8c9d-0e1f2a3b4c5d", true);
     const { container } = zeige(ADMIN);
     sitzungMitStimme();
     await ruhe();

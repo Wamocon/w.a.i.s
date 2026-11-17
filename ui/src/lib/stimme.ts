@@ -37,12 +37,16 @@ export function stimmeStatusAnwenden(s: StimmeStand, m: { status: StimmeStatus; 
   };
 }
 
+/** Hat der Kern die Äußerung verworfen? Verworfen werden kann eine fremde oder unklare, nie die eigene; ein ignoriert bei "eigen" ist
+ *  Unsinn und zählt nicht. */
+export const istVerworfen = (m: { ergebnis: StimmeErgebnis; ignoriert?: boolean }): boolean =>
+  m.ignoriert === true && (m.ergebnis === "fremd" || m.ergebnis === "unklar");
+
 export function stimmeErgebnisAnwenden(
   s: StimmeStand,
   m: { ergebnis: StimmeErgebnis; wert: number | null; modus: StimmeModus | null; ignoriert?: boolean },
 ): StimmeStand {
-  // verworfen werden kann eine fremde oder unklare Äußerung, nie die eigene; ein ignoriert bei "eigen" ist Unsinn und zählt nicht
-  const ignoriert = m.ignoriert === true && (m.ergebnis === "fremd" || m.ergebnis === "unklar");
+  const ignoriert = istVerworfen(m);
   return {
     ...s,
     ergebnis: m.ergebnis,

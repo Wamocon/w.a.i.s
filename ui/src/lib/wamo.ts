@@ -11,6 +11,7 @@ import type {
   Modellzugang,
   Profil,
   ServerMessage,
+  StimmeErgebnis,
   Vorgang,
 } from "@/lib/nachrichten";
 import { hinweisText, type DateiMeldung } from "./export.ts"; // relativ aus demselben Grund
@@ -27,6 +28,7 @@ import {
   abdruckAnsage,
   abdruckAnwenden,
   abdruckOeffnen,
+  istVerworfen,
   kannEinlernen,
   STIMME_LEER,
   stimmeErgebnisAnwenden,
@@ -34,6 +36,7 @@ import {
   type Abdruck,
   type StimmeStand,
 } from "./stimme.ts"; // relativ aus demselben Grund
+import { alleFreigeben, HALTEN_MS, sichtbarerNutzerText, teilFreigeben } from "./stimmFilter.ts"; // relativ aus demselben Grund
 import { createStore } from "./store.ts"; // relativ, damit node:test diese Datei laden kann (textEingabe.test.ts)
 import { vorgangAnsage, vorgangEinordnen } from "./vorgaenge.ts";
 
@@ -69,8 +72,10 @@ export type Approval = {
   ablauf?: number;
 };
 
-/** Ein endgültiger Teil des Nutzerbeitrags aus der Spracherkennung, mit deren Zeitstempel (siehe nutzerTranskript). */
-export type NutzerTeil = { zeit: string; text: string };
+/** Ein endgültiger Teil des Nutzerbeitrags aus der Spracherkennung, mit deren Zeitstempel (siehe nutzerTranskript). frist: mit
+ *  Stimmfilter hält der Chat links den Teil bis zum Urteil des Kerns zurück, längstens bis zu diesem Zeitpunkt (Date.now,
+ *  lib/stimmFilter.ts); fehlt sie, darf der Teil überall erscheinen. */
+export type NutzerTeil = { zeit: string; text: string; frist?: number };
 
 /** Live-Untertitel: Nutzerzeile und der aktuelle WAMO-Zug (Karaoke über spoken). */
 export type Caption = {
@@ -78,6 +83,7 @@ export type Caption = {
   userLive: string; // Zwischenergebnis (kursiv grau)
   userLogged: boolean; // schon in den Verlauf übernommen
   userTeile: NutzerTeil[]; // die gesprochenen Teile am Ende von userDone, damit der Kern einen verworfenen zurücknehmen kann
+  gefiltert: boolean; // Stimmfilter beim letzten Transkript: der Chat links zeigt nur Geprüftes (lib/stimmFilter.ts)
   text: string; // WAMO-Zug, gesprochene und noch kommende Wörter
   spoken: number; // Anzahl schon gesprochener Wörter
   turnEnd: boolean;
@@ -205,6 +211,7 @@ export const leereCaption: Caption = {
   userLive: "",
   userLogged: false,
   userTeile: [],
+  gefiltert: false,
   ...ZUG_LEER,
 };
 
@@ -336,20 +343,60 @@ const MAX_TEILE = 40;
  * bereits hier. Danach schickt der Kern dasselbe Transkript ohne Text (nur Leerzeichen) mit dem Zeitstempel des Originals. Passt es zu
  * einem gemerkten Teil, verschwindet genau dieser Teil aus dem Untertitel und, falls W.A.I.S. inzwischen zu sprechen begann, aus dem
  * Eintrag im Verlauf. Eigene Sätze desselben Zugs und getippter Text bleiben.
+ *
+ * Stimmfilter (opt.filter, lib/stimmFilter.ts): Ein endgültiger Teil bekommt eine Frist und erscheint im Chat links erst nach dem Urteil
+ * (urteilEinarbeiten) oder dem Rückfall; Zwischenstände erscheinen dort gar nicht. Der Untertitel unter dem Kern zeigt weiter alles.
  */
-export function nutzerTranskript(s: WamoState, d: { text: string; final: boolean; timestamp?: string }): WamoState {
+export function nutzerTranskript(
+  s: WamoState,
+  d: { text: string; final: boolean; timestamp?: string },
+  opt: { filter?: boolean; jetzt?: number } = {},
+): WamoState {
   const c = s.caption;
   if (!d.text.trim()) {
     // Ohne Text gibt es nichts zu zeigen. Passt es zu keinem gemerkten Teil (der Beitrag begann inzwischen neu), bleibt alles stehen
     const i = d.final && d.timestamp ? letzterIndex(c.userTeile, (t) => t.zeit === d.timestamp) : -1;
     return i >= 0 ? teilZuruecknehmen(s, i) : s;
   }
+  const gefiltert = opt.filter === true;
   const base = c.userLogged ? { ...c, userDone: "", userLive: "", userLogged: false, userTeile: [] } : c;
-  if (!d.final) return { ...s, caption: { ...base, userLive: d.text } };
+  if (!d.final) return { ...s, caption: { ...base, userLive: d.text, gefiltert } };
   const text = norm(d.text);
   // jeder Teil kommt in die Liste, auch ohne Zeitstempel (zeit leer, nie zurückzunehmen): sonst stimmte "die Teile stehen am Ende" nicht
-  const userTeile = [...base.userTeile, { zeit: d.timestamp ?? "", text }].slice(-MAX_TEILE);
-  return { ...s, caption: { ...base, userDone: anhaengen(base.userDone, text), userLive: "", userTeile } };
+  const zeit = d.timestamp ?? "";
+  const teil: NutzerTeil = gefiltert ? { zeit, text, frist: (opt.jetzt ?? Date.now()) + HALTEN_MS } : { zeit, text };
+  const userTeile = [...base.userTeile, teil].slice(-MAX_TEILE);
+  return { ...s, caption: { ...base, userDone: anhaengen(base.userDone, text), userLive: "", userTeile, gefiltert } };
+}
+
+/** W.A.I.S. beginnt zu antworten (Modell oder Stimme, useWamo.ts): mit Stimmfilter erscheint jetzt alles Zurückgehaltene im Chat. */
+export function antwortBeginnt(s: WamoState): WamoState {
+  const caption = alleFreigeben(s.caption);
+  return caption === s.caption ? s : { ...s, caption };
+}
+
+/**
+ * W.A.I.S. beginnt zu sprechen (RTVI bot-started-speaking): Zurückgehaltenes erscheint (antwortBeginnt), der fertige Nutzerbeitrag kommt
+ * in den Verlauf, so wie ihn der Chat zeigt (nur ganze Züge; mit Stimmfilter ohne Zwischenstand), und W.A.I.S. spricht.
+ */
+export function botSprichtAn(s: WamoState): WamoState {
+  const n = antwortBeginnt(s);
+  const c = n.caption;
+  const userFertig = sichtbarerNutzerText(c);
+  const log = userFertig && !c.userLogged ? [...n.log, logEintrag({ wer: "nutzer", text: userFertig })] : n.log;
+  return { ...n, presence: "speaking", log: log.slice(-200), caption: userFertig ? { ...c, userLogged: true } : c };
+}
+
+/**
+ * Urteil der Stimmprüfung zu einer Äußerung (Nachricht stimme mit ergebnis und zeit, lib/stimmFilter.ts): angenommen zeigt den
+ * zurückgehaltenen Teil mit dieser Zeit, verworfen nimmt ihn zurück wie das leere Ersatztranskript des Kerns (auch aus dem Verlauf, falls
+ * er nach einem Rückfall schon dort steht). Ohne zeit (älterer Kern) bleibt der Untertitel, wie er ist.
+ */
+export function urteilEinarbeiten(s: WamoState, m: { ergebnis: StimmeErgebnis; ignoriert?: boolean; zeit?: string }): WamoState {
+  if (!m.zeit) return s;
+  if (istVerworfen(m)) return nutzerTranskript(s, { text: "", final: true, timestamp: m.zeit });
+  const caption = teilFreigeben(s.caption, m.zeit);
+  return caption === s.caption ? s : { ...s, caption };
 }
 
 /** Text mit einem Leerzeichen anhängen; der Text davor (etwa getippt, mit Zeilenumbrüchen) bleibt unverändert. */
@@ -386,12 +433,12 @@ function teilZuruecknehmen(s: WamoState, i: number): WamoState {
   // Nichts mehr übrig, während W.A.I.S. auf das Ende des Zugs wartet: der Zug endet leer, ohne Antwort (siehe nutzerHoertAuf)
   const presence: Presence = nutzerZeileLeer(caption) && s.presence === "thinking" && !c.userLogged ? "idle" : s.presence;
   if (!c.userLogged) return { ...s, presence, caption };
-  // Schon im Verlauf (onBotStartedSpeaking in useWamo.ts übernimmt userDone und userLive): seither kam kein neues Transkript, sonst
-  // hätte der Beitrag neu begonnen und der Teil stünde nicht mehr in der Liste. Nur den Eintrag mit genau diesem Text ändern.
-  const vorher = `${c.userDone} ${c.userLive}`.trim();
+  // Schon im Verlauf (botSprichtAn übernimmt den Text, den der Chat zeigt): seither kam kein neues Transkript, sonst hätte der Beitrag
+  // neu begonnen und der Teil stünde nicht mehr in der Liste. Nur den Eintrag mit genau diesem Text ändern.
+  const vorher = sichtbarerNutzerText(c);
   const k = letzterIndex(s.log, (e) => e.wer === "nutzer");
   if (k < 0 || s.log[k].text !== vorher) return { ...s, caption };
-  const nachher = `${userDone} ${c.userLive}`.trim();
+  const nachher = sichtbarerNutzerText(caption);
   const log = nachher ? s.log.map((e, j) => (j === k ? { ...e, text: nachher } : e)) : s.log.filter((_, j) => j !== k);
   return { ...s, log, caption };
 }
@@ -850,7 +897,7 @@ export function applyServerMessage(msg: ServerMessage) {
       wamo.set((s) => ({ ...s, stimme: stimmeStatusAnwenden(s.stimme, msg) }));
       return;
     case "stimme_ergebnis":
-      wamo.set((s) => ({ ...s, stimme: stimmeErgebnisAnwenden(s.stimme, msg) }));
+      wamo.set((s) => urteilEinarbeiten({ ...s, stimme: stimmeErgebnisAnwenden(s.stimme, msg) }, msg));
       return;
     case "stimmabdruck_einwilligung":
       wamo.set((s) => ({ ...s, einwilligung: { version: msg.version, text: msg.text }, einwilligungAbgelehnt: false }));
