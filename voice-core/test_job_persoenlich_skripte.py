@@ -370,5 +370,6 @@ def test_schalter_github_nur_mit_option_und_ab_schranken_4(welt):
     assert zeilen[-1] == "Environment=WAMO_ENTWICKLUNG_GITHUB=an" and zeilen[-2] == "Environment=WAMO_ENTWICKLUNG_HAUS=aus"
     assert "PERSOENLICH nicht auf an" in p.stdout  # Hinweis: im Kanal noch aus
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL)
-    assert p.returncode == 0 and "WAMO_ENTWICKLUNG_GITHUB" not in (welt["w"] / DROPIN_REL).read_text(encoding="utf-8")
+    zeilen = (welt["w"] / DROPIN_REL).read_text(encoding="utf-8").splitlines()
+    assert p.returncode == 0 and zeilen[-1] == "Environment=WAMO_ENTWICKLUNG_GITHUB=aus"  # ohne die Option: aus, die Zeile steht immer
     assert "GitHub-Weg ist danach aus" in p.stdout

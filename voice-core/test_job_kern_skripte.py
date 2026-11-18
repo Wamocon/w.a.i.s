@@ -1100,7 +1100,7 @@ def test_schalter_an_schreibt_das_dropin_laedt_neu_und_schaltet_dann_um(welt):
     assert zeilen[1:] == ["[Service]", "Environment=WAMO_ENTWICKLUNG_BUERO=an", "Environment=WAMO_ENTWICKLUNG_ORT=sokrates2",
                           f"Environment=WAMO_ENTWICKLUNG_PROFILE={PROFIL}", "Environment=WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD=3",
                           "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=10", "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=aus",
-                          "Environment=WAMO_ENTWICKLUNG_HAUS=aus"]
+                          "Environment=WAMO_ENTWICKLUNG_HAUS=aus", "Environment=WAMO_ENTWICKLUNG_GITHUB=aus"]
     assert not text.startswith("# gespiegelt")  # keine Spiegel-Marke
     log = [z for z in aufrufe(welt) if z.startswith(("systemctl daemon-reload", "slots umschalten-kern"))]
     assert log == ["systemctl daemon-reload", f"slots umschalten-kern {RELEASE} dropin=ja"]  # erst neu laden, dann umschalten, Drop-in lag schon
@@ -1320,10 +1320,10 @@ def test_schalter_mit_mitgliedern_verlangt_schranken_version_2_und_schreibt_den_
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, "--mitglieder", "an")
     assert p.returncode == 0, p.stdout + p.stderr
     text = (welt["w"] / DROPIN_REL).read_text(encoding="utf-8")
-    assert text.splitlines()[-2:] == ["Environment=WAMO_ENTWICKLUNG_MITGLIEDER=an", "Environment=WAMO_ENTWICKLUNG_HAUS=aus"]
+    assert text.splitlines()[-3:-1] == ["Environment=WAMO_ENTWICKLUNG_MITGLIEDER=an", "Environment=WAMO_ENTWICKLUNG_HAUS=aus"]
     # ohne die Option schreibt der nächste Aufruf wieder aus (nie nebenbei an)
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL)
-    assert p.returncode == 0 and (welt["w"] / DROPIN_REL).read_text(encoding="utf-8").splitlines()[-2] == "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=aus"
+    assert p.returncode == 0 and (welt["w"] / DROPIN_REL).read_text(encoding="utf-8").splitlines()[-3] == "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=aus"
 
 
 @braucht_bash
@@ -1433,7 +1433,7 @@ def test_schalter_an_schreibt_den_schalter_fuer_hausmodelle_immer(welt, haus, er
     p = einr(welt, "schalter", "an", RELEASE, "--profil", PROFIL, *(["--haus", haus] if haus else []))
     assert p.returncode == 0, p.stdout + p.stderr
     zeilen = (welt["w"] / DROPIN_REL).read_text(encoding="utf-8").splitlines()
-    assert zeilen[-1] == f"Environment=WAMO_ENTWICKLUNG_HAUS={erwartet}"
+    assert zeilen[-2] == f"Environment=WAMO_ENTWICKLUNG_HAUS={erwartet}" and zeilen[-1] == "Environment=WAMO_ENTWICKLUNG_GITHUB=aus"
     assert sum(z.startswith("Environment=WAMO_ENTWICKLUNG_HAUS=") for z in zeilen) == 1
 
 

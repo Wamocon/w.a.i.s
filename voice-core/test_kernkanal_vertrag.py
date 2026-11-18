@@ -479,12 +479,16 @@ def test_die_standardkosten_des_skripts_nimmt_der_kern_an(monkeypatch):
 
 def test_das_dropin_setzt_genau_die_variablen_die_der_kern_liest():
     namen = re.findall(r"echo \"Environment=([A-Z_]+)=", _funktion(SKRIPT, "drop_in_text"))
-    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG, eb.ENV_MITGLIEDER, eb.ENV_HAUS}
+    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG, eb.ENV_MITGLIEDER, eb.ENV_HAUS,
+                          eb.ENV_GITHUB}
     assert len(namen) == len(set(namen))
     assert "WAMO_ENTWICKLUNG" not in namen and eb.ENV_BEFEHLE not in namen  # Standard aus, nie nebenbei an
-    # WAMO_ENTWICKLUNG_GITHUB schreibt erst das Skript aus Paket D-a (schalter --github an|aus, C.2.7); bis dahin fehlt die Zeile, der Kern
-    # liest dann aus (Standard). D-a nimmt ENV_GITHUB in die Menge oben auf und streicht ihn hier.
-    assert set(eb.ALLE_VARIABLEN) - set(namen) <= {eb.ENV_BEFEHLE, eb.ENV_GITHUB} and eb.ENV_BEFEHLE not in namen
+    assert set(eb.ALLE_VARIABLEN) - set(namen) == {eb.ENV_BEFEHLE}
+
+
+def test_das_dropin_schreibt_den_schalter_fuer_github_immer_und_standardmaessig_aus():
+    rumpf = _funktion(SKRIPT, "drop_in_text")
+    assert f"Environment={eb.ENV_GITHUB}=${{GITHUB:-aus}}" in rumpf  # Paket D-a: schalter ... --github an|aus (C.2.7)
 
 
 def test_das_dropin_schreibt_den_schalter_fuer_hausmodelle_immer_und_standardmaessig_aus():
@@ -770,8 +774,6 @@ NAMEN_DER_UMSETZUNG = (
 )
 # Variablen, die es schon vor dem Vorhaben gab (stehen in der README und in den .env.example, nicht im Namensvertrag)
 VORHANDENE_VARIABLEN = {"WAMO_BETRIEB", "WAMO_ENTWICKLUNG", "WAMO_ABNAHME_BEFEHLE", "WAMO_CLAUDE_SCHLUESSEL_PROFIL"}
-# Neu mit Plan C (Paket K); die Zeile im Namensvertrag von CLAUDE.md schreibt Paket R (C.9), danach fällt dieser Eintrag weg
-VARIABLEN_BIS_PAKET_R = {"WAMO_ENTWICKLUNG_GITHUB"}
 
 
 # Zugangsart haus (P6b, docs/ausrollen-neue-nutzer.md, Abschnitt 4.7)
@@ -789,7 +791,7 @@ def test_jede_variable_der_neuen_dateien_steht_im_namensvertrag():
                     INFRA / "wamo_job_kern_rauchtest.py", INFRA / "wamo_job_kernkanal.py")
     gefunden = {n for datei in neue_dateien for n in re.findall(r"\bWAMO_[A-Z0-9]+(?:_[A-Z0-9]+)*\b", _text(datei))}
     assert len(gefunden) >= 8
-    fehlen = sorted(n for n in gefunden - VORHANDENE_VARIABLEN - VARIABLEN_BIS_PAKET_R if n not in NAMENSVERTRAG)
+    fehlen = sorted(n for n in gefunden - VORHANDENE_VARIABLEN if n not in NAMENSVERTRAG)
     assert not fehlen, f"nicht im Namensvertrag: {fehlen}"
 
 

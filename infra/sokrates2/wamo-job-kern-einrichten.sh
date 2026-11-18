@@ -40,8 +40,8 @@
 #       Hausmodellen für Profile ohne eigenen Zugang oder mit nur Hausmodellen. --haus an verlangt Dispatcher, Kern-Kanal und Release
 #       mit der Zugangsart haus; am Server zusätzlich WAMO_HAUS=an in geheim.env und den Proxy wamo-haus-proxy (sonst scheitern solche
 #       Aufträge geschlossen).
-#       --github an|aus (Plan C, Standard aus): WAMO_ENTWICKLUNG_GITHUB im Drop-in, der persönliche GitHub-Weg im Kern. Ohne die Option
-#       steht die Zeile nicht im Drop-in (heißt aus). --github an verlangt Dispatcher 10 und ein Release ab SCHRANKEN_VERSION 4
+#       --github an|aus (Plan C, Standard aus, die Zeile WAMO_ENTWICKLUNG_GITHUB steht immer im Drop-in): der persönliche GitHub-Weg im
+#       Kern. Jeder Aufruf ohne die Option schreibt aus. --github an verlangt Dispatcher 10 und ein Release ab SCHRANKEN_VERSION 4
 #       (MIN_SCHRANKEN_GITHUB); wirksam erst mit kanal --persoenlich an.
 #   wamo-job-kern-einrichten.sh notaus-aufheben
 #       Sperrdatei entfernen. Der Kanal bleibt zu (der Notaus hat KANAL=zu gesetzt und das Schlüsselpaar beiseitegelegt): erst schluessel
@@ -811,10 +811,7 @@ drop_in_text() {
   echo "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=${KOSTEN_TAG:-$STD_KOSTEN_TAG_USD}"
   echo "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=${MITGLIEDER:-$STD_MITGLIEDER}"
   echo "Environment=WAMO_ENTWICKLUNG_HAUS=${HAUS:-aus}"
-}
-
-drop_in_github() {   # die Zeile des persönlichen GitHub-Wegs, nur mit --github (ohne die Option fehlt sie: aus)
-  case "$GITHUB" in an|aus) echo "Environment=WAMO_ENTWICKLUNG_GITHUB=$GITHUB" ;; esac
+  echo "Environment=WAMO_ENTWICKLUNG_GITHUB=${GITHUB:-aus}"
 }
 
 schranken_version() {   # die Zahl aus der Zeile SCHRANKEN_VERSION des Zielrelease (leer, wenn sie fehlt)
@@ -878,18 +875,18 @@ cmd_schalter() {
     echo "Hinweis: Mitglieder sind danach aus (ohne --mitglieder an schreibt das Skript WAMO_ENTWICKLUNG_MITGLIEDER=aus)."
   fi
   if [ "$SCHALTER" = an ] && [ -f "$DROPIN" ] && grep -qx 'Environment=WAMO_ENTWICKLUNG_GITHUB=an' "$DROPIN" && [ "$GITHUB" != an ]; then
-    echo "Hinweis: der persönliche GitHub-Weg ist danach aus (ohne --github an fehlt die Zeile im Drop-in)."
+    echo "Hinweis: der persönliche GitHub-Weg ist danach aus (ohne --github an schreibt das Skript WAMO_ENTWICKLUNG_GITHUB=aus)."
   fi
   if [ "$TROCKEN" = 1 ]; then
     if [ "$SCHALTER" = an ]; then
       echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde so lauten (user_id nur als Kurzkennung):"
-      { drop_in_text; drop_in_github; } | sed -E 's/([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\1/g; s/^/  /'
+      drop_in_text | sed -E 's/([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\1/g; s/^/  /'
     else echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde entfernt"; fi
     echo "[trocken] danach: systemctl daemon-reload, wamo-core-slots.sh umschalten-kern $RELEASE. Nichts geschrieben, nichts umgeschaltet."
     return 0
   fi
   if [ "$SCHALTER" = an ]; then
-    neu="$(drop_in_text; drop_in_github)"
+    neu="$(drop_in_text)"
     if gleich_wie "$DROPIN" "$neu" && release_laeuft "$RELEASE"; then echo "Schalter steht schon auf an, Release $RELEASE läuft: nichts zu tun."; return 0; fi
   else
     if [ ! -e "$DROPIN" ] && release_laeuft "$RELEASE"; then echo "Schalter steht schon auf aus, Release $RELEASE läuft: nichts zu tun."; return 0; fi
