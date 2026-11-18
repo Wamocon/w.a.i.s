@@ -1224,9 +1224,12 @@ def test_c9_die_ergebnisse_sind_unveraenderlich():
 
 
 def test_c9_das_modul_ist_ohne_nebenwirkung_und_nur_mit_der_standardbibliothek():
-    """Wie das Modul des Kern-Kanals: kein Netz, keine Prozesse, keine Geheimnisse beim Import (installiert unter /opt/wamo/waechter)."""
+    """Wie das Modul des Kern-Kanals: kein Netz, keine Prozesse, keine Geheimnisse beim Import (installiert unter /opt/wamo/waechter).
+    Seit Paket D-b liest und schreibt die Logik Dateien im Auftragsordner selbst (lstat, O_NOFOLLOW, atomar) und lädt die Nachbarmodule
+    erst beim Gebrauch; Netz, git und Sandbox gehen weiter nur über Werkzeuge."""
     baum = ast.parse(_text(INFRA / "wamo_job_github.py"))
-    erlaubt = {"__future__", "collections.abc", "contextlib", "dataclasses", "pathlib", "re", "types", "typing"}
+    erlaubt = {"__future__", "collections.abc", "contextlib", "dataclasses", "pathlib", "re", "types", "typing",
+               "datetime", "hashlib", "importlib", "importlib.util", "json", "os", "secrets", "stat", "sys"}
     for knoten in baum.body:
         if isinstance(knoten, ast.Import):
             assert {a.name for a in knoten.names} <= erlaubt, ast.dump(knoten)
@@ -1237,4 +1240,16 @@ def test_c9_das_modul_ist_ohne_nebenwirkung_und_nur_mit_der_standardbibliothek()
         else:
             assert isinstance(knoten, (ast.Assign, ast.AnnAssign, ast.ClassDef, ast.FunctionDef)), ast.dump(knoten)
     namen = {n.id for n in ast.walk(baum) if isinstance(n, ast.Name)} | {n.attr for n in ast.walk(baum) if isinstance(n, ast.Attribute)}
-    assert not namen & {"subprocess", "socket", "open", "environ", "system", "urlopen", "HTTPSConnection"}
+    assert not namen & {"subprocess", "socket", "environ", "system", "urlopen", "HTTPSConnection", "popen", "Popen", "exec", "eval"}
+
+
+@pytest.mark.parametrize("scopes, ausnahmen, erwartet", SCOPE_FAELLE)
+def test_c28_die_regel_des_dispatchers_folgt_der_wertetabelle(scopes, ausnahmen, erwartet):
+    """Seite D-b (Start und Einreichen): wamo_job_github.scope_grund gegen die Wertetabelle, wie es _scope_grund oben verlangt."""
+    assert G.scope_grund(scopes, ausnahmen) == erwartet
+
+
+@pytest.mark.parametrize("kopf, erwartet", [("repo", ("repo",)), ("repo, gist", ("repo", "gist")), (" repo ,, read:org ", ("repo", "read:org")),
+                                            ("", ()), (" , ", ())])
+def test_c28_der_dispatcher_liest_die_kopfzeile_gleich(kopf, erwartet):
+    assert G.scopes_aus_kopf(kopf) == erwartet
