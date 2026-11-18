@@ -12,6 +12,7 @@ Ausführen:  python -m pytest -q test_auftrag_entwuerfe.py   (im Ordner voice-co
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import unittest
 from pathlib import PurePosixPath
@@ -166,7 +167,10 @@ class EntwurfFormTests(unittest.TestCase):
             "github": "ghp_" + "A1b2C3d4" * 5,
             "feingranular": "github_pat_" + "11ABCDEFG_" * 4,
             "gitlab": "glpat-" + "abcDEF123_" * 3,
-            "jwt": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXdlcnQ",
+            # Attrappe zur Laufzeit gebaut ({"alg":"HS256"}, {"sub":"1234567890"}, Signatur "signature-wert"), damit der Secret-Scan
+            # kein Literal sieht
+            "jwt": ".".join(base64.urlsafe_b64encode(s).decode().rstrip("=")
+                            for s in (b'{"alg":"HS256"}', b'{"sub":"1234567890"}', b"signature-wert")),
             "andere": "sk-" + "proj" * 8,
             "aws": "AKIA" + "ABCDEFGHIJKLMNOP",
         }
