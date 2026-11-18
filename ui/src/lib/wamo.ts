@@ -21,6 +21,14 @@ import { canvasEinordnen, canvasOffen, canvasWaehlen, neueStelle } from "./canva
 import { canvasSchluessel, zuLegen, type Geschlossen } from "./canvasHistorie.ts"; // relativ aus demselben Grund
 import { AUFGABE_LEER, naechsteAufgabe, type Aufgabe } from "./aufgabenanzeige.ts"; // relativ aus demselben Grund
 import { auftraegeNachQuittung } from "./auftragStart.ts"; // relativ aus demselben Grund
+import {
+  ENTWURF_WARTEN_MS,
+  auftraegeNachEntwurf,
+  entwuerfeNachAntwort,
+  entwurfAnsage,
+  type EntwuerfeStand,
+  type EntwurfWarten,
+} from "./auftragEntwuerfe.ts"; // relativ aus demselben Grund
 import { JIRA_LEER, type JiraStand } from "./jiraStory.ts"; // relativ aus demselben Grund
 import { liveBildLoeschen } from "./liveBild.ts"; // relativ aus demselben Grund
 import { PC_EIN_LEER, type PcEinschalten } from "./pcSchalter.ts"; // relativ aus demselben Grund
@@ -157,6 +165,9 @@ export type WamoState = {
   approvals: Approval[];
   /** Entwicklungsaufträge, die auf "Starten" oder "Verwerfen" warten */
   auftraege: Auftrag[];
+  /** Für später gespeicherte Aufträge (lib/auftragEntwuerfe.ts); null, solange der Kern keine Liste geschickt hat (dann fehlen Knopf
+   *  und Liste, etwa ohne Entwicklungsaufträge oder im Labor) */
+  entwuerfe: EntwuerfeStand | null;
   canvas: CanvasItem[];
   /** geschlossene Reiter dieser Sitzung, zuletzt geschlossen zuerst (lib/canvasHistorie.ts); Schließen blendet nur aus */
   canvasZu: Geschlossen<CanvasItem>[];
@@ -232,6 +243,7 @@ export const initialState: WamoState = {
   turn: 0,
   approvals: [],
   auftraege: [],
+  entwuerfe: null,
   canvas: [],
   canvasZu: [],
   betrieb: null,
@@ -597,6 +609,7 @@ export function resetWamo(state: WamoState = initialState) {
   epoche += 1;
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = null;
+  entwurfFristLoeschen();
   for (const t of ablaufTimer.values()) clearTimeout(t);
   ablaufTimer.clear();
   for (const t of memoTimer.values()) clearTimeout(t.timer);
@@ -684,6 +697,31 @@ export function abdruckAnsichtSchliessen() {
 export function nachrichtAbgelehnt(roh: unknown) {
   if (typeof roh !== "object" || roh === null || (roh as { type?: unknown }).type !== "stimmabdruck_einwilligung") return;
   wamo.set((s) => ({ ...s, einwilligung: null, einwilligungAbgelehnt: true }));
+}
+
+// ---------- Gespeicherte Aufträge: Warten auf die Antwort ----------
+
+let entwurfFrist: ReturnType<typeof setTimeout> | null = null;
+let entwurfNr = 0;
+
+function entwurfFristLoeschen() {
+  if (entwurfFrist) clearTimeout(entwurfFrist);
+  entwurfFrist = null;
+}
+
+/** Eine Aktion an den gespeicherten Aufträgen ist gesendet (kennung: Karte oder Entwurf): die Knöpfe warten auf die Antwort. Kommt nach
+ *  ENTWURF_WARTEN_MS keine, sind sie wieder frei, und ein Hinweis sagt es. Ohne Zustand (kein Angebot des Kerns) ändert sich nichts. */
+export function entwurfWarten(aktion: EntwurfWarten["aktion"], kennung: string) {
+  entwurfNr += 1;
+  const n = entwurfNr;
+  entwurfFristLoeschen();
+  wamo.set((s) => (s.entwuerfe ? { ...s, entwuerfe: { ...s.entwuerfe, wartet: { aktion, kennung, n } } } : s));
+  entwurfFrist = setTimeout(() => {
+    entwurfFrist = null;
+    if (wamo.get().entwuerfe?.wartet?.n !== n) return;
+    wamo.set((s) => (s.entwuerfe ? { ...s, entwuerfe: { ...s.entwuerfe, wartet: null } } : s));
+    zeigeToast("Gespeicherte Aufträge: noch keine Antwort vom Kern. Bitte die Liste prüfen, bevor du es noch einmal versuchst.");
+  }, ENTWURF_WARTEN_MS);
 }
 
 // ---------- Jira-Stories: Ergebnis schließen ----------
@@ -920,6 +958,16 @@ export function applyServerMessage(msg: ServerMessage) {
       });
       return;
     }
+    case "auftrag_entwuerfe":
+      // Gespeicherte Aufträge: Liste und Meldung; nach einem gelungenen Speichern verlässt die Karte die Ansicht (der Kern hat sie entfernt)
+      wamo.set((s) => ({
+        ...s,
+        entwuerfe: entwuerfeNachAntwort(s.entwuerfe, msg),
+        auftraege: auftraegeNachEntwurf(s.auftraege, msg),
+        ansage: entwurfAnsage(msg) ?? s.ansage,
+      }));
+      if (!wamo.get().entwuerfe?.wartet) entwurfFristLoeschen(); // beantwortet: keine Frist und kein Hinweis mehr
+      return;
     case "sitzung_beendet":
       wamo.set((s) => ({
         ...s,

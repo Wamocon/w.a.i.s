@@ -3,6 +3,7 @@
 import { memo, useEffect, useLayoutEffect, useRef } from "react";
 import { useSelect } from "@/lib/store";
 import { abnahmeEintraege } from "@/lib/auftragAbnahme";
+import { speichernMoeglich } from "@/lib/auftragEntwuerfe";
 import { kartenAnsicht, repoAnzeige } from "@/lib/auftragStart";
 import { karteTexte } from "@/lib/laborKarte";
 import type { Auftrag } from "@/lib/nachrichten";
@@ -122,15 +123,25 @@ export const Freigaben = memo(function Freigaben({ onDecide }: { onDecide: Entsc
  * verschwindet bei "Verwerfen" sofort, bei "Starten" erst mit der Quittung des Kerns (lib/auftragStart.ts): bis dahin
  * wartet sie, bei einem Grund bleibt sie mit dem Grund stehen, nach 15 Sekunden ohne Antwort zeigt sie einen neutralen
  * Hinweis. Meldet der Kern betrieb.entwicklung "aus", ist Starten gesperrt.
+ * "Für später speichern" (nur wenn der Kern gespeicherte Aufträge anbietet, lib/auftragEntwuerfe.ts) legt die noch nicht gesendete Karte
+ * unter "Gespeicherte Aufträge" ab; sie verschwindet erst mit der Antwort des Kerns.
  */
 function AuftragCard({
   a,
   gesperrt,
   onDecide,
+  onSpeichern,
+  speichernGesperrt,
+  speichert,
 }: {
   a: Auftrag;
   gesperrt: boolean;
   onDecide: (a: Auftrag, ja: boolean) => void;
+  onSpeichern?: (a: Auftrag) => void;
+  /** eine Aktion an den gespeicherten Aufträgen wartet auf Antwort (irgendeine) */
+  speichernGesperrt: boolean;
+  /** genau diese Karte wird gerade gespeichert: Starten und Verwerfen warten mit */
+  speichert: boolean;
 }) {
   const head = useRef<HTMLHeadingElement>(null);
   const karte = useRef<HTMLElement>(null);
@@ -143,6 +154,12 @@ function AuftragCard({
   useEffect(() => {
     if (document.activeElement === document.body) head.current?.focus();
   }, []);
+
+  // Beim Speichern wird der geklickte Knopf gesperrt und verlöre den Fokus: die Überschrift übernimmt ihn, damit er beim Verschwinden der
+  // Karte (Antwort ok) wie bei den anderen Entscheidungen weitergegeben wird
+  useEffect(() => {
+    if (speichert) head.current?.focus();
+  }, [speichert]);
 
   // Nach "Starten" ist die Schaltfläche gesperrt, bis die Quittung kommt: den Fokus auf die Überschrift der Karte legen
   useEffect(() => {
@@ -219,12 +236,22 @@ function AuftragCard({
         </p>
       )}
       <div className="approval-actions">
-        <button type="button" className="btn-decide" disabled={ansicht.startGesperrt} onClick={() => onDecide(a, true)}>
+        <button type="button" className="btn-decide" disabled={ansicht.startGesperrt || speichert} onClick={() => onDecide(a, true)}>
           {ansicht.startText}
         </button>
-        <button type="button" className="btn-decide" disabled={ansicht.verwerfenGesperrt} onClick={() => onDecide(a, false)}>
+        <button type="button" className="btn-decide" disabled={ansicht.verwerfenGesperrt || speichert} onClick={() => onDecide(a, false)}>
           Verwerfen
         </button>
+        {onSpeichern && (
+          <button
+            type="button"
+            className="btn-decide"
+            disabled={speichernGesperrt || !speichernMoeglich(a)}
+            onClick={() => onSpeichern(a)}
+          >
+            {speichert ? "Wird gespeichert …" : "Für später speichern"}
+          </button>
+        )}
       </div>
     </article>
   );
@@ -232,11 +259,18 @@ function AuftragCard({
 
 export const Auftraege = memo(function Auftraege({
   onDecide,
+  onSpeichern,
 }: {
   onDecide: (a: Auftrag, ja: boolean) => boolean;
+  /** Karte für später speichern (lib/useWamo.ts, entwuerfe.speichern); fehlt in der Vorschau und im Labor */
+  onSpeichern?: (a: Auftrag) => boolean;
 }) {
   const auftraege = useSelect(wamo, (s) => s.auftraege);
   const gesperrt = useSelect(wamo, (s) => s.betrieb?.entwicklung === "aus");
+  // Nur wenn der Kern gespeicherte Aufträge anbietet (erste Antwort auf die Liste); gesperrt, solange eine Aktion auf Antwort wartet
+  const speichernAn = useSelect(wamo, (s) => s.entwuerfe !== null);
+  const speichernWartet = useSelect(wamo, (s) => s.entwuerfe?.wartet != null);
+  const speichertJob = useSelect(wamo, (s) => (s.entwuerfe?.wartet?.aktion === "speichern" ? s.entwuerfe.wartet.kennung : null));
   useEffect(fokusWeitergeben, [auftraege]);
 
   const entscheide = (a: Auftrag, ja: boolean) => {
@@ -249,7 +283,15 @@ export const Auftraege = memo(function Auftraege({
   return (
     <section className="approvals" aria-label="Entwicklungsaufträge">
       {auftraege.map((a) => (
-        <AuftragCard key={a.job} a={a} gesperrt={gesperrt} onDecide={entscheide} />
+        <AuftragCard
+          key={a.job}
+          a={a}
+          gesperrt={gesperrt}
+          onDecide={entscheide}
+          onSpeichern={speichernAn && onSpeichern ? onSpeichern : undefined}
+          speichernGesperrt={speichernWartet}
+          speichert={speichertJob === a.job}
+        />
       ))}
     </section>
   );

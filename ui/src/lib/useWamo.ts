@@ -6,6 +6,7 @@ import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 import { betriebsartFuerStart, KERN, kernUrl, type Betriebsart, type BetriebsartBruecke } from "@/lib/betriebsart";
 import { alleFristenLoeschen, fristStarten } from "@/lib/auftragFrist";
 import { auftragLaeuft, auftraegeNachFrist, auftraegeNachStart, auftragStartbar, auftragVerwerfbar } from "@/lib/auftragStart";
+import { speichernMoeglich } from "@/lib/auftragEntwuerfe";
 import { abgelaufenHinweis } from "@/lib/laborKarte";
 import { useNeuladenWarnung } from "@/lib/useNeuladenWarnung";
 import { neuladenPlanen } from "@/lib/laborNeuladen";
@@ -59,6 +60,7 @@ import { istOfficeFormat, type OfficeAktionen, type OfficeFormat } from "@/lib/e
 import { formularFehler, type MailAktionen } from "@/lib/mail";
 import { teamsFehler, type TeamsAktionen } from "@/lib/teams";
 import {
+  ENTWURF_ID,
   parseServerMessage,
   type Auftrag,
   type Markierung,
@@ -124,6 +126,7 @@ import {
   desktopZustand,
   entferneAblauf,
   entferneMemo,
+  entwurfWarten,
   gesprochen,
   historyRef,
   istOnline,
@@ -229,6 +232,16 @@ export type WamoAktionen = {
   canvasAktiv?: (canvasId: string | null) => boolean;
   /** Teams-Nachricht zur Freigabe vorbereiten (lib/teams.ts). Optional, damit die Vorschau ohne Kern auskommt. */
   teams?: TeamsAktionen;
+  /** Gespeicherte Aufträge (lib/auftragEntwuerfe.ts): Karte für später speichern, gespeicherten Auftrag laden oder löschen. Optional, damit
+   *  die Vorschau ohne Kern auskommt; nie im Labor. */
+  entwuerfe?: EntwurfAktionen;
+};
+
+/** Je true, wenn gesendet; der Kern antwortet mit auftrag_entwuerfe. Laden legt nur die Karte an, gestartet wird sie per Klick. */
+export type EntwurfAktionen = {
+  speichern: (a: Auftrag) => boolean;
+  laden: (id: string) => boolean;
+  loeschen: (id: string) => boolean;
 };
 
 /** Die drei Aktionen am Stimmabdruck; der Kern prüft sie und antwortet mit stimmabdruck-Nachrichten. true, wenn gesendet. */
@@ -283,7 +296,11 @@ type ClientMessage =
   | { type: "mail_zurueckholen"; data: { id: string } }
   | { type: "onenote_seite"; data: { canvas_id: string } }
   | { type: "canvas_aktiv"; data: { canvas_id: string | null } }
-  | { type: "teams_vorbereiten"; data: { an: string[]; gruppenname: string; text: string } };
+  | { type: "teams_vorbereiten"; data: { an: string[]; gruppenname: string; text: string } }
+  | {
+      type: "auftrag_entwurf";
+      data: { aktion: "liste" } | { aktion: "speichern"; job: string } | { aktion: "laden" | "loeschen"; id: string };
+    };
 
 function senden(client: PipecatClient, msg: ClientMessage) {
   client.sendClientMessage(msg.type, msg.data);
@@ -602,6 +619,7 @@ export function useWamo(): WamoAktionen {
         aufgabe: aufgabeBeenden(s.aufgabe, performance.now()), // die letzte Aufgabe bleibt stehen, aber nie als laufend
         approvals: [],
         auftraege: [],
+        entwuerfe: null, // Liste und Knöpfe gibt es nur mit einer Sitzung, die sie angeboten hat; beim nächsten Verbinden neu abgefragt
         micOn: true,
         textMoeglich: false,
         mikrofon: null,
@@ -1697,6 +1715,29 @@ export function useWamo(): WamoAktionen {
     return wamo.subscribe(pruefe);
   }, []);
 
+  // Gespeicherte Aufträge (lib/auftragEntwuerfe.ts): die Liste einmal je Verbindung abfragen, sobald der Kern Entwicklungsaufträge meldet
+  // (betrieb.entwicklung "an"; im Labor nie). Erst seine Antwort zeigt Knopf und Liste; ein Kern ohne gespeicherte Aufträge antwortet nicht.
+  useEffect(() => {
+    let abgefragt: unknown = null;
+    const pruefe = () => {
+      const s = wamo.get();
+      if (!istOnline(s)) {
+        abgefragt = null;
+        return;
+      }
+      const client = clientRef.current;
+      if (s.betrieb?.entwicklung !== "an" || !client || abgefragt === client) return;
+      abgefragt = client;
+      try {
+        senden(client, { type: "auftrag_entwurf", data: { aktion: "liste" } });
+      } catch {
+        // ohne Antwort bleibt es ohne Liste, die Aufträge selbst gehen weiter
+      }
+    };
+    pruefe();
+    return wamo.subscribe(pruefe);
+  }, []);
+
   // Autostart der PC-Steuerung: Einstellung an, Profil admin, PC-Host verbunden und Steuerung aus
   // -> einmal je Verbindung einschalten. Den Hinweis gibt es erst, wenn der Kern "an" bestätigt.
   useEffect(() => {
@@ -1855,6 +1896,36 @@ export function useWamo(): WamoAktionen {
     [],
   );
 
+  // Gespeicherte Aufträge: nur senden; Liste, Meldung und das Entfernen der gespeicherten Karte übernimmt die Antwort (wamo.ts). Bis dahin
+  // (höchstens ENTWURF_WARTEN_MS, dann ein Hinweis) sind die Knöpfe gesperrt, damit nichts doppelt hinausgeht.
+  const entwuerfe = useMemo<EntwurfAktionen>(() => {
+    const schicken = (data: Exclude<Extract<ClientMessage, { type: "auftrag_entwurf" }>["data"], { aktion: "liste" }>, kennung: string) => {
+      const client = clientRef.current;
+      const s = wamo.get();
+      if (!s.entwuerfe || s.entwuerfe.wartet !== null) return false;
+      if (!client || !istOnline(s)) {
+        zeigeToast("Gespeicherte Aufträge: keine Verbindung.");
+        return false;
+      }
+      try {
+        senden(client, { type: "auftrag_entwurf", data });
+      } catch {
+        zeigeToast("Gespeicherte Aufträge: die Nachricht ging nicht hinaus.");
+        return false;
+      }
+      entwurfWarten(data.aktion, kennung);
+      return true;
+    };
+    return {
+      speichern: (a) => {
+        const karte = wamo.get().auftraege.find((x) => x.job === a.job);
+        return !!karte && speichernMoeglich(karte) && schicken({ aktion: "speichern", job: a.job }, a.job);
+      },
+      laden: (id) => ENTWURF_ID.test(id) && schicken({ aktion: "laden", id }, id),
+      loeschen: (id) => ENTWURF_ID.test(id) && schicken({ aktion: "loeschen", id }, id),
+    };
+  }, []);
+
   const schliesseFehler = useCallback(() => setFehler(null), []);
 
   // Mikrofone für die Auswahl in der Mikrofon-Warnung (Bezeichnungen gibt es erst nach der Freigabe)
@@ -1930,6 +2001,7 @@ export function useWamo(): WamoAktionen {
       mail,
       canvasAktiv,
       teams,
+      entwuerfe,
     }),
     [
       connect,
@@ -1954,6 +2026,7 @@ export function useWamo(): WamoAktionen {
       mail,
       canvasAktiv,
       teams,
+      entwuerfe,
     ],
   );
 }

@@ -101,7 +101,8 @@ def test_migrations_lint_der_pruefstrecke_findet_nichts():
         sys.path.remove(str(pruefer))
     pfade = ("supabase/migrations/0025_stimme_schwelle.sql", "supabase/migrations/0025_stimme_schwelle.down.sql")
     dateien = [Datei(p, (WURZEL / p).read_bytes(), None) for p in pfade]
-    baum = tuple(p.relative_to(WURZEL).as_posix() for p in (WURZEL / "supabase" / "migrations").glob("*.sql"))
+    # Der Baum wie in dem Zweig, der 0025 brachte: spätere Migrationen (ab 0026) gab es dort noch nicht (Regel nummer_nicht_hoeher)
+    baum = tuple(p.relative_to(WURZEL).as_posix() for p in (WURZEL / "supabase" / "migrations").glob("*.sql") if int(p.name[:4]) <= 25)
     befund = ml.migration_lint(dateien, baum)
     assert [(t.pfad, t.zeile, t.art) for t in befund.treffer] == []
 

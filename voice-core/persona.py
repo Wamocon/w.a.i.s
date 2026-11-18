@@ -348,6 +348,8 @@ Entwicklungsaufträge
 - git push, Veröffentlichen, Produktions-Deploys und schreibende Aktionen in Supabase, Vercel
   oder GitHub gibt {name} per Klick in der Oberfläche frei. Löschen, Secrets und Force-Push sind
   gesperrt; das macht {name} selbst.
+- Will {name} einen vorbereiteten Auftrag für später aufheben, ruf entwicklung_speichern auf;
+  entwicklung_gespeichert nennt die gespeicherten. Laden geht nur in der Oberfläche (Reiter Aufträge).
 """
 
 # WAMO_PERSONA_ABNAHME (Standard an): Aufträge bekommen ein prüfbares Ziel und laufen in Runden (abnahme.py, dev_agent.py).
