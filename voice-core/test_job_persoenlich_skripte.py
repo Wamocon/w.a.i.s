@@ -71,6 +71,19 @@ def test_mounts_der_schritte():
         assert pruefung in LAEUFER, pruefung
 
 
+def test_die_schritte_setzen_nur_namen_aus_der_erlaubnisliste_des_rauchtests():
+    block = LAEUFER[LAEUFER.index("SETENV_SCHRITT=(\n"):]
+    block = block[:block.index("\n)\n")]
+    gesetzt = set(re.findall(r"--setenv (\w+)", block))
+    rauchtest = (INFRA / "wamo_job_rauchtest.py").read_text(encoding="utf-8")
+    liste = rauchtest[rauchtest.index("SCHRITT_UMGEBUNG_ERLAUBT = {"):]
+    erlaubt = set(re.findall(r'"(\w+)"', liste[:liste.index("}")]))
+    assert gesetzt and gesetzt <= erlaubt, gesetzt - erlaubt
+    # was systemd-run oder der Aufrufer mitbringt, verschwindet: XDG_RUNTIME_DIR und INVOCATION_ID (Befund am Server 18.11.2026)
+    assert set(re.findall(r"--unsetenv (\w+)", block)) == {"XDG_RUNTIME_DIR", "INVOCATION_ID"}
+    assert "INVOCATION_ID" not in erlaubt
+
+
 def test_der_lauf_im_persoenlichen_weg_bekommt_nur_die_sechs_namen_und_kein_dienst_token():
     erlaubt = set(re.search(r"ERLAUBT_RE='\^\(([^)]*)\)\$'", LAEUFER).group(1).split("|"))
     assert {"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "WAMO_GITHUB", "WAMO_ZWEIG"} <= erlaubt
