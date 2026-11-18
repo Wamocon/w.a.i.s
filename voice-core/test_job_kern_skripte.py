@@ -730,7 +730,12 @@ case "$1" in
 esac
 ''')
     schreibe("attrappen/wamo-core-env", '#!/usr/bin/env bash\ncat "$(dirname "$0")/core_env.txt" 2>/dev/null || printf "SONIOX_API_KEY: gesetzt\\n"\n')
-    schreibe("attrappen/claude", '#!/usr/bin/env bash\ncat "$(dirname "$0")/claude_help.txt" 2>/dev/null || echo "--max-turns --max-budget-usd"\n')
+    # Attrappe der Optionsprüfung von Claude Code: unbekannte Optionen (nicht in claude_optionen.txt) brechen wie bei commander ab
+    schreibe("attrappen/claude", '#!/usr/bin/env bash\n'
+             'bekannt="$(cat "$(dirname "$0")/claude_optionen.txt" 2>/dev/null || echo "-p --max-turns --max-budget-usd")"\n'
+             'for a in "$@"; do case "$a" in -*) case " $bekannt " in *" $a "*) ;; '
+             '*) echo "error: unknown option \'$a\'" >&2; exit 1 ;; esac ;; esac; done\n'
+             'echo "Modellaufruf"\n')
     schreibe("attrappen/logger", '#!/usr/bin/env bash\necho "logger $*" >> "$(dirname "$0")/aufrufe.log"\n')
     # runuser: hält fest, was als wamo-core läuft (ein Wechsel des Benutzers findet im Probelauf nicht statt)
     schreibe("attrappen/runuser", '#!/usr/bin/env bash\necho "runuser $*" >> "$(dirname "$0")/aufrufe.log"\nshift 3\nexec "$@"\n')
@@ -1029,11 +1034,15 @@ def test_kanal_oeffnet_mit_den_angegebenen_regeln_und_laesst_die_uebrigen_werte(
 def test_kanal_fuer_github_arten_braucht_repos_und_die_flags_von_claude_code(welt):
     schluessel_einrichten(welt)
     assert einr(welt, "kanal", "--arten", "recherche,review").returncode == 2  # GitHub-Art ohne --repos
-    (welt["a"] / "claude_help.txt").write_text("Optionen: --max-turns\n")  # --max-budget-usd fehlt
+    (welt["a"] / "claude_optionen.txt").write_text("-p --max-turns\n")  # --max-budget-usd fehlt
     p = einr(welt, "kanal", "--arten", "review", "--repos", "Acme/Test-Repo")
     assert p.returncode == 3 and "--max-budget-usd" in p.stderr and konfig_von(welt)["KANAL"] == "zu"
     assert einr(welt, "kanal", "--arten", "recherche").returncode == 0  # ohne GitHub-Art ist das Flag keine Voraussetzung
-    (welt["a"] / "claude_help.txt").write_text("--max-turns --max-budget-usd\n")
+    (welt["a"] / "claude_optionen.txt").write_text("-p --max-budget-usd\n")  # --max-turns fehlt
+    p = einr(welt, "kanal", "--arten", "review", "--repos", "Acme/Test-Repo")
+    assert p.returncode == 3 and "--max-turns" in p.stderr
+    # Befund 18.11.2026: --max-turns fehlt in --help, die Optionsprüfung nimmt es aber an; darauf kommt es an
+    (welt["a"] / "claude_optionen.txt").write_text("-p --max-turns --max-budget-usd\n")
     p = einr(welt, "kanal", "--arten", "review,recherche", "--repos", "Acme/Test-Repo")
     assert p.returncode == 0, p.stdout + p.stderr
     k = konfig_von(welt)
