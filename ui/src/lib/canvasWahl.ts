@@ -6,12 +6,27 @@ import { createStore } from "./store.ts"; // relativ, damit node:test diese Date
  * Der Zähler n läuft bei jedem Wunsch hoch, auch bei derselben Kennung: so greift ein zweiter Klick, nachdem die Person
  * inzwischen ein anderes Element gewählt hat.
  */
-export type CanvasWunsch = { id: string | null; n: number };
+export type CanvasWunsch = { id: string | null; n: number; stelle?: string };
 
 export const canvasWunsch = createStore<CanvasWunsch>({ id: null, n: 0 });
 
-export function canvasWaehlen(id: string): void {
-  canvasWunsch.set((alt) => ({ id, n: alt.n + 1 }));
+/** Dieses Element zeigen: nach Kennung, oder nach stelle (Elemente ohne Kennung, etwa ein wieder geöffneter Reiter aus der Historie). */
+export function canvasWaehlen(id: string, stelle?: string): void {
+  canvasWunsch.set((alt) => ({ id, n: alt.n + 1, ...(stelle ? { stelle } : {}) }));
+}
+
+/**
+ * Schlüssel des Reiters, den das Canvas gerade zeigt (lib/canvasHistorie.ts, canvasSchluessel), null ohne Canvas. Das Werkzeug
+ * canvas_schliessen ohne Kennung schließt genau diesen (lib/wamo.ts); das Canvas (components/Canvas.tsx) hält ihn aktuell.
+ */
+export const canvasOffen = createStore<string | null>(null);
+
+let stellen = 0;
+
+/** Neue stelle für ein Element, das neu aufs Canvas kommt: bleibt über Überarbeitungen gleich und ist nie eine Kennung des Kerns. */
+export function neueStelle(): string {
+  stellen += 1;
+  return `stelle-${stellen}`;
 }
 
 /** Stelle des Elements mit dieser Kennung im Canvas, sonst -1. */
@@ -20,8 +35,9 @@ export function canvasIndex(items: readonly { id?: string | null }[], id: string
   return items.findIndex((it) => it.id === id);
 }
 
-/** Wie ein Element aus der Nachricht canvas ins Canvas kam: aktualisiert (gleiche Kennung), ersetzt (Überarbeitung) oder neu. */
-export type CanvasEinordnung<T> = { items: T[]; art: "aktualisiert" | "ersetzt" | "neu" };
+/** Wie ein Element aus der Nachricht canvas ins Canvas kam: aktualisiert (gleiche Kennung), ersetzt (Überarbeitung) oder neu.
+ *  verdraengt: was dabei vorne herausfiel (höchstens max Elemente); es kommt in die Historie, nicht verloren. */
+export type CanvasEinordnung<T> = { items: T[]; art: "aktualisiert" | "ersetzt" | "neu"; verdraengt: T[] };
 
 /**
  * Ein Element aus der Nachricht canvas einordnen (lib/wamo.ts). Gleiche Kennung: Aktualisierung an Ort und Stelle (Fortschritt eines
@@ -39,13 +55,15 @@ export function canvasEinordnen<T extends { id?: string | null; stelle?: string 
   if (gleich >= 0) {
     const neu = [...items];
     neu[gleich] = { ...item, stelle: items[gleich].stelle };
-    return { items: neu, art: "aktualisiert" };
+    return { items: neu, art: "aktualisiert", verdraengt: [] };
   }
   const alt = ersetzt ? canvasIndex(items, ersetzt) : -1;
   if (alt >= 0) {
     const neu = [...items];
     neu[alt] = { ...item, stelle: items[alt].stelle ?? items[alt].id ?? undefined };
-    return { items: neu, art: "ersetzt" };
+    return { items: neu, art: "ersetzt", verdraengt: [] };
   }
-  return { items: [...items, item].slice(-max), art: "neu" };
+  const alle = [...items, item];
+  const ueber = Math.max(0, alle.length - max);
+  return { items: alle.slice(ueber), art: "neu", verdraengt: alle.slice(0, ueber) };
 }

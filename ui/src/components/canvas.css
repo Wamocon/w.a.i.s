@@ -1,5 +1,6 @@
 /* =====================================================================
-   Canvas (components/Canvas.tsx): Tabelle, Code, Dokument, Mermaid-Diagramm, leere Fläche und Reiter. Regeln mit Präfix .canvas und .kinds.
+   Canvas (components/Canvas.tsx): Tabelle, Code, Dokument, Mermaid-Diagramm, Bild, leere Fläche, Reiter mit Schließen-Knopf, Historie und
+   Dateien (CanvasHistorie.tsx, CanvasDateien.tsx). Regeln mit Präfix .canvas und .kinds.
    Eingebunden über globals.css. Aufbau der Spalte (.kz-canvas) steht in kommando/kommando.css, Glas und Kante der Karte hier.
    Farben nur aus den Rollenvariablen, deshalb gelten sie in beiden Themen.
    ===================================================================== */
@@ -14,17 +15,52 @@
 .kinds strong { font: 600 11px/1.3 var(--hud); letter-spacing: 0.16em; text-transform: uppercase; }
 .kinds span { color: var(--ink-soft); font-size: 14px; }
 
+.canvas-bereich { width: 100%; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* Leiste über dem Canvas: Knopf Historie, Datei öffnen; die aufgeklappte Historie liegt darunter über die volle Breite */
+.canvas-leiste { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.canvas-historie { display: contents; }
+.canvas-historie-liste {
+  order: 1; flex: 1 1 100%; display: grid; gap: 12px; max-height: 360px; overflow-y: auto; padding: 12px 14px;
+  border: 1px solid var(--kante); border-radius: 8px; background: var(--glas-leicht);
+}
+.canvas-historie-liste[hidden] { display: none; }
+.canvas-historie-titel { margin: 0 0 6px; font: 600 11px/1.3 var(--hud); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-soft); }
+.canvas-historie-eintraege { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.canvas-historie-eintrag {
+  width: 100%; min-height: 40px; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px;
+  padding: 6px 10px; text-align: left; background: transparent; color: var(--ink); border: 1px solid var(--rule); border-radius: 6px;
+  font: inherit; cursor: pointer; transition-property: border-color; transition-duration: var(--dur-fast);
+}
+.canvas-historie-eintrag:hover:not([aria-disabled="true"]) { border-color: var(--core); }
+.canvas-historie-eintrag[aria-disabled="true"] { cursor: progress; opacity: 0.7; }
+.canvas-historie-name { font-weight: 600; overflow-wrap: anywhere; }
+.canvas-historie-meta { color: var(--ink-soft); font-size: 13px; }
+.canvas-historie-leer, .canvas-historie-stand { margin: 0; color: var(--ink-soft); font-size: 14px; }
+.canvas-historie-stand[data-art="fehler"] { color: var(--ink); }
+
 .canvas-board { width: 100%; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .canvas-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Reiter: Titel und Schließen-Knopf (×) in einem Rahmen; beide mindestens 32 mal 36 Pixel groß */
+.canvas-tab-gruppe {
+  display: inline-flex; align-items: stretch; max-width: 34ch; min-width: 0;
+  border: 1px solid var(--steuer-rand); border-radius: 6px; transition-property: border-color; transition-duration: var(--dur-fast);
+}
+.canvas-tab-gruppe[data-offen] { border-color: var(--core); background: var(--glas-stark); }
 .canvas-tab {
-  min-height: 36px; max-width: 30ch; padding: 0 12px;
+  min-height: 36px; min-width: 0; padding: 0 10px 0 12px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  background: transparent; color: var(--ink-soft); border: 1px solid var(--steuer-rand); border-radius: 6px;
+  background: transparent; color: var(--ink-soft); border: 0; border-radius: 6px 0 0 6px;
   font: 500 11px/1 var(--hud); letter-spacing: 0.08em; cursor: pointer;
-  transition-property: color, border-color; transition-duration: var(--dur-fast);
+  transition-property: color; transition-duration: var(--dur-fast);
 }
 .canvas-tab:hover { color: var(--ink); }
-.canvas-tab[aria-current="true"] { border-color: var(--core); color: var(--ink); background: var(--glas-stark); }
+.canvas-tab[aria-current="true"] { color: var(--ink); }
+.canvas-tab-zu {
+  flex: none; min-width: 32px; min-height: 36px; padding: 0 8px;
+  background: transparent; color: var(--ink-soft); border: 0; border-left: 1px solid var(--steuer-rand); border-radius: 0 6px 6px 0;
+  font: 600 16px/1 var(--body); cursor: pointer; transition-property: color, background-color; transition-duration: var(--dur-fast);
+}
+.canvas-tab-zu:hover { color: var(--ink); background: color-mix(in srgb, var(--core) 12%, transparent); }
 
 .canvas-item {
   min-width: 0; padding: 24px;
@@ -49,6 +85,13 @@
 .canvas-mail-hinweis { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); }
 .canvas-mail-knoepfe { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .canvas-mail-knoepfe button[aria-busy="true"] { cursor: progress; }
+/* Herunterladen im Browser (CanvasDateien.tsx): aufklappbar, darin dieselbe Zeile kleiner Knöpfe */
+.canvas-download { margin-top: 6px; }
+.canvas-download > summary {
+  width: max-content; min-height: 32px; display: inline-flex; align-items: center; cursor: pointer;
+  font: 600 11px/1 var(--hud); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink);
+}
+.canvas-download .canvas-export button[aria-disabled="true"], .canvas-leiste button[aria-disabled="true"] { cursor: progress; opacity: 0.55; }
 /* Hinweis nach dem Speichern (DateiHinweis.tsx): der volle Pfad darf umbrechen */
 .datei-hinweis .datei-pfad { overflow-wrap: anywhere; }
 
@@ -98,3 +141,13 @@
 .canvas-mermaid svg { max-width: 100%; height: auto; }
 .canvas-mermaid img { display: block; height: auto; }
 .canvas-mermaid-wartet { display: grid; gap: 8px; justify-items: start; }
+
+/* Bilder (CanvasDateien.tsx, BildAnsicht): eigene aus blob:, Bilder von außen nur als Verweis */
+.canvas-bild { margin: 0; display: grid; gap: 8px; justify-items: start; }
+.canvas-bild img { display: block; max-width: 100%; height: auto; max-height: 70vh; object-fit: contain; border-radius: 6px; background: var(--code-grund); }
+.canvas-bild figcaption { color: var(--ink-soft); font-size: 13px; overflow-wrap: anywhere; }
+.canvas-bild-verweis { display: grid; gap: 8px; justify-items: start; max-width: 72ch; }
+.canvas-bild-verweis p { margin: 0; }
+.canvas-bild-quelle strong { overflow-wrap: anywhere; }
+.canvas-bild-adresse { font-size: 13px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.canvas-bild-adresse code { font-family: var(--hud); }

@@ -7,7 +7,12 @@ websuche       Aktuelle Infos aus dem Web: Anthropic-Websuche in einem eigenen H
                Das Ergebnis ist in beiden Fällen als unvertrauenswürdige Daten gekennzeichnet.
 canvas_zeigen  Tabelle, Code, Dokument oder Mermaid-Diagramm auf das Canvas der UI legen. Liefert die Kennung des Elements
                (c1, c2, ...); mit ersetzt=<Kennung> ersetzt die Oberfläche ein Element dieser Sitzung an derselben Stelle
-               (canvas_sitzung.py), gespeichert wird jede Fassung als neue Zeile.
+               (canvas_sitzung.py), gespeichert wird jede Fassung als neue Zeile. Außerhalb des Labors auch typ bild: nur eine
+               öffentliche https-Adresse (bild_url), der Kern lädt sie nie (kein SSRF), gespeichert wird nichts; die Oberfläche zeigt
+               sie als Verweis, denn ihre CSP lässt keine fremden Bilder zu.
+canvas_schliessen  Reiter auf dem Canvas schließen (der offene, einer nach Kennung oder alle). Schließen blendet nur aus: Das Element
+               bleibt in der Datenbank und in der Historie der Oberfläche (canvas_historie.py). Nie im Labor (nicht in
+               labor.WERKZEUGE_BASIS).
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ import re
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import anthropic
 from loguru import logger
@@ -28,10 +34,11 @@ from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 from pipecat.services.llm_service import FunctionCallParams
 
 from auth_gate import Identity
-from canvas_sitzung import CanvasSitzung
+from canvas_sitzung import NACHRICHT_SCHLIESSEN, CanvasSitzung
 from labor_limit import GRUND_SUCHEN, SuchZaehler
 from llm_anbieter import Zugang, verbrauch_loggen
 from memory import BEREICHE, ZEITZONE, MemoryStore, initial_status
+from persona import clean_inline
 from suche import (
     HINWEIS as SUCHE_HINWEIS,
     VERTRAUEN as SUCHE_VERTRAUEN,
@@ -50,6 +57,22 @@ MONATE = [
 ]
 MEMORY_KIND = {"fakt": "fact", "vorliebe": "preference", "lektion": "lesson"}
 CANVAS_TYPE = {"tabelle": "table", "code": "code", "dokument": "document", "mermaid": "mermaid"}
+# Bilder (Wunsch vom 18.11.2026): nur als Adresse, nie in canvas_items (dort gibt es keine Art dafür), nie im Labor
+BILD = "bild"
+BILD_URL_MAX = 2000
+BILD_ALT_MAX = 300
+BILD_FEHLER = "bild braucht eine öffentliche https-Adresse (url) ohne Zugangsdaten"
+BILD_HINWEIS = ("Die Oberfläche zeigt Bilder von außen als Verweis mit Titel und Beschreibung, die Person öffnet sie mit einem Klick. "
+                "Sag nicht, dass das Bild schon zu sehen ist.")
+# Name mit Punkt, die letzte Stufe beginnt mit einem Buchstaben: so fallen auch Kurzformen von IP-Adressen weg (127.1, 0x7f.0.0.1, 10.1)
+_HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z][a-z0-9-]{0,61}[a-z0-9]|xn--[a-z0-9-]{1,59})")
+_HOST_INTERN = (".local", ".lan", ".intern", ".internal", ".home", ".localhost", ".box", ".arpa", ".test", ".invalid", ".corp",
+                ".localdomain")
+_JA = frozenset({"true", "ja", "1", "yes"})
+SCHLIESSEN_HINWEIS = ("Der Reiter ist zu. Die Person findet ihn in der Historie des Canvas wieder, gespeicherte Elemente auch in späteren "
+                      "Sitzungen.")
+SCHLIESSEN_UNBEKANNT = ("Kein Element dieser Sitzung mit dieser canvas_id. Ohne canvas_id schließt du den offenen Reiter, mit alle=true "
+                        "alle.")
 SEARCH_MODEL = os.getenv("SEARCH_MODEL") or "claude-haiku-5-5"
 SUCHE_TIMEOUT_SECS = 60.0  # Anthropic-Websuche ohne Stream: die Antwort kommt erst nach den Suchen
 SEARCH_CITY = os.getenv("WAMO_CITY") or "Eschborn"
@@ -195,19 +218,23 @@ FERNZUGRIFF_SCHEMA = FunctionSchema(
     required=[],
 )
 
-CANVAS_SCHEMA = FunctionSchema(
-    name="canvas_zeigen",
-    description=(
-        "Legt etwas Sichtbares auf das Canvas neben der Stimmlinie: Tabellen, Code (z. B. SQL), "
-        "Dokumente oder Diagramme. Immer nutzen, wenn etwas besser gelesen als gehört wird. "
-        "Danach nur kurz sagen, was du zeigst, nicht vorlesen. Das Ergebnis nennt die canvas_id. "
-        "Will die Person das Gezeigte ändern, ergänzen, kürzen oder umbauen, schick die ganze neue Fassung "
-        "mit ersetzt=canvas_id des offenen Reiters: Sie ersetzt ihn. Offen ist das zuletzt Gezeigte, außer ein "
-        "Systemhinweis nennt einen anderen Reiter. Einen neuen Reiter nur, wenn sie ausdrücklich etwas Neues "
-        "oder Zusätzliches will."
-    ),
-    properties={
-        "typ": {"type": "string", "enum": list(CANVAS_TYPE)},
+CANVAS_BESCHREIBUNG = (
+    "Legt etwas Sichtbares auf das Canvas neben der Stimmlinie: Tabellen, Code (z. B. SQL), "
+    "Dokumente oder Diagramme. Immer nutzen, wenn etwas besser gelesen als gehört wird. "
+    "Danach nur kurz sagen, was du zeigst, nicht vorlesen. Das Ergebnis nennt die canvas_id. "
+    "Will die Person das Gezeigte ändern, ergänzen, kürzen oder umbauen, schick die ganze neue Fassung "
+    "mit ersetzt=canvas_id des offenen Reiters: Sie ersetzt ihn. Offen ist das zuletzt Gezeigte, außer ein "
+    "Systemhinweis nennt einen anderen Reiter. Einen neuen Reiter nur, wenn sie ausdrücklich etwas Neues "
+    "oder Zusätzliches will."
+)
+CANVAS_BILD_SATZ = (" Ein Bild (typ=bild) nur mit url, einer öffentlichen https-Adresse aus einer Quelle wie der Websuche, nie "
+                    "erfunden; dazu eine kurze beschreibung.")
+
+
+def canvas_schema(bilder: bool) -> FunctionSchema:
+    """Schema von canvas_zeigen; bilder=False ist das bisherige Schema (Labor: keine neue Wahl), bilder=True kennt dazu typ bild."""
+    properties = {
+        "typ": {"type": "string", "enum": [*CANVAS_TYPE, BILD] if bilder else list(CANVAS_TYPE)},
         "titel": {"type": "string", "description": "Kurzer Titel"},
         "spalten": {
             "type": "array",
@@ -226,8 +253,33 @@ CANVAS_SCHEMA = FunctionSchema(
         },
         "sprache": {"type": "string", "description": "Nur bei typ=code, z. B. sql, python"},
         "ersetzt": {"type": "string", "description": "canvas_id (z. B. c2) des Elements, das du überarbeitest; leer = neuer Reiter"},
+    }
+    if bilder:
+        properties["url"] = {"type": "string", "description": "Nur bei typ=bild: öffentliche https-Adresse des Bildes"}
+        properties["beschreibung"] = {"type": "string", "description": "Nur bei typ=bild: was auf dem Bild zu sehen ist, ein Satz"}
+    return FunctionSchema(
+        name="canvas_zeigen",
+        description=CANVAS_BESCHREIBUNG + (CANVAS_BILD_SATZ if bilder else ""),
+        properties=properties,
+        required=["typ", "titel"],
+    )
+
+
+CANVAS_SCHEMA = canvas_schema(False)  # Labor: unverändert
+CANVAS_SCHEMA_BILD = canvas_schema(True)
+
+SCHLIESSEN_SCHEMA = FunctionSchema(
+    name="canvas_schliessen",
+    description=(
+        "Schließt Reiter auf dem Canvas, wenn die Person das will. Schließen blendet nur aus: Das Element bleibt in der Historie "
+        "des Canvas, dort öffnet die Person es wieder. Ohne Angabe schließt du den offenen Reiter, mit canvas_id einen bestimmten, "
+        "mit alle=true alle. Danach nur kurz bestätigen."
+    ),
+    properties={
+        "canvas_id": {"type": "string", "description": "canvas_id (z. B. c2) des Elements; leer = der offene Reiter"},
+        "alle": {"type": "boolean", "description": "true schließt alle Reiter"},
     },
-    required=["typ", "titel"],
+    required=[],
 )
 
 
@@ -365,10 +417,48 @@ class SuchZug:
         return self
 
 
-def canvas_item(args: dict) -> tuple[dict | None, str | None]:
-    """Prüft die Argumente von canvas_zeigen. Liefert (Item, None) oder (None, Fehler)."""
+def bild_url(roh: object) -> str | None:
+    """Adresse eines Bildes für typ bild oder None. Nur https, ohne Zugangsdaten, ohne Leer-, Steuer- und unsichtbare Zeichen, höchstens
+    BILD_URL_MAX Zeichen, und nur ein öffentlicher Name mit Punkt: keine IP-Adresse, kein localhost, keine Namen im Netz des Büros. Der Kern
+    lädt die Adresse nie; die Prüfung hält Verweise auf eigene Dienste und Zugangsdaten aus der Oberfläche heraus."""
+    if not isinstance(roh, str):
+        return None
+    url = roh.strip()
+    if not url or len(url) > BILD_URL_MAX or any(z.isspace() or not z.isprintable() for z in url):
+        return None
+    try:
+        teile = urlsplit(url)
+        _ = teile.port  # wirft ValueError bei einem kaputten Port
+    except ValueError:
+        return None
+    if teile.scheme != "https" or "@" in teile.netloc:
+        return None
+    host = (teile.hostname or "").lower()
+    if not _HOST_RE.fullmatch(host) or host.endswith(_HOST_INTERN):
+        return None
+    return url
+
+
+def _ja(wert: object) -> bool:
+    """Wahrheitswert eines Arguments; Hausmodelle schicken ihn oft als Text oder Zahl."""
+    return wert is True or (isinstance(wert, int) and not isinstance(wert, bool) and wert == 1) or (
+        isinstance(wert, str) and wert.strip().lower() in _JA)
+
+
+def _canvas_kennung(wert: object) -> object:
+    """Eine Zahl als Kennung (2) heißt c2; alles andere bleibt, wie es ist (CanvasSitzung.finden prüft selbst)."""
+    return f"c{wert}" if isinstance(wert, int) and not isinstance(wert, bool) and wert > 0 else wert
+
+
+def canvas_item(args: dict, *, bilder: bool = False) -> tuple[dict | None, str | None]:
+    """Prüft die Argumente von canvas_zeigen. Liefert (Item, None) oder (None, Fehler). bilder: typ bild ist erlaubt (nie im Labor)."""
     typ = str(args.get("typ", ""))
     titel = str(args.get("titel", "")).strip() or "Ohne Titel"
+    if typ == BILD and bilder:
+        url = bild_url(args.get("url"))
+        if url is None:
+            return None, BILD_FEHLER
+        return {"kind": BILD, "title": titel, "url": url, "alt": clean_inline(args.get("beschreibung") or "", BILD_ALT_MAX)}, None
     if typ not in CANVAS_TYPE:
         return None, f"unbekannter typ {typ!r}"
     if typ == "tabelle":
@@ -398,7 +488,7 @@ def jetzt_text(now: datetime | None = None) -> dict:
 def register_tools(
     llm, memory: MemoryStore, identity: Identity, turn: TurnState | None = None, *, zugang: Zugang, fernzugriff: bool = False,
     erlaubt: Collection[str] | None = None, suchen_max: int | None = None, suchen_zaehler: SuchZaehler | None = None,
-    canvas: CanvasSitzung | None = None,
+    canvas: CanvasSitzung | None = None, canvas_bilder: bool | None = None,
 ) -> ToolsSchema:
     """Registriert die Handler am LLM und liefert das Schema für den Kontext. zugang: Modellzugang des
     Profils (Websuche über Anthropic nur mit eigenem Schlüssel, sonst SearXNG). fernzugriff: nur für Admins bei
@@ -409,8 +499,11 @@ def register_tools(
     und der Schlüssel wird nicht berührt. suchen_zaehler: stattdessen ein fertiger, gemeinsamer Zähler (bot.py reicht den je Profil und Durchlauf,
     labor_limit.LIMITS, damit eine Neuverbindung die Suchen nicht zurücksetzt); er geht vor suchen_max. Beides None: unbegrenzt wie bisher.
     canvas: Liste der Canvas-Elemente dieser Sitzung (canvas_sitzung.py); bot.py reicht sie, damit auch die Meldung des offenen Reiters
-    und die Ergebnisse von Boss-Aufgaben dort landen. None: eine eigene Liste nur für diese Werkzeuge."""
+    und die Ergebnisse von Boss-Aufgaben dort landen. None: eine eigene Liste nur für diese Werkzeuge.
+    canvas_bilder: canvas_zeigen kennt typ bild (None: nur ohne Erlaubnisliste, also nie im Labor). canvas_schliessen gibt es nur, wo die
+    Erlaubnisliste es zulässt (im Labor nicht)."""
     turn = turn or TurnState()
+    bilder = erlaubt is None if canvas_bilder is None else canvas_bilder
     canvas = canvas if canvas is not None else CanvasSitzung()
     frei = (lambda name: True) if erlaubt is None else (lambda name: name in erlaubt)
     suchen = suchen_zaehler if suchen_zaehler is not None else (None if suchen_max is None else SuchZaehler(suchen_max))
@@ -500,14 +593,17 @@ def register_tools(
         await params.result_callback(ergebnis)
 
     async def canvas_zeigen(params: FunctionCallParams):
-        item, fehler = canvas_item(params.arguments)
+        item, fehler = canvas_item(params.arguments, bilder=bilder)
         if fehler:
             await params.result_callback({"angezeigt": False, "fehler": fehler})
             return
         gewuenscht = params.arguments.get("ersetzt")
         # Jede Fassung ist eine neue Zeile (die vorige bleibt in der Datenbank); ohne Datenbank eine lokale Kennung, damit die Oberfläche
-        # das Element später trotzdem ersetzen kann
-        item["id"] = await memory.save_canvas(CANVAS_TYPE[item["kind"]], item["title"], item) or canvas.lokale_id()
+        # das Element später trotzdem ersetzen kann. Ein Bild ist nur eine Adresse und wird nie gespeichert.
+        if item["kind"] == BILD:
+            item["id"] = canvas.lokale_id()
+        else:
+            item["id"] = await memory.save_canvas(CANVAS_TYPE[item["kind"]], item["title"], item) or canvas.lokale_id()
         # erst nach dem Speichern und ohne await bis zum Ersetzen: eine gleichzeitige Überarbeitung ersetzt die jeweils neueste Fassung
         alt = canvas.finden(gewuenscht)  # nur Elemente dieser Sitzung, nie ein fremdes
         nachricht = {"type": "canvas", "item": item}
@@ -520,8 +616,33 @@ def register_tools(
             ergebnis["canvas_id"] = canvas.neu(item["id"], item["title"])
             if gewuenscht not in (None, ""):
                 ergebnis["hinweis"] = "Kein Element dieser Sitzung mit dieser canvas_id: als neuer Reiter gezeigt."
+        if item["kind"] == BILD:
+            ergebnis["hinweis"] = " ".join(filter(None, (ergebnis.get("hinweis"), BILD_HINWEIS)))
         await params.llm.push_frame(RTVIServerMessageFrame(data=nachricht))
         logger.info("canvas: {}{}", item["kind"], " (überarbeitet)" if alt is not None else "")
+        await params.result_callback(ergebnis)
+
+    async def canvas_schliessen(params: FunctionCallParams):
+        # Nur die Oberfläche schließt (sie kennt den offenen Reiter); Elemente nach Kennung nur aus dieser Sitzung, nie ein fremdes
+        args = params.arguments if isinstance(params.arguments, dict) else {}
+        wunsch = _canvas_kennung(args.get("canvas_id"))
+        ohne_kennung = wunsch is None or (isinstance(wunsch, str) and not wunsch.strip())
+        if ohne_kennung:  # eine genannte Kennung geht vor alle
+            ziel = "alle" if _ja(args.get("alle")) else "offen"
+            canvas.geschlossen(None)
+            nachricht: dict = {"type": NACHRICHT_SCHLIESSEN, "ziel": ziel}
+            ergebnis: dict = {"geschlossen": True, "ziel": ziel, "hinweis": SCHLIESSEN_HINWEIS}
+        else:
+            element = canvas.finden(wunsch)
+            if element is None:
+                await params.result_callback({"geschlossen": False, "fehler": SCHLIESSEN_UNBEKANNT})
+                return
+            canvas.geschlossen(element)
+            # auch frühere Kennungen der Oberfläche: eine Überarbeitung kann noch unterwegs sein
+            nachricht = {"type": NACHRICHT_SCHLIESSEN, "ziel": "ids", "ids": [element.ui_id, *reversed(element.frueher)]}
+            ergebnis = {"geschlossen": True, "canvas_id": element.kennung, "hinweis": SCHLIESSEN_HINWEIS}
+        await params.llm.push_frame(RTVIServerMessageFrame(data=nachricht))
+        logger.info("canvas: geschlossen ({})", nachricht["ziel"])
         await params.result_callback(ergebnis)
 
     async def fernzugriff_oeffnen(params: FunctionCallParams):
@@ -543,7 +664,10 @@ def register_tools(
         standard.append(WEBSUCHE_SCHEMA)
     if frei("canvas_zeigen"):
         llm.register_function("canvas_zeigen", canvas_zeigen)
-        standard.append(CANVAS_SCHEMA)
+        standard.append(CANVAS_SCHEMA_BILD if bilder else CANVAS_SCHEMA)
+    if frei("canvas_schliessen"):
+        llm.register_function("canvas_schliessen", canvas_schliessen)
+        standard.append(SCHLIESSEN_SCHEMA)
     if fernzugriff and identity.is_admin and frei("fernzugriff_oeffnen"):  # zusätzlich zum Schalter des Aufrufers: nie für Mitglieder
         llm.register_function("fernzugriff_oeffnen", fernzugriff_oeffnen)
         standard.append(FERNZUGRIFF_SCHEMA)

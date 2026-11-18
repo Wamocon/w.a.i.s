@@ -349,6 +349,9 @@ export type ServerMessage =
   | ({ type: "bild" } & LiveBildFrame)
   /** ersetzt: Kennung des Elements, das dieses überarbeitet (voice-core/canvas_sitzung.py); die Oberfläche setzt es an dieselbe Stelle */
   | { type: "canvas"; item: CanvasItem; ersetzt?: string }
+  /** Reiter schließen (voice-core/tools.py, canvas_schliessen): der offene, alle oder die mit diesen Kennungen; sie bleiben in der Historie */
+  | { type: "canvas_schliessen"; ziel: "offen" | "alle" }
+  | { type: "canvas_schliessen"; ziel: "ids"; ids: string[] }
   | ({ type: "markierung" } & Markierung)
   | ({ type: "aktivitaet" } & Pick<Activity, "id" | "name" | "detail" | "status">)
   | { type: "vorgang"; vorgang: Vorgang }
@@ -434,7 +437,7 @@ function schnitt(t: string, max: number): string {
 
 const optStr = (v: unknown, max = 80) => (isStr(v) && v.trim() ? schnitt(v.trim(), max) : undefined);
 
-const CANVAS_KINDS = ["tabelle", "code", "dokument", "mermaid"] as const;
+const CANVAS_KINDS = ["tabelle", "code", "dokument", "mermaid", "bild"] as const;
 
 // Grenzen wie host/windows_control.py (Windows rechnet Koordinaten mit 16 Bit), voice-core/activity.py und desktop/lichtrahmen.js
 export const MARK_POS_MIN = -32768;
@@ -489,6 +492,28 @@ function officeFormate(v: unknown): OfficeFormat[] | undefined {
 export const CANVAS_MAX_ZEILEN = 500;
 export const CANVAS_MAX_SPALTEN = 30;
 export const CANVAS_MAX_TEXT = 200_000;
+export const BILD_URL_MAX = 2000;
+
+/**
+ * Adresse eines Bildes von außen (canvas_zeigen mit typ bild, voice-core/tools.bild_url): nur https, ohne Zugangsdaten, ohne Leer- und
+ * Steuerzeichen, höchstens BILD_URL_MAX Zeichen, nur ein öffentlicher Name (letzte Stufe beginnt mit einem Buchstaben: keine IP-Adresse,
+ * auch keine Kurzform wie 127.1, die URL schon zu 127.0.0.1 normalisiert; keine Namen im Netz des Büros); sonst null. Die Oberfläche lädt
+ * sie nie selbst (die CSP erlaubt keine fremden Bilder), sie zeigt nur einen Verweis, den die Person bewusst öffnet.
+ */
+export function bildUrl(roh: unknown): string | null {
+  if (!isStr(roh) || !roh || roh.length > BILD_URL_MAX || /[\s\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/.test(roh)) return null;
+  try {
+    const u = new URL(roh);
+    if (u.protocol !== "https:" || u.username || u.password) return null;
+    const host = u.hostname.toLowerCase();
+    const letzte = host.split(".").pop() ?? "";
+    if (!host.includes(".") || !/^(?:[a-z][a-z0-9-]*[a-z0-9]|xn--[a-z0-9-]+)$/.test(letzte) || BILD_HOST_INTERN.test(host)) return null;
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+const BILD_HOST_INTERN = /\.(?:local|lan|intern|internal|home|localhost|box|arpa|test|invalid|corp|localdomain)$/;
 
 // Steuerzeichen (außer Zeilenumbruch und Tab) und Bidi-Steuerzeichen, die Text optisch umdrehen können
 const STEUER = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
@@ -607,6 +632,11 @@ function canvasGrund(v: unknown): CanvasItem | null {
     case "mermaid":
       // Diagrammtext nicht kürzen (sonst ungültig): zu groß heißt ablehnen
       return isStr(v.text) && v.text.length <= CANVAS_MAX_TEXT ? { id, kind: v.kind, title, text: v.text.replace(STEUER, "") } : null;
+    case "bild": {
+      // vom Kern nur eine Adresse; eigene Bilddaten (datei) legt nur die Oberfläche selbst an (lib/canvasDatei.ts), nie eine Nachricht
+      const url = bildUrl(v.url);
+      return url ? { id, kind: "bild", title, url, alt: isStr(v.alt) ? sauber(v.alt, 300, false) : undefined } : null;
+    }
   }
 }
 
@@ -680,6 +710,12 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
       const item = canvasItem(m.item);
       if (!item) return null;
       return isStr(m.ersetzt) && m.ersetzt && m.ersetzt.length <= 100 ? { type: "canvas", item, ersetzt: m.ersetzt } : { type: "canvas", item };
+    }
+    case "canvas_schliessen": {
+      if (m.ziel === "offen" || m.ziel === "alle") return { type: "canvas_schliessen", ziel: m.ziel };
+      if (m.ziel !== "ids" || !Array.isArray(m.ids)) return null;
+      const ids = m.ids.filter((id): id is string => isStr(id) && id.length > 0 && id.length <= 100).slice(0, 10);
+      return ids.length ? { type: "canvas_schliessen", ziel: "ids", ids } : null;
     }
     case "bild": {
       const frame = liveBildFrame(m);

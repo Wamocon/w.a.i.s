@@ -47,11 +47,12 @@ function markdownZeile(zeile: string): string {
 }
 
 /** Canvas-Inhalt als Klartext (wie voice-core/teams_werkzeuge.klartext): Dokumente ohne Markdown-Zeichen, Tabellen als Zeilen mit " | ",
- * Code und Diagramme wie sie sind. Nur ein Vorschlag fürs Formular, die Person kann ihn ändern. */
+ * Code und Diagramme wie sie sind, Bilder als Titel, Beschreibung und Adresse. Nur ein Vorschlag fürs Formular, die Person kann ihn ändern. */
 export function klartext(item: CanvasItem): string {
   if (item.kind === "tabelle") {
     return [item.title, ...[item.columns, ...item.rows].map((z) => z.join(" | "))].join("\n").trim();
   }
+  if (item.kind === "bild") return [item.title, item.alt, item.url].filter(Boolean).join("\n");
   if (item.kind !== "dokument") return item.text;
   return item.text
     .split("\n")

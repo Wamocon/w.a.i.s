@@ -4,7 +4,6 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { useRahmen } from "@/components/kommando/rahmenKontext";
 import { TeilenKnopf } from "@/components/Teilen";
 import {
-  alsCanvasAntwort,
   alsDateien,
   alsEreignisse,
   alsTeilungen,
@@ -20,9 +19,9 @@ import {
   type Recht,
   type Teilung,
 } from "@/lib/kernApi";
+import { aufsCanvas, canvasLaden } from "@/lib/canvasOeffnen";
 import { einstellungenSchliessen } from "@/lib/einstellungenHash";
-import { parseServerMessage } from "@/lib/nachrichten";
-import { applyServerMessage, zeigeToast } from "@/lib/wamo";
+import { zeigeToast } from "@/lib/wamo";
 
 /**
  * "Geteilte Arbeit": was andere mit mir geteilt haben (öffnen, herunterladen, bearbeiten, zurückgeben), was ich geteilt
@@ -56,20 +55,6 @@ function zeit(iso: string | null): string {
 
 function fehlerText(e: unknown, standard: string): string {
   return e instanceof KernFehler ? e.message : standard;
-}
-
-/** Aufs Canvas legen, geprüft wie jede Nachricht des Kerns. */
-function aufsCanvas(antwort: CanvasAntwort) {
-  const geteilt = antwort.recht === "besitzer" ? undefined : { von: antwort.besitzer, recht: antwort.recht };
-  const msg = parseServerMessage({ type: "canvas", item: { ...antwort.item, geteilt } });
-  if (msg) applyServerMessage(msg);
-  else zeigeToast("Dieses Dokument lässt sich nicht anzeigen");
-}
-
-async function canvasLaden(canvasId: string): Promise<CanvasAntwort> {
-  const antwort = alsCanvasAntwort(await kernJson(`/geteilt/canvas/${encodeURIComponent(canvasId)}`));
-  if (!antwort) throw new KernFehler(0, "Unerwartete Antwort des Kerns");
-  return antwort;
 }
 
 /** Zweistufiger Knopf für endgültige Schritte (widerrufen, löschen, zurückgeben); die Rückfrage wird angesagt. */
