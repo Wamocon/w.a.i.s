@@ -4,6 +4,9 @@
 > Kennzeichnung wie in `docs/folgepaket-1.md`: **B** belegt (Datei:Zeile im Arbeitsbaum der Basis), **A** abgeleitet, **Annahme** nicht belegt (Prüfstelle in 2.3).
 > Pfade relativ zur Repo-Wurzel, Bezeichner in ASCII. Schritte, die nur der Admin ausführen kann, heißen **Admin, manuell**. Die Pakete heißen PZ-0 bis PZ-16 (Abschnitt 4).
 >
+> **Umgesetzt und live seit 18.11.2026** (PR #215, #216, #218, #219, #221, #222, #223); der erste echte Auftrag lief bis zum Pull Request.
+> Betrieb, Einschalten, Befunde und Rückweg: `infra/sokrates2/README.md` Abschnitt 18.3.
+>
 > **Entschieden am 18.11.2026: Plan C.** Der Abschnitt „Plan C“ direkt hierunter ist die verbindliche Bauvorlage bis zum Freeze (Pakete S, K, D-a, D-b, R). Alles ab
 > „Kurzfassung der Ausbaustufe“ beschreibt Plan A und B mit Zugangsdienst, Git-Tor und Geräteschlüssel; das ist die Ausbaustufe für nach dem Labortag am 05.12.
 

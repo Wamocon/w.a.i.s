@@ -1547,6 +1547,38 @@ CPU und Platte ohne gemeinsame Obergrenze (je Einheit 8 GB, 400 % CPU; Vorschlag
 startet je Sitzung einen Auftrag; drei gleichzeitige Aufträge einer Person brauchen drei Sitzungen. (5) Ein Start, dessen Ende nie gebucht wurde,
 reserviert seine Laufzeit bis zu einem Tag (fail closed, ohne Werkzeug zum Bereinigen).
 
+### 18.3 Persönlicher GitHub-Weg (Plan C, Dispatcher 10, live seit 18.11.2026)
+
+Planpapier `docs/persoenliche-zugaenge.md` (Plan C). Jede Person hinterlegt in den Einstellungen unter „GitHub-Zugang“ ein eigenes Token (fein-granular
+`github_pat_` oder klassisch `ghp_` mit einem Ablauf von höchstens 366 Tagen). Welche Scopes über die strenge Liste hinaus erlaubt sind, stellt ein Admin je
+Person unter „Neue Mitglieder“ im Block „Rechte der GitHub-Zugänge“ ein. Ist ein Token hinterlegt, nimmt im Büro jeder Auftrag mit GitHub-Stufe diesen Weg
+statt der GitHub-App.
+
+**Ablauf.** (1) Start: Der Kern schickt das Token nur über stdin. Der Dispatcher prüft Konto, Scopes und Repo bei GitHub und klont außerhalb der Sandbox ein
+bereinigtes `basis.git` (nie das eigene Repo, höchstens `MAX_KLON_MB`), danach überschreibt er das Token im Speicher. (2) Sandbox-Schritt `klon` ohne Netz und
+ohne Token: Arbeitskopie im Projektordner auf dem Zweig `wamo/<job>`. (3) Der Lauf arbeitet ohne Token; der Wächter sperrt push, send-pack, gh und das Ändern
+von Remotes. (4) Am Laufende `ausgabe` (Bundle der Commits) und `pruefung` (Auszug), dann die Regeln (Pfade, Geheimnisse, Größen) und ein Kandidat in `aus.git`;
+die Karte zeigt die Änderung mit „Einreichen“ oder „Verwerfen“. (5) Erst der Klick auf „Einreichen“ schickt das Token erneut, der Dispatcher pusht genau
+`refs/heads/wamo/<job>` und legt den Pull Request an. Gemergt wird nie durch W.A.I.S.
+
+**Einschalten (so am 18.11.2026 gelaufen).** (1) Bei Ruhe `wamo-job-einrichten.sh` (Dispatcher 10, Helfer `wamo-git-zugang`, Schrittskripte, Timer), danach
+mit einer neuen Verbindung `sudo touch /run/wamo-sshd-bestaetigt`. (2) `sudo -u wamo -H /opt/wamo/bin/wamo-job-rauchtest --persoenlich`: Schritte ohne Netz,
+enge Umgebung, Helfer, ping und ein Durchlauf ohne Netz vom Schritt `klon` bis zum Kandidaten, zusammen 50 Prüfungen. (3) `wamo-job-kern-einrichten.sh kanal
+--persoenlich an` (Grenzen `MAX_EINREICHEN_TAG` 10, `MAX_EINREICHEN_TAG_PROFIL` 5, `MAX_KLON_MB` 2048). (4) Kern-Release über die Slots, dann `schalter an
+<release> --profil <user_id>[,<user_id>] --kosten-auftrag 3 --kosten-tag 10 --mitglieder an --haus an --github an` (jeder Aufruf ohne `--github an` schreibt
+aus), danach Bewährung und Ausleiten wie immer. (5) `/opt/wamo-core/bin/wamo-job-kern-rauchtest --produktiv` (35 Proben). Einen neuen Stand dieses Rauchtests
+von Hand installieren (root 0755, ohne CR), wenn `schluessel` nicht laufen soll: `schluessel` legt ein neues Schlüsselpaar an und schließt den Kanal.
+
+**Befunde vom ersten echten Lauf (18.11.2026).** Der Schritt `klon` verlangte `zustand/approvals.json`, die der Dispatcher erst nach dem Klonen anlegt (Exit 70,
+in der Oberfläche als „Wächter-Selbsttest fehlgeschlagen“). Behoben in `wamo-job.sh`; seitdem spielt der Rauchtest den echten Ablauf durch, statt den Auftrag
+mit `lauf_vorbereiten` anzulegen. Das Modell wählte für eine neue Datei die Art `dokumentation` (nur lesend, im Kanal nicht erlaubt); seitdem prüft der Kern
+die Art vor der Karte gegen `kernkanal.arten` aus dem ping. Danach lief der erste Auftrag in rund einer Minute bis zum Pull Request.
+
+**Rückweg.** Sofort für neue Aufträge: `kanal --persoenlich aus` (Starts mit `github=persoenlich` enden mit `persoenlich_aus`, der App-Weg bleibt). Im Kern:
+`schalter an <release> ...` ohne `--github an`. Kopien privater Repos löscht der Timer `wamo-job-aufraeumen.timer` täglich (nach einem beziehungsweise sieben
+Tagen), sofort `sudo -u wamo -H /opt/wamo/bin/wamo-job-dispatch aufraeumen alle`. Zurück auf Dispatcher 9: erst `kanal --persoenlich entfernen` (Dispatcher 9
+schlösse den Kanal bei den neuen Schlüsseln), dann `wamo-job-rueckweg.sh`.
+
 ## 19. Labor-Dienst (Test-Jira des Testlabors, Betrieb, vorbereitet am 12.11.2026, noch nicht ausgerollt)
 
 Der Dienst selbst liegt im Repo unter `labor-dienst/` (Vertrag `docs/labor-dienst-vertrag.md`, Umgebung `WAMO_LABOR_DIENST_*`, Weboberflächen `/board`, `/betreuer` und
