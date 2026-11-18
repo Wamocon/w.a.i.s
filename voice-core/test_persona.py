@@ -110,8 +110,10 @@ class PersonaPaketATests(unittest.TestCase):
         # (Abschnitte, Reihenfolge, Schalter). Neu berechnet am 16.11.2026: Die Marker-Regel im Gesprächsteil nennt die unsichere
         # Antwort und den eigenen Denkausdruck (SatzendeMarkerTests). Neu berechnet am 18.11.2026: eine Regel zu fehler_erklaeren
         # (fehlerbuch.py) nach "Jede Aktion genau einmal"; ohne diese Zeile ergeben beide Prompts die vorigen Prüfsummen 7eda643b... und 7d4acf6a....
+        # Ebenfalls am 18.11.2026: im Teil Entwicklungsaufträge eine Regel zu entwicklung_speichern und entwicklung_gespeichert
+        # (auftrag_entwuerfe.py); nur der volle Prompt ändert sich, ohne diese Regel ergibt er die vorige Prüfsumme f14e9851....
         self.assertEqual(hashlib.sha256(voll.encode()).hexdigest(),
-                         "f14e98515d3096c9b5108d26614ebdf6aa400637bf04925dffe2ee8976862ae4")
+                         "1b67e03df279fc0d0f4e60276e8b29258b7f8b2022ba4a90348854a118af8585")
         self.assertEqual(hashlib.sha256(kurz.encode()).hexdigest(),
                          "cd7401b8261d52851934cc360b4f173273a8532090666e29e1fb374e408c6de0")
 

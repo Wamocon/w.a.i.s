@@ -10,6 +10,7 @@ import { Einstellungen } from "@/components/einstellungen/Einstellungen";
 import { EINSTELLUNGEN_KNOPF_ID } from "@/components/einstellungen/EinstellungenLink";
 import { Auftraege, Freigaben } from "@/components/Freigaben";
 import { GemerktHinweis } from "@/components/GemerktHinweis";
+import { GespeicherteAuftraege } from "@/components/GespeicherteAuftraege";
 import { JiraErgebnisHinweis } from "@/components/JiraStory";
 import { Bedienung } from "@/components/kommando/Bedienung";
 import { BueroKarte } from "@/components/kommando/BueroKarte";
@@ -215,8 +216,9 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
         <>
           <Freigaben onDecide={aktionen.decide} />
           <JiraErgebnisHinweis />
-          <Auftraege onDecide={aktionen.entscheideAuftrag} />
+          <Auftraege onDecide={aktionen.entscheideAuftrag} onSpeichern={ansicht.labor ? undefined : aktionen.entwuerfe?.speichern} />
           <AuftraegeLeer />
+          <GespeicherteAuftraege aktionen={ansicht.labor ? undefined : aktionen.entwuerfe} />
         </>
       }
       vorgaenge={

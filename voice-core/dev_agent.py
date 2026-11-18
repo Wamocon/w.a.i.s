@@ -85,6 +85,7 @@ from pipecat.services.llm_service import FunctionCallParams
 
 import abnahme
 import abnahme_remote
+import auftrag_entwuerfe as ae
 import entwicklung_betrieb
 import kontingent as kt
 import pc_host
@@ -515,12 +516,14 @@ class DevAgent:
     dispatcher_ping: der Ping samt Cache (abnahme_remote.DispatcherPing); Standard ist einer je Prozess.
     zulassung: Nachweis für das Büro (entwicklung_betrieb.BueroZulassung, nur bot.build_session erzeugt ihn aus der geprüften
     Identität). Im Büro (pc_host.buero) wirft der Konstruktor ohne gültige Zulassung, _vorbereiten, _auftrag_start und _freigabe
-    prüfen sie erneut. Außerhalb des Büros hat der Wert keine Wirkung."""
+    prüfen sie erneut. Außerhalb des Büros hat der Wert keine Wirkung.
+    entwuerfe: Speicher der für später gespeicherten Aufträge (auftrag_entwuerfe.py); Standard aus dem Gedächtnis der Sitzung, ohne
+    Datenbank keiner (dann fehlen Knopf, Liste und die beiden Werkzeuge)."""
 
     def __init__(self, memory, auftraggeber: str, ort: str | None = None, vorgaenge: Vorgaenge | None = None,
                  beurteiler: abnahme.Beurteiler | None = None, befehl_ausfuehrer: abnahme.Ausfuehrer | None = None,
                  dispatcher_ping: abnahme_remote.DispatcherPing | None = None, zulassung: BueroZulassung | None = None,
-                 haus: bool = False):
+                 haus: bool = False, entwuerfe: ae.EntwurfSpeicher | None = None):
         # Hausmodelle für diese Sitzung (bot.py entscheidet einmal: Quelle haus); nur ein echtes True, nie ein Wert
         self._haus = haus is True
         if pc_host.buero():
@@ -563,6 +566,9 @@ class DevAgent:
         self._eigener_zugang = False  # der laufende Lauf nutzt den Zugang des Profils (nur dann gilt sein Kontingent)
         self._startet = False  # ein Start (Prüfungen, Buchung in actions) läuft gerade: kein zweiter Start dazwischen
         self._kanal_abweisung: tuple[str, float] | None = None  # letzter dauerhafter Grund des Kanals und Zeit (Wiederholsperre)
+        self._entwuerfe = entwuerfe if entwuerfe is not None else ae.fuer(memory)  # für später gespeicherte Aufträge, je Profil
+        self._speichert: set[str] = set()  # Karten, die gerade gespeichert werden (gesperrt für Start und zweites Speichern)
+        self._geladen: dict[str, str] = {}  # Entwurf -> Karte dieser Sitzung (Laden legt keine zweite offene Karte an)
 
     def _kanal_sperre_satz(self) -> str | None:
         """Büro: Hat der Kanal vor weniger als KANAL_SPERRE_SECS einen Auftrag aus einem dauerhaften Grund abgewiesen (geschlossen,
@@ -687,6 +693,8 @@ class DevAgent:
                 properties={},
                 required=[],
             ),
+            # Für später speichern und auflisten (auftrag_entwuerfe.py), nur mit Speicher; Laden geht nur in der Oberfläche
+            *((ae.SCHEMA_SPEICHERN, ae.SCHEMA_GESPEICHERT) if self._entwuerfe is not None else ()),
         ]
 
     def _befehle_moeglich(self) -> bool:
@@ -751,6 +759,9 @@ class DevAgent:
     def register(self, llm) -> None:
         llm.register_function("entwicklung_vorbereiten", self._vorbereiten)
         llm.register_function("entwicklung_status", self._status)
+        if self._entwuerfe is not None:  # beide laufen wie jedes Werkzeug durch das Stimm-Gate (stimme_gate.werkzeuge_absichern)
+            llm.register_function(ae.SCHEMA_SPEICHERN.name, self._werkzeug_speichern)
+            llm.register_function(ae.SCHEMA_GESPEICHERT.name, self._werkzeug_gespeichert)
 
     async def _send(self, data: dict) -> None:
         if self._task:
@@ -769,53 +780,68 @@ class DevAgent:
         return False
 
     async def _vorbereiten(self, params: FunctionCallParams):
-        auftrag = auftrag_bereinigen(params.arguments.get("auftrag", ""))  # einmal, Karte und Start nutzen genau diesen Text
-        art = str(params.arguments.get("art", "")).strip()
+        job = await self._karte_anlegen(params.arguments)
+        if isinstance(job, dict):  # abgewiesen: das Ergebnis für das Modell (ok false mit dem Satz in fehler)
+            await params.result_callback(job)
+            return
+        ergebnis = {
+            "ok": True, "auftrag_id": job.id, "art": KARTEN[job.art].titel,
+            "hinweis": (f"Der Auftrag liegt als Karte in der Oberfläche. Sag kurz Auftrag und Art und dass "
+                        f"{self._auftraggeber} ihn dort per Klick startet oder verwirft."),
+        }
+        if job.repo:
+            ergebnis["repo"] = job.repo
+        if job.kriterien:
+            ergebnis["abnahme"] = [k.text for k in job.kriterien]
+            ergebnis["max_runden"] = job.max_runden
+            ergebnis["hinweis"] += (f" Nenne in einem Satz das Ziel ({len(job.kriterien)} Kriterien, höchstens "
+                                    f"{job.max_runden} Runden), ohne zusätzliche Rückfrage.")
+        if self._ort == "lokal":
+            ergebnis["neu"] = not Path(job.projekt).exists()
+        await params.result_callback(ergebnis)
+
+    async def _karte_anlegen(self, args: dict) -> Job | dict:
+        """Prüft die Angaben des Werkzeugs entwicklung_vorbereiten und legt die Karte an (RTVI auftrag, Vorgang). Liefert den Job oder
+        das Ergebnis der Abweisung ({"ok": False, "fehler": Satz[, "hinweis"]}). Auch ein gespeicherter Auftrag kommt beim Laden hier
+        durch (auftrag_entwuerfe.py): dieselben Prüfungen, gestartet wird nur per Klick."""
+        auftrag = auftrag_bereinigen(args.get("auftrag", ""))  # einmal, Karte und Start nutzen genau diesen Text
+        art = str(args.get("art", "")).strip()
         if not self._buero_darf("vorbereiten"):
-            await params.result_callback({"ok": False, "fehler": entwicklung_betrieb.SATZ_KEINE_ZULASSUNG})
-            return
+            return {"ok": False, "fehler": entwicklung_betrieb.SATZ_KEINE_ZULASSUNG}
         if (sperre := self._kanal_sperre_satz()) is not None:  # kein neuer Auftrag, der gleich wieder abgewiesen würde
-            await params.result_callback({
-                "ok": False, "fehler": sperre,
-                "hinweis": (f"Der Server hat das vor Kurzem schon abgewiesen. Sag {self._auftraggeber} den Grund in einem Satz und "
-                            "stelle keinen neuen Auftrag. Ein neuer Versuch geht frühestens in zwei Minuten.")})
-            return
+            return {"ok": False, "fehler": sperre,
+                    "hinweis": (f"Der Server hat das vor Kurzem schon abgewiesen. Sag {self._auftraggeber} den Grund in einem Satz und "
+                                "stelle keinen neuen Auftrag. Ein neuer Versuch geht frühestens in zwei Minuten.")}
         im_buero = pc_host.buero()
         try:  # im Büro entsteht der Projektname erst nach dem Repo (Namensraum kern-, entwicklung_betrieb.buero_projekt)
-            projekt = None if im_buero else validate_project(params.arguments.get("projekt"), self._ort)
+            projekt = None if im_buero else validate_project(args.get("projekt"), self._ort)
         except ValueError as e:
-            await params.result_callback({"ok": False, "fehler": str(e)})
-            return
+            return {"ok": False, "fehler": str(e)}
         if not auftrag:
-            await params.result_callback({"ok": False, "fehler": "Auftrag ist leer"})
-            return
+            return {"ok": False, "fehler": "Auftrag ist leer"}
         if art not in KARTEN:
-            await params.result_callback({"ok": False, "fehler": f"Unbekannte Auftragsart, erlaubt: {', '.join(AUFTRAGSARTEN)}"})
-            return
-        repo_arg = params.arguments.get("repo")
+            return {"ok": False, "fehler": f"Unbekannte Auftragsart, erlaubt: {', '.join(AUFTRAGSARTEN)}"}
+        repo_arg = args.get("repo")
         try:  # ausdrücklich genannt (Werkzeugaufruf) oder eindeutig als GitHub-Adresse im Auftrag
             repo = repo_pruefen(repo_arg) if isinstance(repo_arg, str) and repo_arg.strip() else repo_aus_auftrag(auftrag)
             if im_buero:  # Repo-Pflicht für Arten mit GitHub-Stufe, Projekt kern-<Name aus dem Repo>
-                projekt = validate_project(entwicklung_betrieb.buero_projekt(art, repo, params.arguments.get("projekt"), self._zulassung),
-                                           self._ort)
+                projekt = validate_project(entwicklung_betrieb.buero_projekt(art, repo, args.get("projekt"), self._zulassung), self._ort)
         except ValueError as e:
-            await params.result_callback({"ok": False, "fehler": str(e)})
-            return
-        await self._ping_vor_vorbereiten(params.arguments.get("abnahme"))  # nur mit befehl: auf Sokrates-2, mit Frist
+            return {"ok": False, "fehler": str(e)}
+        await self._ping_vor_vorbereiten(args.get("abnahme"))  # nur mit befehl: auf Sokrates-2, mit Frist
         try:
-            kriterien = abnahme.parse_abnahme(params.arguments.get("abnahme"), befehle_erlaubt=self._befehle_moeglich(),
+            kriterien = abnahme.parse_abnahme(args.get("abnahme"), befehle_erlaubt=self._befehle_moeglich(),
                                               befehle_hinweis=self._befehle_hinweis())
             if self._beurteiler is None and any(k.art == "aussage" for k in kriterien):
                 raise ValueError("Aussagen lassen sich in dieser Sitzung nicht beurteilen, formuliere nur Befehle oder lass "
                                  "das Ziel weg")
         except ValueError as e:
-            await params.result_callback({"ok": False, "fehler": str(e)})
-            return
+            return {"ok": False, "fehler": str(e)}
         job = Job(id=uuid.uuid4().hex[:16], auftrag=auftrag, projekt=projekt, art=art, repo=repo)
         if kriterien:  # ohne abnahme bleibt es bei einer Runde ohne Prüfung (max_runden und zeitlimit_min gelten dann nicht)
             job.kriterien = kriterien
-            job.max_runden = _ganzzahl(params.arguments.get("max_runden"), RUNDEN_STANDARD, 1, RUNDEN_MAX)
-            job.zeitlimit_s = 60 * _ganzzahl(params.arguments.get("zeitlimit_min"), ZEITLIMIT_STANDARD_MIN, 1, ZEITLIMIT_MAX_MIN)
+            job.max_runden = _ganzzahl(args.get("max_runden"), RUNDEN_STANDARD, 1, RUNDEN_MAX)
+            job.zeitlimit_s = 60 * _ganzzahl(args.get("zeitlimit_min"), ZEITLIMIT_STANDARD_MIN, 1, ZEITLIMIT_MAX_MIN)
         self._jobs[job.id] = job
         self._vorgang_anlegen(job)
         karte = {"type": "auftrag", "job": job.id, "projekt": projekt.name, "art": art,
@@ -825,21 +851,7 @@ class DevAgent:
         if kriterien:  # die Person bestätigt mit dem Klick auch die Kriterien (und damit Befehle), also muss sie sie sehen
             karte["abnahme"] = [clean_inline(schwaerzen(k.text), abnahme.KRITERIUM_ZEICHEN) for k in kriterien[:abnahme.MAX_KRITERIEN]]
         await self._send(karte)
-        ergebnis = {
-            "ok": True, "auftrag_id": job.id, "art": KARTEN[art].titel,
-            "hinweis": (f"Der Auftrag liegt als Karte in der Oberfläche. Sag kurz Auftrag und Art und dass "
-                        f"{self._auftraggeber} ihn dort per Klick startet oder verwirft."),
-        }
-        if repo:
-            ergebnis["repo"] = repo
-        if kriterien:
-            ergebnis["abnahme"] = [k.text for k in kriterien]
-            ergebnis["max_runden"] = job.max_runden
-            ergebnis["hinweis"] += (f" Nenne in einem Satz das Ziel ({len(kriterien)} Kriterien, höchstens "
-                                    f"{job.max_runden} Runden), ohne zusätzliche Rückfrage.")
-        if self._ort == "lokal":
-            ergebnis["neu"] = not Path(projekt).exists()
-        await params.result_callback(ergebnis)
+        return job
 
     async def _status(self, params: FunctionCallParams):
         job = next(reversed(self._jobs.values()), None) if self._jobs else None
@@ -867,6 +879,8 @@ class DevAgent:
         elif msg_type == "kontingent":  # Anzeige fragt den gespeicherten Stand ab (ohne Lauf, ohne Anfrage an Anthropic)
             await self._kontingent_laden()
             await self._kontingent_senden()
+        elif msg_type == ae.NACHRICHT:  # für später gespeicherte Aufträge: Liste, Speichern, Laden, Löschen
+            await self._entwurf_nachricht(data)
 
     async def _quittung(self, job: Job | str, ok: bool, grund: str | None = None) -> None:
         """auftrag_quittung an die Oberfläche: ok, oder nicht ok mit einem Satz als Grund (nie Pfade oder Werte). Je Klick auf Starten
@@ -888,6 +902,10 @@ class DevAgent:
                 await self._quittung(job_id, False, entwicklung_betrieb.SATZ_UNBEKANNT)
             return
         if job.started:
+            return
+        if job.id in self._speichert:  # die Karte wird gerade für später gespeichert (auftrag_entwuerfe.py): kein Start dazwischen
+            if ja:
+                await self._quittung(job, False, ae.SATZ_WIRD_GESPEICHERT)
             return
         if not self._buero_darf("start"):
             if ja:
@@ -939,6 +957,131 @@ class DevAgent:
             self._startet = False
             if not angelegt:  # abgelehnt oder Fehler: die Karte bleibt und ein zweiter Klick geht
                 job.started = False
+
+    # ---------- Für später speichern (auftrag_entwuerfe.py): Speicher, Sätze und Prüfungen stehen dort ----------
+    async def _entwurf_nachricht(self, data: dict) -> None:
+        """Client-Nachricht auftrag_entwurf: Antwort ist immer genau eine Servernachricht auftrag_entwuerfe (ok mit Satz und Liste, sonst
+        der Grund). Eine unbekannte Aktion bleibt ohne Wirkung. Keine Ausnahme erreicht das Gespräch."""
+        aktion = data.get("aktion")
+        if aktion not in ae.AKTIONEN:
+            return
+        job_id = clean_inline(data.get("job", ""), 100) if aktion == "speichern" else None
+        satz = {"speichern": ae.SATZ_GESPEICHERT, "laden": ae.SATZ_GELADEN, "loeschen": ae.SATZ_GELOESCHT}.get(aktion, "")
+        liste: list[dict] | None = None
+        try:
+            grund = self._entwurf_grund(f"entwurf {aktion}")
+            if grund is None and aktion == "liste":
+                liste, grund = await self._entwuerfe.liste()
+            elif grund is None and aktion == "speichern":
+                grund = await self._entwurf_speichern(job_id)
+            elif grund is None and aktion == "laden":
+                job, grund, satz = await self._entwurf_laden(str(data.get("id", "")))
+                job_id = job.id if job is not None else None
+            elif grund is None:
+                _, grund = await self._entwuerfe.loeschen(str(data.get("id", "")))
+            if grund is None and aktion != "liste":
+                liste = (await self._entwuerfe.liste())[0]  # nach einem Erfolg die frische Liste
+        except Exception as e:  # noqa: BLE001 (nie bis ins Gespräch; die Antwort nennt einen festen Satz, nie den Fehlertext)
+            logger.error("Gespeicherter Auftrag ({}): Ausnahme {}", aktion, type(e).__name__)
+            grund, liste = ae.SATZ_INTERN, None
+        await self._send(ae.antwort(aktion, grund is None, grund or satz, job=job_id, entwuerfe=liste))
+
+    def _entwurf_grund(self, aktion: str) -> str | None:
+        """Warum gespeicherte Aufträge gerade nicht gehen (Büro: Zulassung, die bei jedem Schritt neu gilt; kein Speicher), sonst None."""
+        if not self._buero_darf(aktion):
+            return entwicklung_betrieb.SATZ_KEINE_ZULASSUNG
+        return ae.SATZ_OHNE_SPEICHER if self._entwuerfe is None else None
+
+    async def _entwurf_speichern(self, job_id: str | None) -> str | None:
+        """Speichert die noch nicht gestartete Karte job_id und nimmt sie danach aus der Sitzung (wie Verwerfen). None oder der Satz, warum
+        nicht. Während des Speicherns bleibt die Karte in der Sitzung, ist aber gesperrt (_speichert): Ein Klick auf Starten bekommt dann
+        eine Quittung mit eigenem Satz, ein zweites Speichern derselben Karte geht nicht."""
+        job = self._jobs.get(job_id or "")
+        if job is None:
+            return ae.SATZ_KARTE_FEHLT
+        if job.started:  # gilt schon vor dem ersten await eines Starts (_auftrag_start)
+            return ae.SATZ_GESTARTET
+        if job.id in self._speichert:
+            return ae.SATZ_WIRD_GESPEICHERT
+        try:
+            entwurf = ae.entwurf_aus_job(job)
+        except ValueError as e:  # die Meldung nennt nur das Feld (eine Konstante), nie einen Wert
+            logger.warning("Entwicklungsauftrag {} nicht gespeichert: {} passt nicht", job.id, e)
+            return ae.SATZ_UNGUELTIG
+        self._speichert.add(job.id)
+        grund: str | None = ae.SATZ_DATENBANK
+        try:
+            _, grund = await self._entwuerfe.speichern(entwurf)
+        except Exception as e:  # noqa: BLE001 (der Speicher wirft nie; falls doch: fester Satz, die Karte bleibt)
+            logger.error("Entwicklungsauftrag {} nicht gespeichert: Ausnahme {}", job.id, type(e).__name__)
+        finally:
+            self._speichert.discard(job.id)
+        if grund is not None:
+            return grund
+        self._jobs.pop(job.id, None)
+        self._fuehrung(job, "verwerfen")
+        logger.info("Entwicklungsauftrag {} für später gespeichert", job.id)
+        return None
+
+    async def _entwurf_laden(self, entwurf_id: str) -> tuple[Job | None, str | None, str]:
+        """Legt einen gespeicherten Auftrag als neue Karte an, mit allen Prüfungen von entwicklung_vorbereiten (_karte_anlegen). Liefert Job,
+        Grund und den Satz für den Erfolg. Liegt eine Karte aus demselben Entwurf noch offen in der Sitzung, entsteht keine zweite."""
+        kennung_entwurf = normalize_uuid(entwurf_id)
+        offen = self._jobs.get(self._geladen.get(kennung_entwurf or "", ""))
+        if offen is not None and not offen.started:
+            return offen, None, ae.SATZ_SCHON_GELADEN
+        entwurf, grund = await self._entwuerfe.holen(entwurf_id)
+        if entwurf is None:
+            return None, grund or ae.SATZ_NICHT_GEFUNDEN, ""
+        kennung = self._zulassung.kennung if pc_host.buero() and isinstance(self._zulassung, BueroZulassung) else None
+        job = await self._karte_anlegen(ae.argumente(entwurf, kennung))
+        if isinstance(job, dict):
+            return None, clean_inline(job.get("fehler") or ae.SATZ_UNGUELTIG, 300), ""
+        if kennung_entwurf:
+            self._geladen[kennung_entwurf] = job.id
+        logger.info("Entwicklungsauftrag {} aus einem gespeicherten Auftrag als Karte angelegt", job.id)
+        return job, None, ae.SATZ_GELADEN
+
+    async def _werkzeug_speichern(self, params: FunctionCallParams):
+        """Werkzeug entwicklung_speichern: die genannte oder die jüngste noch nicht gestartete Karte. Nach einem Erfolg erfährt es die
+        Oberfläche wie beim Klick (die Karte verschwindet); ein Fehler geht nur an das Modell (einmal im Fehlerbuch)."""
+        try:
+            if (grund := self._entwurf_grund("entwurf speichern")) is not None:
+                await params.result_callback(ae.werkzeug_fehler(grund))
+                return
+            gewuenscht = clean_inline((params.arguments or {}).get("auftrag_id") or "", 100)
+            job = self._jobs.get(gewuenscht) if gewuenscht else next(
+                (j for j in reversed(self._jobs.values()) if not j.started and j.id not in self._speichert), None)
+            if job is None:
+                await params.result_callback(ae.werkzeug_fehler(ae.SATZ_KARTE_FEHLT if gewuenscht else ae.SATZ_KEINE_KARTE))
+                return
+            if (grund := await self._entwurf_speichern(job.id)) is not None:
+                await params.result_callback(ae.werkzeug_fehler(grund))
+                return
+            liste, _ = await self._entwuerfe.liste()
+            await self._send(ae.antwort("speichern", True, ae.SATZ_GESPEICHERT, job=job.id, entwuerfe=liste))
+            await params.result_callback({"ok": True, "projekt": job.projekt.name, "hinweis": ae.HINWEIS_GESPEICHERT})
+        except Exception as e:  # noqa: BLE001 (nie bis ins Gespräch)
+            logger.error("Werkzeug entwicklung_speichern: Ausnahme {}", type(e).__name__)
+            await params.result_callback(ae.werkzeug_fehler(ae.SATZ_INTERN))
+
+    async def _werkzeug_gespeichert(self, params: FunctionCallParams):
+        """Werkzeug entwicklung_gespeichert: die gespeicherten Aufträge als Daten (Titel, Projekt, Art, Datum). Die Texte stammen aus der
+        Datenbank: Der Zug gilt als Fremdinhalt (on_result, im Bot turn.taint)."""
+        try:
+            if (grund := self._entwurf_grund("entwurf liste")) is not None:
+                await params.result_callback(ae.werkzeug_fehler(grund))
+                return
+            liste, grund = await self._entwuerfe.liste()
+            if liste is None:
+                await params.result_callback(ae.werkzeug_fehler(grund or ae.SATZ_DATENBANK))
+                return
+            if callable(self.on_result):
+                self.on_result()
+            await params.result_callback(ae.werkzeug_liste(liste))
+        except Exception as e:  # noqa: BLE001 (nie bis ins Gespräch)
+            logger.error("Werkzeug entwicklung_gespeichert: Ausnahme {}", type(e).__name__)
+            await params.result_callback(ae.werkzeug_fehler(ae.SATZ_INTERN))
 
     async def _freigabe(self, data: dict) -> None:
         if not self._buero_darf("freigabe"):

@@ -251,6 +251,22 @@ export type Auftrag = {
   stand?: AuftragStand;
 };
 
+/** Aktionen an den gespeicherten Aufträgen (voice-core/auftrag_entwuerfe.py, Client-Nachricht auftrag_entwurf). */
+export const ENTWURF_AKTIONEN = ["liste", "speichern", "laden", "loeschen"] as const;
+export type EntwurfAktion = (typeof ENTWURF_AKTIONEN)[number];
+/** Höchstens so viele Einträge nimmt die Oberfläche aus einer Liste (der Kern speichert höchstens 50 je Person). */
+export const ENTWURF_LISTE_MAX = 50;
+
+/** Ein für später gespeicherter Entwicklungsauftrag in der Liste: Titel (Anfang des Textes), Projekt, Art, Repo, Zeitpunkt. */
+export type AuftragEntwurf = {
+  id: string;
+  titel: string;
+  projekt: string;
+  art: string;
+  repo?: string;
+  gespeichertMs: number;
+};
+
 /**
  * Vorgang (voice-core/vorgaenge.py): was WAMO gerade abarbeitet, mit Gesamtfortschritt, Schritten und Prüfkriterien.
  * Jede Nachricht trägt den ganzen Stand; die Oberfläche ersetzt den Vorgang gleicher Kennung.
@@ -377,6 +393,18 @@ export type ServerMessage =
   | ({ type: "auftrag" } & Omit<Auftrag, "stand">)
   /** Antwort des Kerns auf den Klick "Starten": ok, oder nicht ok mit einem Satz als Grund (voice-core/dev_agent.py) */
   | { type: "auftrag_quittung"; job: string; ok: boolean; grund?: string }
+  /** Gespeicherte Aufträge (voice-core/auftrag_entwuerfe.py): Ergebnis einer Aktion mit einem Satz als text (auf dem Draht text bei ok,
+   *  grund bei ok false; hier immer text), nach dem Speichern die Kennung der Karte (job), die damit die Sitzung verlässt, und, wenn
+   *  lesbar, die Liste (entwuerfe, max) */
+  | {
+      type: "auftrag_entwuerfe";
+      aktion: EntwurfAktion;
+      ok: boolean;
+      text: string;
+      job?: string;
+      entwuerfe?: AuftragEntwurf[];
+      max?: number;
+    }
   | { type: "sitzung_beendet"; grund: string; anmelden?: boolean }
   /** Testlabor: der Betreuer hat den Durchlauf beendet; die Seite lädt sich neu (lib/laborNeuladen.ts). Trägt nie Inhalte. */
   | { type: "labor_durchlauf_ende" }
@@ -549,6 +577,33 @@ const REPO_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 /** Ziel-Repo der Auftragskarte: nur owner/name (wie der Kern es prüft), alles andere und Fehlendes ergibt undefined. */
 function repoName(roh: unknown): string | undefined {
   return isStr(roh) && REPO_NAME.test(roh.trim()) ? roh.trim() : undefined;
+}
+
+/** Kennung eines gespeicherten Auftrags (UUID, wie der Kern sie schreibt); auch useWamo prüft damit vor dem Senden. */
+export const ENTWURF_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Zeitpunkt nur in einem plausiblen Bereich (2020 bis 2100): ein riesiger Wert ergäbe ein ungültiges Datum, an dem die Anzeige scheitert
+const ENTWURF_MS_MIN = Date.UTC(2020, 0, 1);
+const ENTWURF_MS_MAX = Date.UTC(2100, 0, 1);
+
+/** Liste der gespeicherten Aufträge: nur Einträge mit gültiger Kennung, Texte einzeilig und gekürzt, höchstens ENTWURF_LISTE_MAX. */
+function entwurfListe(roh: unknown[]): AuftragEntwurf[] {
+  const liste: AuftragEntwurf[] = [];
+  for (const e of roh.slice(0, ENTWURF_LISTE_MAX)) {
+    if (!isObj(e) || !isStr(e.id) || !ENTWURF_ID.test(e.id)) continue;
+    const roheMs = e.gespeichert_ms;
+    const ms = typeof roheMs === "number" && roheMs >= ENTWURF_MS_MIN && roheMs <= ENTWURF_MS_MAX ? roheMs : 0;
+    const eintrag: AuftragEntwurf = {
+      id: e.id.toLowerCase(),
+      titel: zeile(e.titel, 80) ?? "Auftrag",
+      projekt: zeile(e.projekt, 80) ?? "",
+      art: zeile(e.art, 60) ?? "",
+      gespeichertMs: Math.round(ms),
+    };
+    const repo = repoName(e.repo);
+    if (repo) eintrag.repo = repo;
+    liste.push(eintrag);
+  }
+  return liste;
 }
 
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -882,6 +937,20 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
       if (!isStr(m.job) || !m.job || typeof m.ok !== "boolean") return null;
       const grund = m.ok || !isStr(m.grund) ? "" : sauber(m.grund, 300, false).trim();
       return { type: "auftrag_quittung", job: m.job.slice(0, 100), ok: m.ok, grund: grund || undefined };
+    }
+    case "auftrag_entwuerfe": {
+      if (!oneOf(m.aktion, ENTWURF_AKTIONEN) || typeof m.ok !== "boolean") return null;
+      const satz = zeile(m.ok ? m.text : m.grund, 300);
+      const aus: Extract<ServerMessage, { type: "auftrag_entwuerfe" }> = {
+        type: "auftrag_entwuerfe",
+        aktion: m.aktion,
+        ok: m.ok,
+        text: satz ?? (m.ok ? "" : "Das ging nicht."),
+      };
+      if (isStr(m.job) && m.job) aus.job = m.job.slice(0, 100);
+      if (Array.isArray(m.entwuerfe)) aus.entwuerfe = entwurfListe(m.entwuerfe);
+      if (typeof m.max === "number" && Number.isInteger(m.max) && m.max >= 1 && m.max <= 1000) aus.max = m.max;
+      return aus;
     }
     case "labor_durchlauf_ende":
       return { type: "labor_durchlauf_ende" }; // keine Felder übernehmen, nur das Ereignis
