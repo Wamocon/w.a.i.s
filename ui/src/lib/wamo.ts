@@ -17,7 +17,8 @@ import type {
 import { hinweisText, type DateiMeldung } from "./export.ts"; // relativ aus demselben Grund
 import { versandText, type MailVersand } from "./mail.ts"; // relativ aus demselben Grund
 import { fristLoeschen } from "./auftragFrist.ts"; // relativ aus demselben Grund
-import { canvasEinordnen, canvasWaehlen } from "./canvasWahl.ts"; // relativ aus demselben Grund
+import { canvasEinordnen, canvasOffen, canvasWaehlen, neueStelle } from "./canvasWahl.ts"; // relativ aus demselben Grund
+import { canvasSchluessel, zuLegen, type Geschlossen } from "./canvasHistorie.ts"; // relativ aus demselben Grund
 import { AUFGABE_LEER, naechsteAufgabe, type Aufgabe } from "./aufgabenanzeige.ts"; // relativ aus demselben Grund
 import { auftraegeNachQuittung } from "./auftragStart.ts"; // relativ aus demselben Grund
 import { JIRA_LEER, type JiraStand } from "./jiraStory.ts"; // relativ aus demselben Grund
@@ -156,6 +157,8 @@ export type WamoState = {
   /** Entwicklungsaufträge, die auf "Starten" oder "Verwerfen" warten */
   auftraege: Auftrag[];
   canvas: CanvasItem[];
+  /** geschlossene Reiter dieser Sitzung, zuletzt geschlossen zuerst (lib/canvasHistorie.ts); Schließen blendet nur aus */
+  canvasZu: Geschlossen<CanvasItem>[];
   betrieb: Betrieb | null;
   /** Kern der laufenden oder letzten Verbindung (Betriebsart beim Verbinden, lib/betriebsart.ts) */
   kern: Betriebsart | null;
@@ -229,6 +232,7 @@ export const initialState: WamoState = {
   approvals: [],
   auftraege: [],
   canvas: [],
+  canvasZu: [],
   betrieb: null,
   kern: null,
   profil: null,
@@ -600,7 +604,61 @@ export function resetWamo(state: WamoState = initialState) {
   levelsRef.current = { user: 0, bot: 0, cut: false, speaker: 0 };
   historyRef.current = { samples: [], seq: 0 };
   liveBildLoeschen();
+  const alt = wamo.get();
+  bildDatenFreigeben([...alt.canvas, ...alt.canvasZu.map((g) => g.item)], [...state.canvas, ...state.canvasZu.map((g) => g.item)]);
   wamo.set(() => state);
+}
+
+// ---------- Canvas: Reiter schließen, Historie, eigene Dateien ----------
+
+/** Bilddaten (blob:) eigener Dateien freigeben, sobald sie weder als Reiter noch in der Historie stehen. */
+function bildDatenFreigeben(weg: readonly CanvasItem[], bleiben: readonly CanvasItem[]) {
+  const genutzt = new Set(bleiben.flatMap((it) => (it.kind === "bild" && it.datei ? [it.datei.src] : [])));
+  for (const it of weg) {
+    if (it.kind === "bild" && it.datei && !genutzt.has(it.datei.src)) URL.revokeObjectURL(it.datei.src);
+  }
+}
+
+/** Reiter, auf die treffer passt, schließen: Sie verlassen die Leiste und kommen in die Historie dieser Sitzung (nichts wird gelöscht). */
+function reiterSchliessen(treffer: (item: CanvasItem, index: number) => boolean): boolean {
+  const s = wamo.get();
+  const bleiben: CanvasItem[] = [];
+  const weg: CanvasItem[] = [];
+  s.canvas.forEach((it, i) => (treffer(it, i) ? weg : bleiben).push(it));
+  if (!weg.length) return false;
+  const { zu, verworfen } = zuLegen(s.canvasZu, weg, Date.now());
+  bildDatenFreigeben(verworfen, [...bleiben, ...zu.map((g) => g.item)]);
+  const ansage = weg.length === 1 ? `Reiter geschlossen: ${weg[0].title}. Er steht in der Historie.` : "Alle Reiter geschlossen. Sie stehen in der Historie.";
+  wamo.set((x) => ({ ...x, canvas: bleiben, canvasZu: zu, ansage }));
+  return true;
+}
+
+/** Den Reiter mit diesem Schlüssel schließen (Knopf am Reiter, lib/canvasHistorie.ts canvasSchluessel). */
+export function canvasSchliessen(schluessel: string): boolean {
+  return reiterSchliessen((it, i) => canvasSchluessel(it, i) === schluessel);
+}
+
+/** Alle Reiter schließen. */
+export function canvasAlleSchliessen(): boolean {
+  return reiterSchliessen(() => true);
+}
+
+/** Ein Element (wieder) als Reiter zeigen: aus der Historie, aus der Datenbank oder eine eigene Datei. Es kommt hinten dazu und wird gezeigt. */
+export function canvasZeigen(item: CanvasItem, ansage: string): void {
+  const s = wamo.get();
+  const neu: CanvasItem = { ...item, stelle: item.stelle ?? neueStelle() };
+  const e = canvasEinordnen(s.canvas, neu, undefined, CANVAS_MAX_ELEMENTE);
+  const ohne = s.canvasZu.filter((g) => g.item !== item && !(item.id && g.item.id === item.id));
+  const { zu, verworfen } = zuLegen(ohne, e.verdraengt, Date.now());
+  bildDatenFreigeben(verworfen, [...e.items, ...zu.map((g) => g.item)]);
+  wamo.set((x) => ({ ...x, canvas: e.items, canvasZu: zu, ansage }));
+  const gezeigt = e.items.find((it) => (neu.id && it.id === neu.id) || it.stelle === neu.stelle);
+  canvasWaehlen(gezeigt?.id ?? "", gezeigt?.stelle);
+}
+
+/** Einen geschlossenen Reiter dieser Sitzung wieder öffnen (Historie). */
+export function canvasWiederOeffnen(eintrag: Geschlossen<CanvasItem>): void {
+  canvasZeigen(eintrag.item, `Wieder geöffnet: ${eintrag.item.title}`);
 }
 
 // ---------- Stimme einlernen: Ansicht öffnen und schließen ----------
@@ -652,17 +710,44 @@ export function applyServerMessage(msg: ServerMessage) {
       return;
     case "canvas": {
       // canvas_zeigen im Voice-Core: gleiche id = Aktualisierung (z. B. Fortschritt eines Auftrags), ersetzt = Überarbeitung an derselben
-      // Stelle (der Reiter wird gezeigt), sonst neu (höchstens 20 Elemente, das älteste fällt heraus); lib/canvasWahl.ts
-      const item = msg.item;
-      const e = canvasEinordnen(wamo.get().canvas, item, msg.ersetzt, CANVAS_MAX_ELEMENTE);
+      // Stelle (der Reiter wird gezeigt), sonst neu (höchstens 20 Elemente, das älteste fällt heraus und kommt in die Historie);
+      // lib/canvasWahl.ts. Jedes neue Element bekommt eine eigene stelle (Schlüssel des Reiters, auch ohne Kennung).
+      const item: CanvasItem = { ...msg.item, stelle: neueStelle() };
+      const vorher = wamo.get();
+      // Fortschritt an einem Element, dessen Reiter die Person geschlossen hat: in der Historie aktualisieren, nicht wieder öffnen
+      const zuStelle = !msg.ersetzt && item.id && !vorher.canvas.some((it) => it.id === item.id)
+        ? vorher.canvasZu.findIndex((g) => g.item.id === item.id)
+        : -1;
+      if (zuStelle >= 0) {
+        wamo.set((s) => ({
+          ...s,
+          canvasZu: s.canvasZu.map((g, i) => (i === zuStelle ? { ...g, item: { ...item, stelle: g.item.stelle } } : g)),
+        }));
+        return;
+      }
+      const e = canvasEinordnen(vorher.canvas, item, msg.ersetzt, CANVAS_MAX_ELEMENTE);
       const ansage =
         e.art === "ersetzt"
           ? `Auf dem Canvas überarbeitet: ${item.title}`
           : e.art === "neu"
             ? `Neues Ergebnis auf dem Canvas: ${item.title}`
             : undefined;
-      wamo.set((s) => ({ ...s, canvas: e.items, ...(ansage ? { ansage } : {}) }));
+      const { zu, verworfen } = e.verdraengt.length ? zuLegen(vorher.canvasZu, e.verdraengt, Date.now()) : { zu: vorher.canvasZu, verworfen: [] };
+      bildDatenFreigeben(verworfen, [...e.items, ...zu.map((g) => g.item)]);
+      wamo.set((s) => ({ ...s, canvas: e.items, canvasZu: zu, ...(ansage ? { ansage } : {}) }));
       if (e.art === "ersetzt" && item.id) canvasWaehlen(item.id);
+      return;
+    }
+    case "canvas_schliessen": {
+      // Werkzeug canvas_schliessen (voice-core/tools.py): der Reiter, den das Canvas gerade zeigt, alle oder die mit diesen Kennungen
+      if (msg.ziel === "alle") canvasAlleSchliessen();
+      else if (msg.ziel === "ids") reiterSchliessen((it) => Boolean(it.id && msg.ids.includes(it.id)));
+      else {
+        const offen = canvasOffen.get();
+        const items = wamo.get().canvas;
+        const schluessel = offen ?? (items.length ? canvasSchluessel(items[items.length - 1], items.length - 1) : null);
+        if (schluessel !== null) canvasSchliessen(schluessel);
+      }
       return;
     }
     case "aktivitaet": {

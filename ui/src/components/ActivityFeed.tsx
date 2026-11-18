@@ -27,6 +27,7 @@ export const LABEL: Record<string, string> = {
   powershell_lesen: "liest PC-Infos",
   websuche: "sucht im Web",
   canvas_zeigen: "legt aufs Canvas",
+  canvas_schliessen: "schließt Reiter",
   merken: "merkt sich etwas",
   aktuelle_zeit: "schaut auf die Uhr",
   entwicklung_vorbereiten: "plant Entwicklung",

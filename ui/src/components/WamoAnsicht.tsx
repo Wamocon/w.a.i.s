@@ -28,6 +28,7 @@ import type { Sitzung } from "@/components/LoginGate";
 import { FehlerAnzeige } from "@/components/FehlerAnzeige";
 import { StillAktionen, UebernehmenHinweis } from "@/components/StillStart";
 import { Verlauf } from "@/components/Verlauf";
+import { HISTORIE_QUELLE } from "@/lib/canvasOeffnen";
 import { einstellungenSchliessen, oeffnerFuerFokus, useEinstellungenZiel } from "@/lib/einstellungenHash";
 import { laborAnsicht } from "@/lib/laborPlatz";
 import { useModellzugangStandHalten } from "@/lib/modellzugangApi";
@@ -191,13 +192,16 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
         <>
           {aktionen.liveBild && <BildschirmAnsicht aktionen={aktionen.liveBild} />}
           {/* Speichern als Datei nie für Laborkonten (der Kern schickt dort ohnehin keine Formate); den offenen Reiter melden Laborkonten
-              nicht, die Laborsitzung nimmt diese Nachricht nicht an */}
+              nicht, die Laborsitzung nimmt diese Nachricht nicht an. Schließen und die Historie dieser Sitzung gibt es auch im Labor, ältere
+              Elemente aus der Datenbank (die Route ist dort gesperrt), Datei öffnen und Herunterladen nicht */}
           <CanvasBereich
             jiraStory={aktionen.jiraStory}
             office={ansicht.labor ? undefined : aktionen.office}
             mail={ansicht.labor ? undefined : aktionen.mail}
             aktiv={ansicht.labor ? undefined : aktionen.canvasAktiv}
             teams={ansicht.labor ? undefined : aktionen.teams}
+            historie={ansicht.labor ? undefined : HISTORIE_QUELLE}
+            dateien={!ansicht.labor}
           />
         </>
       }

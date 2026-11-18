@@ -12,6 +12,8 @@ canvas_zeigen nur {"angezeigt": True} und konnte nichts ersetzen. Jetzt:
     dem ab, was das Modell zuletzt gezeigt oder gehört hat, bekommt es einen kurzen Systemhinweis mit Kennung und Titel. Der Titel ist
     dort als Daten gekennzeichnet und von unsichtbaren Zeichen und Anführungszeichen befreit. Ein Reiter außerhalb der Liste (Auftrag,
     Geräteliste, geteiltes Dokument, Element ohne Kennung) bringt einmal den Hinweis, dass er sich nicht überarbeiten lässt.
+  * Schließen (Werkzeug canvas_schliessen, Knopf am Reiter) blendet nur aus: Das Element bleibt hier und in der Datenbank, die Oberfläche
+    führt es in ihrer Historie (Wunsch vom 18.11.2026).
 """
 
 from __future__ import annotations
@@ -22,6 +24,9 @@ import unicodedata
 from dataclasses import dataclass, field
 
 NACHRICHT = "canvas_aktiv"  # Client-Nachricht der Oberfläche: {"canvas_id": Kennung der Oberfläche}
+# Servernachricht an die Oberfläche (tools.canvas_schliessen): {"ziel": "offen" | "alle"} oder
+# {"ziel": "ids", "ids": [Kennungen der Oberfläche]}
+NACHRICHT_SCHLIESSEN = "canvas_schliessen"
 MAX_ELEMENTE = 20  # wie die Oberfläche (CANVAS_MAX_ELEMENTE in ui/src/lib/wamo.ts): das älteste fällt heraus
 UI_ID_MAX = 100  # Kennungen der Oberfläche sind Kennungen aus der Datenbank oder lokal, nie länger
 TITEL_HINWEIS_MAX = 80
@@ -99,6 +104,13 @@ class CanvasSitzung:
         e.ui_id, e.titel = ui_id, str(titel)
         self._bekannt = e.kennung
         return e.kennung
+
+    def geschlossen(self, element: Element | None) -> None:
+        """Ein Reiter ging zu (Werkzeug canvas_schliessen; None: der offene oder alle). Das Element bleibt in der Liste: Öffnet die Person
+        es aus der Historie wieder, lässt es sich weiter überarbeiten. Nur der Reiter, den das Modell für offen hält, ist vergessen, damit
+        die nächste Meldung der Oberfläche als Hinweis ankommt."""
+        if element is None or element.kennung == self._bekannt:
+            self._bekannt = None
 
     def aktiv_melden(self, ui_id: object) -> str | None:
         """Die Oberfläche zeigt diesen Reiter (None: ein Element ohne Kennung). Liefert den Systemhinweis für das Modell oder None

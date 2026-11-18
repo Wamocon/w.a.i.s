@@ -1,11 +1,16 @@
 "use client";
 
-import { Fragment, memo, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { BildAnsicht, CanvasDateiOeffnen, CanvasHerunterladen } from "@/components/CanvasDateien";
+import { CanvasHistorie } from "@/components/CanvasHistorie";
 import { CanvasMail } from "@/components/MailFormular";
 import { CanvasTeams } from "@/components/TeamsFormular";
 import { JiraStoryKnopf } from "@/components/JiraStory";
 import { TeilenKnopf } from "@/components/Teilen";
-import { canvasIndex, canvasWunsch } from "@/lib/canvasWahl";
+import type { BildMime } from "@/lib/canvasDatei";
+import { artText, canvasSchluessel } from "@/lib/canvasHistorie";
+import type { HistorieQuelle } from "@/lib/canvasOeffnen";
+import { canvasIndex, canvasOffen, canvasWunsch } from "@/lib/canvasWahl";
 import { exportFormate, knopfText, ONENOTE_KNOPF, onenoteMoeglich, type OfficeAktionen, type OfficeFormat } from "@/lib/export";
 import { KOPIERT_MS, kopierChipText, type KopierStatus } from "@/lib/kopieren";
 import type { MailAktionen } from "@/lib/mail";
@@ -13,28 +18,26 @@ import type { TeamsAktionen } from "@/lib/teams";
 import { istUuid } from "@/lib/teilenHilfe";
 import { useSelect } from "@/lib/store";
 import { useThema } from "@/lib/useThema";
-import { wamo } from "@/lib/wamo";
+import { canvasSchliessen, wamo } from "@/lib/wamo";
 
-/** Was der Voice-Core per canvas_zeigen schickt (siehe voice-core/tools.py). */
+/** Bild aus einer Datei der Person (lib/canvasDatei.ts): nur im Browser, src ist eine eigene blob:-Adresse mit geprüftem Typ. */
+export type CanvasBild = { src: string; mime: BildMime; groesse: number; name: string; blob: Blob; breite: number; hoehe: number };
+
+/** Was der Voice-Core per canvas_zeigen schickt (siehe voice-core/tools.py), dazu Bilder und eigene Dateien der Person. */
 export type CanvasItem = (
   | { id?: string | null; kind: "tabelle"; title: string; columns: string[]; rows: string[][] }
   | { id?: string | null; kind: "code"; title: string; text: string; language?: string }
   | { id?: string | null; kind: "dokument"; title: string; text: string }
   | { id?: string | null; kind: "mermaid"; title: string; text: string }
+  /** Bild: vom Kern nur als https-Adresse (url, wird nie geladen, nur verlinkt), aus einer Datei der Person als datei */
+  | { id?: string | null; kind: "bild"; title: string; alt?: string; url?: string; datei?: CanvasBild }
 ) & {
   /** gespeichertes Ergebnis eines Entwicklungsauftrags: teilbar als Dokument oder als ganzes Projekt */
   teilbar?: { id: string; projekt?: string };
   /** von jemand anderem geteilt (geöffnet über geteilte Arbeit) */
   geteilt?: { von: string | null; recht: "lesen" | "bearbeiten" };
-  /** nur in der Oberfläche: Kennung der ersten Fassung an dieser Stelle (lib/canvasWahl.ts), bleibt bei Überarbeitungen gleich */
+  /** nur in der Oberfläche: Schlüssel des Reiters (lib/canvasWahl.ts), bleibt bei Überarbeitungen gleich */
   stelle?: string;
-};
-
-const KIND_LABEL: Record<CanvasItem["kind"], string> = {
-  tabelle: "Tabelle",
-  code: "Code",
-  dokument: "Dokument",
-  mermaid: "Diagramm",
 };
 
 const BEISPIELE = [
@@ -44,11 +47,13 @@ const BEISPIELE = [
   { name: "Code", hint: "„Zeig mir ein SQL-Statement mit JOIN“" },
   { name: "Websuche", hint: "„Wie wird das Wetter morgen?“" },
   { name: "Am PC", hint: "„Öffne WhatsApp“ · „Klick auf Senden“", nurPc: true },
+  { name: "Dateien", hint: "„Datei öffnen“: Bilder, CSV, Markdown, JSON, Code", nurDateien: true },
 ];
 
 /**
  * Ergebnisfläche: abonniert nur den eigenen Store-Ausschnitt (canvas) und rendert deshalb nicht
- * neu, wenn sich Untertitel oder Zeitleiste ändern. Leer zeigt sie eine ruhige Beispielliste.
+ * neu, wenn sich Untertitel oder Zeitleiste ändern. Leer zeigt sie eine ruhige Beispielliste. Darüber eine Leiste mit der aufklappbaren
+ * Historie (geschlossene und ältere Elemente) und, außer im Labor, "Datei öffnen".
  */
 export const CanvasBereich = memo(function CanvasBereich({
   jiraStory,
@@ -56,6 +61,8 @@ export const CanvasBereich = memo(function CanvasBereich({
   mail,
   teams,
   aktiv,
+  historie,
+  dateien = false,
 }: {
   jiraStory?: (canvasId: string) => boolean;
   office?: OfficeAktionen;
@@ -63,24 +70,61 @@ export const CanvasBereich = memo(function CanvasBereich({
   teams?: TeamsAktionen;
   /** offener Reiter an den Kern (Nachricht canvas_aktiv, voice-core/canvas_sitzung.py), null für ein Element ohne Kennung; fehlt im Labor */
   aktiv?: (canvasId: string | null) => void;
+  /** ältere Elemente aus der Datenbank laden und öffnen (lib/canvasOeffnen.ts); fehlt im Labor: dann nur diese Sitzung */
+  historie?: HistorieQuelle;
+  /** Dateien im Browser öffnen und herunterladen (lib/canvasDatei.ts, lib/canvasExport.ts); nie im Labor */
+  dateien?: boolean;
 }) {
   const items = useSelect(wamo, (s) => s.canvas);
   // PC-Werkzeuge gibt es für Admins und für Mitglieder, die der Kern freigeschaltet hat (betrieb.pcStufe); den anderen den Hinweis ersparen
   const ohnePc = useSelect(wamo, (s) => s.profil?.rolle === "mitglied" && s.betrieb?.pcStufe !== "mitglied");
-  if (items.length) return <Canvas items={items} jiraStory={jiraStory} office={office} mail={mail} teams={teams} aktiv={aktiv} />;
+  // Nach dem Schließen per Knopf bekommt der Nachbarreiter den Fokus, ohne Reiter der Knopf der Historie (der Knopf selbst ist dann weg)
+  const flaeche = useRef<HTMLDivElement>(null);
+  const fokusNach = useRef<string | null>(null);
+  useEffect(() => {
+    const ziel = fokusNach.current;
+    if (ziel === null) return;
+    fokusNach.current = null;
+    const reiter = Array.from(flaeche.current?.querySelectorAll<HTMLElement>("[data-reiter]") ?? []).find((r) => r.dataset.reiter === ziel);
+    (reiter ?? flaeche.current?.querySelector<HTMLElement>(".canvas-historie-knopf"))?.focus();
+  });
+  const schliessen = useCallback((schluessel: string, nachbar: string | null) => {
+    fokusNach.current = nachbar ?? "";
+    if (!canvasSchliessen(schluessel)) fokusNach.current = null; // nichts geschlossen: den Fokus nicht später woanders hinsetzen
+  }, []);
   return (
-    <div className="canvas-empty">
-      <p className="eyebrow">Canvas</p>
-      <h2>Was W.A.I.S. dir hier zeigt</h2>
-      <p>Ergebnisse, die man sehen muss, landen auf dieser Fläche statt in der Sprache.</p>
-      <ul className="kinds">
-        {BEISPIELE.filter((k) => !k.nurPc || !ohnePc).map((k) => (
-          <li key={k.name}>
-            <strong>{k.name}</strong>
-            <span>{k.hint}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="canvas-bereich" ref={flaeche}>
+      {/* Reihenfolge im DOM wie auf dem Bildschirm: erst die Knöpfe, dann die aufgeklappte Historie über die volle Breite */}
+      <div className="canvas-leiste">
+        {dateien && <CanvasDateiOeffnen />}
+        <CanvasHistorie quelle={historie} />
+      </div>
+      {items.length ? (
+        <Canvas
+          items={items}
+          jiraStory={jiraStory}
+          office={office}
+          mail={mail}
+          teams={teams}
+          aktiv={aktiv}
+          dateien={dateien}
+          schliessen={schliessen}
+        />
+      ) : (
+        <div className="canvas-empty">
+          <p className="eyebrow">Canvas</p>
+          <h2>Was W.A.I.S. dir hier zeigt</h2>
+          <p>Ergebnisse, die man sehen muss, landen auf dieser Fläche statt in der Sprache.</p>
+          <ul className="kinds">
+            {BEISPIELE.filter((k) => (!k.nurPc || !ohnePc) && (!k.nurDateien || dateien)).map((k) => (
+              <li key={k.name}>
+                <strong>{k.name}</strong>
+                <span>{k.hint}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 });
@@ -92,6 +136,8 @@ function Canvas({
   mail,
   teams,
   aktiv,
+  dateien,
+  schliessen,
 }: {
   items: CanvasItem[];
   jiraStory?: (canvasId: string) => boolean;
@@ -99,20 +145,28 @@ function Canvas({
   mail?: MailAktionen;
   teams?: TeamsAktionen;
   aktiv?: (canvasId: string | null) => void;
+  dateien: boolean;
+  /** Reiter schließen; nachbar: Schlüssel des Reiters, der danach den Fokus bekommt */
+  schliessen: (schluessel: string, nachbar: string | null) => void;
 }) {
-  const [picked, setPicked] = useState<number | null>(null);
-  // "Ergebnis ansehen" in der Tafel Vorgänge (lib/canvasWahl.ts): ein neuer Wunsch wählt das Element mit dieser Kennung, noch im
-  // selben Render (kein Zwischenbild mit dem alten Element). Ein Wunsch, der schon galt, bevor dieses Canvas entstand, zählt nicht.
+  // Eigene Auswahl als Schlüssel des Reiters (lib/canvasHistorie.ts), nicht als Position: Schließen verschiebt die Positionen
+  const [picked, setPicked] = useState<string | null>(null);
+  // "Ergebnis ansehen" in der Tafel Vorgänge oder Wiederöffnen aus der Historie (lib/canvasWahl.ts): ein neuer Wunsch wählt das Element
+  // mit dieser Kennung oder stelle, noch im selben Render (kein Zwischenbild). Ein Wunsch, der schon galt, bevor dieses Canvas entstand,
+  // zählt nicht.
   const wunsch = useSelect(canvasWunsch, (w) => w);
   const [gesehen, setGesehen] = useState(wunsch.n);
   if (wunsch.n !== gesehen) {
     setGesehen(wunsch.n);
-    const i = wunsch.id ? canvasIndex(items, wunsch.id) : -1;
-    if (i >= 0) setPicked(i === items.length - 1 ? null : i);
+    const i = wunsch.stelle ? items.findIndex((it) => it.stelle === wunsch.stelle) : wunsch.id ? canvasIndex(items, wunsch.id) : -1;
+    if (i >= 0) setPicked(i === items.length - 1 ? null : canvasSchluessel(items[i], i));
   }
-  // Ohne eigene Auswahl zeigt das Canvas immer das Neueste.
-  const index = picked !== null && picked < items.length ? picked : items.length - 1;
+  // Ohne eigene Auswahl (oder wenn der gewählte Reiter zu ist) zeigt das Canvas immer das Neueste.
+  const gewaehlt = picked === null ? -1 : items.findIndex((it, i) => canvasSchluessel(it, i) === picked);
+  if (picked !== null && gewaehlt < 0) setPicked(null);
+  const index = gewaehlt >= 0 ? gewaehlt : items.length - 1;
   const item = items[index];
+  const schluessel = canvasSchluessel(item, index);
   // Den offenen Reiter dem Kern melden: beim Zeigen, beim Wechsel, nach einer Überarbeitung (neue Kennung) und wenn ein Element dazukommt,
   // während ein älterer Reiter gewählt bleibt (sonst hielte das Modell das Neue für offen). Fortschritt am selben Element meldet nichts.
   const offeneId = item.id ?? null;
@@ -120,29 +174,53 @@ function Canvas({
   useEffect(() => {
     aktiv?.(offeneId);
   }, [offeneId, kennungen, aktiv]);
+  // Welcher Reiter offen ist, braucht auch das Werkzeug canvas_schliessen ohne Kennung (lib/wamo.ts)
+  useEffect(() => {
+    canvasOffen.set(() => schluessel);
+  }, [schluessel]);
+  useEffect(() => () => canvasOffen.set(() => null), []);
   // Knöpfe und Formulare am Element bleiben über Überarbeitungen stehen (ein offenes Mail-Formular schickt dann die neue Fassung)
   const stelle = item.stelle ?? item.id ?? item.title;
 
   return (
     <div className="canvas-board">
-      {items.length > 1 && (
-        <nav className="canvas-tabs" aria-label="Frühere Inhalte">
-          {items.map((it, i) => (
-            <button
-              type="button"
-              key={`${i}-${it.title}`}
-              className="canvas-tab"
-              aria-current={i === index}
-              onClick={() => setPicked(i === items.length - 1 ? null : i)}
-            >
-              {it.title}
-            </button>
-          ))}
-        </nav>
-      )}
+      <nav className="canvas-tabs" aria-label="Reiter des Canvas">
+        {items.map((it, i) => {
+          const k = canvasSchluessel(it, i);
+          // Schlüssel des Nachbarn nach dem Schließen (rechts, sonst links): bei einem Schlüssel aus der Position rückt der rechte nach
+          const nachbar = i + 1 < items.length ? canvasSchluessel(items[i + 1], i) : i > 0 ? canvasSchluessel(items[i - 1], i - 1) : null;
+          return (
+            <span key={k} className="canvas-tab-gruppe" data-offen={i === index || undefined}>
+              <button
+                type="button"
+                className="canvas-tab"
+                data-reiter={k}
+                aria-current={i === index}
+                onClick={() => setPicked(i === items.length - 1 ? null : k)}
+              >
+                {it.title}
+              </button>
+              <button
+                type="button"
+                className="canvas-tab-zu"
+                aria-label={`${it.title} schließen`}
+                title="Schließen (bleibt in der Historie)"
+                onClick={() => {
+                  // War es der gezeigte Reiter, zeigt das Canvas danach den Nachbarn, der auch den Fokus bekommt (ist er der neueste: keine
+                  // eigene Auswahl, das Canvas folgt wieder dem Neuesten)
+                  if (i === index) setPicked(i < items.length - 2 ? nachbar : null);
+                  schliessen(k, nachbar);
+                }}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </span>
+          );
+        })}
+      </nav>
       <article className="canvas-item">
         <header className="canvas-item-head">
-          <span className="eyebrow">{KIND_LABEL[item.kind]}</span>
+          <span className="eyebrow">{artText(item.kind)}</span>
           <h2>{item.title}</h2>
           {item.geteilt && (
             <p className="canvas-geteilt">
@@ -152,6 +230,7 @@ function Canvas({
           <CanvasTeilen item={item} />
           <JiraStoryKnopf item={item} anfragen={jiraStory} />
           {office && <CanvasSpeichern key={stelle} item={item} office={office} />}
+          {dateien && <CanvasHerunterladen key={`laden-${stelle}`} item={item} />}
           {mail && <CanvasMail key={`mail-${stelle}`} item={item} mail={mail} />}
           {teams && <CanvasTeams key={`teams-${stelle}`} item={item} teams={teams} />}
         </header>
@@ -267,6 +346,8 @@ function CanvasBody({ item }: { item: CanvasItem }) {
           geteiltVon={item.geteilt ? (item.geteilt.von ?? null) : undefined}
         />
       );
+    case "bild":
+      return <BildAnsicht item={item} />;
   }
 }
 
