@@ -84,6 +84,31 @@ def test_die_schritte_setzen_nur_namen_aus_der_erlaubnisliste_des_rauchtests():
     assert "INVOCATION_ID" not in erlaubt
 
 
+def test_die_schritte_verlangen_keine_approvals_json_der_lauf_schon():
+    # Befund 18.11.2026: der Dispatcher klont vor lauf_vorbereiten; approvals.json gibt es dann noch nicht (Exit 70 vor dem ersten Klon)
+    assert 'PFLICHT_DATEIEN=("$JOBDIR/etc/passwd" "$JOBDIR/etc/group")' in LAEUFER
+    assert '[ "$SCHRITT" = 1 ] || PFLICHT_DATEIEN+=("$JOBDIR/zustand/approvals.json")' in LAEUFER
+    assert 'for pfad in "$JOBDIR/zustand/approvals.json"' not in LAEUFER
+    # die Prüfung steht hinter der Festlegung von SCHRITT, eingehängt wird approvals.json nur im Auftragslauf
+    assert LAEUFER.index("SCHRITT=0\n") < LAEUFER.index("PFLICHT_DATEIEN=(")
+    assert LAEUFER.count('/run/wamo/zustand/approvals.json') == 1
+    einhaengen = LAEUFER.index('--ro-bind "$JOBDIR/zustand/approvals.json" /run/wamo/zustand/approvals.json')
+    assert LAEUFER.rindex('if [ "$MODUS" = lauf ]; then', 0, einhaengen) > LAEUFER.index("PFLICHT_DATEIEN=(")
+
+
+def test_der_rauchtest_spielt_den_echten_ablauf_ohne_approvals_json_durch():
+    rauchtest = lies("wamo_job_rauchtest.py")
+    teil = rauchtest[rauchtest.index("def persoenlicher_durchlauf"):rauchtest.index("def helfer_probe")]
+    assert "D.vorbereiten(jobdir, job, PROJEKT, \"umsetzung\")" in teil and "neuer_auftrag(" not in teil
+    # Reihenfolge wie github_vorlauf und github_nachlauf: klon vor lauf_vorbereiten, laufende danach
+    assert teil.index('D.sandbox_schritt("klon"') < teil.index("D.lauf_vorbereiten(") < teil.index("G.laufende(")
+    assert "persoenlicher_weg()\n            persoenlicher_durchlauf()" in rauchtest
+    felder = set(re.findall(r'"(\w+)":', teil[teil.index('G.json_schreiben(w.pfad("github.json")'):teil.index("lauf = D.PersoenlicherLauf")]))
+    github = lies("wamo_job_github.py")
+    soll = set(re.findall(r'"(\w+)"', re.search(r"GITHUB_JSON_FELDER = \(([^)]*)\)", github).group(1)))
+    assert felder == soll
+
+
 def test_der_lauf_im_persoenlichen_weg_bekommt_nur_die_sechs_namen_und_kein_dienst_token():
     erlaubt = set(re.search(r"ERLAUBT_RE='\^\(([^)]*)\)\$'", LAEUFER).group(1).split("|"))
     assert {"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "WAMO_GITHUB", "WAMO_ZWEIG"} <= erlaubt
