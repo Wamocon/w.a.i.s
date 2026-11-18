@@ -1369,6 +1369,80 @@ def persoenlicher_weg() -> None:
         entfernen(jobdir)
 
 
+DURCHLAUF_REPO = "rauchtest-wamo/durchlauf"
+DURCHLAUF_PROFIL = "0000abcd"  # Kurzkennung eines Profils (8 Hexzeichen), kein echtes Profil
+
+
+def _git_lokal(*argumente: str, cwd: Path | None = None) -> str:
+    """git als wamo außerhalb der Sandbox für das lokale Quell-Repo des Durchlaufs (ohne System- und Benutzerkonfiguration, ohne Hooks)."""
+    env = {**D.basis_env(), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0"}
+    p = subprocess.run(["/usr/bin/git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Rauchtest", "-c", "user.email=rauchtest@wamo.invalid",
+                        *argumente], cwd=str(cwd) if cwd else "/", env=env, capture_output=True, text=True, timeout=120)
+    if p.returncode != 0:
+        raise RuntimeError(f"git {argumente[0]}: {p.stderr.strip()[-200:]}")
+    return p.stdout.strip()
+
+
+def persoenlicher_durchlauf() -> None:
+    """Der echte Ablauf des persönlichen Wegs ohne Netz (Befund 18.11.2026: der erste echte Auftrag scheiterte vor dem Klonen an
+    approvals.json, die der Dispatcher erst danach anlegt; die Probe oben legt den Auftrag mit lauf_vorbereiten an und sah das nicht).
+    Reihenfolge wie github_vorlauf und github_nachlauf: Auftrag nur mit vorbereiten, basis.git wie nach start (bare, bereinigt) aus einem
+    lokalen Repo, github.json, Sandbox-Schritt klon, lauf_vorbereiten, ein Commit wie vom Agenten auf wamo/<job>, dann laufende (ausgabe,
+    pruefung, Regeln, Kandidat in aus.git) bis zum Zustand bereit. Nur Einreichen (Push und PR) braucht GitHub."""
+    print("\n== Persönlicher GitHub-Weg: Durchlauf ohne Netz (klon, Commit, ausgabe, pruefung, Kandidat)", flush=True)
+    G = D.github_modul()
+    job = uuid.uuid4().hex[:16]
+    jobdir = D.job_ordner(job)
+    quelle = Path(tempfile.mkdtemp(prefix="wamo-durchlauf-", dir=str(D.HEIM)))
+    try:
+        D.vorbereiten(jobdir, job, PROJEKT, "umsetzung", DURCHLAUF_REPO, "kern", DURCHLAUF_PROFIL, D.GITHUB_WEG)  # wie cmd_start
+        pruefe("Durchlauf: vor dem Klon gibt es keine approvals.json (wie im echten Start)",
+               not os.path.lexists(jobdir / "zustand" / "approvals.json"))
+        _git_lokal("init", "-q", "-b", "main", str(quelle))
+        (quelle / "README.md").write_text("Rauchtest Durchlauf\n", encoding="utf-8")
+        _git_lokal("add", "README.md", cwd=quelle)
+        _git_lokal("commit", "-q", "-m", "Basis", cwd=quelle)
+        basis_git = jobdir / "basis.git"
+        _git_lokal("clone", "--bare", "--single-branch", "--branch=main", "--no-tags", "--template=", "--", str(quelle), str(basis_git))
+        w = D.DispatcherWerkzeuge(job, PROJEKT, jobdir, platz=RAUCHTEST_PLATZ, gehalten=(".lauf",))
+        G._basis_bereinigen(w, basis_git, DURCHLAUF_REPO, "main")
+        basis = _git_lokal("--git-dir", str(basis_git), "rev-parse", "refs/heads/main^{commit}")
+        G.json_schreiben(w.pfad("github.json"), {"v": 1, "repo": DURCHLAUF_REPO, "repo_id": 1, "login": "rauchtest", "konto_id": 1,
+                                                 "basis": basis, "standardzweig": "main", "privat": True, "schreiben": True,
+                                                 "geklont_at": int(time.time())})
+        lauf = D.PersoenlicherLauf.aus_datei(jobdir, job, DURCHLAUF_REPO)
+        schritt = D.sandbox_schritt("klon", job, PROJEKT, RAUCHTEST_PLATZ, D.schritt_argumente("klon", lauf, jobdir))
+        pruefe("Durchlauf: Schritt klon ohne approvals.json", schritt.rc == 0,
+               f"rc={schritt.rc} {schritt.fehler.decode('utf-8', 'replace')[-200:]}")
+        if schritt.rc != 0:
+            return
+        zweig = _git_lokal("symbolic-ref", "HEAD", cwd=PROJ)
+        herkunft = _git_lokal("remote", "get-url", "origin", cwd=PROJ)
+        pruefe("Durchlauf: Arbeitskopie auf wamo/<job>, origin zeigt auf GitHub, Eigner gesetzt",
+               zweig == f"refs/heads/wamo/{job}" and herkunft == f"https://github.com/{DURCHLAUF_REPO}.git"
+               and (PROJ / "README.md").is_file() and D.eigner_lesen(PROJEKT) == job, f"{zweig} {herkunft}")
+        D.lauf_vorbereiten(jobdir, PROJEKT)
+        (PROJ / "HALLO.md").write_text("Hallo aus dem Rauchtest.\n", encoding="utf-8")
+        _git_lokal("add", "HALLO.md", cwd=PROJ)
+        _git_lokal("commit", "-q", "-m", "HALLO.md anlegen", cwd=PROJ)
+        for entfernt in D.projekt_entschaerfen(PROJ):  # wie github_nachlauf vor der Logik
+            D.log(f"entschärft {job} {PROJEKT}: {entfernt}")
+        daten = G.laufende(w, job=job, projekt=PROJEKT, art="umsetzung", profil=DURCHLAUF_PROFIL, auftrag="Rauchtest Durchlauf", lauf="fertig")
+        pfade = [e.get("pfad") for e in daten.get("liste") or [] if isinstance(e, dict)]
+        pruefe("Durchlauf: ausgabe, pruefung und Regeln ergeben einen Kandidaten (bereit, genau HALLO.md)",
+               daten.get("status") == "bereit" and daten.get("dateien") == 1 and pfade == ["HALLO.md"],
+               f"status={daten.get('status')} gruende={daten.get('gruende')} dateien={daten.get('dateien')} pfade={pfade}")
+        pruefe("Durchlauf: Kandidat in aus.git und einreichen.json liegen bereit, nichts ungesichert",
+               (jobdir / "aus.git").is_dir() and (jobdir / "einreichen.json").is_file() and daten.get("ungesichert") == 0,
+               f"ungesichert={daten.get('ungesichert')}")
+    except Exception as e:  # noqa: BLE001 (ein Fehler im Durchlauf ist ein nicht bestandener Test, kein Abbruch der übrigen Proben)
+        pruefe("Durchlauf ohne Ausnahme", False, f"{type(e).__name__}: {str(e)[:200]}")
+    finally:
+        D.eigner_entfernen(PROJEKT)
+        entfernen(quelle)
+        entfernen(jobdir)
+
+
 def helfer_probe() -> None:
     """Der Helfer über git credential fill: git reicht die Pipe weiter (Vorprobe aus C.5 Start 3), nur get für https://github.com."""
     def fill(anfrage: bytes, aktion: str = "fill") -> bytes:
@@ -1416,6 +1490,7 @@ def main() -> int:
             token_attrappe()
         if "--persoenlich" in sys.argv:
             persoenlicher_weg()
+            persoenlicher_durchlauf()
         if "--app-echt" in sys.argv:
             github_app_echt()
     finally:
