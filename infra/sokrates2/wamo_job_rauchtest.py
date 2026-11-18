@@ -8,6 +8,13 @@ Installiert als /opt/wamo/bin/wamo-job-rauchtest durch wamo-job-einrichten.sh. A
     sudo -u wamo -H /opt/wamo/bin/wamo-job-rauchtest --mcp        zusätzlich MCP-Server mit echter Umgebung
     sudo -u wamo -H /opt/wamo/bin/wamo-job-rauchtest --app-echt   zusätzlich die eingerichtete GitHub-App (echt, nur lesend)
     sudo -u wamo -H /opt/wamo/bin/wamo-job-rauchtest --token-attrappe   zusätzlich der persönliche Claude-Zugang (Attrappen)
+    sudo -u wamo -H /opt/wamo/bin/wamo-job-rauchtest --persoenlich      zusätzlich der persönliche GitHub-Weg (Dispatcher 10, Attrappen)
+
+--persoenlich prüft ohne GitHub und ohne echtes Token: die Sandbox-Schritte klon, ausgabe und pruefung haben kein Netz (weder 1.1.1.1 noch
+github.com) und keinen Token und keinen Namen von Claude oder einem Dienst in der Umgebung, auch wenn der Aufrufer welche mitgibt; jeder
+Schritt startet nur sein festes Programm (ein anderer Befehl endet mit Exit 70); der Credential-Helfer wamo-git-zugang bekommt den Zugang
+über die Pipe, die git an ihn weiterreicht (Vorprobe aus C.5 Start 3), antwortet nur auf get für https://github.com und nie auf store, erase
+oder einen anderen Host; der Dispatcher meldet im ping Version 10 und persoenlich.
 
 --attrappe startet in der Sandbox eine Attrappe der Messages-API (127.0.0.1:20980, Platz 9, nur Standardbibliothek) und
 lässt Claude Code mit einem Dummy-Schlüssel dagegen laufen. Die Attrappe verlangt den Befehl
@@ -1313,6 +1320,76 @@ def github_app_echt() -> None:
     lesetoken(f"nur für {name}", name, ein_repo)
 
 
+# ---------------------------------------------------------------- persönlicher GitHub-Weg (Plan C, Dispatcher 10)
+TOKEN_ATTRAPPE = "ghp_" + "Rauchtest0" * 3 + "abcdef"  # kein echtes Token: 36 Zeichen nach ghp_, nur für den Helfer
+SCHRITT_UMGEBUNG_ERLAUBT = {"HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR", "LANG", "LC_ALL", "TZ", "TERM", "PYTHONDONTWRITEBYTECODE",
+                            "PYTHONIOENCODING", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT", "GIT_OPTIONAL_LOCKS",
+                            "GIT_CEILING_DIRECTORIES", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1",
+                            "GIT_CONFIG_VALUE_1", "WAMO_MODUS", "PWD", "OLDPWD", "SHLVL", "_"}
+
+
+def schritt_probe(job: str, modus: str, env: dict) -> dict:
+    argv = [str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT, "--platz", str(RAUCHTEST_PLATZ), "--modus", modus, "--",
+            str(D.WAECHTER / "wamo-job-klon.sh"), "--probe"]
+    p = subprocess.run(argv, capture_output=True, env=env, timeout=120, stdin=subprocess.DEVNULL)
+    try:
+        return json.loads(p.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"fehler": p.returncode}
+
+
+def persoenlicher_weg() -> None:
+    print("\n== Persönlicher GitHub-Weg (Sandbox-Schritte ohne Netz, Helfer, ping)", flush=True)
+    job, jobdir = neuer_auftrag()
+    for name in ("ausgabe", "ergebnis"):
+        (jobdir / name).mkdir(mode=0o700, exist_ok=True)
+    env = {**D.basis_env(), "GH_TOKEN": "ghp_" + "X" * 36, "ANTHROPIC_API_KEY": "sk-ant-api03-" + "Y" * 40, "VERCEL_TOKEN": "v" * 24,
+           "WAMO_GITHUB": "persoenlich", "GIT_AUTHOR_NAME": "rauchtest"}
+    try:
+        for modus in ("klon", "ausgabe", "pruefung"):
+            antwort = schritt_probe(job, modus, env)
+            namen = set(antwort.get("umgebung") or [])
+            pruefe(f"Modus {modus}: kein Netz (1.1.1.1 und github.com)", antwort.get("netz") == "zu" and antwort.get("github") == "zu",
+                   f"netz={antwort.get('netz')} github={antwort.get('github')}")
+            pruefe(f"Modus {modus}: nur die enge Umgebung, kein Token", bool(namen) and namen <= SCHRITT_UMGEBUNG_ERLAUBT
+                   and antwort.get("modus") == modus, ", ".join(sorted(namen - SCHRITT_UMGEBUNG_ERLAUBT)) or "ok")
+            p = subprocess.run([str(D.RUNNER), "--auftrag", job, "--projekt", PROJEKT, "--platz", str(RAUCHTEST_PLATZ), "--modus", modus,
+                                "--", "/bin/bash", "-c", "true"], capture_output=True, env=D.basis_env(), timeout=60, stdin=subprocess.DEVNULL)
+            pruefe(f"Modus {modus}: nur das feste Programm", p.returncode == 70, f"Exit {p.returncode}")
+        helfer_probe()
+        ping = subprocess.run([DISPATCH, "ping"], capture_output=True, text=True, env=D.basis_env(), timeout=60)
+        try:
+            antwort = json.loads(ping.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            antwort = {}
+        pruefe("ping: Version 10 oder höher, Feld persoenlich, Helfer da",
+               int(str(antwort.get("version", "0"))) >= 10 and isinstance(antwort.get("persoenlich"), bool) and antwort.get("github_helfer") is True,
+               f"version={antwort.get('version')} persoenlich={antwort.get('persoenlich')}")
+    finally:
+        entfernen(jobdir)
+
+
+def helfer_probe() -> None:
+    """Der Helfer über git credential fill: git reicht die Pipe weiter (Vorprobe aus C.5 Start 3), nur get für https://github.com."""
+    def fill(anfrage: bytes, aktion: str = "fill") -> bytes:
+        r, w = os.pipe()
+        os.write(w, f"username=x-access-token\npassword={TOKEN_ATTRAPPE}\n".encode())
+        os.close(w)
+        env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+               "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false"}
+        try:
+            p = subprocess.run(["/usr/bin/git", "-c", "credential.helper=", "-c", f"credential.helper={D.HELFER} {r}", "credential", aktion],
+                               input=anfrage, capture_output=True, env=env, cwd="/", pass_fds=(r,), timeout=30)
+        finally:
+            os.close(r)
+        return p.stdout
+    pruefe("Helfer: git reicht die Pipe weiter, get für github.com", f"password={TOKEN_ATTRAPPE}".encode() in fill(
+        b"protocol=https\nhost=github.com\n\n"))
+    pruefe("Helfer: kein Zugang für einen anderen Host", TOKEN_ATTRAPPE.encode() not in fill(b"protocol=https\nhost=example.com\n\n"))
+    pruefe("Helfer: store und erase ohne Wirkung", TOKEN_ATTRAPPE.encode() not in fill(
+        b"protocol=https\nhost=github.com\nusername=a\npassword=b\n\n", "approve") + fill(b"protocol=https\nhost=github.com\n\n", "reject"))
+
+
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--ausfuehren":
         D.beenden(ausfuehren(sys.argv[2]))  # hartes Ende wie der Dispatcher (Lebenslinien-Thread)
@@ -1337,6 +1414,8 @@ def main() -> int:
             github_app_mit_attrappe()
         if "--token-attrappe" in sys.argv:
             token_attrappe()
+        if "--persoenlich" in sys.argv:
+            persoenlicher_weg()
         if "--app-echt" in sys.argv:
             github_app_echt()
     finally:

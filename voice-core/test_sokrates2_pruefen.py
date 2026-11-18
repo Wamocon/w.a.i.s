@@ -186,7 +186,7 @@ def test_schlechte_aufrufe_werden_abgewiesen(roh):
 
 
 def test_die_version_zaehlt_hoch():
-    assert D.VERSION == "9"  # 9: gleichzeitige Aufträge (8: Trennung je Profil im Kern-Kanal, 7: Kern-Kanal, 6: Befehl pruefen)
+    assert D.VERSION == "10"  # 10: persönlicher GitHub-Weg (9: gleichzeitige Aufträge, 8: Trennung je Profil, 7: Kern-Kanal, 6: pruefen)
 
 
 @pytest.mark.parametrize("geheim, erwartet", [
@@ -220,7 +220,7 @@ def test_ping_meldet_ob_pruefen_aktiv_ist_und_die_pruefsumme_der_allowlist(welt)
     erwartet = hashlib.sha256((VOICE_CORE / "abnahme_befehl.py").read_bytes()).hexdigest()
     D.cmd_ping()
     ping = welt.emitted[-1]
-    assert ping["pruefen"] is True and ping["abnahme_befehl_sha256"] == erwartet and ping["version"] == "9" and ping["ok"] is True
+    assert ping["pruefen"] is True and ping["abnahme_befehl_sha256"] == erwartet and ping["version"] == "10" and ping["ok"] is True
     welt.geheim = {}
     welt.emitted.clear()
     D.cmd_ping()
@@ -1136,7 +1136,10 @@ def runner() -> str:
 
 def test_der_laeufer_kennt_den_modus_pruefen_mit_netz_zu_und_zeitlimit_120(runner):
     assert "--modus) MODUS=${2-}; shift 2 ;;" in runner
-    assert re.search(r'\[\[ \$MODUS =~ \^\(lauf\|pruefen\)\$ \]\]', runner)
+    # Modi als case mit Ablehnung als Standard (seit Dispatcher 10 dazu die drei Schritte ohne Netz des persönlichen GitHub-Wegs)
+    assert re.search(r'^case "\$MODUS" in\n  lauf\|pruefen\|klon\|ausgabe\|pruefung\) ;;\n  \*\) fehler', runner, re.M)
+    # Netz und Zeitlimit: nur der Auftragslauf hat Netz, jeder andere Modus (pruefen eingeschlossen) bekommt --unshare-net
+    assert '[ "$MODUS" = lauf ] || NETZ_OPTION=--unshare-net' in runner
     assert "ZEITLIMIT_PRUEFEN_S=120" in runner
     assert 'ZEIT=${ZEIT:-$ZEITLIMIT_PRUEFEN_S}' in runner or "ZEITLIMIT_PRUEFEN_S" in runner
     assert re.search(r'NETZ_OPTION=--unshare-net', runner)

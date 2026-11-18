@@ -347,8 +347,12 @@ I2_ABLAUF_TAGE = 30
 I2_BEREICHE = {"MAX_TURNS": (1, 200), "MAX_START_STUNDE": (1, 60), "MAX_START_TAG": (1, 200), "MAX_LAUFZEIT_TAG_S": (60, 86400),
                "MAX_FOLGEN": (0, 20), "MIN_ABSTAND_S": (0, 3600), "MIN_PLATZ_MB": (100, 1000000), "MAX_VERSUCH_STUNDE": (1, 60),
                "MAX_NEU_STUNDE_PROFIL": (1, 60), "MAX_NEU_TAG_PROFIL": (1, 200), "MAX_VERSUCH_STUNDE_PROFIL": (1, 60),
-               "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400), "MAX_PARALLEL": (1, 6), "MAX_PARALLEL_PROFIL": (1, 6)}
-I2_SCHLUESSEL = {"KANAL", "ABLAUF", "ARTEN", "REPOS", "DIENSTE", "MAX_BUDGET_USD", *I2_BEREICHE}
+               "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400), "MAX_PARALLEL": (1, 6), "MAX_PARALLEL_PROFIL": (1, 6),
+               # Dispatcher 10 (Plan C, C.2.7): persönlicher GitHub-Weg
+               "MAX_EINREICHEN_TAG": (1, 50), "MAX_EINREICHEN_TAG_PROFIL": (1, 50), "MAX_KLON_MB": (100, 4096)}
+# Schlüssel, die das Skript nur schreibt, wenn kanal --persoenlich sie gesetzt hat (Dispatcher 9 schlösse sonst den Kanal)
+I2_SCHLUESSEL_PERSOENLICH = {"PERSOENLICH", "MAX_EINREICHEN_TAG", "MAX_EINREICHEN_TAG_PROFIL", "MAX_KLON_MB"}
+I2_SCHLUESSEL = {"KANAL", "ABLAUF", "ARTEN", "REPOS", "DIENSTE", "MAX_BUDGET_USD", "PERSOENLICH", *I2_BEREICHE}
 
 
 def _std_werte(skript: str) -> dict[str, str]:
@@ -364,8 +368,11 @@ def test_i2_standardwerte_des_skripts():
 
 def test_i2_der_dispatcher_kennt_dieselben_schluessel_und_bereiche():
     schluessel = re.search(r"^KONFIG_SCHLUESSEL=\(([^)]*)\)", SKRIPT, flags=re.M | re.S)
-    assert schluessel
-    assert set(schluessel.group(1).split()) == set(K.BEKANNTE_SCHLUESSEL) == I2_SCHLUESSEL
+    persoenlich = re.search(r"^KONFIG_SCHLUESSEL_PERSOENLICH=\(([^)]*)\)", SKRIPT, flags=re.M | re.S)
+    assert schluessel and persoenlich
+    assert set(persoenlich.group(1).split()) == set(K.SCHLUESSEL_PERSOENLICH) == I2_SCHLUESSEL_PERSOENLICH
+    assert set(schluessel.group(1).split()) | set(persoenlich.group(1).split()) == set(K.BEKANNTE_SCHLUESSEL) == I2_SCHLUESSEL
+    assert not set(schluessel.group(1).split()) & I2_SCHLUESSEL_PERSOENLICH  # nie unbedingt geschrieben
     assert dict(K.ZAHLEN) == I2_BEREICHE
     assert K.MAX_ABLAUF_TAGE == 400 and K.MAX_REPOS == 10 and K.MAX_VERSUCH_STUNDE_FEST == 60
 
@@ -377,7 +384,7 @@ def test_i2_die_standardwerte_des_dispatchers_gleichen_denen_des_skripts():
     # gleichzeitig; die Standards 6 und 3 schreibt das Skript (schluessel, kanal) ausdrücklich
     assert (standard.max_parallel, standard.max_parallel_profil) == (1, 1)
     for schluessel in I2_BEREICHE:
-        if schluessel in ("MAX_PARALLEL", "MAX_PARALLEL_PROFIL"):
+        if schluessel in ("MAX_PARALLEL", "MAX_PARALLEL_PROFIL") or schluessel in I2_SCHLUESSEL_PERSOENLICH:
             continue
         assert str(getattr(standard, schluessel.lower())) == I2_STANDARD[schluessel], schluessel
     assert standard.max_budget_usd == I2_STANDARD["MAX_BUDGET_USD"]
@@ -394,7 +401,7 @@ def test_i2_die_angelegte_datei_wird_vom_dispatcher_angenommen():
     std = _std_werte(SKRIPT)
     ablauf = (date(2026, 11, 11) + timedelta(days=int(std["ABLAUF_TAGE"]))).strftime("%Y%m%d")
     werte = {"KANAL": std["KANAL"], "ABLAUF": ablauf, "ARTEN": "", "REPOS": "", "DIENSTE": "",
-             **{schluessel: std[schluessel] for schluessel in (*I2_BEREICHE, "MAX_BUDGET_USD")}}
+             **{schluessel: std[schluessel] for schluessel in (*I2_BEREICHE, "MAX_BUDGET_USD") if schluessel not in I2_SCHLUESSEL_PERSOENLICH}}
     konfig = K.konfig_lesen("/t/kernkanal.conf", jetzt=jetzt, lesen=_attrappe("\n".join(f"{k}={v}" for k, v in werte.items()) + "\n"))
     # Dispatcher 9: das Skript schreibt die Standards 6 und 3 ausdrücklich (fehlende Schlüssel hießen einer)
     assert konfig == K.Konfig(kanal="zu", ablauf=date(2026, 12, 11), max_parallel=6, max_parallel_profil=3)
@@ -472,12 +479,16 @@ def test_die_standardkosten_des_skripts_nimmt_der_kern_an(monkeypatch):
 
 def test_das_dropin_setzt_genau_die_variablen_die_der_kern_liest():
     namen = re.findall(r"echo \"Environment=([A-Z_]+)=", _funktion(SKRIPT, "drop_in_text"))
-    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG, eb.ENV_MITGLIEDER, eb.ENV_HAUS}
+    assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG, eb.ENV_MITGLIEDER, eb.ENV_HAUS,
+                          eb.ENV_GITHUB}
     assert len(namen) == len(set(namen))
     assert "WAMO_ENTWICKLUNG" not in namen and eb.ENV_BEFEHLE not in namen  # Standard aus, nie nebenbei an
-    # WAMO_ENTWICKLUNG_GITHUB schreibt erst das Skript aus Paket D-a (schalter --github an|aus, C.2.7); bis dahin fehlt die Zeile, der Kern
-    # liest dann aus (Standard). D-a nimmt ENV_GITHUB in die Menge oben auf und streicht ihn hier.
-    assert set(eb.ALLE_VARIABLEN) - set(namen) <= {eb.ENV_BEFEHLE, eb.ENV_GITHUB} and eb.ENV_BEFEHLE not in namen
+    assert set(eb.ALLE_VARIABLEN) - set(namen) == {eb.ENV_BEFEHLE}
+
+
+def test_das_dropin_schreibt_den_schalter_fuer_github_immer_und_standardmaessig_aus():
+    rumpf = _funktion(SKRIPT, "drop_in_text")
+    assert f"Environment={eb.ENV_GITHUB}=${{GITHUB:-aus}}" in rumpf  # Paket D-a: schalter ... --github an|aus (C.2.7)
 
 
 def test_das_dropin_schreibt_den_schalter_fuer_hausmodelle_immer_und_standardmaessig_aus():
@@ -763,8 +774,6 @@ NAMEN_DER_UMSETZUNG = (
 )
 # Variablen, die es schon vor dem Vorhaben gab (stehen in der README und in den .env.example, nicht im Namensvertrag)
 VORHANDENE_VARIABLEN = {"WAMO_BETRIEB", "WAMO_ENTWICKLUNG", "WAMO_ABNAHME_BEFEHLE", "WAMO_CLAUDE_SCHLUESSEL_PROFIL"}
-# Neu mit Plan C (Paket K); die Zeile im Namensvertrag von CLAUDE.md schreibt Paket R (C.9), danach fällt dieser Eintrag weg
-VARIABLEN_BIS_PAKET_R = {"WAMO_ENTWICKLUNG_GITHUB"}
 
 
 # Zugangsart haus (P6b, docs/ausrollen-neue-nutzer.md, Abschnitt 4.7)
@@ -782,7 +791,7 @@ def test_jede_variable_der_neuen_dateien_steht_im_namensvertrag():
                     INFRA / "wamo_job_kern_rauchtest.py", INFRA / "wamo_job_kernkanal.py")
     gefunden = {n for datei in neue_dateien for n in re.findall(r"\bWAMO_[A-Z0-9]+(?:_[A-Z0-9]+)*\b", _text(datei))}
     assert len(gefunden) >= 8
-    fehlen = sorted(n for n in gefunden - VORHANDENE_VARIABLEN - VARIABLEN_BIS_PAKET_R if n not in NAMENSVERTRAG)
+    fehlen = sorted(n for n in gefunden - VORHANDENE_VARIABLEN if n not in NAMENSVERTRAG)
     assert not fehlen, f"nicht im Namensvertrag: {fehlen}"
 
 
@@ -886,7 +895,8 @@ def test_p5_die_grenzen_je_profil_liegen_unter_den_gesamtgrenzen_und_das_skript_
 
 
 def test_p5_skript_und_rauchtest_verlangen_dispatcher_9():
-    assert re.search(r"^MIN_DISPATCHER=9\b", SKRIPT, flags=re.M) and D.VERSION == "9"
+    assert re.search(r"^MIN_DISPATCHER=9\b", SKRIPT, flags=re.M) and int(D.VERSION) >= 9
+    assert re.search(r"^MIN_DISPATCHER_PERSOENLICH=10\b", SKRIPT, flags=re.M) and D.VERSION == "10"  # Plan C: kanal --persoenlich, --github
     assert ">= 9" in (INFRA / "wamo_job_kern_rauchtest.py").read_text(encoding="utf-8")
     assert re.search(r"^PARALLEL_HART=6\b", SKRIPT, flags=re.M) and K.PARALLEL_HART == 6
     assert "grenze_profil" in K.KANAL_GRUENDE  # das Skript prüft das installierte Modul auf diesen Code
@@ -1088,15 +1098,32 @@ def test_c28_wertetabelle_der_regel(scopes, ausnahmen, erwartet):
     assert erwartet is None or (erwartet in K.GITHUB_GRUENDE and erwartet in K.EINREICHEN_GRUENDE)
 
 
+@pytest.mark.parametrize("kanal", ["pc", "lokal"])
 @pytest.mark.parametrize("feld", ["github", "scopes_ausnahmen"])
-def test_c28_dispatcher_9_weist_die_neuen_kopffelder_ab(feld):
-    """Fail closed bis Paket D-a: Ein Dispatcher ohne den persönlichen Weg lehnt beide Felder als unbekannt ab. D-a ändert parse_header
-    (Felder nur im Kern-Kanal, scopes_ausnahmen nur mit github=persoenlich, Werte nur aus SCOPES_AUSNAHMEN) und passt diesen Test an."""
+def test_c28_dispatcher_10_nimmt_die_neuen_kopffelder_nur_im_kern_kanal(feld, kanal, monkeypatch):
+    """Paket D-a: beide Felder nur im Kern-Kanal, scopes_ausnahmen nur mit github=persoenlich, Werte nur aus SCOPES_AUSNAHMEN, sortiert und
+    ohne Doppel. Außerhalb des Kern-Kanals bleibt es fail closed."""
     wert = G.GITHUB_PERSOENLICH if feld == G.FELD_GITHUB else []
-    roh = json.dumps({"auftrag": "x", "zugang": "haus", "profil": KENNUNG, feld: wert}) + "\n"
-    assert D.VERSION == "9"
-    with pytest.raises(D.Abgewiesen, match="unbekannte Felder"):
+    roh = json.dumps({"auftrag": "x", "zugang": "haus", "profil": KENNUNG, "repo": "acme/demo", feld: wert}) + "\n"
+    assert D.VERSION == "10"
+    monkeypatch.setattr(D, "KANAL", kanal)
+    with pytest.raises(D.Abgewiesen):
         D.parse_header(roh.encode("utf-8"))
+
+
+def test_c28_im_kern_kanal_gelten_die_ausnahmen_aus_der_festen_liste(monkeypatch):
+    monkeypatch.setattr(D, "KANAL", "kern")
+
+    def kopf(**felder):
+        return (json.dumps({"auftrag": "x", "zugang": "haus", "profil": KENNUNG, "repo": "acme/demo", **felder}) + "\n").encode("utf-8")
+    alle = sorted(G.SCOPES_AUSNAHMEN)
+    k = D.parse_header(kopf(**{G.FELD_GITHUB: G.GITHUB_PERSOENLICH, G.FELD_SCOPES_AUSNAHMEN: alle}))
+    assert (k.github, k.scopes_ausnahmen) == (G.GITHUB_PERSOENLICH, tuple(alle))
+    for schlecht in ([*G.SCOPES_NIE[:1]], [G.SCOPES_UNBEDENKLICH[0]], ["neu_bei_github"], [alle[1], alle[0]], [alle[0], alle[0]], "gist"):
+        with pytest.raises(D.Abgewiesen):
+            D.parse_header(kopf(**{G.FELD_GITHUB: G.GITHUB_PERSOENLICH, G.FELD_SCOPES_AUSNAHMEN: schlecht}))
+    with pytest.raises(D.Abgewiesen):
+        D.parse_header(kopf(**{G.FELD_SCOPES_AUSNAHMEN: []}))  # nur mit github
 
 
 # ---------------------------------------------------------------- C.2.2: GitHub-Zeile und Token-Formen
@@ -1158,9 +1185,9 @@ def test_c24_ereignisse_und_zustaende():
 
 
 def test_c52_die_modi_der_sandbox_schliessen_die_heutigen_ein():
-    treffer = re.search(r"\[\[ \$MODUS =~ \^\(([a-z|]+)\)\$ \]\]", _text(INFRA / "wamo-job.sh"))
-    assert treffer, "D-a: beim Umbau von wamo-job.sh auf case dieses Muster anpassen"
-    assert set(treffer.group(1).split("|")) <= set(G.SANDBOX_MODI)
+    treffer = re.search(r"^case \"\$MODUS\" in\n  ([a-z|]+)\) ;;\n  \*\) fehler", _text(INFRA / "wamo-job.sh"), flags=re.M)
+    assert treffer, "wamo-job.sh: case mit Ablehnung als Standard (C.5.2)"
+    assert tuple(treffer.group(1).split("|")) == G.SANDBOX_MODI
     assert G.SANDBOX_MODI == ("lauf", "pruefen", "klon", "ausgabe", "pruefung")
     assert G.SANDBOX_MODI_NETZLOS == ("klon", "ausgabe", "pruefung")
     assert G.SPERREN == (".lauf", ".einreichen", "kernkanal")

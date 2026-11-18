@@ -1,0 +1,12 @@
+# WAMO: täglich die Kopien privater Repos aus Entwicklungsaufträgen aufräumen (wamo-job-aufraeumen.service, Plan C, C.10).
+# Installiert durch wamo-job-einrichten.sh, entfernt durch wamo-job-rueckweg.sh, wenn es den persönlichen GitHub-Weg danach nicht mehr gibt.
+[Unit]
+Description=WAMO: Kopien privater Repos aus Entwicklungsaufträgen täglich aufräumen
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

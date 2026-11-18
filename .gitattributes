@@ -32,3 +32,6 @@ infra/sokrates2/wamo-rd/erweiterung/*.js text eol=lf
 infra/sokrates2/wamo-rd/erweiterung/*.css text eol=lf
 # Signierte Beispieldaten des Update-Vertrags (desktop/update.test.js): Bytes nie umschreiben, sonst passt die Signatur nicht
 desktop/testdaten/update/** -text
+*.service text eol=lf
+*.timer text eol=lf
+infra/sokrates2/wamo-git-zugang text eol=lf

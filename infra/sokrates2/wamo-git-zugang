@@ -1,0 +1,145 @@
+#!/usr/bin/python3 -I
+"""Credential-Helfer für die git-Aufrufe des Dispatchers im persönlichen GitHub-Weg (Plan C, Dispatcher 10).
+
+Installiert als /opt/wamo/bin/wamo-git-zugang (root:wamo 0750) durch wamo-job-einrichten.sh. Nur der Dispatcher setzt ihn, je git-Aufruf
+außerhalb der Sandbox (Klon, ls-remote, Push) mit
+
+    -c credential.helper= -c "credential.helper=/opt/wamo/bin/wamo-git-zugang <fd>"
+
+und reicht ihm eine Pipe als geerbten Deskriptor <fd> weiter, in die er vorher genau "username=<name>\npassword=<token>\n" geschrieben und
+deren Schreibende er geschlossen hat. git ruft den Helfer als "wamo-git-zugang <fd> <aktion>" auf. Das Token steht so in keiner Umgebung,
+keinem argv und keiner Datei; die Nummer des Deskriptors ist nicht geheim.
+
+Regeln:
+  * nur die Aktion get antwortet, und nur für genau protocol=https und host=github.com (ohne Port); store und erase lesen die Anfrage und
+    enden ohne jede Wirkung (git speichert nie etwas), jede andere Aktion ebenso
+  * der Deskriptor muss eine Pipe sein (nie eine Datei, die ein Aufrufer untergeschoben hätte), er wird höchstens einmal gelesen und
+    immer geschlossen
+  * der Inhalt muss genau die Form oben haben (Benutzername x-access-token oder ein GitHub-Login, Token ghp_ mit 36 Zeichen oder
+    github_pat_ mit 82 Zeichen); sonst antwortet der Helfer nichts, git scheitert dann ohne Rückfrage (GIT_TERMINAL_PROMPT=0)
+  * der Prozess ist nicht dumpable (PR_SET_DUMPABLE=0, keine Core-Datei), der Puffer wird nach der Antwort überschrieben
+  * keine Ausgabe außer der Antwort, keine Fehlertexte mit Inhalt, kein Protokoll
+
+Exit 0 in allen Fällen, in denen git weitermachen soll (auch ohne Antwort), 2 bei falscher Aufrufform. Nur Standardbibliothek.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import stat
+import sys
+
+FD_RE = re.compile(r"[3-9]|[1-9][0-9]{1,3}")
+ZUGANG_RE = re.compile(rb"username=(?:x-access-token|[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\n"
+                       rb"password=(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})\n")
+MAX_ANFRAGE = 64 * 1024
+MAX_ZUGANG = 512
+PROTOKOLL = b"https"
+HOST = b"github.com"
+
+
+def nicht_dumpbar() -> None:
+    """PR_SET_DUMPABLE=0 und keine Core-Datei: /proc/<pid>/mem und environ gehören dann root (Muster des Dispatchers)."""
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (ImportError, ValueError, OSError):
+        pass
+    try:
+        import ctypes
+        ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)
+    except (OSError, AttributeError, ValueError, TypeError):
+        pass
+
+
+def anfrage_lesen(eingabe) -> dict[bytes, bytes]:
+    """Die Anfrage von git (key=value je Zeile bis zur Leerzeile oder EOF). Nur die ersten Werte zählen, Listen wie capability[] nicht."""
+    daten = eingabe.read(MAX_ANFRAGE + 1)
+    felder: dict[bytes, bytes] = {}
+    if len(daten) > MAX_ANFRAGE:
+        return {}
+    for zeile in daten.split(b"\n"):
+        if not zeile:
+            break
+        name, gleich, wert = zeile.partition(b"=")
+        if gleich and name not in felder:
+            felder[name] = wert
+    return felder
+
+
+def zugang_lesen(fd: int) -> tuple[bytearray, int] | None:
+    """Liest die Pipe einmal bis EOF in einen eigenen Puffer (höchstens MAX_ZUGANG Bytes): (Puffer, Länge). None, wenn fd keine Pipe ist,
+    nichts oder zu viel kommt."""
+    try:
+        if not stat.S_ISFIFO(os.fstat(fd).st_mode):
+            return None
+    except OSError:
+        return None
+    puffer = bytearray(MAX_ZUGANG + 1)
+    ansicht = memoryview(puffer)
+    ende = 0
+    try:
+        while ende <= MAX_ZUGANG:
+            if hasattr(os, "readv"):
+                n = os.readv(fd, [ansicht[ende:]])
+            else:  # nur für Tests unter Windows (dort gibt es readv nicht)
+                stueck = os.read(fd, len(puffer) - ende)
+                n = len(stueck)
+                ansicht[ende:ende + n] = stueck
+            if n == 0:
+                break
+            ende += n
+    except OSError:
+        puffer[:] = bytes(len(puffer))
+        return None
+    finally:
+        ansicht.release()
+    if ende == 0 or ende > MAX_ZUGANG:
+        puffer[:] = bytes(len(puffer))
+        return None
+    return puffer, ende
+
+
+def antworten(fd: int, ausgabe_fd: int = 1) -> bool:
+    """Liest den Zugang und schreibt ihn unverändert als Antwort; True, wenn geantwortet wurde. Überschreibt den Puffer immer."""
+    gelesen = zugang_lesen(fd)
+    if gelesen is None:
+        return False
+    puffer, ende = gelesen
+    ansicht = memoryview(puffer)
+    try:
+        if not ZUGANG_RE.fullmatch(ansicht[:ende]):
+            return False
+        geschrieben = 0
+        while geschrieben < ende:
+            geschrieben += os.write(ausgabe_fd, ansicht[geschrieben:ende])
+        return True
+    except OSError:
+        return False
+    finally:
+        ansicht.release()
+        puffer[:] = bytes(len(puffer))
+
+
+def main(argv: list[str], eingabe=None, ausgabe_fd: int = 1) -> int:
+    if len(argv) != 3 or not FD_RE.fullmatch(argv[1]):
+        return 2
+    nicht_dumpbar()
+    fd = int(argv[1])
+    aktion = argv[2]
+    try:
+        felder = anfrage_lesen(eingabe if eingabe is not None else sys.stdin.buffer)
+        if aktion != "get" or felder.get(b"protocol") != PROTOKOLL or felder.get(b"host") != HOST:
+            return 0  # store, erase, fremde Hosts: nichts lesen, nichts antworten
+        antworten(fd, ausgabe_fd)
+        return 0
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
