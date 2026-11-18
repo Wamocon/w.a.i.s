@@ -108,11 +108,12 @@ class PersonaPaketATests(unittest.TestCase):
         # mit "Du bist W.A.I.S.", die Namensregel (persona.NAMENSREGEL) ersetzt die alte Zeile zum Namen, die Anrede bei
         # mehreren Personen und das PC-Beispiel nennen die Kurzform, die PC-Meldungen W.A.I.S. Sonst ist der Prompt unverändert
         # (Abschnitte, Reihenfolge, Schalter). Neu berechnet am 16.11.2026: Die Marker-Regel im Gesprächsteil nennt die unsichere
-        # Antwort und den eigenen Denkausdruck (SatzendeMarkerTests).
+        # Antwort und den eigenen Denkausdruck (SatzendeMarkerTests). Neu berechnet am 18.11.2026: eine Regel zu fehler_erklaeren
+        # (fehlerbuch.py) nach "Jede Aktion genau einmal"; ohne diese Zeile ergeben beide Prompts die vorigen Prüfsummen 7eda643b... und 7d4acf6a....
         self.assertEqual(hashlib.sha256(voll.encode()).hexdigest(),
-                         "7eda643bdcc9e4403ed2602773f52878d43f0e8f770379d2d8e68dc71e0883db")
+                         "f14e98515d3096c9b5108d26614ebdf6aa400637bf04925dffe2ee8976862ae4")
         self.assertEqual(hashlib.sha256(kurz.encode()).hexdigest(),
-                         "7d4acf6a04dff39b415165edea81674edc79361d0908f7f1dda777dbf79fbb99")
+                         "cd7401b8261d52851934cc360b4f173273a8532090666e29e1fb374e408c6de0")
 
     def test_schalter_aus_der_umgebung(self):
         from persona import persona_pc_ordner_an, persona_rueckfragen_an
