@@ -15,6 +15,9 @@ Seit dem 18.11.2026 schneidet auch der Prüfer jede Äußerung wie das Einlernen
 Ein Prozess hält das Modell genau einmal (MODELL am Ende der Datei), alle Sitzungen und Profile benutzen dieselbe Instanz. Der Rechner
 ist nicht an ein Profil gebunden: Abdrücke und Prüfzustand gehören je Sitzung zum Gate (stimme_gate.py). Gerechnet wird nacheinander
 (Sperre im Embedder), damit nie zwei Sitzungen gleichzeitig denselben Extraktor benutzen. Rohton wird nie gespeichert.
+
+Embedder und StimmModell dienen auch dem zweiten Modell im Schattenbetrieb (stimme_schatten.py, seit 18.11.2026): Embedder nimmt die Zahl
+der Werte des Modells (dim), StimmModell lässt Bereitstellen der Datei, Bau des Rechners und den Hinweis bei einem Fehlschlag überschreiben.
 """
 
 from __future__ import annotations
@@ -100,15 +103,16 @@ class ModellQuelle(Protocol):
 class Embedder:
     """Rechnet aus 16-Bit-PCM (mono) einen normierten Abdruck. Blockiert: im Thread aufrufen. Mehrere Threads rechnen nacheinander."""
 
-    def __init__(self, pfad: Path | None = None, threads: int = THREADS, extraktor: object | None = None):
+    def __init__(self, pfad: Path | None = None, threads: int = THREADS, extraktor: object | None = None, dim: int = DIM):
         if extraktor is None:
             import sherpa_onnx
 
             konfig = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(pfad or modell_pfad()), num_threads=threads)
             extraktor = sherpa_onnx.SpeakerEmbeddingExtractor(konfig)
-        if extraktor.dim != DIM:
-            raise ValueError(f"Modell liefert {extraktor.dim} statt {DIM} Werte")
+        if extraktor.dim != dim:
+            raise ValueError(f"Modell liefert {extraktor.dim} statt {dim} Werte")
         self._extraktor = extraktor
+        self._dim = dim
         self._sperre = threading.Lock()
 
     def embed(self, pcm: bytes, sample_rate: int) -> np.ndarray:
@@ -117,14 +121,17 @@ class Embedder:
             strom.accept_waveform(sample_rate=sample_rate, waveform=pcm_in_float(pcm))
             strom.input_finished()
             roh = np.array(self._extraktor.compute(strom), dtype=np.float32)
-        if roh.shape != (DIM,) or not np.all(np.isfinite(roh)) or not float(np.linalg.norm(roh)) > 0:
+        if roh.shape != (self._dim,) or not np.all(np.isfinite(roh)) or not float(np.linalg.norm(roh)) > 0:
             raise ValueError("Das Modell lieferte keinen gültigen Abdruck (NaN, unendlich, Nullvektor oder falsche Länge)")
         return normalisieren(roh)
 
 
 class StimmModell:
     """Lädt das Modell einmal je Prozess (Download beim ersten Mal, Prüfsumme auch für eine schon vorhandene Datei). get liefert den
-    Embedder oder None; dann neuer Versuch nach NEUER_VERSUCH_SECS. Wirft nie."""
+    Embedder oder None; dann neuer Versuch nach NEUER_VERSUCH_SECS. Wirft nie. Unterklassen (stimme_schatten.SchattenModell) überschreiben
+    _datei_bereit, _rechner_bauen und _fehlgeschlagen."""
+
+    ETIKETT = "Stimmabdruck"  # Anfang der Logzeilen
 
     def __init__(self, pfad: Path | None = None, sha256: str = MODELL_SHA256, uhr: Callable[[], float] = time.monotonic):
         self._pfad = pfad
@@ -163,23 +170,35 @@ class StimmModell:
         return self._embedder
 
     async def _laden(self) -> None:
-        pfad = self.pfad
         try:
-            if not pfad.is_file():
-                await herunterladen(pfad, sha256=self._sha256)
-            elif await asyncio.to_thread(datei_sha256, pfad) != self._sha256:
-                if _im_cache_ordner(pfad):
-                    pfad.unlink()  # beschädigt oder ausgetauscht: beim nächsten Versuch neu laden
-                # Ein Pfad aus WAMO_STIMME_MODELL gehört dem Betreiber: nie löschen
-                raise ValueError("Prüfsumme der Modelldatei stimmt nicht")
-            self._embedder = await asyncio.to_thread(Embedder, pfad)
+            pfad = await self._datei_bereit()
+            self._embedder = await asyncio.to_thread(self._rechner_bauen, pfad)
             self._gescheitert_um = None
             self._fehlversuche = 0
-            logger.info("Stimmabdruck: Modell {} geladen", pfad.name)
+            logger.info("{}: Modell {} geladen", self.ETIKETT, pfad.name)
         except Exception as e:  # die Stimmprüfung ist dann nicht bereit, das Gespräch läuft weiter
             self._gescheitert_um = self._uhr()
             self._fehlversuche += 1
-            logger.warning("Stimmabdruck: Modell nicht verfügbar ({}: {})", type(e).__name__, e)
+            self._fehlgeschlagen(e)
+
+    async def _datei_bereit(self) -> Path:
+        """Die geprüfte Modelldatei: fehlt sie, wird sie geladen; stimmt ihre Summe nicht, ist das ein Fehler."""
+        pfad = self.pfad
+        if not pfad.is_file():
+            await herunterladen(pfad, sha256=self._sha256)
+        elif await asyncio.to_thread(datei_sha256, pfad) != self._sha256:
+            if _im_cache_ordner(pfad):
+                pfad.unlink()  # beschädigt oder ausgetauscht: beim nächsten Versuch neu laden
+            # Ein Pfad aus WAMO_STIMME_MODELL gehört dem Betreiber: nie löschen
+            raise ValueError("Prüfsumme der Modelldatei stimmt nicht")
+        return pfad
+
+    def _rechner_bauen(self, pfad: Path) -> Embedder:
+        """Blockiert (sherpa-onnx lädt die Datei): im Thread aufrufen."""
+        return Embedder(pfad)
+
+    def _fehlgeschlagen(self, e: Exception) -> None:
+        logger.warning("Stimmabdruck: Modell nicht verfügbar ({}: {})", type(e).__name__, e)
 
 
 def _im_cache_ordner(pfad: Path) -> bool:
@@ -359,13 +378,13 @@ def als_vektor(v: np.ndarray) -> str:
     return "[" + ",".join(f"{x:.6f}" for x in v.tolist()) + "]"
 
 
-def aus_vektor(wert: object) -> np.ndarray | None:
-    """Liest den Abdruck aus der Datenbank (pgvector kommt als Text oder Liste). Falsche Länge, Zahlen mit Fehler oder ein Nullvektor
-    ergeben None."""
+def aus_vektor(wert: object, dim: int = DIM) -> np.ndarray | None:
+    """Liest den Abdruck aus der Datenbank (pgvector kommt als Text oder Liste). Falsche Länge (nicht dim Werte), Zahlen mit Fehler oder ein
+    Nullvektor ergeben None."""
     try:
         if isinstance(wert, str):
             wert = [float(x) for x in wert.strip("[] ").split(",") if x.strip()]
-        if not isinstance(wert, list) or len(wert) != DIM:
+        if not isinstance(wert, list) or len(wert) != dim:
             return None
         v = np.array(wert, dtype=np.float32)
     except (TypeError, ValueError):

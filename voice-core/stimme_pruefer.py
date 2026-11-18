@@ -38,6 +38,10 @@ Klingt es nach der Person (Wert ab der Schwelle für eigen, StimmGate.schwelle_f
 Ein frühes eigen merkt sich der Prüfer auch für den Wächter (frueh_eigen). Kurze Äußerungen ("Stopp", unter einer Sekunde) bekommen also nur
 das Urteil am Sprechende: WAMO hält dort rund 0,5 bis 1 Sekunde später an als bisher, und das ist so gewollt. Das frühe Urteil ändert
 weder den Prüfzustand im Gate (Werkzeuge) noch das Urteil, auf das das Transkript wartet, und es geht nicht an die Oberfläche.
+
+Schattenbetrieb (stimme_schatten.py, WAMO_STIMME_SCHATTEN, seit 18.11.2026): Mit einem Schattenmodell rechnet der Prüfer nach jedem Urteil
+am Sprechende denselben Ton auch mit dem zweiten Modell, in einer eigenen Aufgabe nach der Meldung des Urteils; ins Log geht nur eine Zeile
+mit Zahlen. Das Urteil bleibt allein bei TitaNet, das frühe Urteil rechnet ohne Schatten.
 """
 
 from __future__ import annotations
@@ -68,6 +72,7 @@ from soft_interrupt import StimmUrteilFrame
 from stimme_einlernen import Einlernen, Speichern
 from stimme_gate import EIGEN, KURZ, UNKLAR, StimmGate
 from stimme_modell import ModellQuelle, kosinus, pruefsegment
+from stimme_schatten import SchattenPruefung
 
 RING_SECS = 10.0
 MAX_PRUEF_SECS = 8.0
@@ -108,13 +113,17 @@ class Stimmpruefer(FrameProcessor):
         sagen: Callable[[str], Awaitable[None]],
         uhr: Callable[[], float] = time.time,
         nachweis: Callable[[], bool] | None = None,
+        schatten: ModellQuelle | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._gate = gate
         self._modell = modell
         self._uhr = uhr  # Wanduhr wie VADUser...SpeakingFrame.timestamp
-        self._einlernen = Einlernen(gate, modell, senden=self._senden, sagen=sagen, speichern=speichern, uhr=uhr, nachweis=nachweis)
+        self._einlernen = Einlernen(gate, modell, senden=self._senden, sagen=sagen, speichern=speichern, uhr=uhr, nachweis=nachweis,
+                                    schatten=schatten)
+        # Zweites Modell im Schattenbetrieb (stimme_schatten.py): nur messen, nie entscheiden; None ohne WAMO_STIMME_SCHATTEN
+        self._schatten = SchattenPruefung(gate, schatten) if schatten is not None else None
         self._ring: deque[tuple[float, int, bytes]] = deque()  # (Ende des Pakets auf der Uhr, laufende Nummer, Ton)
         self._paket = 0  # Nummer des letzten Pakets im Ring (zählt nur hoch, auch wenn die Uhr springt)
         self._ring_secs = 0.0
@@ -372,7 +381,9 @@ class Stimmpruefer(FrameProcessor):
         try:
             if rechner is None or not pcm:
                 raise RuntimeError("kein Modell" if rechner is None else "kein Ton ausgeschnitten")
+            start = time.perf_counter()
             wert = kosinus(await asyncio.to_thread(rechner.embed, pcm, rate), abdruck)
+            titanet_ms = (time.perf_counter() - start) * 1000
             if not math.isfinite(wert):
                 raise ValueError("Ähnlichkeit ist keine endliche Zahl")
         except Exception as e:  # nicht geprüft heißt nicht erkannt: nie das alte Ergebnis weiterverwenden
@@ -383,7 +394,11 @@ class Stimmpruefer(FrameProcessor):
             return
         if gate.abdruck is None:
             return
-        await self._ergebnis(nr, gate.einstufen(wert, secs, ueberlappung), wert, secs, ueberlappung, gehoert_um, gate.schwelle_fuer(secs))
+        urteil = gate.einstufen(wert, secs, ueberlappung)
+        await self._ergebnis(nr, urteil, wert, secs, ueberlappung, gehoert_um, gate.schwelle_fuer(secs))
+        if self._schatten is not None:
+            # erst jetzt: das Urteil ist gemeldet, der Schatten rechnet in einer eigenen Aufgabe und hält keine Prüfung auf
+            self._schatten.starten(pcm, rate, secs, ueberlappung, urteil, wert, titanet_ms)
 
     async def _ergebnis(
         self, nr: int, urteil: str, wert: float | None, secs: float, ueberlappung: bool, gehoert_um: float, schwelle: float | None = None
@@ -424,9 +439,16 @@ class Stimmpruefer(FrameProcessor):
         if not task.cancelled() and (fehler := task.exception()) is not None:  # abgeholt: kein "never retrieved" im Log
             logger.warning("Stimmprüfung: Aufgabe mit Fehler beendet ({})", type(fehler).__name__)
 
+    async def schatten_warten(self) -> None:
+        """Wartet auf eine laufende Rechnung des Schattens (für Tests)."""
+        if self._schatten is not None:
+            await self._schatten.warten()
+
     async def cleanup(self):
         await super().cleanup()
         await self._einlernen.aufraeumen()
+        if self._schatten is not None:
+            await self._schatten.aufraeumen()
         laufend = list(self._tasks)
         for task in laufend:
             task.cancel()

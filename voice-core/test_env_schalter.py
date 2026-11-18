@@ -126,7 +126,9 @@ STIMME_UEBERTRAGEN = (
 )
 # Der Modellpfad gilt je Rechner: er steht in der Liste des Servers (dort setzbar), aber nie in der Liste, die der PC aus seiner .env übernimmt
 STIMME_MODELL = "WAMO_STIMME_MODELL"
-STIMME = (*STIMME_UEBERTRAGEN, STIMME_MODELL)
+# Zweites Sprechermodell im Schattenbetrieb (stimme_schatten.py), seit 18.11.2026: wie Modus und Schwellen nur über die Liste des Servers
+STIMME_SCHATTEN = "WAMO_STIMME_SCHATTEN"
+STIMME = (*STIMME_UEBERTRAGEN, STIMME_MODELL, STIMME_SCHATTEN)
 
 
 # Prüfbares Ziel für Entwicklungsaufträge (Standard an), Befehlskriterien (Standard aus) und Schwelle zum Kürzen langer
