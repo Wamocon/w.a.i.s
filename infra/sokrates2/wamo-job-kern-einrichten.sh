@@ -19,7 +19,7 @@
 #       Aufträge gesamt und je Person (Dispatcher 9, Entscheidung von Niko 16.11.2026); 1 und 1 heißt ein Auftrag gleichzeitig wie früher.
 #   wamo-job-kern-einrichten.sh kanal zu
 #       Regeln des Kern-Kanals öffnen oder schließen. Öffnen und Ändern nur ohne laufenden Kern-Auftrag, GitHub-Arten nur, wenn
-#       claude --help (als wamo) --max-turns und --max-budget-usd kennt. kanal zu geht immer.
+#       Claude Code (als wamo) --max-turns und --max-budget-usd annimmt (Probe über die Optionsprüfung). kanal zu geht immer.
 #   wamo-job-kern-einrichten.sh schalter an|aus <release> [--profil <user_id>[,<user_id>]] [--kosten-auftrag X] [--kosten-tag X]
 #                               [--mitglieder an|aus] [--haus an|aus] [--trocken]
 #       Drop-in wamo-entwicklung-buero.conf der Slot-Vorlage schreiben (an) oder entfernen (aus), daemon-reload, dann
@@ -648,13 +648,17 @@ sys.exit(1 if fehlt else 0)' "$KERN_IP,127.0.0.1" "$ignoreip" \
 }
 
 # ---------------------------------------------------------------- kanal
-claude_flags_pruefen() {   # kennt die installierte Claude-Code-Version beide Flags? (als wamo)
-  local hilfe claude="/srv/wamo/.local/bin/claude"
+claude_flags_pruefen() {   # nimmt die installierte Claude-Code-Version beide Flags an? (als wamo)
+  # Befund 18.11.2026: Claude Code 2.1.303 kennt --max-turns, zeigt es aber nicht mehr in --help. Deshalb fragt die Probe die
+  # Optionsprüfung selbst: hinter beiden Flags steht eine erfundene Option. Meldet Claude Code genau sie als unbekannt, hat es beide
+  # Flags angenommen; die Optionsprüfung bricht vor jedem Modellaufruf ab. Jede andere Antwort heißt: GitHub-Arten bleiben zu.
+  local antwort claude="/srv/wamo/.local/bin/claude" probe="--wamo-flagprobe"
+  local argv=(-p --max-turns 1 --max-budget-usd 0.01 "$probe" x wamo-flagprobe)
   [ -z "$WURZEL" ] || claude="$WURZEL/attrappen/claude"
-  if [ -n "$WURZEL" ]; then hilfe="$("$claude" --help 2>&1 || true)"
-  else hilfe="$(runuser -u wamo -- env -i HOME=/srv/wamo PATH=/usr/bin:/bin "$claude" --help 2>&1 || true)"; fi
-  grep -q -- '--max-turns' <<<"$hilfe" && grep -q -- '--max-budget-usd' <<<"$hilfe" \
-    || vorbedingung "claude --help (als wamo) kennt --max-turns oder --max-budget-usd nicht: der Kern-Kanal bleibt für GitHub-Arten zu (Claude Code anheben)"
+  if [ -n "$WURZEL" ]; then antwort="$(timeout 20 "$claude" "${argv[@]}" 2>&1 || true)"
+  else antwort="$(runuser -u wamo -- env -i HOME=/srv/wamo PATH=/usr/bin:/bin timeout 20 "$claude" "${argv[@]}" 2>&1 || true)"; fi
+  grep -qF -- "unknown option '$probe'" <<<"$antwort" \
+    || vorbedingung "Claude Code (als wamo) nimmt --max-turns oder --max-budget-usd nicht an: der Kern-Kanal bleibt für GitHub-Arten zu (Claude Code anheben)"
 }
 
 cmd_kanal() {
