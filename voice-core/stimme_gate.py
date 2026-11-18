@@ -26,7 +26,8 @@ Schwellen (alle als Schalter in der Umgebung, siehe schwellen_aus_env): Ab welch
 Kalibrierung vom 17.11.2026 von ihrer Länge ab (schwelle_fuer): bis KURZ_BIS_SECS (1,5 s) Sprache WAMO_STIMME_EIGEN_MIN_KURZ (0,35), ab
 LANG_AB_SECS (3 s) WAMO_STIMME_EIGEN_MIN_LANG (0,45), dazwischen linear. Befund dazu: Im Modus streng wurden über 70 % der eigenen Äußerungen
 verworfen, ihre Werte lagen bei 0,4 bis 1,8 s meist bei 0,35 bis 0,60, eine zweite Person bei 0,10 bis 0,30; TitaNet streut unter 2 s stark
-(Literatur: EER 2,4 % bei 3 s, 18,4 % bei 1 s, Schwelle des EER unter 1 s bei etwa 0,30). Hat das Profil eine persönliche Schwelle vom
+(Literatur, Korrektur 18.11.2026: EER 2,4 % bei 3 s und 18,4 % bei 1 s gelten für WavLM plus ECAPA-TDNN, nicht für TitaNet; die Schwelle des EER
+bei etwa 0,30 stammt aus Callcenter-Telefonie, siehe docs/stimme-recherche-2026-11-18.md). Hat das Profil eine persönliche Schwelle vom
 Einlernen (speakers.voice_threshold, Migration 0025, stimme_modell.schwelle_einlernen), ersetzt sie die kurze, aber nur nach unten (seit
 18.11.2026 nie über WAMO_STIMME_EIGEN_MIN_KURZ); die lange liegt nie darunter.
 Mehrere Abdrücke (seit 18.11.2026, Migration 0029, stimme_mikrofon.py): je eingelerntem Mikrofon einer, höchstens drei. Verglichen wird mit

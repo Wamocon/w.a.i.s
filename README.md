@@ -1157,9 +1157,10 @@ Gespeichert werden nur 192 Zahlen und diese eine Schwelle, nie eine Aufnahme. Im
 **Kalibrierung (17.11.2026).** Befund: Im Modus streng mit `NUR_EIGEN` wurden über 70 % der Äußerungen des Besitzers verworfen. Seine Werte
 lagen meist bei 0,35 bis 0,60 bei Äußerungen von 0,4 bis 1,8 Sekunden, eine zweite Person bei 0,10 bis 0,30. Ursachen: zu kurze Prüfstücke
 (Sprachpause 0,2 s, jedes Transkript ein eigenes Urteil), die Schwelle 0,5 war nie an echten Stimmen gemessen, und Einlernen (Stücke von 3 s,
-jeder leise 20-ms-Block entfernt) und Prüfen (ganze Äußerung mit Pausen) passten nicht zueinander. Literatur zu TitaNet-L: unter einer Sekunde
-liegt der Punkt gleicher Fehlerraten bei etwa 0,30 (empfohlen mindestens 0,33), die Fehlerrate steigt von 2,4 % bei 3 s auf 18,4 % bei 1 s,
-mehrere Einlernstücke helfen deutlich. Daraus:
+jeder leise 20-ms-Block entfernt) und Prüfen (ganze Äußerung mit Pausen) passten nicht zueinander. Literatur (Korrektur 18.11.2026, `docs/stimme-recherche-2026-11-18.md`): Das TitaNet-Paper
+nennt weder Kurzäußerungen noch Rauschen. Die Zahlen "2,4 % bei 3 s, 18,4 % bei 1 s" gehören zur Basislinie WavLM plus ECAPA-TDNN (arXiv 2609.25007),
+der Punkt gleicher Fehlerraten bei etwa 0,30 (empfohlen mindestens 0,33) stammt aus Callcenter-Telefonie (arXiv 2611.09516) und gilt nicht für
+Laptop-Mikrofone. Als Größenordnung bleibt: Unter einer Sekunde ist jedes Modell schwach, mehrere Einlernstücke und ein Abdruck je Mikrofon helfen. Daraus:
 
 - Schwelle nach Länge (`StimmGate.schwelle_fuer`): bis 1,5 s Sprache 0,35, ab 3 s 0,45, dazwischen linear; fremd bis 0,3 für alle Längen.
 - Einlernen wie Prüfen: keine 20-ms-Blöcke mehr, nur Pausen über 0,3 s entfernen, Stücke von 1,5 s.
