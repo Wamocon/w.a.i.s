@@ -131,6 +131,33 @@ Kanal), Rückweg umgekehrt. Kern: `WAMO_ENTWICKLUNG_GITHUB` (`an` oder `aus`, St
 (Name), App-Modus nicht nötig, Dienste der Art zählen nicht (der persönliche Weg gibt keine Dienst-Tokens aus `geheim.env` weiter); ohne `PERSOENLICH=an` ergibt das
 `persoenlich_aus`.
 
+**C.2.8 Rechte klassischer Tokens je Person (Entscheidung von Niko 18.11.2026, verfeinert C5 und C.4 Schritt 3).** Welche Scopes ein klassisches Token haben darf, stellt der
+Admin je Person in der Oberfläche ein. Jeder bekannte klassische Scope steht in genau einer Liste: `SCOPES_UNBEDENKLICH` (immer erlaubt: `repo`, `public_repo`, `read:org`,
+`read:user`, `notifications`, `project` und weitere nur lesende), `SCOPES_AUSNAHMEN` (standardmäßig abgelehnt, je Person einzeln erlaubbar) und `SCOPES_NIE` (nie erlaubt:
+`delete_repo`, `site_admin`, `admin:enterprise` und dessen Teilrechte `manage_runners:enterprise`, `manage_billing:enterprise`, `read:enterprise`). Die strenge Liste für alle,
+`SCOPES_STANDARD_ABGELEHNT`, ist `SCOPES_NIE` und `SCOPES_AUSNAHMEN` zusammen: alle `admin:`-Rechte, `write:packages`, `delete:packages`, `read:packages`, `user`, `user:email`,
+`user:follow`, `workflow`, `gist`, `write:org`, `codespace`, `codespace:secrets` und nach dem Review (HIGH) die Rechte, die Code ausführen oder dauerhaften Zugriff schaffen
+(`manage_runners:org`, `write:repo_hook`, `write:public_key`, `write:gpg_key`, `write:ssh_signing_key`, `write:network_configurations`, `copilot`, `manage_billing:copilot`,
+`audit_log`, `read:audit_log`). Regel (fail closed): Ein klassisches Token braucht einen Scope aus `SCOPES_PFLICHT_EINER` (`repo`, `public_repo`), und jeder Scope muss in
+`SCOPES_UNBEDENKLICH` oder in den Ausnahmen der Person stehen, sonst `token_rechte`. Ein Scope, den keine Liste kennt (etwa ein neuer bei GitHub), ist abgelehnt und auch je
+Person nicht erlaubbar, bis er in einer Liste steht. Die Scopes kommen aus `X-OAuth-Scopes`: am Komma getrennt, Leerzeichen am Rand weg, leere Einträge übergangen,
+Groß- und Kleinschreibung zählt, höchstens `SCOPES_MAX` (30). Dieselbe Regel gilt beim Speichern (K), bei jedem Start und jedem Einreichen (D-b) mit den Ausnahmen von jetzt.
+Der Kern schickt die Ausnahmen als sortierte JSON-Liste im Feld `scopes_ausnahmen` (`FELD_SCOPES_AUSNAHMEN`) der Kopfzeile von `start` (nur mit `github=persoenlich`) und der
+Zeile 1 von `einreichen`; fehlt das Feld, gilt die strenge Liste; ein Name außerhalb von `SCOPES_AUSNAHMEN`, ein Doppel oder ein falscher Typ heißt `Abgewiesen` (fail closed).
+Fein-granulare Tokens haben keine Scopes in diesem Sinn: für sie gilt das Feld nicht, sondern die Prüfung der Rechte am Repo (C.5 Start 2) und der Hinweis auf der Karte.
+Speicherort in K (Vorschlag): eigene Tabelle je Person in 0027 (etwa `github_rechte`, Spalte `scopes_ausnahmen text[]`), nicht in `github_zugang`, damit die Einstellung einen
+Widerruf des Tokens übersteht. Die Wertetabelle der Regel (`SCOPE_FAELLE`) und die Liste der bekannten Scopes (`BEKANNTE_SCOPES`) stehen in
+`voice-core/test_kernkanal_vertrag.py`; K und D-b prüfen ihre Umsetzung zusätzlich dagegen.
+
+**C.2.9 Festgelegte Namen (Paket S).** Gründe in `infra/sokrates2/wamo_job_kernkanal.py` (`KANAL_GRUENDE` ergänzt, `GITHUB_GRUENDE`, `AENDERUNG_GRUENDE`,
+`EINREICHEN_GRUENDE`), Sätze in `voice-core/entwicklung_betrieb.py` (`GRUND_SAETZE`, `GITHUB_SAETZE`, `AENDERUNG_SAETZE`, `EINREICHEN_SAETZE`; `persoenlich_aus` zählt zu
+`GRUENDE_DAUERHAFT`). In `infra/sokrates2/wamo_job_github.py` und mit gleichem Wert im Kern: `FELD_GITHUB`, `GITHUB_PERSOENLICH`, `FELD_SCOPES_AUSNAHMEN`,
+`GITHUB_TOKEN_FORMEN`, `GITHUB_ABLAUF_MAX_TAGE` (366), `SCOPES_MAX` und die Listen `SCOPES_*`. Nur im Dispatcher: `GITHUB_ZEILE_RE` (Bytes-Regel für C.2.2, auf einem
+`memoryview`), `GITHUB_ZEILE_MAX_BYTES`, `EINREICHEN_FELDER`, `EINREICHEN_ZEILE_MAX_BYTES`, `BEFEHLE_GITHUB`, `BEFEHLE_GITHUB_GESCHLOSSEN`, `EREIGNISSE_GITHUB`,
+`AENDERUNG_STATUS` (C.5.1), `SANDBOX_MODI`, `SANDBOX_MODI_NETZLOS`, `SPERREN`, `AUFTRAG_DATEIEN`. Protokoll `Werkzeuge` (Schnittstelle D-a zu D-b, C.9): `log`, `http`, `git`,
+`sandbox` (nur die netzlosen Modi), `sperre`, `uhr` und zusätzlich `pfad` (Einträge aus `AUFTRAG_DATEIEN`) und `geheimnis_in` (sucht die exakten Werte des Aufrufs, damit D-b
+das Token für C.5 Start 4 und Einreichen 4 nie sieht), Ergebnisse `HttpAntwort`, `GitErgebnis`, `SandboxErgebnis`, Fehler `KeinToken`, `NetzFehler`. Ereignisse schreibt
+D-a, D-b liefert ihre Felder zurück.
 ### C.3 Migration 0027_github_zugang
 
 0026 ist im Zweig `feat/auftrag-speichern` belegt (`0026_auftrag_entwuerfe`), Plan C nimmt deshalb **0027**. Neue Tabelle statt neuer Spalten in `model_access` (deren Wächter
@@ -167,7 +194,7 @@ Neues Modul `voice-core/github_zugang.py` nach dem Muster von `modellzugang.py`,
 1. Form: `ghp_` plus 36 Zeichen (klassisch) oder `github_pat_` plus 82 Zeichen (fein-granular); `gho_`, `ghu_`, `ghs_`, `ghr_` mit eigenem Satz abgewiesen.
 2. `GET https://api.github.com/user` (Zeitlimit 10 s, keine Weiterleitung): 200 mit `login`, `id`, `type` `User`; 401 heißt ungültig.
 3. Klassisch: `X-OAuth-Scopes` muss `repo` oder `public_repo` enthalten und darf `delete_repo`, kein `admin:*`, `site_admin`, `write:packages`, `delete:packages`, `read:packages`,
-   `user`, `user:*` und `codespace` enthalten (C5). Beide Arten: `GitHub-Authentication-Token-Expiration` Pflicht, höchstens 366 Tage in der Zukunft (Annahme A2 aus 2.3).
+   `user`, `user:*` und `codespace` enthalten (C5; seit 18.11.2026 je Person einstellbar, Listen und Regel in C.2.8). Beide Arten: `GitHub-Authentication-Token-Expiration` Pflicht, höchstens 366 Tage in der Zukunft (Annahme A2 aus 2.3).
    Fein-granular: Die Karte nennt die nötigen Rechte (Contents lesen und schreiben, Pull requests lesen und schreiben, Metadata lesen) und rät von allen anderen ab
    (Administration, Secrets, Workflows sind nicht abfragbar).
 4. Speichern als Chiffrat mit Metadaten, Zeile in `actions`. Antwort nur Metadaten (Art, Login, Scopes, Ablauf, „endet auf …abcd“). Kein Weg gibt den Wert zurück.
@@ -413,7 +440,8 @@ Adversariales Review durch `ecc:security-reviewer` mit Fokus Token-Leck, Git-Hoo
 | 13 | Ereignistexte ins Sprachmodell, `einreichen` als Werkzeug, Base64 nur mit festem Namen, Startkarte, Sensibel-Liste | LOW | alles übernommen | C.2.3, C.2.4, C.5, C.6 |
 
 **Nicht übernommen:** Allowlist der klassischen Scopes statt der Liste aus C5 (würde auch `workflow`, `write:org` und `gist` verbieten). Das weicht von der Entscheidung C5 ab und
-ist dem Admin als Empfehlung vorgelegt; die erneute Prüfung bei jeder Benutzung ist übernommen.
+ist dem Admin als Empfehlung vorgelegt; die erneute Prüfung bei jeder Benutzung ist übernommen. Entschieden am 18.11.2026 (C.2.8): `workflow`, `write:org` und `gist` sind
+standardmäßig abgelehnt, der Admin kann sie je Person erlauben.
 
 ## Kurzfassung der Ausbaustufe (Plan A und B, nach dem 05.12.)
 

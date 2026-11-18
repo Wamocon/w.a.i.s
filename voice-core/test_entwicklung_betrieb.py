@@ -621,7 +621,7 @@ PROJEKTNAMEN = (
 )
 GRUND_CODES = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt",
                "dienst", "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit",
-               "grenze_folgen", "abstand", "platz", "grenze_profil")
+               "grenze_folgen", "abstand", "platz", "grenze_profil", "persoenlich_aus", "grenze_einreichen")
 
 
 class ProjektnameTests(unittest.TestCase):
@@ -697,6 +697,21 @@ class GrundSaetzeTests(unittest.TestCase):
                 self.assertNotRegex(satz, r"[/\\_=:*#`]")
                 self.assertNotRegex(satz, r"[–—]| - ")
                 self.assertNotIn("  ", satz)
+
+    def test_saetze_der_persoenlichen_github_zugaenge_folgen_denselben_regeln(self):
+        """Plan C (C.2.6): GITHUB_SAETZE, AENDERUNG_SAETZE und EINREICHEN_SAETZE gehen in Quittung, Karte und Status, nie mit Werten."""
+        for name in ("GITHUB_SAETZE", "AENDERUNG_SAETZE", "EINREICHEN_SAETZE"):
+            tabelle = getattr(eb, name)
+            self.assertGreaterEqual(len(tabelle), 10, name)
+            for code, satz in tabelle.items():
+                with self.subTest(tabelle=name, code=code):
+                    self.assertIsInstance(satz, str)
+                    self.assertTrue(satz.endswith("."))
+                    self.assertLessEqual(len(satz), 110)
+                    self.assertNotRegex(satz, r"[/\\_=:*#`]")
+                    self.assertNotRegex(satz, r"[–—]| - ")
+                    self.assertNotIn("  ", satz)
+                    self.assertNotRegex(satz, r"ghp|github_pat|sk-ant")
 
     def test_kanal_gesperrt_ist_ein_remote_ereignis_mit_dem_satz(self):
         self.assertTrue(dev_agent.REMOTE_EREIGNIS_STATUS["kanal_gesperrt"].startswith("nicht gestartet"))

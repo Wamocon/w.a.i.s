@@ -692,9 +692,14 @@ def test_die_reihenfolge_der_grenzen_in_regel_9():
 def test_alle_codes_der_regeln_gehoeren_zur_festen_liste_i6():
     assert K.KANAL_GRUENDE == ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt",
                                "dienst", "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit",
-                               "grenze_folgen", "abstand", "platz", "grenze_profil")
+                               "grenze_folgen", "abstand", "platz", "grenze_profil", "persoenlich_aus", "grenze_einreichen")
     quelle = MODUL_PFAD.read_text(encoding="utf-8")
+    # Plan C, Paket S legt die Codes nur fest; Paket D-a liefert sie (Regel 5 und Zähler einreichen) und streicht sie dann hier
+    noch_ohne_regel = {"persoenlich_aus", "grenze_einreichen"}
     for code in K.KANAL_GRUENDE:
+        if code in noch_ohne_regel:
+            assert quelle.count(f'"{code}"') == 1, code  # bis D-a nur in der Liste
+            continue
         assert quelle.count(f'"{code}"') >= 2, code  # jeder Code steht in der Liste und wird irgendwo geliefert
     assert K.BEFEHLE_KERN == ("ping", "start", "status", "pending", "approve", "cancel")
 
