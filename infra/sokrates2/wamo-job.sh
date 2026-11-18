@@ -220,24 +220,29 @@ ZUSATZ=${ZUSATZ:-$MODUS}
 for zahl in "$TMP_MB" "$HEIM_TMP_MB" "$DATEI_MAX_MB" "$OFFENE_DATEIEN" "$PROZESSE_MAX" "$ZEITLIMIT_S" "$ZEITLIMIT_MAX_S"; do
   [[ $zahl =~ ^[0-9]{1,9}$ ]] || fehler "wamo-job.conf: Zahl ungültig"
 done
-# Höchstes Zeitlimit des Modus (pruefen und die Schritte stehen fest im Skript)
-case "$MODUS" in
-  pruefen) ZEIT_HOECHSTENS=$ZEITLIMIT_PRUEFEN_S ;;
-  klon) ZEIT_HOECHSTENS=$ZEITLIMIT_KLON_S ;;
-  ausgabe|pruefung) ZEIT_HOECHSTENS=$ZEITLIMIT_SCHRITT_S ;;
-  *) ZEIT_HOECHSTENS=$ZEITLIMIT_MAX_S ;;
-esac
 if [ "$MODUS" != lauf ]; then
   # Enger als der Auftragslauf, nie weiter: Speicher, Prozesse, CPU, Platz und das Zeitlimit (von jedem Paar der kleinere Wert; die
-  # Werte PRUEFEN_* prüfen die Funktionen dabei selbst, ein Fehler dort betrifft nur diese Modi)
+  # Werte PRUEFEN_* prüfen die Funktionen dabei selbst, ein Fehler dort betrifft nur diese Modi). Gilt für pruefen und die drei Schritte.
   pruefen_grenzen
-  ZEIT=${ZEIT:-$ZEIT_HOECHSTENS}
-else
+fi
+# Höchstes Zeitlimit der drei Schritte (fest im Skript, nie über ZEITLIMIT_MAX_S); pruefen hat ZEITLIMIT_PRUEFEN_S (schon verengt)
+case "$MODUS" in
+  klon) ZEIT_HOECHSTENS=$(kleiner_zahl "$ZEITLIMIT_KLON_S" "$ZEITLIMIT_MAX_S") || exit 70 ;;
+  ausgabe|pruefung) ZEIT_HOECHSTENS=$(kleiner_zahl "$ZEITLIMIT_SCHRITT_S" "$ZEITLIMIT_MAX_S") || exit 70 ;;
+  *) ZEIT_HOECHSTENS=$ZEITLIMIT_MAX_S ;;
+esac
+if [ "$MODUS" = pruefen ]; then
+  ZEIT=${ZEIT:-$ZEITLIMIT_PRUEFEN_S}
+elif [ "$MODUS" = lauf ]; then
   ZEIT=${ZEIT:-$ZEITLIMIT_S}
+else
+  ZEIT=${ZEIT:-$ZEIT_HOECHSTENS}
 fi
 case "$MODUS" in ausgabe|pruefung) DATEI_MAX_MB=$(kleiner_zahl "$DATEI_MAX_MB" "$SCHRITT_DATEI_MAX_MB") || exit 70 ;; esac
 [[ $ZEIT =~ ^[0-9]{1,6}$ ]] && (( ZEIT >= 1 && ZEIT <= ZEITLIMIT_MAX_S )) || fehler "Zeitlimit ungültig"
-if [ "$MODUS" != lauf ]; then
+if [ "$MODUS" = pruefen ]; then
+  (( ZEIT <= ZEITLIMIT_PRUEFEN_S )) || fehler "Zeitlimit im Modus pruefen höchstens $ZEITLIMIT_PRUEFEN_S Sekunden"
+elif [ "$MODUS" != lauf ]; then
   (( ZEIT <= ZEIT_HOECHSTENS )) || fehler "Zeitlimit im Modus $MODUS höchstens $ZEIT_HOECHSTENS Sekunden"
 fi
 

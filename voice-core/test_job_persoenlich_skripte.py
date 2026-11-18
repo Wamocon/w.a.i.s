@@ -41,6 +41,14 @@ def test_die_modi_sind_ein_case_mit_ablehnung_und_die_schritte_haben_nie_netz():
     assert '[ "$SCHRITT" = 1 ] || ARGS+=(--ro-bind "$HEIM/.local/bin" "$HEIM/.local/bin")' in LAEUFER
 
 
+def test_die_zeitlimits_der_schritte_gelten_nach_den_engeren_grenzen_und_nie_ueber_dem_hoechstwert():
+    aufruf = LAEUFER.index("\n  pruefen_grenzen\n")
+    assert aufruf < LAEUFER.index("ZEIT_HOECHSTENS=$(kleiner_zahl \"$ZEITLIMIT_KLON_S\" \"$ZEITLIMIT_MAX_S\")")
+    assert 'ausgabe|pruefung) ZEIT_HOECHSTENS=$(kleiner_zahl "$ZEITLIMIT_SCHRITT_S" "$ZEITLIMIT_MAX_S")' in LAEUFER
+    assert '(( ZEIT <= ZEIT_HOECHSTENS )) || fehler "Zeitlimit im Modus $MODUS' in LAEUFER
+    assert aufruf < LAEUFER.index("ZEIT=${ZEIT:-$ZEITLIMIT_PRUEFEN_S}") < LAEUFER.index("(( ZEIT <= ZEITLIMIT_PRUEFEN_S ))") < LAEUFER.index("ARGS=(")
+
+
 def test_jeder_schritt_startet_nur_sein_festes_programm():
     for teil in ('klon) [ "$1" = "$WAECHTER_INNEN/wamo-job-klon.sh" ] || fehler',
                  'ausgabe) [ "$1" = "$WAECHTER_INNEN/wamo-job-ausgabe.sh" ] || fehler',
