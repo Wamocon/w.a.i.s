@@ -5,6 +5,7 @@ Aufgabe: scripts/wamo-tunnel-einrichten.ps1 legt sie mit Priorität 4 an, und wa
 """
 
 import ctypes
+import sys
 import unittest
 from pathlib import Path
 
@@ -88,6 +89,18 @@ class NormalSetzen(unittest.TestCase):
         ergebnis = pp.normal_setzen(Kaputt(), Kaputt())
         for schluessel in ("cpu_fehler", "speicher_fehler", "io_fehler", "drossel_fehler"):
             self.assertEqual(ergebnis[schluessel], "OSError")
+
+
+@unittest.skipUnless(sys.platform == "win32", "nur unter Windows")
+class EchtUnterWindows(unittest.TestCase):
+    """Befund 18.11.2026: Mit den Attrappen war alles grün, am Laptop scheiterte jeder Aufruf (Handle als 32-Bit-int). Hier gegen das
+    echte kernel32 und ntdll; der Testprozess wird dabei höchstens auf normal gesetzt."""
+
+    def test_echter_aufruf_liest_die_klasse_und_setzt_speicher_und_ea(self):
+        ergebnis = pp.normal_setzen()
+        self.assertNotEqual(ergebnis.get("cpu_vorher"), "0x0", ergebnis)
+        self.assertTrue(ergebnis.get("speicher"), ergebnis)
+        self.assertTrue(ergebnis.get("io"), ergebnis)
 
 
 class Vertrag(unittest.TestCase):
