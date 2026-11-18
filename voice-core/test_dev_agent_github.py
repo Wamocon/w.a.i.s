@@ -173,7 +173,10 @@ class KarteUndStartTests(GithubFlow):
             vorher = len(self.remote("ping"))
             job = await self.karte()
             self.assertIsNone(job.github)
-            self.assertEqual(len(self.remote("ping")), vorher)  # ohne Schalter fragt der Kern nicht einmal
+            # ohne Schalter fragt der Kern nur einmal nach den Arten des Kanals (Cache 5 Minuten), nie nach dem GitHub-Weg
+            self.assertEqual(len(self.remote("ping")), vorher + 1)
+            await self.karte()
+            self.assertEqual(len(self.remote("ping")), vorher + 1)
 
     async def test_mitglied_bekommt_ein_repo_nur_mit_eigenem_token(self):
         mitglied = tb.AuditMemory(user_id=tb.ANDERE)
@@ -257,6 +260,33 @@ class KarteUndStartTests(GithubFlow):
         await self.starten(job, self.sk.FakeProc([ereignis("start_abgelehnt", grund="eigenes_repo")], returncode=8))
         self.assertEqual(self.nachrichten("auftrag_quittung")[-1]["grund"], eb.GITHUB_SAETZE["eigenes_repo"])
         self.assertIn(f"Start abgelehnt: {eb.GITHUB_SAETZE['eigenes_repo']}", job.steps)
+
+
+class KanalArtenTests(GithubFlow):
+    """Befund 18.11.2026: W.A.I.S. bereitete für eine neue Datei die Art dokumentation vor, der Kanal erlaubte nur recherche, planung
+    und umsetzung, der Server wies den Start mit grund=art ab. Jetzt prüft der Kern die Art vor der Karte gegen kernkanal.arten."""
+
+    async def test_art_ausserhalb_des_kanals_gibt_keine_karte_sondern_die_erlaubten_arten(self):
+        self.ping_antwort = {**PING_10, "kernkanal": {"arten": ["recherche", "planung", "umsetzung"]}}
+        ergebnis = await self.vorbereiten(self.agent, art="dokumentation")
+        self.assertFalse(ergebnis["ok"])
+        self.assertIn("Dokumentation", ergebnis["fehler"])
+        self.assertIn("Recherche, Planung, Umsetzung", ergebnis["fehler"])
+        self.assertIn("Umsetzung", ergebnis["hinweis"])
+        self.assertEqual(self.agent._jobs, {})
+        self.assertEqual(self.nachrichten("auftrag_karte"), [])
+
+    async def test_erlaubte_art_wie_bisher(self):
+        self.ping_antwort = {**PING_10, "kernkanal": {"arten": ["recherche", "planung", "umsetzung"]}}
+        job = await self.karte()
+        self.assertEqual(job.art, "umsetzung")
+
+    async def test_ohne_liste_im_ping_entscheidet_wie_bisher_der_dispatcher(self):
+        for antwort in (PING_10, {**PING_10, "kernkanal": {"arten": "umsetzung"}}):
+            self.agent = self.neuer_agent()
+            self.ping_antwort = dict(antwort)
+            ergebnis = await self.vorbereiten(self.agent, art="dokumentation")
+            self.assertTrue(ergebnis["ok"], ergebnis)
 
 
 class EinreichenTests(GithubFlow):

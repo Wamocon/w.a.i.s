@@ -267,7 +267,11 @@ PROJDIR=$PROJEKTE/$PROJEKT
 for pfad in "$JOBDIR" "$JOBDIR/claude" "$JOBDIR/zustand" "$JOBDIR/etc" "$PROJDIR"; do
   [ -d "$pfad" ] && [ ! -L "$pfad" ] || fehler "Ordner fehlt oder ist ein Link: $pfad"
 done
-for pfad in "$JOBDIR/zustand/approvals.json" "$JOBDIR/etc/passwd" "$JOBDIR/etc/group"; do
+# approvals.json legt der Dispatcher erst in lauf_vorbereiten an, nach dem Schritt klon; eingehängt wird sie nur im Auftragslauf. Die drei
+# Schritte verlangen sie deshalb nicht (Befund 18.11.2026: der erste echte Auftrag scheiterte vor dem Klonen genau an dieser Prüfung).
+PFLICHT_DATEIEN=("$JOBDIR/etc/passwd" "$JOBDIR/etc/group")
+[ "$SCHRITT" = 1 ] || PFLICHT_DATEIEN+=("$JOBDIR/zustand/approvals.json")
+for pfad in "${PFLICHT_DATEIEN[@]}"; do
   [ -f "$pfad" ] && [ ! -L "$pfad" ] || fehler "Datei fehlt oder ist ein Link: $pfad"
 done
 # Die Ordner und Dateien der Schritte (vom Dispatcher angelegt, für die Sandbox sonst unsichtbar): nie ein Link, immer der richtige Typ
@@ -510,6 +514,8 @@ SETENV_SCHRITT=(
   --setenv GIT_CONFIG_NOSYSTEM 1 --setenv GIT_CONFIG_GLOBAL /dev/null --setenv GIT_TERMINAL_PROMPT 0 --setenv GIT_OPTIONAL_LOCKS 0
   --setenv GIT_CEILING_DIRECTORIES /srv/wamo/projekte --setenv WAMO_MODUS "$MODUS"
   --unsetenv XDG_RUNTIME_DIR
+  # INVOCATION_ID setzt systemd-run für jede Einheit; kein Geheimnis, aber die Schritte bekommen nur die Namen oben (Rauchtest, Befund 18.11.2026)
+  --unsetenv INVOCATION_ID
 )
 case "$MODUS" in
   lauf) ARGS+=("${SETENV_LAUF[@]}") ;;

@@ -90,6 +90,9 @@ Offen:
   Stack mit 12 von 12 Prüfungen bestanden.
 - Gedächtnis je Profil (persönlich) plus gemeinsames Firmengedächtnis mit Freigabe durch Admins.
 - Werkzeugkarte: Entwicklungsaufträge wählen je Auftragsart passende ECC-Skills, Agenten und REA-Werkzeuge.
+- Persönlicher GitHub-Zugang für Entwicklungsaufträge (Plan C, live seit 18.11.2026): eigenes Token je Person in den Einstellungen,
+  Arbeit nur auf dem Zweig `wamo/<auftrag>`, Push und Pull Request erst nach dem Klick auf „Einreichen“, Betrieb in
+  `infra/sokrates2/README.md` Abschnitt 18.3.
 - Oberfläche im WMC-Design (hell und dunkel), Desktop-App umbenannt und gehärtet.
 - Tests (20.10.2026): voice-core 563 bestanden (12 übersprungen, inklusive TLS-Handshakes und Eval-Testsatz), host 93
   bestanden (inklusive Echttest der Bildschirmsperre in einer interaktiven Sitzung); UI: 16 Unit-Tests (`npm test`,
