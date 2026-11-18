@@ -514,14 +514,15 @@ class SperrTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SchalterTests(unittest.TestCase):
-    def test_modus_standard_ist_streng_und_unbekanntes_auch(self):
-        self.assertEqual(pruefmodus(""), "streng")
+    def test_modus_standard_ist_beobachten_und_unbekanntes_auch(self):
+        # 18.11.2026 (Entscheidung von Niko): die Stimme sperrt nichts; streng gilt nur noch auf ausdrücklichen Wunsch
+        self.assertEqual(pruefmodus(""), "beobachten")
         with mock.patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(pruefmodus(None), "streng")
+            self.assertEqual(pruefmodus(None), "beobachten")
         for modus in ("aus", "beobachten", "streng"):
             self.assertEqual(pruefmodus(modus), modus)
             self.assertEqual(pruefmodus(f"  {modus.upper()} "), modus)
-        self.assertEqual(pruefmodus("strenge"), "streng")
+        self.assertEqual(pruefmodus("strenge"), "beobachten")  # ein Tippfehler macht nie strenger
 
     def test_unbekannter_modus_wird_einmal_gewarnt(self):
         stimme_gate._GEWARNT.clear()
@@ -533,8 +534,12 @@ class SchalterTests(unittest.TestCase):
     def test_modus_aus_der_umgebung(self):
         with mock.patch.dict("os.environ", {"WAMO_STIMME_PRUEFUNG": "beobachten"}):
             self.assertEqual(StimmGate.aus_umgebung().modus, "beobachten")
-        with mock.patch.dict("os.environ", {}, clear=True):
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_PRUEFUNG": "streng"}):
             self.assertEqual(StimmGate.aus_umgebung().modus, "streng")
+        with mock.patch.dict("os.environ", {}, clear=True):  # Standard seit 18.11.2026: die Stimme sperrt nichts
+            gate = StimmGate.aus_umgebung()
+            self.assertEqual(gate.modus, "beobachten")
+            self.assertFalse(gate.sperrt)
 
     def test_schwellen_standard(self):
         with mock.patch.dict("os.environ", {}, clear=True):

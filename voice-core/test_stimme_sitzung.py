@@ -478,9 +478,18 @@ class NachrichtTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(USER_A, db.zeilen)
         self.assertEqual(arten(gesendet, "stimmabdruck")[-1]["status"], "geloescht")
 
-    async def test_loeschen_gilt_auch_im_modus_beobachten(self):
+    async def test_loeschen_braucht_den_nachweis_nur_im_modus_streng(self):
+        # 18.11.2026: Im Modus beobachten sperrt die Stimme nichts. Wer den Abdruck loswerden will, muss nicht erst an der Stimme erkannt
+        # werden (die Falle: der schlechte Abdruck verhindert das Ersetzen des schlechten Abdrucks)
         db = FakeDb({USER_A: als_vektor(EIGENER)})
         s, gesendet, _, _ = await self.bereit(db, modus="beobachten", identity=self.angemeldet(None))
+        await s.nachricht({"aktion": "loeschen"})
+        self.assertEqual(arten(gesendet, "stimmabdruck")[-1]["status"], "geloescht")
+        self.assertNotIn(USER_A, db.zeilen)
+
+    async def test_loeschen_im_modus_streng_braucht_den_nachweis(self):
+        db = FakeDb({USER_A: als_vektor(EIGENER)})
+        s, gesendet, _, _ = await self.bereit(db, modus="streng", identity=self.angemeldet(None))
         await s.nachricht({"aktion": "loeschen"})
         self.assertEqual(arten(gesendet, "stimmabdruck")[-1]["status"], "fehler")
         self.assertIn(USER_A, db.zeilen)
