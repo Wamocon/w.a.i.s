@@ -171,3 +171,109 @@ describe("Abschnitt Stimme: Abdruck löschen", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/nicht hinaus/);
   });
 });
+
+describe("Abschnitt Stimme: ein Abdruck je Mikrofon", () => {
+  const LAPTOP = { kennung: "a".repeat(32), name: "Mikrofonarray (Realtek)", am: "2026-11-18T09:30:00+00:00" };
+  const HEADSET = { kennung: "b".repeat(32), name: "Headset (Jabra)", am: "2026-11-18T10:00:00+00:00" };
+  const ALT = { kennung: "unbekannt", name: null, am: null };
+  const liste = (mikrofone: (typeof LAPTOP | typeof ALT)[], max = 3, laeuft = "Headset (Jabra)") =>
+    act(() => {
+      applyServerMessage({ type: "stimmabdruck_mikrofone", mikrofone, max });
+      wamo.set((s) => ({ ...s, mikrofon: laeuft }));
+    });
+
+  it("zeigt die eingelernten Mikrofone mit Datum; das laufende hat Neu einlernen, jedes hat Löschen", () => {
+    render(<StimmeAbschnitt aktionen={aktionen()} />);
+    online();
+    status("bereit");
+    liste([LAPTOP, HEADSET, ALT]);
+    const eintraege = within(screen.getByRole("list", { name: "Eingelernte Mikrofone" })).getAllByRole("listitem");
+    expect(eintraege.map((e) => e.textContent)).toEqual([
+      expect.stringContaining("Mikrofonarray (Realtek)"),
+      expect.stringContaining("läuft gerade"),
+      expect.stringContaining("Unbekanntes Mikrofon"),
+    ]);
+    expect(eintraege[0].textContent).toContain("18.11.2026");
+    expect(screen.getByRole("button", { name: "Neu einlernen: Headset (Jabra)" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Neu einlernen: Mikrofonarray (Realtek)" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Löschen: / })).toHaveLength(3);
+    // das laufende ist eingelernt: kein zweiter Knopf zum Einlernen
+    expect(screen.queryByRole("button", { name: "Für dieses Mikrofon einlernen" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Neu einlernen: Headset (Jabra)" }));
+    expect(wamo.get().abdruck?.phase).toBe("einwilligung");
+  });
+
+  it("ein noch nicht eingelerntes Mikrofon lässt sich dazu einlernen", () => {
+    render(<StimmeAbschnitt aktionen={aktionen()} />);
+    online();
+    status("bereit");
+    liste([LAPTOP], 3, "Webcam");
+    fireEvent.click(screen.getByRole("button", { name: "Für dieses Mikrofon einlernen" }));
+    expect(wamo.get().abdruck?.phase).toBe("einwilligung");
+  });
+
+  it("bei drei Mikrofonen ist ein viertes gesperrt und der Abschnitt sagt, was hilft", () => {
+    render(<StimmeAbschnitt aktionen={aktionen()} />);
+    online();
+    status("bereit");
+    liste([LAPTOP, HEADSET, { ...LAPTOP, kennung: "c".repeat(32), name: "Konferenz" }], 3, "Webcam");
+    expect((screen.getByRole("button", { name: "Für dieses Mikrofon einlernen" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/höchstens drei Mikrofone/i)).toBeTruthy();
+  });
+
+  it("einen Abdruck löschen fragt nach und schickt nur dessen Kennung", () => {
+    const a = aktionen();
+    render(<StimmeAbschnitt aktionen={a} />);
+    online();
+    status("bereit");
+    liste([LAPTOP, HEADSET]);
+    fireEvent.click(screen.getByRole("button", { name: "Löschen: Mikrofonarray (Realtek)" }));
+    const frage = screen.getByRole("group", { name: /Abdruck für Mikrofonarray \(Realtek\) wirklich löschen/ });
+    expect(document.activeElement).toBe(within(frage).getByRole("button", { name: "Behalten" }));
+    fireEvent.click(within(frage).getByRole("button", { name: "Ja, löschen" }));
+    expect(a.loeschen).toHaveBeenCalledWith(LAPTOP.kennung);
+  });
+
+  it("bestätigt der Kern das Löschen, verschwindet der Eintrag sofort; ohne Kennung verschwinden alle", () => {
+    render(<StimmeAbschnitt aktionen={aktionen()} />);
+    online();
+    status("bereit");
+    liste([LAPTOP, HEADSET]);
+    act(() => applyServerMessage({ type: "stimmabdruck", status: "geloescht", mikrofon: LAPTOP.kennung }));
+    expect(screen.queryByRole("button", { name: "Löschen: Mikrofonarray (Realtek)" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Löschen: Headset (Jabra)" })).toBeTruthy();
+    act(() => applyServerMessage({ type: "stimmabdruck", status: "geloescht" }));
+    expect(wamo.get().stimmMikrofone?.mikrofone).toEqual([]);
+  });
+
+  it("wird das laufende Mikrofon gelöscht, geht der Fokus auf die Meldung statt mit dem Eintrag verloren", () => {
+    render(<StimmeAbschnitt aktionen={aktionen()} />);
+    online();
+    status("bereit");
+    liste([LAPTOP, HEADSET]);
+    fireEvent.click(screen.getByRole("button", { name: "Löschen: Headset (Jabra)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ja, löschen" }));
+    expect(document.activeElement).toBe(screen.getByRole("status"));
+  });
+
+  it("alle Abdrücke löschen ist der Widerruf und schickt keine Kennung", () => {
+    const a = aktionen();
+    render(<StimmeAbschnitt aktionen={a} />);
+    online();
+    status("bereit");
+    liste([LAPTOP, HEADSET]);
+    fireEvent.click(screen.getByRole("button", { name: "Alle Abdrücke löschen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ja, alle löschen" }));
+    expect(a.loeschen).toHaveBeenCalledWith();
+  });
+
+  it("kann der Kern nur einen Abdruck, bleibt alles wie bisher", () => {
+    render(<StimmeAbschnitt aktionen={aktionen()} />);
+    online();
+    status("bereit");
+    liste([ALT], 1, "Webcam");
+    expect(screen.queryByRole("list", { name: "Eingelernte Mikrofone" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Neu einlernen" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Abdruck löschen" })).toBeTruthy();
+  });
+});

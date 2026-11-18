@@ -15,7 +15,7 @@ import { StimmeAbschnitt } from "@/components/einstellungen/StimmeAbschnitt";
 import type { Mikrofon } from "@/lib/mikrofon";
 import { nutzerSetzen } from "@/lib/nutzer";
 import { LEISE_TEXT } from "@/lib/pegelWarnung";
-import { ANDERES_MIKROFON_TEXT } from "@/lib/stimmMikrofon";
+import { ANDERES_MIKROFON_TEXT, MIKROFONE_VOLL_TEXT } from "@/lib/stimmMikrofon";
 import { resetWamo, wamo } from "@/lib/wamo";
 
 const ID = "0b7f3c1e-2d4a-4c55-9a10-1a2b3c4d5e6f";
@@ -177,7 +177,7 @@ describe("Weg zur Mikrofonwahl", () => {
     render(
       <FehlerAnzeige onRetry={vi.fn()} onAbmelden={vi.fn()} onSchliessen={onSchliessen} onMikrofone={async () => []} onMikrofonWaehlen={() => true} />,
     );
-    await userEvent.setup().click(screen.getByRole("button", { name: "Neu einlernen" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Für dieses Mikrofon einlernen" }));
     expect(onSchliessen).toHaveBeenCalledTimes(1);
     expect(wamo.get().abdruck?.phase).toBe("einwilligung");
   });
@@ -185,7 +185,18 @@ describe("Weg zur Mikrofonwahl", () => {
   it("Gerätewechsel ohne laufendes Gespräch: der Knopf führt zum Abschnitt Stimme", async () => {
     act(() => wamo.set((s) => ({ ...s, error: { art: "hinweis", text: ANDERES_MIKROFON_TEXT, aktion: "neu_einlernen" } })));
     render(<FehlerAnzeige onRetry={vi.fn()} onAbmelden={vi.fn()} onSchliessen={vi.fn()} onMikrofone={async () => []} onMikrofonWaehlen={() => true} />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Neu einlernen" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Für dieses Mikrofon einlernen" }));
+    expect(window.location.hash).toBe("#einstellungen/stimme");
+  });
+
+  it("drei Mikrofone eingelernt: der Knopf am Hinweis führt zu den eingelernten Mikrofonen", async () => {
+    act(() => wamo.set((s) => ({ ...s, error: { art: "hinweis", text: MIKROFONE_VOLL_TEXT, aktion: "mikrofone_verwalten" } })));
+    const onSchliessen = vi.fn();
+    render(
+      <FehlerAnzeige onRetry={vi.fn()} onAbmelden={vi.fn()} onSchliessen={onSchliessen} onMikrofone={async () => []} onMikrofonWaehlen={() => true} />,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Mikrofone verwalten" }));
+    expect(onSchliessen).toHaveBeenCalledTimes(1);
     expect(window.location.hash).toBe("#einstellungen/stimme");
   });
 

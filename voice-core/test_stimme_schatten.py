@@ -27,7 +27,8 @@ import stimme_sitzung
 import stimme_speicher as ss
 from auth_gate import Identity
 from stimme_einlernen import ZIEL_SECS, Einlernen
-from stimme_gate import EIGEN, KURZ, StimmGate
+from stimme_gate import EIGEN, KURZ, Abdruck, StimmGate
+from stimme_mikrofon import UNBEKANNT
 from stimme_modell import DIM, als_vektor, kosinus
 from stimme_pruefer import Stimmpruefer
 
@@ -167,7 +168,7 @@ class EinwilligungTests(unittest.TestCase):
         self.assertEqual((se.aktuelle_version(False), se.aktuelle_version(True)), ("stimme-1", "stimme-2"))
         self.assertTrue(se.einwilligung_gilt("stimme-1") and se.einwilligung_gilt("stimme-2", schatten=True))
         self.assertFalse(se.einwilligung_gilt("stimme-2") or se.einwilligung_gilt("stimme-1", schatten=True))
-        for falsch in ("stimme-3", "Stimme-2", " stimme-2", "", None, 2, True, ["stimme-2"]):
+        for falsch in ("stimme-4", "Stimme-2", " stimme-2", "", None, 2, True, ["stimme-2"]):  # stimme-3: test_stimme_mikrofon.py
             self.assertFalse(se.einwilligung_gilt(falsch, schatten=True), falsch)
             self.assertFalse(se.einwilligung_bekannt(falsch), falsch)
         self.assertTrue(se.einwilligung_bekannt("stimme-1") and se.einwilligung_bekannt("stimme-2"))
@@ -451,6 +452,42 @@ class PruefenTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------------------------------------- Einlernen
 
 
+class SchattenJeMikrofonTests(unittest.IsolatedAsyncioTestCase):
+    """Ein Abdruck je Mikrofon (18.11.2026): der Schatten nimmt den besten Wert über seine eigenen Abdrücke, getrennt von TitaNet."""
+
+    setUp = PruefenTests.setUp
+    pruefer = PruefenTests.pruefer
+    sprechen = PruefenTests.sprechen
+
+    async def test_bester_wert_ueber_die_schatten_abdruecke(self):
+        from stimme_gate import Abdruck
+        from stimme_mikrofon import mikrofon_aus
+
+        anderer = np.eye(sch.SCHATTEN_DIM, dtype=np.float32)[7]
+        self.gate.setze_abdruecke([Abdruck(EIGENER, mikrofon_aus("Laptop"), schatten=anderer),
+                                   Abdruck(np.eye(DIM, dtype=np.float32)[9], mikrofon_aus("Headset"), schatten=SCHATTEN),
+                                   Abdruck(np.eye(DIM, dtype=np.float32)[8], mikrofon_aus("Webcam"))])
+        with mock.patch.object(sch.logger, "info") as info:
+            await self.sprechen(1.4)
+            urteil = await self.v.urteil_abwarten(5.0)
+            await self.v.schatten_warten()
+        (zeile,) = zeilen(info)
+        self.assertIn(f"titanet={urteil.wert:.3f}", zeile)  # TitaNet: bester Wert beim Laptop
+        soll = max(kosinus(self.schatten_rechner.wert, SCHATTEN), kosinus(self.schatten_rechner.wert, anderer))
+        self.assertIn(f"schatten={soll:.3f}", zeile)  # Schatten: bester Wert über seine Abdrücke, hier beim Headset
+
+    async def test_ohne_jeden_schatten_abdruck_keine_zeile(self):
+        from stimme_gate import Abdruck
+        from stimme_mikrofon import mikrofon_aus
+
+        self.gate.setze_abdruecke([Abdruck(EIGENER, mikrofon_aus("Laptop")), Abdruck(EIGENER, mikrofon_aus("Headset"))])
+        with mock.patch.object(sch.logger, "info") as info:
+            await self.sprechen(1.4)
+            await self.v.urteil_abwarten(5.0)
+            await self.v.schatten_warten()
+        self.assertEqual(zeilen(info), [])
+
+
 class EinlernenTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.uhr = Uhr()
@@ -615,7 +652,7 @@ class SpeicherTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unbekannte_fassung_speichert_nichts(self):
         db = SchattenDb()
-        for version in ("stimme-3", "stimme-0", "", None):
+        for version in ("stimme-4", "stimme-0", "", None):
             self.assertFalse(await ss.abdruck_speichern(speicher(db), EIGENER, version=version, name="E", einwilligung_am=self.am,
                                                         schatten=SCHATTEN, schatten_modell=sch.SCHATTEN_MODELL))
         self.assertEqual(db.calls, [])
@@ -669,8 +706,8 @@ class SitzungTests(unittest.IsolatedAsyncioTestCase):
         schatten = Modell(Rechner(SCHATTEN), bereit=False)
         s = stimme_sitzung.StimmSitzung.fuer(self.identity(), speicher(SchattenDb()), senden=mock.AsyncMock(), sagen=mock.AsyncMock(),
                                              modell=Modell(Rechner(EIGENER)), gate=StimmGate(modus="streng"), schatten=schatten)
-        with mock.patch("stimme_sitzung.abdruck_mit_schwelle_laden", mock.AsyncMock(return_value=(True, EIGENER, None))), \
-                mock.patch("stimme_sitzung.schatten_laden", mock.AsyncMock(return_value=SCHATTEN)) as laden:
+        with mock.patch("stimme_sitzung.abdruecke_laden", mock.AsyncMock(return_value=(True, [Abdruck(EIGENER)], False))), \
+                mock.patch("stimme_sitzung.schatten_alle_laden", mock.AsyncMock(return_value={UNBEKANNT: SCHATTEN})) as laden:
             await s.vorbereiten()
         laden.assert_awaited_once()
         self.assertEqual(laden.call_args.args[1:], (sch.SCHATTEN_MODELL, sch.SCHATTEN_DIM))
@@ -680,13 +717,13 @@ class SitzungTests(unittest.IsolatedAsyncioTestCase):
     async def test_der_abdruck_von_titanet_wartet_nicht_auf_den_schatten(self):
         gelesen = asyncio.Event()
 
-        async def langsam(*_a):
+        async def langsam(*_a, **_k):
             gelesen.set()
             await asyncio.sleep(10)
 
         s = stimme_sitzung.StimmSitzung.fuer(self.identity(), speicher(SchattenDb()), senden=mock.AsyncMock(), sagen=mock.AsyncMock(),
                                              modell=Modell(Rechner(EIGENER)), gate=StimmGate(modus="streng"), schatten=Modell(Rechner(SCHATTEN)))
-        with mock.patch("stimme_sitzung.abdruck_mit_schwelle_laden", mock.AsyncMock(return_value=(True, EIGENER, None))),                 mock.patch("stimme_sitzung.schatten_laden", side_effect=langsam), mock.patch("stimme_sitzung.SCHATTEN_LADEN_SECS", 0.1):
+        with mock.patch("stimme_sitzung.abdruecke_laden", mock.AsyncMock(return_value=(True, [Abdruck(EIGENER)], False))),                 mock.patch("stimme_sitzung.schatten_alle_laden", side_effect=langsam), mock.patch("stimme_sitzung.SCHATTEN_LADEN_SECS", 0.1):
             vorbereiten = asyncio.create_task(s.vorbereiten())
             await gelesen.wait()
             self.assertIs(s.gate.abdruck, EIGENER)  # schon gesetzt, während der Schatten noch gelesen wird
@@ -697,8 +734,8 @@ class SitzungTests(unittest.IsolatedAsyncioTestCase):
     async def test_ohne_schalter_wird_kein_schatten_gelesen(self):
         s = stimme_sitzung.StimmSitzung.fuer(self.identity(), speicher(SchattenDb()), senden=mock.AsyncMock(), sagen=mock.AsyncMock(),
                                              modell=Modell(Rechner(EIGENER)), gate=StimmGate(modus="streng"))
-        with mock.patch("stimme_sitzung.abdruck_mit_schwelle_laden", mock.AsyncMock(return_value=(True, EIGENER, None))), \
-                mock.patch("stimme_sitzung.schatten_laden", mock.AsyncMock()) as laden:
+        with mock.patch("stimme_sitzung.abdruecke_laden", mock.AsyncMock(return_value=(True, [Abdruck(EIGENER)], False))), \
+                mock.patch("stimme_sitzung.schatten_alle_laden", mock.AsyncMock()) as laden:
             await s.vorbereiten()
         laden.assert_not_awaited()
         self.assertIsNone(s.gate.schatten_abdruck)

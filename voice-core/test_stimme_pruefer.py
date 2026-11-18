@@ -737,5 +737,48 @@ class FruehTests(PrueferBasis):
         self.assertEqual(self.urteile(), [])
 
 
+class MehrereAbdrueckeTests(PrueferBasis):
+    """Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026): geprüft wird gegen alle, es zählt der beste Wert und dessen Schwelle."""
+
+    def zwei_abdruecke(self, schwelle_headset=None, laptop_vektor=FREMDER):
+        from stimme_gate import Abdruck
+        from stimme_mikrofon import mikrofon_aus
+
+        laptop = Abdruck(laptop_vektor, mikrofon_aus("Laptop"))
+        headset = Abdruck(EIGENER, mikrofon_aus("Headset"), schwelle=schwelle_headset)
+        self.gate.setze_abdruecke([laptop, headset])
+        return laptop, headset
+
+    async def test_der_beste_abdruck_entscheidet(self):
+        self.zwei_abdruecke()
+        urteil = await self.sprechen(8000, 2.0)  # klingt wie EIGENER: der zweite Abdruck passt
+        self.assertEqual(urteil.urteil, EIGEN)
+        self.assertGreater(urteil.wert, 0.99)
+        urteil = await self.sprechen(-8000, 2.0)  # klingt wie FREMDER: passt zum ersten Abdruck
+        self.assertGreater(urteil.wert, 0.99)
+
+    async def test_die_schwelle_des_besten_abdrucks(self):
+        self.zwei_abdruecke(schwelle_headset=0.31, laptop_vektor=np.eye(DIM, dtype=np.float32)[2])
+        self.modell.rechner.festes_ergebnis = mit_kosinus(0.33)  # zum Headset 0,33, zum Laptop 0
+        urteil = await self.sprechen(8000, 1.2)
+        self.assertAlmostEqual(urteil.schwelle, 0.31)
+        self.assertEqual(urteil.urteil, EIGEN)
+
+
+class MikrofontestTests(PrueferBasis):
+    """Mikrofontest in der Oberfläche (Wunsch vom 18.11.2026): eine laufende Antwort von W.A.I.S. wird unterbrochen."""
+
+    async def test_unterbricht_nur_wenn_wais_spricht(self):
+        from pipecat.frames.frames import InterruptionFrame
+
+        frames = []
+        self.v.push_frame = mock.AsyncMock(side_effect=lambda f, *a: frames.append(f))
+        self.assertFalse(await self.v.ausgabe_unterbrechen())
+        self.assertEqual(frames, [])
+        self.v.on_bot_speaking(True)
+        self.assertTrue(await self.v.ausgabe_unterbrechen())
+        self.assertEqual([type(f) for f in frames], [InterruptionFrame])
+
+
 if __name__ == "__main__":
     unittest.main()

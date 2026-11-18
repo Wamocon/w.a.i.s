@@ -48,7 +48,7 @@ from loguru import logger
 
 import stimme_modell as sm
 from env_schalter import schalter_an
-from stimme_gate import StimmGate
+from stimme_gate import Abdruck, StimmGate
 
 SCHALTER = "WAMO_STIMME_SCHATTEN"
 SCHATTEN_NAME = "wespeaker_en_voxceleb_resnet34.onnx"  # Datei im Release, so wird sie auch vorab abgelegt
@@ -181,9 +181,12 @@ class SchattenPruefung:
         self.uebersprungen = 0
 
     def starten(self, pcm: bytes, rate: int, secs: float, ueberlappung: bool, urteil: str, wert: float, titanet_ms: float) -> None:
-        """Nach dem Urteil zur Äußerung (pcm wie TitaNet ihn bekam): rechnet in einer eigenen Aufgabe und kehrt sofort zurück."""
-        abdruck = self._gate.schatten_abdruck
-        if self._zu or abdruck is None or not pcm or not math.isfinite(wert):
+        """Nach dem Urteil zur Äußerung (pcm wie TitaNet ihn bekam): rechnet in einer eigenen Aufgabe und kehrt sofort zurück. Mit mehreren
+        Abdrücken (einer je Mikrofon, seit 18.11.2026) zählt der beste Wert über alle Schatten-Abdrücke, unabhängig davon, welcher Abdruck
+        bei TitaNet den besten Wert hatte (je Modell getrennt)."""
+        stand = self._gate.abdruecke
+        abdruecke = tuple(a.schatten for a in stand if a.schatten is not None)
+        if self._zu or not abdruecke or not pcm or not math.isfinite(wert):
             return
         if not self._modell.bereit:
             vorwaermen(self._modell)  # nie in dieser Aufgabe laden: ein Download hielte sonst alle folgenden Äußerungen auf
@@ -192,24 +195,25 @@ class SchattenPruefung:
             self.uebersprungen += 1
             logger.debug("Stimmschatten: übersprungen, die Äußerung davor rechnet noch ({})", self.uebersprungen)
             return
-        self._task = asyncio.create_task(self._rechnen(pcm, rate, secs, ueberlappung, urteil, wert, titanet_ms, abdruck))
+        self._task = asyncio.create_task(self._rechnen(pcm, rate, secs, ueberlappung, urteil, wert, titanet_ms, stand, abdruecke))
         self._task.add_done_callback(_abholen)
 
     async def _rechnen(self, pcm: bytes, rate: int, secs: float, ueberlappung: bool, urteil: str, wert: float, titanet_ms: float,
-                       abdruck: np.ndarray) -> None:
+                       stand: tuple[Abdruck, ...], abdruecke: tuple[np.ndarray, ...]) -> None:
         rechner = await self._modell.get()
         if rechner is None:
             return
         start = self._uhr()
         try:
-            schatten = sm.kosinus(await asyncio.to_thread(rechner.embed, pcm, rate), abdruck)
+            vektor = await asyncio.to_thread(rechner.embed, pcm, rate)
+            werte = [w for a in abdruecke if math.isfinite(w := sm.kosinus(vektor, a))]
         except Exception as e:  # der Schatten entscheidet nichts: ein Fehler fehlt nur in der Messung
             logger.debug("Stimmschatten: Rechnen fehlgeschlagen ({})", type(e).__name__)
             return
         ms = (self._uhr() - start) * 1000
-        if not math.isfinite(schatten) or self._gate.schatten_abdruck is not abdruck:
+        if not werte or self._gate.abdruecke is not stand:
             return  # gelöscht oder neu eingelernt, während der Schatten rechnete
-        logger.info(ZEILE, wert, schatten, secs, int(bool(ueberlappung)), urteil, titanet_ms, ms)
+        logger.info(ZEILE, wert, max(werte), secs, int(bool(ueberlappung)), urteil, titanet_ms, ms)
 
     async def warten(self) -> None:
         """Wartet auf eine laufende Rechnung (für Tests)."""

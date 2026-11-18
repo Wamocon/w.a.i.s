@@ -264,7 +264,8 @@ class NachladenTests(unittest.IsolatedAsyncioTestCase):
     async def test_bekannter_stand_laedt_nicht_neu(self):
         db = FakeDb()
         s, _, pausen = await self.lauf(db, heil_nach=99)
-        self.assertEqual((s.gate.status, pausen, len(db.calls)), ("fehlt", [], 1))
+        # ein Laden: ohne Migration 0029 erst die Abfrage mit der Spalte mikrofon, dann der Rückfall mit einem Abdruck
+        self.assertEqual((s.gate.status, pausen, [c[0] for c in db.calls]), ("fehlt", [], ["fetch", "fetchrow"]))
 
     async def test_geloescht_waehrend_der_pause_wird_nicht_ueberschrieben(self):
         db = FakeDb({USER_A: als_vektor(EIGENER)}, fehler=asyncpg.PostgresError("weg"))
@@ -542,6 +543,93 @@ class ZeitTests(unittest.TestCase):
         jetzt = ss.jetzt_utc()
         self.assertIsNotNone(jetzt.tzinfo)
         self.assertLess(abs(jetzt - datetime.now(timezone.utc)), timedelta(seconds=2))
+
+
+class MikrofonSitzungTests(unittest.IsolatedAsyncioTestCase):
+    """Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026, Migration 0029) und der Mikrofontest."""
+
+    async def mit_zwei(self, **kw):
+        from test_stimme_speicher import AM, HEADSET, LAPTOP, MikrofonDb
+
+        db = MikrofonDb()
+        for mikro, zeit in ((LAPTOP, AM), (HEADSET, datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc))):
+            await ss_speicher.abdruck_speichern(m.MemoryStore(USER_A, db), EIGENER, version="stimme-2", name="Erika", einwilligung_am=zeit,
+                                                mikrofon=mikro)
+        s, gesendet, uhr, sagen = neu(db, identity=Identity(USER_A, "Erika", "mitglied", "du", anmeldung=time.time()), **kw)
+        return s, gesendet, db, LAPTOP, HEADSET
+
+    async def test_laden_meldet_mikrofone_und_verlangt_stimme_3(self):
+        s, gesendet, _, laptop, headset = await self.mit_zwei()
+        await s.client_bereit()  # vor dem Laden: noch die Fassung ohne Mikrofone
+        self.assertEqual([x["version"] for x in arten(gesendet, "stimmabdruck_einwilligung")], ["stimme-1"])
+        await s.vorbereiten()
+        self.assertTrue(s.mehrere)
+        self.assertEqual(s.gate.max_abdruecke, 3)
+        self.assertEqual([a.mikrofon for a in s.gate.abdruecke], [laptop, headset])
+        self.assertEqual([x["version"] for x in arten(gesendet, "stimmabdruck_einwilligung")], ["stimme-1", "stimme-3"])
+        liste = arten(gesendet, "stimmabdruck_mikrofone")[-1]
+        self.assertEqual([(x["kennung"], x["name"]) for x in liste["mikrofone"]], [(laptop.kennung, laptop.name), (headset.kennung, headset.name)])
+        self.assertEqual(liste["max"], 3)
+        with mock.patch.object(s.pruefer, "einlernen_starten", mock.AsyncMock()) as starten:
+            await s.nachricht({"aktion": "start", "einwilligung": "stimme-2", "mikrofon": "Headset (Jabra)"})
+            starten.assert_not_awaited()
+            await s.nachricht({"aktion": "start", "einwilligung": "stimme-3", "mikrofon": "Standard - Headset (Jabra)"})
+        self.assertEqual(starten.await_args.args[0], "stimme-3")
+        self.assertEqual(starten.await_args.args[2], headset)  # ersetzt nur den Abdruck dieses Mikrofons
+
+    async def test_ohne_0029_bleibt_das_unbekannte_mikrofon(self):
+        from stimme_mikrofon import UNBEKANNTES_MIKROFON
+
+        s, gesendet, _, _ = neu(FakeDb({USER_A: als_vektor(EIGENER)}))
+        await s.vorbereiten()
+        self.assertFalse(s.mehrere)
+        self.assertEqual(s.gate.max_abdruecke, 1)
+        self.assertEqual(arten(gesendet, "stimmabdruck_mikrofone")[-1]["max"], 1)
+        s.gate.eintragen(EIGEN)
+        with mock.patch.object(s.pruefer, "einlernen_starten", mock.AsyncMock()) as starten:
+            await s.nachricht({"aktion": "start", "einwilligung": EINWILLIGUNG_VERSION, "mikrofon": "Headset"})
+        self.assertEqual(starten.await_args.args[2], UNBEKANNTES_MIKROFON)
+
+    async def test_einen_abdruck_loeschen_die_anderen_bleiben(self):
+        s, gesendet, db, laptop, headset = await self.mit_zwei()
+        await s.vorbereiten()
+        gesendet.clear()
+        await s.nachricht({"aktion": "loeschen", "mikrofon": laptop.kennung})
+        self.assertEqual(list(db.zeilen), [(USER_A, headset.kennung)])
+        self.assertEqual(s.gate.kennungen, (headset.kennung,))
+        self.assertEqual(s.gate.status, "bereit")
+        self.assertEqual(arten(gesendet, "stimmabdruck")[-1], {"type": "stimmabdruck", "status": "geloescht", "mikrofon": laptop.kennung})
+        self.assertEqual([x["kennung"] for x in arten(gesendet, "stimmabdruck_mikrofone")[-1]["mikrofone"]], [headset.kennung])
+
+    async def test_unbekanntes_mikrofon_loescht_nichts(self):
+        s, gesendet, db, _, _ = await self.mit_zwei()
+        await s.vorbereiten()
+        gesendet.clear()
+        for falsch in ("f" * 32, "Headset", 3, ["x"]):
+            await s.nachricht({"aktion": "loeschen", "mikrofon": falsch})
+        self.assertEqual(len(db.zeilen), 2)
+        self.assertEqual(len(s.gate.abdruecke), 2)
+        self.assertEqual({x["status"] for x in arten(gesendet, "stimmabdruck")}, {"fehler"})
+        self.assertEqual(arten(gesendet, "stimmabdruck")[0]["text"], ss.MIKROFON_FEHLT)
+        self.assertTrue(arten(gesendet, "stimmabdruck_mikrofone"))
+
+    async def test_alle_loeschen_ist_der_widerruf(self):
+        s, gesendet, db, _, _ = await self.mit_zwei()
+        await s.vorbereiten()
+        await s.nachricht({"aktion": "loeschen"})
+        self.assertEqual(db.zeilen, {})
+        self.assertEqual(s.gate.status, "fehlt")
+        self.assertEqual(arten(gesendet, "stimmabdruck")[-1], {"type": "stimmabdruck", "status": "geloescht"})
+        self.assertEqual(arten(gesendet, "stimmabdruck_mikrofone")[-1]["mikrofone"], [])
+
+    async def test_mikrofontest_unterbricht_nur_mit_start(self):
+        s, _, _, _ = neu(FakeDb())
+        with mock.patch.object(s.pruefer, "ausgabe_unterbrechen", mock.AsyncMock(return_value=True)) as unterbrechen:
+            await s.mikrofontest({"aktion": "ende"})
+            await s.mikrofontest("start")
+            unterbrechen.assert_not_awaited()
+            await s.mikrofontest({"aktion": "start"})
+        unterbrechen.assert_awaited_once()
 
 
 if __name__ == "__main__":

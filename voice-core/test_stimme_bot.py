@@ -234,6 +234,26 @@ async def test_client_nachricht_stimmabdruck_geht_an_die_stimmsitzung():
     await session.cleanup()
 
 
+async def test_client_nachricht_mikrofontest_geht_an_die_stimmsitzung():
+    """Mikrofontest (Wunsch vom 18.11.2026): W.A.I.S. schweigt, eine laufende Antwort wird unterbrochen (stimme_sitzung.mikrofontest)."""
+    session, _stufen, _llm = await bauen(Identity(USER, "Erika", "mitglied", "sie"))
+    with mock.patch.object(StimmSitzung, "mikrofontest", mock.AsyncMock()) as test:
+        await nachricht(session, "mikrofontest", {"aktion": "start"})
+        test.assert_awaited_once_with({"aktion": "start"})
+    await session.cleanup()
+
+
+async def test_laborprofil_mikrofontest_wirkt_nicht():
+    b = Beobachter()
+    with labor_testhilfe.dienst(b.app), mock.patch.object(labor_werkzeuge, "labor_sitzung", b):
+        session = await bot.build_session(smoke.FakeTransport(), laborprofil())
+    with mock.patch.object(StimmSitzung, "mikrofontest", mock.AsyncMock()) as test:
+        await nachricht(session, "mikrofontest", {"aktion": "start"})
+        test.assert_not_awaited()
+    await session.cleanup()
+    await b.client.aclose()
+
+
 async def test_oberflaeche_bekommt_stand_und_einwilligungstext_beim_verbinden():
     store = m.MemoryStore(USER, BotDb())
     session, _stufen, _llm = await bauen(Identity(USER, "Erika", "mitglied", "sie"), store=store)
@@ -244,7 +264,9 @@ async def test_oberflaeche_bekommt_stand_und_einwilligungstext_beim_verbinden():
     meldungen = gesendet(session.task.queue_frames)
     assert {"type": "stimme", "status": "fehlt", "modus": "streng"} in meldungen
     einwilligung = [x for x in meldungen if x.get("type") == "stimmabdruck_einwilligung"]
-    assert len(einwilligung) == 1 and einwilligung[0]["version"] == "stimme-1" and einwilligung[0]["text"]
+    # die Attrappe kennt die Spalte mikrofon (Migration 0029): ein Abdruck je Mikrofon, also die Fassung stimme-3
+    assert len(einwilligung) == 1 and einwilligung[0]["version"] == "stimme-3" and einwilligung[0]["text"]
+    assert {"type": "stimmabdruck_mikrofone", "mikrofone": [], "max": 3} in meldungen
     await session.cleanup()
 
 
@@ -400,7 +422,7 @@ async def test_laborprofil_hat_nie_einen_abdruck_auch_mit_allen_schaltern_an(art
     b = Beobachter()
     with labor_testhilfe.dienst(b.app), mock.patch.object(labor_werkzeuge, "labor_sitzung", b), \
             mock.patch.object(bot, "Pipeline", wraps=bot.Pipeline) as pipeline, \
-            mock.patch("stimme_sitzung.abdruck_mit_schwelle_laden", mock.AsyncMock(return_value=(True, None, None))) as laden:
+            mock.patch("stimme_sitzung.abdruecke_laden", mock.AsyncMock(return_value=(True, [], True))) as laden:
         session = await bot.build_session(smoke.FakeTransport(), laborprofil(art))
         session.task.queue_frames = mock.AsyncMock()
         await session.task.rtvi._call_event_handler("on_client_ready")

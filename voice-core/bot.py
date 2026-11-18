@@ -40,12 +40,21 @@ Nachrichten an die Oberfläche (RTVI-Servernachrichten, zusätzlich zu canvas, a
                                                                    dieses Transkripts in user-transcription (höchstens 64 Zeichen,
                                                                    sonst null), damit gibt der Chat links den Satz frei
   {"type": "stimmabdruck", "status": "start"|"aufnahme"|"rechnet"|"fertig"|"fehler"|"abgebrochen"|"geloescht",
-   "sekunden"?, "ziel"?, "text"?}                                  Einlernen des Stimmabdrucks (nie in Laborsitzungen)
+   "sekunden"?, "ziel"?, "text"?, "mikrofon"?}                     Einlernen des Stimmabdrucks (nie in Laborsitzungen); "mikrofon":
+                                                                   Kennung des Mikrofons bei fertig und beim Löschen eines einzelnen
   {"type": "stimmabdruck_einwilligung", "version", "text"}         Text der Einwilligung beim Verbinden (stimme_einwilligung.py)
+  {"type": "stimmabdruck_mikrofone", "mikrofone": [{"kennung", "name", "am"}], "max"}
+                                                                   eingelernte Mikrofone, einer je Abdruck (stimme_mikrofon.py,
+                                                                   höchstens drei; ohne Migration 0029 max 1)
 Nachrichten von der Oberfläche:
-  {"type": "stimmabdruck", "data": {"aktion": "start", "einwilligung": "stimme-1" (im Schattenbetrieb "stimme-2")} | {"aktion": "abbrechen"} | {"aktion": "loeschen"}}
-                                          Stimmabdruck einlernen (nur mit der aktuellen Version der Einwilligung), abbrechen oder
-                                          löschen (stimme_sitzung.py; nie für Laborprofile)
+  {"type": "stimmabdruck", "data": {"aktion": "start", "einwilligung": "stimme-1" (im Schattenbetrieb "stimme-2", mit Abdrücken je
+   Mikrofon "stimme-3"), "mikrofon"?: Name des Mikrofons} | {"aktion": "abbrechen"} | {"aktion": "loeschen", "mikrofon"?: Kennung}}
+                                          Stimmabdruck einlernen (nur mit der aktuellen Version der Einwilligung, ersetzt nur den
+                                          Abdruck dieses Mikrofons), abbrechen oder löschen (eines oder alle; stimme_sitzung.py; nie
+                                          für Laborprofile)
+  {"type": "mikrofontest", "data": {"aktion": "start"}}
+                                          Mikrofontest in den Einstellungen: eine laufende Antwort von W.A.I.S. unterbrechen
+                                          (stimme_sitzung.mikrofontest; nie in Laborsitzungen)
   {"type": "vergessen", "data": {"id"}}   eigenen Eintrag deaktivieren (memory.forget)
   {"type": "freigabe", "data": {"job": "pc", "id", "entscheidung"}}
                                           Freigabe einer kritischen PC-Aktion (pc_freigaben.py; Admin oder freigeschaltetes
@@ -1632,6 +1641,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         elif msg.type == "stimmabdruck" and stimme is not None:
             # Einlernen, abbrechen, löschen (stimme_sitzung.py): nur per Klick in der angemeldeten Oberfläche, nie per Sprache, nie im Labor
             await stimme.nachricht(data)
+        elif msg.type == "mikrofontest" and stimme is not None:
+            # Mikrofontest (Einstellungen, Sprache und Ton): W.A.I.S. schweigt, eine laufende Antwort wird unterbrochen; nie im Labor
+            await stimme.mikrofontest(data)
         elif msg.type == "modellzugang":
             # Eigener Claude-Schlüssel: hinterlegen, ersetzen, löschen, Stand (gilt ab der nächsten Sitzung).
             # Der Inhalt dieser Nachricht wird nie geloggt und nie zurückgeschickt.

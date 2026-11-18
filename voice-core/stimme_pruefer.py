@@ -42,6 +42,11 @@ weder den Prüfzustand im Gate (Werkzeuge) noch das Urteil, auf das das Transkri
 Schattenbetrieb (stimme_schatten.py, WAMO_STIMME_SCHATTEN, seit 18.11.2026): Mit einem Schattenmodell rechnet der Prüfer nach jedem Urteil
 am Sprechende denselben Ton auch mit dem zweiten Modell, in einer eigenen Aufgabe nach der Meldung des Urteils; ins Log geht nur eine Zeile
 mit Zahlen. Das Urteil bleibt allein bei TitaNet, das frühe Urteil rechnet ohne Schatten.
+
+Ein Abdruck je Mikrofon (seit 18.11.2026, stimme_mikrofon.py): Der Prüfer vergleicht mit allen Abdrücken des Gates und nimmt den besten Wert
+(StimmGate.vergleichen) mit der persönlichen Schwelle dieses Abdrucks; im Log steht mit mehreren Abdrücken, welcher es war (Nummer, nie Name
+oder Kennung). Der Schatten nimmt ebenso den besten Wert über seine eigenen Abdrücke. Für den Mikrofontest der Oberfläche unterbricht
+ausgabe_unterbrechen eine laufende Antwort von W.A.I.S.
 """
 
 from __future__ import annotations
@@ -61,6 +66,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -71,7 +77,8 @@ from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 from soft_interrupt import StimmUrteilFrame
 from stimme_einlernen import Einlernen, Speichern
 from stimme_gate import EIGEN, KURZ, UNKLAR, StimmGate
-from stimme_modell import ModellQuelle, kosinus, pruefsegment
+from stimme_mikrofon import UNBEKANNTES_MIKROFON, Mikrofon
+from stimme_modell import ModellQuelle, pruefsegment
 from stimme_schatten import SchattenPruefung
 
 RING_SECS = 10.0
@@ -156,14 +163,24 @@ class Stimmpruefer(FrameProcessor):
     async def _senden(self, daten: dict) -> None:
         await self.push_frame(RTVIServerMessageFrame(data=daten))
 
-    async def einlernen_starten(self, version: str, einwilligung_am: datetime) -> None:
-        await self._einlernen.starten(version, einwilligung_am)
+    async def einlernen_starten(self, version: str, einwilligung_am: datetime, mikrofon: Mikrofon = UNBEKANNTES_MIKROFON) -> None:
+        await self._einlernen.starten(version, einwilligung_am, mikrofon)
 
     async def einlernen_abbrechen(self) -> None:
         await self._einlernen.abbrechen()
 
     async def einlernen_warten(self) -> None:
         await self._einlernen.warten()
+
+    async def ausgabe_unterbrechen(self) -> bool:
+        """Mikrofontest in der Oberfläche (Wunsch vom 18.11.2026): Spricht W.A.I.S. gerade, wird die Antwort unterbrochen wie bei
+        einem Einwurf (InterruptionFrame stromabwärts, das SoftInterruptGate behandelt es als Unterbrechung von anderer Stelle). True, wenn
+        unterbrochen wurde. Nur während W.A.I.S. spricht: ein laufendes Werkzeug oder eine Antwort, die erst entsteht, bleibt unberührt."""
+        if not self._bot_spricht:
+            return False
+        logger.info("Mikrofontest: W.A.I.S. wird unterbrochen")
+        await self.push_frame(InterruptionFrame())
+        return True
 
     # ---------- Frames ----------
 
@@ -307,19 +324,21 @@ class Stimmpruefer(FrameProcessor):
         """Prüft ein Stück der laufenden Äußerung nr (W.A.I.S. spricht). Nur ein Urteil eigen zählt, und nur, solange nr noch läuft. Das Stück
         wird wie am Sprechende zugeschnitten (stiller Vorlauf weg), im Thread des Rechners."""
         gate = self._gate
-        abdruck = gate.abdruck
         rechner = await self._modell.get()
-        if abdruck is None or rechner is None or not pcm:
+        if not gate.abdruecke or rechner is None or not pcm:
             return
         try:
-            wert = kosinus(await asyncio.to_thread(lambda: rechner.embed(_zuschneiden(pcm, rate, secs), rate)), abdruck)
+            vektor = await asyncio.to_thread(lambda: rechner.embed(_zuschneiden(pcm, rate, secs), rate))
+            vergleich = gate.vergleichen(vektor)  # bester Wert über alle Abdrücke (einer je Mikrofon)
         except Exception as e:  # ein früher Fehler entscheidet nichts, es zählt das Urteil am Sprechende
             logger.debug("Stimmprüfung früh fehlgeschlagen ({})", type(e).__name__)
             return
-        if not math.isfinite(wert) or gate.abdruck is None:
+        if vergleich is None or not math.isfinite(vergleich[0]):
             return
-        urteil = gate.einstufen(wert, secs, True)
-        logger.info("Stimme früh: {:.2f} bei {:.1f} s (WAMO spricht) -> {} (Schwelle {:.2f})", wert, secs, urteil, gate.schwelle_fuer(secs))
+        wert, treffer = vergleich
+        urteil = gate.einstufen(wert, secs, True, treffer)
+        logger.info("Stimme früh: {:.2f} bei {:.1f} s (WAMO spricht) -> {} (Schwelle {:.2f})", wert, secs, urteil,
+                    gate.schwelle_fuer(secs, treffer))
         if urteil not in (EIGEN, KURZ) or not self._laeuft(nr) or not gate.nur_eigen_unterbricht():
             return
         self._frueh_eigen_nr = nr
@@ -373,36 +392,42 @@ class Stimmpruefer(FrameProcessor):
         if vorherige and not vorherige.done():
             await asyncio.wait({vorherige})  # der Reihe nach, sonst überholt ein altes Ergebnis
         gate = self._gate
-        if gate.abdruck is None or gate.modus == "aus":
+        if not gate.abdruecke or gate.modus == "aus":
             return
         rechner = await self._modell.get()
         gate.modell_ok = rechner is not None
-        abdruck = gate.abdruck
         try:
             if rechner is None or not pcm:
                 raise RuntimeError("kein Modell" if rechner is None else "kein Ton ausgeschnitten")
             start = time.perf_counter()
-            wert = kosinus(await asyncio.to_thread(rechner.embed, pcm, rate), abdruck)
+            vektor = await asyncio.to_thread(rechner.embed, pcm, rate)
             titanet_ms = (time.perf_counter() - start) * 1000
+            vergleich = gate.vergleichen(vektor)  # bester Wert über alle Abdrücke (einer je Mikrofon)
+            if vergleich is None:
+                return  # der Abdruck wurde während des Rechnens gelöscht
+            wert, treffer = vergleich
             if not math.isfinite(wert):
                 raise ValueError("Ähnlichkeit ist keine endliche Zahl")
         except Exception as e:  # nicht geprüft heißt nicht erkannt: nie das alte Ergebnis weiterverwenden
-            if gate.abdruck is None:
+            if not gate.abdruecke:
                 return  # der Abdruck wurde während des Rechnens gelöscht
             logger.warning("Stimmprüfung fehlgeschlagen ({}), gilt als unklar", e)
             await self._ergebnis(nr, UNKLAR, None, secs, ueberlappung, gehoert_um)
             return
-        if gate.abdruck is None:
-            return
-        urteil = gate.einstufen(wert, secs, ueberlappung)
-        await self._ergebnis(nr, urteil, wert, secs, ueberlappung, gehoert_um, gate.schwelle_fuer(secs))
+        urteil = gate.einstufen(wert, secs, ueberlappung, treffer)
+        quelle = None
+        if len(gate.abdruecke) > 1 and treffer in gate.abdruecke:
+            quelle = f"Abdruck {gate.abdruecke.index(treffer) + 1} von {len(gate.abdruecke)}"
+        await self._ergebnis(nr, urteil, wert, secs, ueberlappung, gehoert_um, gate.schwelle_fuer(secs, treffer), quelle)
         if self._schatten is not None:
             # erst jetzt: das Urteil ist gemeldet, der Schatten rechnet in einer eigenen Aufgabe und hält keine Prüfung auf
             self._schatten.starten(pcm, rate, secs, ueberlappung, urteil, wert, titanet_ms)
 
     async def _ergebnis(
-        self, nr: int, urteil: str, wert: float | None, secs: float, ueberlappung: bool, gehoert_um: float, schwelle: float | None = None
+        self, nr: int, urteil: str, wert: float | None, secs: float, ueberlappung: bool, gehoert_um: float, schwelle: float | None = None,
+        quelle: str | None = None,
     ) -> None:
+        """quelle: welcher Abdruck den besten Wert hatte (nur mit mehreren, für das Protokoll; nie Name oder Kennung des Mikrofons)."""
         self._gate.eintragen(urteil, gehoert_um)
         self._urteile[nr] = Urteil(nr, urteil, wert, secs, ueberlappung, self._gate.uhr(), schwelle)
         for alt in [n for n in self._urteile if n <= nr - URTEILE_MERKEN]:
@@ -410,8 +435,11 @@ class Stimmpruefer(FrameProcessor):
         self._fertig = max(self._fertig, nr)
         if wert is not None:
             # für die Kalibrierung: Wert, Länge, Urteil und die angewandte Schwelle, nie ein Inhalt
-            logger.info("Stimme: {:.2f} bei {:.1f} s{} -> {} (Schwelle {:.2f})", wert, secs, " (WAMO sprach)" if ueberlappung else "", urteil,
-                        schwelle)
+            sprach = " (WAMO sprach)" if ueberlappung else ""
+            if quelle is None:
+                logger.info("Stimme: {:.2f} bei {:.1f} s{} -> {} (Schwelle {:.2f})", wert, secs, sprach, urteil, schwelle)
+            else:
+                logger.info("Stimme: {:.2f} bei {:.1f} s{} -> {} (Schwelle {:.2f}, {})", wert, secs, sprach, urteil, schwelle, quelle)
         if self._gate.nur_eigen_unterbricht() and nr == self._begonnen:
             # fürs Unterbrechen (Start-Strategie und Gate, soft_interrupt.py); hat schon die nächste Äußerung begonnen, gälte es für sie
             await self.push_frame(StimmUrteilFrame(nr=nr, eigen=urteil in (EIGEN, KURZ)))

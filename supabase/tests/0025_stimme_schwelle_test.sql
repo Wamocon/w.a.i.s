@@ -59,22 +59,18 @@ do $$ begin
                                   where user_id = '00000000-0000-4000-8000-0000000025a2'), null::real, 'Bestand');
 end $$;
 
--- 2. Der Kern speichert und liest die Schwelle wie voice-core/stimme_speicher.py (Upsert mit Abdruck, Lesen in einer Abfrage)
+-- 2. Der Kern speichert und liest die Schwelle wie voice-core/stimme_speicher.py (Anlegen mit Abdruck, Lesen in einer Abfrage)
 set role wamo_core;
 do $$ begin
   insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint, consent_at, consent_text_version, enrolled_at, voice_threshold)
     values ('00000000-0000-4000-8000-0000000025a1', 'Schwelle Eins', true, wamo_testhilfe.abdruck()::extensions.vector, now(),
-            'stimme-1', now(), 0.42::real)
-    on conflict (user_id) where is_owner do update set name = excluded.name, voiceprint = excluded.voiceprint,
-      consent_at = excluded.consent_at, consent_text_version = excluded.consent_text_version, enrolled_at = excluded.enrolled_at,
-      voice_threshold = excluded.voice_threshold;
+            'stimme-1', now(), 0.42::real);
   perform wamo_testhilfe.gleich((select voice_threshold from __SCHEMA__.speakers
                                   where user_id = '00000000-0000-4000-8000-0000000025a1' and is_owner), 0.42::real, 'neue Zeile');
   -- neu einlernen ersetzt die Schwelle, auch durch NULL (eine alte Schwelle gilt für einen neuen Abdruck nie)
-  insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint, consent_at, consent_text_version, enrolled_at, voice_threshold)
-    values ('00000000-0000-4000-8000-0000000025a1', 'Schwelle Eins', true, wamo_testhilfe.abdruck()::extensions.vector, now(),
-            'stimme-1', now(), null)
-    on conflict (user_id) where is_owner do update set voiceprint = excluded.voiceprint, voice_threshold = excluded.voice_threshold;
+  -- (seit 0029 ist der Upsert des Kerns je Person und Mikrofon: hier als update derselben Zeile, so läuft der Test vor und nach 0029)
+  update __SCHEMA__.speakers set voiceprint = wamo_testhilfe.abdruck()::extensions.vector, voice_threshold = null
+    where user_id = '00000000-0000-4000-8000-0000000025a1' and is_owner;
   perform wamo_testhilfe.gleich((select voice_threshold from __SCHEMA__.speakers
                                   where user_id = '00000000-0000-4000-8000-0000000025a1'), null::real, 'ersetzt durch NULL');
   -- die Grenzen 0,2 und 0,8 gelten mit, alles außerhalb lehnt die Datenbank ab

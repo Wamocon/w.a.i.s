@@ -432,9 +432,11 @@ export type ServerMessage =
       zeit?: string;
     }
   /** Einlernen des Stimmabdrucks: Zustand, aufgenommene Sekunden reiner Sprache, Ziel in Sekunden, bei fehler ein Satz dazu */
-  | { type: "stimmabdruck"; status: AbdruckStatus; sekunden?: number; ziel?: number; text?: string }
+  | { type: "stimmabdruck"; status: AbdruckStatus; sekunden?: number; ziel?: number; text?: string; mikrofon?: string }
   /** Einwilligungstext zum Stimmabdruck, kommt vom Kern; version geht beim Start in der Antwort mit zurück */
   | { type: "stimmabdruck_einwilligung"; version: string; text: string }
+  /** Eingelernte Mikrofone, ein Abdruck je Mikrofon (Kern voice-core/stimme_mikrofon.py, höchstens max; max 1: der Kern kann nur einen) */
+  | { type: "stimmabdruck_mikrofone"; mikrofone: StimmMikrofonEintrag[]; max: number }
   /** Jira-Stories (lib/jiraStory.ts): der Kern bietet sie an (Knopf am Canvas), und was nach dem Klick auf die Karte geschah */
   | ({ type: "jira_status" } & JiraStatus)
   | ({ type: "jira_ergebnis" } & JiraErgebnis);
@@ -449,6 +451,11 @@ export type StimmeErgebnis = (typeof STIMME_ERGEBNISSE)[number];
 /** Obergrenze für zeit im Urteil (Zeitstempel eines Transkripts, ISO 8601 braucht rund 32 Zeichen) */
 const ZEIT_MAX = 64;
 export const ABDRUCK_STATUS = ["start", "aufnahme", "rechnet", "fertig", "fehler", "abgebrochen", "geloescht"] as const;
+/** Kennung eines eingelernten Mikrofons wie im Kern (stimme_mikrofon.KENNUNG_RE) */
+export const MIKROFON_KENNUNG = /^(unbekannt|[0-9a-f]{32})$/;
+/** So viele Abdrücke nimmt der Kern je Person höchstens (stimme_mikrofon.MAX_ABDRUECKE) */
+export const MIKROFONE_MAX = 3;
+export type StimmMikrofonEintrag = { kennung: string; name: string | null; am: string | null };
 export type AbdruckStatus = (typeof ABDRUCK_STATUS)[number];
 /** Obergrenze des Einwilligungstextes (Zeichen): ein längerer Text wird abgelehnt, nie gekürzt */
 export const EINWILLIGUNG_MAX = 4000;
@@ -1062,7 +1069,26 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
       if (typeof m.ziel === "number") aus.ziel = Math.min(600, Math.max(1, m.ziel));
       const text = isStr(m.text) ? sauber(m.text, 400, false).trim() : "";
       if (text) aus.text = text;
+      // mikrofon: Kennung des Mikrofons bei fertig und beim Löschen eines einzelnen Abdrucks (freiwillig, nur in fester Form; eine
+      // ungültige fällt weg, die Meldung bleibt, sonst hinge die Einlernansicht)
+      if (isStr(m.mikrofon) && MIKROFON_KENNUNG.test(m.mikrofon)) aus.mikrofon = m.mikrofon;
       return aus;
+    }
+    case "stimmabdruck_mikrofone": {
+      // max 1 bis 3, höchstens max Einträge; je Eintrag Kennung in fester Form, Name als eine bereinigte Zeile (leer heißt keiner),
+      // Zeitpunkt als lesbares Datum oder leer. Alles andere lehnt die ganze Nachricht ab.
+      if (typeof m.max !== "number" || !Number.isInteger(m.max) || m.max < 1 || m.max > MIKROFONE_MAX) return null;
+      if (!Array.isArray(m.mikrofone) || m.mikrofone.length > m.max) return null;
+      const mikrofone: StimmMikrofonEintrag[] = [];
+      for (const roh of m.mikrofone as unknown[]) {
+        if (typeof roh !== "object" || roh === null) return null;
+        const e = roh as Record<string, unknown>;
+        if (!isStr(e.kennung) || !MIKROFON_KENNUNG.test(e.kennung) || mikrofone.some((x) => x.kennung === e.kennung)) return null;
+        if (e.name !== null && e.name !== undefined && !isStr(e.name)) return null;
+        if (e.am !== null && e.am !== undefined && !(isStr(e.am) && e.am.length <= 40 && Number.isFinite(Date.parse(e.am)))) return null;
+        mikrofone.push({ kennung: e.kennung, name: zeile(e.name, 120) ?? null, am: isStr(e.am) ? e.am : null });
+      }
+      return { type: "stimmabdruck_mikrofone", mikrofone, max: m.max };
     }
     case "stimmabdruck_einwilligung": {
       // Der Text ist Teil einer Einwilligung: bereinigt, aber nie gekürzt (zu lang heißt abgelehnt)

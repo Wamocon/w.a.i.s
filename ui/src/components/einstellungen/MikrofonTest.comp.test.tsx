@@ -159,9 +159,47 @@ describe("Mikrofontest", () => {
     expect(screen.queryByText("Rot")).toBeNull();
   });
 
-  it("spricht W.A.I.S. während des Tests, sagt das Ergebnis, dass es ungenau sein kann", async () => {
+  it("spricht W.A.I.S. während des Tests, ist der Test ungültig: kein Ergebnis, keine Ampel, nichts gemerkt, Mikrofon zu", async () => {
+    // Wunsch vom 18.11.2026: einmal war das Ergebnis orange, weil W.A.I.S. dazwischen geredet hat
+    const { oeffnen, schliessen } = attrappe();
+    render(<MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} ausgabeAnhalten={vi.fn()} />);
+    await klicken("Mikrofon testen");
+    await laufen(1000);
+    act(() => wamo.set((s) => ({ ...s, presence: "speaking" })));
+    await laufen(100);
+    expect(screen.getByRole("alert").textContent).toBe("W.A.I.S. hat gesprochen, bitte noch einmal testen.");
+    expect(schliessen).toHaveBeenCalledTimes(1);
+    expect(screen.queryAllByText(/^(Gelb|Grün|Rot)$/)).toHaveLength(0);
+    expect(localStorage.getItem(`${TEST_PRAEFIX}${ID}`)).toBeNull();
+    expect(screen.getByRole("button", { name: "Mikrofon testen" })).toBeTruthy();
+  });
+
+  it("spricht W.A.I.S. beim Start noch, wartet das Einschwingen, bis die Unterbrechung angekommen ist", async () => {
     const { oeffnen } = attrappe();
-    render(<MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} />);
+    act(() => wamo.set((s) => ({ ...s, presence: "speaking" })));
+    render(<MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} ausgabeAnhalten={vi.fn()} />);
+    await klicken("Mikrofon testen");
+    await laufen(1500); // länger als das Einschwingen: es wartet
+    expect(screen.queryByRole("alert")).toBeNull();
+    act(() => wamo.set((s) => ({ ...s, presence: "idle" })));
+    await laufen(RUHE_MS + SPRECHEN_MS + 100);
+    // ein Ergebnis (die Attrappe liefert ihre Pegel nach der Uhr ab dem Öffnen, die Ampel zählt hier nicht), kein ungültiger Test
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status").textContent).toMatch(/^Ergebnis des Mikrofontests: /);
+  });
+
+  it("verstummt W.A.I.S. auch nach der Wartezeit nicht, ist der Test ungültig", async () => {
+    const { oeffnen } = attrappe();
+    act(() => wamo.set((s) => ({ ...s, presence: "speaking" })));
+    render(<MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} ausgabeAnhalten={vi.fn()} />);
+    await klicken("Mikrofon testen");
+    await laufen(3600);
+    expect(screen.getByRole("alert").textContent).toBe("W.A.I.S. hat gesprochen, bitte noch einmal testen.");
+  });
+
+  it("Laborsicht (ohne ausgabeAnhalten) bleibt wie bisher: Spricht W.A.I.S., sagt das Ergebnis, dass es ungenau sein kann", async () => {
+    const { oeffnen } = attrappe();
+    render(<MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} merken={false} />);
     await klicken("Mikrofon testen");
     await laufen(1000);
     act(() => wamo.set((s) => ({ ...s, presence: "speaking" })));
@@ -212,6 +250,37 @@ describe("Mikrofontest im Gespräch", () => {
     await laufen(RUHE_MS + SPRECHEN_MS + 100);
     expect(umschalten).toHaveBeenCalledTimes(2);
     expect(wamo.get().micOn).toBe(true);
+  });
+
+  it("im Gespräch schweigt W.A.I.S. während des Tests: Wiedergabe angehalten und danach wieder frei", async () => {
+    act(() => wamo.set((s) => ({ ...s, presence: "idle", micOn: true })));
+    const { oeffnen } = attrappe();
+    const ausgabe = vi.fn<(an: boolean) => void>();
+    render(
+      <MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} mikrofonUmschalten={umschalten} ausgabeAnhalten={ausgabe} />,
+    );
+    expect(screen.getByText(/W.A.I.S. schweigt/)).toBeTruthy();
+    await klicken("Mikrofon testen");
+    expect(ausgabe.mock.calls).toEqual([[true]]);
+    await laufen(RUHE_MS + SPRECHEN_MS + 100);
+    expect(ausgabe.mock.calls).toEqual([[true], [false]]);
+    expect(screen.getByText("Grün")).toBeTruthy();
+  });
+
+  it("ohne Gespräch hält der Test keine Wiedergabe an; Abbrechen gibt sie wieder frei", async () => {
+    const { oeffnen } = attrappe();
+    const ausgabe = vi.fn<(an: boolean) => void>();
+    const r = render(<MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} ausgabeAnhalten={ausgabe} />);
+    await klicken("Mikrofon testen");
+    await laufen(RUHE_MS + SPRECHEN_MS + 100);
+    expect(ausgabe).not.toHaveBeenCalled();
+    r.unmount();
+    act(() => wamo.set((s) => ({ ...s, presence: "idle" })));
+    render(<MikrofonTest geraetId="b" geraetName="Headset (USB)" oeffnen={oeffnen} ausgabeAnhalten={ausgabe} />);
+    await klicken("Mikrofon testen");
+    await laufen(1000);
+    await klicken("Abbrechen");
+    expect(ausgabe.mock.calls).toEqual([[true], [false]]);
   });
 
   it("ein schon stummes oder still gestartetes Gespräch bleibt, wie es ist", async () => {

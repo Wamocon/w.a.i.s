@@ -33,6 +33,7 @@ class FakeDb:
         self.fehler = fehler
         self.ohne_0025 = ohne_0025
         self.calls: list[tuple] = []
+        # Stand vor Migration 0029: die Spalte mikrofon fehlt, der Kern liest und schreibt einen Abdruck wie bisher (MikrofonDb: mit 0029)
 
     def t(self, name):
         return f"wamo_test.{name}"
@@ -40,8 +41,15 @@ class FakeDb:
     def _pruefen(self, sql):
         if self.fehler:
             raise self.fehler
+        if "mikrofon" in sql:
+            raise asyncpg.UndefinedColumnError('column "mikrofon" does not exist')
         if self.ohne_0025 and "voice_threshold" in sql:
             raise asyncpg.UndefinedColumnError('column "voice_threshold" does not exist')
+
+    async def fetch(self, sql, *args):
+        self.calls.append(("fetch", sql, args))
+        self._pruefen(sql)
+        return []
 
     async def fetchval(self, sql, *args):
         self.calls.append(("fetchval", sql, args))
@@ -292,6 +300,152 @@ class LoeschenTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ohne_datenbank_kein_erfolg(self):
         self.assertFalse(await ss.abdruck_loeschen(speicher(USER_A, None)))
+
+
+# ---------- Ein Abdruck je Mikrofon (Migration 0029, Wunsch vom 18.11.2026) ----------
+
+from stimme_gate import Abdruck  # noqa: E402
+from stimme_mikrofon import UNBEKANNT, Mikrofon, mikrofon_aus  # noqa: E402
+
+HEADSET = mikrofon_aus("Headset (Jabra)")
+LAPTOP = mikrofon_aus("Mikrofonarray (Realtek)")
+AM = datetime(2026, 11, 18, 9, 0, tzinfo=timezone.utc)
+
+
+class MikrofonDb:
+    """speakers mit Migration 0029: eine Zeile je (user_id, mikrofon)."""
+
+    configured = True
+    schema = "wamo_test"
+
+    def __init__(self, fehler: Exception | None = None):
+        self.zeilen: dict[tuple[str, str], dict] = {}
+        self.fehler = fehler
+        self.calls: list[tuple] = []
+
+    def t(self, name):
+        return f"wamo_test.{name}"
+
+    async def fetch(self, sql, *args):
+        self.calls.append(("fetch", sql, args))
+        if self.fehler:
+            raise self.fehler
+        zeilen = [dict(z, mikrofon=k[1]) for k, z in self.zeilen.items() if k[0] == args[0]]
+        if "voiceprint_shadow" in sql:
+            return [z for z in zeilen if z.get("schatten") is not None and z["version"] in args[1]]
+        return sorted(zeilen, key=lambda z: z["am"], reverse=True)[: args[1]]
+
+    async def execute(self, sql, *args):
+        self.calls.append(("execute", sql, args))
+        if self.fehler:
+            raise self.fehler
+        if sql.startswith("delete"):
+            weg = [k for k in self.zeilen if k[0] == args[0] and (len(args) == 1 or k[1] == args[1])]
+            for k in weg:
+                del self.zeilen[k]
+            return f"DELETE {len(weg)}"
+        if sql.startswith("update"):
+            z = self.zeilen.get((args[0], args[4]))
+            if z is None or z["version"] not in ("stimme-2", "stimme-3"):
+                return "UPDATE 0"
+            z.update(schatten=args[1], modell=args[2])
+            return "UPDATE 1"
+        self.zeilen[(args[0], args[6])] = {"abdruck": args[2], "version": args[3], "am": args[4], "schwelle": args[5], "name": args[7],
+                                           "schatten": None, "modell": None}
+        return "INSERT 0 1"
+
+
+class MikrofonSpeicherTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        ss._GEMELDET.clear()
+
+    async def speichern(self, db, mikrofon, abdruck=ABDRUCK, version="stimme-3", am=AM, **kw):
+        return await ss.abdruck_speichern(speicher(USER_A, db), abdruck, version=version, name="Erika", einwilligung_am=am, schwelle=0.33,
+                                          mikrofon=mikrofon, **kw)
+
+    async def test_je_mikrofon_eine_zeile_und_upsert_ersetzt_nur_dieses(self):
+        db = MikrofonDb()
+        self.assertTrue(await self.speichern(db, HEADSET))
+        self.assertTrue(await self.speichern(db, LAPTOP, am=datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc)))
+        anders = np.eye(DIM, dtype=np.float32)[5]
+        self.assertTrue(await self.speichern(db, HEADSET, abdruck=anders, am=datetime(2026, 11, 18, 11, 0, tzinfo=timezone.utc)))
+        _, sql, args = db.calls[-1]
+        self.assertIn("on conflict (user_id, mikrofon) where is_owner do update set", sql)
+        self.assertIn("mikrofon_name = excluded.mikrofon_name", sql)
+        self.assertEqual(args[6:], (HEADSET.kennung, "Headset (Jabra)"))
+        ok, liste, mehrere = await ss.abdruecke_laden(speicher(USER_A, db))
+        self.assertTrue(ok and mehrere)
+        self.assertEqual([a.mikrofon for a in liste], [LAPTOP, HEADSET])  # älteste zuerst
+        self.assertAlmostEqual(kosinus(liste[1].vektor, anders), 1.0, places=5)
+        self.assertEqual([a.schwelle for a in liste], [0.33, 0.33])
+        self.assertEqual(liste[0].am, datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc))
+        _, sql, args = [c for c in db.calls if c[0] == "fetch"][-1]
+        for teil in ("mikrofon", "mikrofon_name", "is_owner", "voiceprint is not null", "order by enrolled_at desc"):
+            self.assertIn(teil, sql)
+        self.assertEqual(args, (USER_A, 3))
+
+    async def test_schatten_je_mikrofon(self):
+        import stimme_schatten as sch
+
+        db = MikrofonDb()
+        schatten = np.ones(sch.SCHATTEN_DIM, dtype=np.float32)
+        await self.speichern(db, HEADSET, schatten=schatten, schatten_modell=sch.SCHATTEN_MODELL)
+        await self.speichern(db, LAPTOP, version="stimme-1", schatten=schatten, schatten_modell=sch.SCHATTEN_MODELL)  # stimme-1: keiner
+        update = [c for c in db.calls if c[1].startswith("update")]
+        self.assertEqual(len(update), 1)
+        self.assertIn("and mikrofon = $5", update[0][1])
+        self.assertEqual(update[0][2][4], HEADSET.kennung)
+        geladen = await ss.schatten_alle_laden(speicher(USER_A, db), sch.SCHATTEN_MODELL, sch.SCHATTEN_DIM, mehrere=True)
+        self.assertEqual(list(geladen), [HEADSET.kennung])
+        self.assertAlmostEqual(kosinus(geladen[HEADSET.kennung], schatten), 1.0, places=5)
+        self.assertEqual(await ss.schatten_alle_laden(speicher(USER_A, db), "anderes-modell", sch.SCHATTEN_DIM, mehrere=True), {})
+        _, sql, args = [c for c in db.calls if c[0] == "fetch"][-1]
+        self.assertIn("consent_text_version = any($2::text[])", sql)
+        self.assertEqual(sorted(args[1]), ["stimme-2", "stimme-3"])
+
+    async def test_einen_oder_alle_loeschen(self):
+        db = MikrofonDb()
+        await self.speichern(db, HEADSET)
+        await self.speichern(db, LAPTOP)
+        self.assertTrue(await ss.abdruck_loeschen(speicher(USER_A, db), mikrofon=HEADSET.kennung))
+        _, sql, args = db.calls[-1]
+        self.assertIn("and is_owner and mikrofon = $2", sql)
+        self.assertEqual(args, (USER_A, HEADSET.kennung))
+        self.assertEqual(list(db.zeilen), [(USER_A, LAPTOP.kennung)])
+        self.assertTrue(await ss.abdruck_loeschen(speicher(USER_A, db)))
+        self.assertEqual(db.zeilen, {})
+
+    async def test_ohne_migration_0029_ein_abdruck_wie_bisher(self):
+        db = FakeDb({USER_A: als_vektor(ABDRUCK)}, schwellen={USER_A: 0.31})
+        ok, liste, mehrere = await ss.abdruecke_laden(speicher(USER_A, db))
+        self.assertEqual((ok, mehrere, len(liste)), (True, False, 1))
+        self.assertEqual((liste[0].mikrofon, liste[0].schwelle), (Mikrofon(UNBEKANNT, None), 0.31))
+        self.assertEqual(await ss.abdruecke_laden(speicher(USER_B, db)), (True, [], False))
+        # ein Abdruck je Mikrofon geht ohne 0029 nicht: nichts gespeichert, der alte Abdruck bleibt
+        self.assertFalse(await self.speichern(db, HEADSET))
+        self.assertEqual(db.zeilen[USER_A], als_vektor(ABDRUCK))
+        self.assertFalse(await ss.abdruck_loeschen(speicher(USER_A, db), mikrofon=HEADSET.kennung))
+        self.assertIn(USER_A, db.zeilen)
+
+    async def test_fehler_kaputte_zeile_und_ohne_datenbank(self):
+        self.assertEqual(await ss.abdruecke_laden(speicher(USER_A, MikrofonDb(fehler=asyncpg.PostgresError("weg")))), (False, [], None))
+        self.assertEqual(await ss.abdruecke_laden(m.MemoryStore(USER_A, None)), (False, [], None))
+        db = MikrofonDb()
+        db.zeilen[(USER_A, HEADSET.kennung)] = {"abdruck": "[1,2]", "version": "stimme-3", "am": AM, "schwelle": None, "name": "Headset"}
+        self.assertEqual(await ss.abdruecke_laden(speicher(USER_A, db)), (False, [], True))
+        db.zeilen[(USER_A, HEADSET.kennung)] = {"abdruck": als_vektor(ABDRUCK), "version": "stimme-3", "am": AM, "schwelle": 7.0,
+                                                "name": "Headset"}
+        ok, liste, _ = await ss.abdruecke_laden(speicher(USER_A, db))
+        self.assertTrue(ok)
+        self.assertIsNone(liste[0].schwelle)  # unbrauchbare Schwelle: die aus der Umgebung
+        self.assertFalse(await ss.abdruck_speichern(speicher(USER_A, MikrofonDb(fehler=asyncpg.PostgresError("weg"))), ABDRUCK,
+                                                    version="stimme-3", name="A", einwilligung_am=AM, mikrofon=HEADSET))
+
+    async def test_ergebnis_ist_ein_abdruck_des_gates(self):
+        db = MikrofonDb()
+        await self.speichern(db, HEADSET)
+        _, liste, _ = await ss.abdruecke_laden(speicher(USER_A, db))
+        self.assertIsInstance(liste[0], Abdruck)
 
 
 if __name__ == "__main__":

@@ -233,6 +233,7 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
                     mikrofone={aktionen.mikrofone}
                     mikrofonWaehlen={aktionen.mikrofonWaehlen}
                     mikrofonUmschalten={aktionen.toggleMic}
+                    ausgabeAnhalten={labor ? undefined : aktionen.ausgabeAnhalten}
                     nurMikrofon={labor}
                   />
                 )}

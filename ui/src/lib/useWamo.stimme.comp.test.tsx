@@ -125,6 +125,15 @@ describe("useWamo, Stimmabdruck", () => {
       expect(aktuell().abdruck?.phase).toBe("start");
     });
 
+    it("schickt den Namen des laufenden Mikrofons mit, bereinigt (ein Abdruck je Mikrofon)", async () => {
+      const { result, c } = await bereitZumEinlernen();
+      act(() => wamo.set((s) => ({ ...s, mikrofon: "Standard - Headset (Jabra)\u202e" })));
+      act(() => {
+        result.current.stimmabdruck!.start("stimme-1");
+      });
+      expect(c.sendClientMessage).toHaveBeenCalledWith("stimmabdruck", { aktion: "start", einwilligung: "stimme-1", mikrofon: "Headset (Jabra)" });
+    });
+
     it("startet nicht mit einer anderen Version als der, die der Kern geschickt hat", async () => {
       const { result, c } = await bereitZumEinlernen();
       expect(result.current.stimmabdruck!.start("stimme-2")).toBe(false);
@@ -196,12 +205,45 @@ describe("useWamo, Stimmabdruck", () => {
       expect(c.sendClientMessage).toHaveBeenCalledWith("stimmabdruck", { aktion: "loeschen" });
     });
 
+    it("löscht einen Abdruck nur mit einer Kennung, die der Kern als eingelernt gemeldet hat", async () => {
+      const { result, c } = await sitzung();
+      await vomKern(c, { type: "stimme", status: "bereit", modus: "streng" });
+      const k = "a".repeat(32);
+      await vomKern(c, { type: "stimmabdruck_mikrofone", mikrofone: [{ kennung: k, name: "Headset", am: null }], max: 3 });
+      expect(result.current.stimmabdruck!.loeschen("b".repeat(32))).toBe(false);
+      act(() => {
+        expect(result.current.stimmabdruck!.loeschen(k)).toBe(true);
+      });
+      expect(stimmabdruckGesendet(c).map((a) => a[1])).toEqual([{ aktion: "loeschen", mikrofon: k }]);
+    });
+
     it("schickt nichts, wenn es keinen Abdruck gibt", async () => {
       const { result, c } = await sitzung();
       await vomKern(c, { type: "stimme", status: "fehlt", modus: "streng" });
       expect(result.current.stimmabdruck!.loeschen()).toBe(false);
       expect(stimmabdruckGesendet(c)).toHaveLength(0);
     });
+  });
+
+  it("Mikrofontest: die Wiedergabe ist stumm, der Kern unterbricht eine laufende Antwort, danach ist sie wieder frei", async () => {
+    const { result, c } = await sitzung();
+    const audio = document.querySelector("audio") ?? document.createElement("audio");
+    act(() => result.current.ausgabeAnhalten!(true));
+    expect(c.sendClientMessage).toHaveBeenCalledWith("mikrofontest", { aktion: "start" });
+    act(() => result.current.ausgabeAnhalten!(false));
+    expect(c.sendClientMessage.mock.calls.filter((a) => a[0] === "mikrofontest")).toHaveLength(1);
+    expect(audio.muted).toBe(false);
+  });
+
+  it("mit dem Ende der Sitzung verschwindet die Liste der eingelernten Mikrofone", async () => {
+    const { result, c } = await sitzung();
+    await vomKern(c, { type: "stimmabdruck_mikrofone", mikrofone: [], max: 3 });
+    expect(aktuell().stimmMikrofone).toEqual({ mikrofone: [], max: 3 });
+    await act(async () => {
+      await result.current.disconnect();
+    });
+    await fluss();
+    expect(aktuell().stimmMikrofone).toBeNull();
   });
 
   it("ein Einwilligungstext, den die Oberfläche ablehnt (zu lang), wird vermerkt statt still verworfen", async () => {

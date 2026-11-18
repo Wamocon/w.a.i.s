@@ -64,15 +64,12 @@ do $$ begin
                                   and tgname = 'speakers_schatten_verwerfen' and tgenabled = 'O'), 1::bigint, 'Trigger');
 end $$;
 
--- 2. Der Kern speichert und liest den Schatten wie voice-core/stimme_speicher.py (Upsert des Abdrucks, danach update des Schattens)
+-- 2. Der Kern speichert und liest den Schatten wie voice-core/stimme_speicher.py (Abdruck anlegen, danach update des Schattens)
 set role wamo_core;
 do $$ begin
   insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint, consent_at, consent_text_version, enrolled_at, voice_threshold)
     values ('00000000-0000-4000-8000-0000000028a1', 'Schatten Eins', true, wamo_testhilfe.vektor(192, 0.072)::extensions.vector, now(),
-            'stimme-2', now(), 0.33::real)
-    on conflict (user_id) where is_owner do update set name = excluded.name, voiceprint = excluded.voiceprint,
-      consent_at = excluded.consent_at, consent_text_version = excluded.consent_text_version, enrolled_at = excluded.enrolled_at,
-      voice_threshold = excluded.voice_threshold;
+            'stimme-2', now(), 0.33::real);
   update __SCHEMA__.speakers set voiceprint_shadow = wamo_testhilfe.vektor(256, 0.0625)::text::extensions.vector,
       shadow_model = 'wespeaker-resnet34-cmn'
     where user_id = '00000000-0000-4000-8000-0000000028a1'::uuid and is_owner and voiceprint is not null;
@@ -85,10 +82,9 @@ do $$ begin
   perform wamo_testhilfe.gleich((select shadow_model from __SCHEMA__.speakers where user_id = '00000000-0000-4000-8000-0000000028a1'),
                                 'wespeaker-resnet34-cmn', 'derselbe Abdruck behält den Schatten');
   -- neu einlernen ohne Schatten: der Trigger verwirft den alten
-  insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint, consent_at, consent_text_version, enrolled_at, voice_threshold)
-    values ('00000000-0000-4000-8000-0000000028a1', 'Schatten Eins', true, wamo_testhilfe.vektor(192, 0.05)::extensions.vector, now(),
-            'stimme-2', now(), null)
-    on conflict (user_id) where is_owner do update set voiceprint = excluded.voiceprint, voice_threshold = excluded.voice_threshold;
+  -- (seit 0029 ist der Upsert des Kerns je Person und Mikrofon: hier als update derselben Zeile, so läuft der Test vor und nach 0029)
+  update __SCHEMA__.speakers set voiceprint = wamo_testhilfe.vektor(192, 0.05)::extensions.vector, voice_threshold = null
+    where user_id = '00000000-0000-4000-8000-0000000028a1' and is_owner;
   perform wamo_testhilfe.gleich((select coalesce(voiceprint_shadow::text, '') || coalesce(shadow_model, '') from __SCHEMA__.speakers
                                   where user_id = '00000000-0000-4000-8000-0000000028a1'), '', 'alter Schatten verworfen');
   -- neuer Abdruck und neuer Schatten in einer Anweisung: der neue bleibt
