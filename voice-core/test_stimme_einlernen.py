@@ -400,14 +400,14 @@ class EinlernenTests(EinlernenBasis):
         self.speichern.assert_not_awaited()
 
     async def test_die_aufnahme_wird_nirgends_gespeichert(self):
-        """Nur der Abdruck geht an speichern: drei Argumente und die persönliche Schwelle, kein Ton."""
+        """Nur der Abdruck geht an speichern: drei Argumente, die persönliche Schwelle und der Schatten-Abdruck (hier keiner), kein Ton."""
         await self.e.starten("stimme-1", EINWILLIGUNG_AM)
         await self.anleitung_vorbei()
         await self.aufnehmen(ZIEL_SECS + 0.1)
         await self.e.warten()
         abdruck, version, am = self.speichern.await_args.args
         self.assertEqual(abdruck.shape, (DIM,))
-        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35})
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35, "schatten": None})
 
 
 class EinlernenWiePruefenTests(EinlernenBasis):
@@ -436,7 +436,7 @@ class EinlernenWiePruefenTests(EinlernenBasis):
     async def test_persoenliche_schwelle_geht_an_speicher_und_gate(self):
         with mock.patch.object(se.logger, "info") as info:
             await self.saetze(0.5)
-        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35})  # gleiche Stücke: die Obergrenze (Standardschwelle)
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35, "schatten": None})  # gleiche Stücke: die Obergrenze (Standardschwelle)
         self.assertEqual(self.gate.schwelle_kurz, 0.35)
         zeilen = [c.args for c in info.call_args_list if "Stücke" in c.args[0]]
         self.assertEqual(len(zeilen), 1)

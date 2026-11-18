@@ -17,6 +17,10 @@ nach einem Löschen in derselben Sitzung brauchen (außer im Modus aus, dort geh
 an der Stimme erkannt oder die Anmeldung mit zweitem Faktor ist jünger als 10 Minuten (nachweis_ok). Sonst meldet die Sitzung einen Fehler
 und nennt die neue Anmeldung. Ohne Abdruck (nie einer da gewesen) braucht es keinen Nachweis.
 Ohne Datenbank oder im Modus aus ist die Stimmprüfung aus (Status aus); ohne Abdruck wird nie geprüft oder gesperrt.
+
+Schattenbetrieb (stimme_schatten.py): Mit WAMO_STIMME_SCHATTEN=an bekommt die Sitzung das Schattenmodell des Prozesses (schatten), liest beim
+Laden den Schatten-Abdruck mit (nur mit Abdruck und Einwilligung stimme-2) und wärmt das Modell im Hintergrund vor. Gezeigt und verlangt
+wird dann die Einwilligung stimme-2 (zwei Abdrücke), ohne Schalter weiter stimme-1 (stimme_einwilligung.py). Laborprofile bekommen weiterhin keine Sitzung.
 """
 
 from __future__ import annotations
@@ -35,7 +39,8 @@ from stimme_einwilligung import einwilligung_gilt, einwilligung_nachricht
 from stimme_gate import StimmGate, stand_nachricht
 from stimme_modell import MODELL, ModellQuelle
 from stimme_pruefer import Stimmpruefer
-from stimme_speicher import abdruck_loeschen, abdruck_mit_schwelle_laden, abdruck_speichern, schwelle_speicherbar
+from stimme_schatten import SCHATTEN, SCHATTEN_DIM, SCHATTEN_MODELL, schatten_an, vorwaermen
+from stimme_speicher import abdruck_loeschen, abdruck_mit_schwelle_laden, abdruck_speichern, schatten_laden, schwelle_speicherbar
 from stimme_waechter import StimmWaechter
 
 LADE_VERSUCHE = 3  # der Abdruck wird beim Start der Sitzung gelesen; ein kurzer Ausfall der Datenbank soll nicht gleich "kaputt" heißen
@@ -45,6 +50,7 @@ EINWILLIGUNG_FEHLT = "Die Einwilligung fehlt oder gehört zu einem älteren Text
 ABGESCHALTET = "Die Stimmerkennung ist abgeschaltet."
 STAND_UNKLAR = "Ich kann gerade nicht lesen, ob schon ein Stimmabdruck gespeichert ist. Bitte versuch es gleich noch einmal."
 NICHT_GELOESCHT = "Ich konnte den Stimmabdruck nicht löschen. Bitte versuch es später noch einmal."
+SCHATTEN_LADEN_SECS = 5.0  # so lange darf das Lesen des Schatten-Abdrucks dauern (stimme_schatten.py), danach misst die Sitzung ohne ihn
 ANMELDUNG_FRISCH_SECS = 600.0  # so jung muss die Anmeldung mit zweitem Faktor sein, wenn die Stimme nicht als Nachweis dient
 LOESCHEN_NACHWEIS = (
     "Zum Löschen deines Stimmabdrucks muss ich dich erst an der Stimme erkennen: Sag kurz etwas in einem ganzen Satz. "
@@ -74,8 +80,10 @@ class StimmSitzung:
         sagen: Callable[[str], Awaitable[None]],
         uhr: Callable[[], float] | None = None,
         wanduhr: Callable[[], float] = time.time,
+        schatten: ModellQuelle | None = None,
     ):
         self._identity = identity
+        self.schatten = schatten  # Schattenmodell (stimme_schatten.py) oder None: nur messen, nie entscheiden
         self._wanduhr = wanduhr  # Unix-Zeit wie der Zeitstempel der Anmeldung im Token (Identity.anmeldung)
         self._memory = memory
         self._modell = modell
@@ -85,7 +93,8 @@ class StimmSitzung:
             logger.info("Stimmprüfung aus: keine Datenbank für das Profil")
             gate.modus = "aus"  # ohne Datenbank gibt es keinen Abdruck, nichts zu prüfen und nichts einzulernen
         kwargs = {"uhr": uhr} if uhr is not None else {}
-        self.pruefer = Stimmpruefer(gate, modell, speichern=self._speichern, sagen=sagen, nachweis=self.nachweis_ok, **kwargs)
+        self.pruefer = Stimmpruefer(gate, modell, speichern=self._speichern, sagen=sagen, nachweis=self.nachweis_ok, schatten=schatten,
+                                    **kwargs)
         self.waechter = StimmWaechter(gate, self.pruefer)
 
     @classmethod
@@ -99,11 +108,15 @@ class StimmSitzung:
         modell: ModellQuelle = MODELL,
         gate: StimmGate | None = None,
         uhr: Callable[[], float] | None = None,
+        schatten: ModellQuelle | None = None,
     ) -> StimmSitzung | None:
-        """Die Stimmsitzung dieser Identität, oder None für ein Laborprofil: dort gibt es nie Stimmprüfung und nie Einlernen."""
+        """Die Stimmsitzung dieser Identität, oder None für ein Laborprofil: dort gibt es nie Stimmprüfung und nie Einlernen. schatten: das
+        Schattenmodell; ohne Angabe das des Prozesses, wenn WAMO_STIMME_SCHATTEN an ist, sonst keins."""
         if labor.ist_labor(identity):
             return None
-        return cls(identity, memory, gate or StimmGate.aus_umgebung(), modell, senden=senden, sagen=sagen, uhr=uhr)
+        if schatten is None and schatten_an():
+            schatten = SCHATTEN
+        return cls(identity, memory, gate or StimmGate.aus_umgebung(), modell, senden=senden, sagen=sagen, uhr=uhr, schatten=schatten)
 
     # ---------- Laden und Stand ----------
 
@@ -146,11 +159,25 @@ class StimmSitzung:
             return  # während des Lesens gelöscht: das Gelesene ist veraltet
         self.gate.schwelle_erlaubt = schwelle_speicherbar()
         self.gate.setze_abdruck(abdruck, ok, schwelle=schwelle)
+        if self.schatten is not None and abdruck is not None:
+            await self._schatten_laden(abdruck)
         if abdruck is not None:
             logger.info("Stimmprüfung: Schwelle für kurze Äußerungen {:.2f} ({})", self.gate.schwelle_fuer(0.0),
                         "persönlich" if self.gate.schwelle_kurz is not None else "Umgebung")
         if abdruck is not None:
             self.gate.modell_ok = await self._modell.get() is not None
+
+    async def _schatten_laden(self, abdruck: np.ndarray) -> None:
+        """Erst nach dem Abdruck von TitaNet (die Prüfung wartet nie darauf): Schatten-Abdruck lesen, höchstens SCHATTEN_LADEN_SECS, und nur
+        setzen, wenn der Abdruck inzwischen derselbe ist. Das Schattenmodell lädt im Hintergrund vor."""
+        vorwaermen(self.schatten)
+        try:
+            schatten = await asyncio.wait_for(schatten_laden(self._memory, SCHATTEN_MODELL, SCHATTEN_DIM), SCHATTEN_LADEN_SECS)
+        except asyncio.TimeoutError:
+            logger.info("Stimmschatten: Abdruck nicht rechtzeitig gelesen, diese Sitzung misst ohne Schatten")
+            return
+        if self.gate.abdruck is abdruck:
+            self.gate.schatten_abdruck = schatten
 
     async def status_melden(self) -> None:
         await self._senden(self.gate.stand())
@@ -159,7 +186,7 @@ class StimmSitzung:
         """Die Oberfläche ist verbunden: Stand der Stimmprüfung und der Text der Einwilligung."""
         await self.status_melden()
         if self.gate.modus != "aus":
-            await self._senden(einwilligung_nachricht())
+            await self._senden(einwilligung_nachricht(schatten=self.schatten is not None))
 
     def anmeldung_frisch(self) -> bool:
         """Ist die Anmeldung mit zweitem Faktor jünger als ANMELDUNG_FRISCH_SECS? Der Zeitpunkt kommt aus dem Token (auth_gate.anmeldezeit,
@@ -196,17 +223,18 @@ class StimmSitzung:
     async def _start(self, einwilligung: object) -> None:
         if self.gate.modus == "aus":
             await self._fehler(ABGESCHALTET)
-        elif not einwilligung_gilt(einwilligung):
+        elif not einwilligung_gilt(einwilligung, schatten=self.schatten is not None):  # im Schattenbetrieb nur stimme-2
             await self._fehler(EINWILLIGUNG_FEHLT)
         elif self.gate.zustand in ("laedt", "kaputt"):
             await self._fehler(STAND_UNKLAR)  # nicht blind einen vielleicht vorhandenen Abdruck ersetzen
         else:
             await self.pruefer.einlernen_starten(einwilligung, jetzt_utc())
 
-    async def _speichern(self, abdruck: np.ndarray, version: str, einwilligung_am: datetime, *, schwelle: float | None = None) -> bool:
+    async def _speichern(self, abdruck: np.ndarray, version: str, einwilligung_am: datetime, *, schwelle: float | None = None,
+                         schatten: np.ndarray | None = None) -> bool:
         gespeichert = await abdruck_speichern(
             self._memory, abdruck, version=version, name=getattr(self._identity, "name", ""), einwilligung_am=einwilligung_am,
-            schwelle=schwelle,
+            schwelle=schwelle, schatten=schatten, schatten_modell=SCHATTEN_MODELL if schatten is not None else None,
         )
         # Ohne Spalte für die Schwelle (Migration 0025) wirkt sie auch in dieser Sitzung nicht: das Einlernen setzt sie danach im Gate
         self.gate.schwelle_erlaubt = schwelle_speicherbar()

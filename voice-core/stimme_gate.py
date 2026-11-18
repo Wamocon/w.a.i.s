@@ -188,6 +188,9 @@ class StimmGate:
     modell_ok: bool | None = None  # nur für ein Profil mit Abdruck von Belang
     schwelle_kurz: float | None = None  # persönliche Schwelle für kurze Äußerungen (vom Einlernen, speakers.voice_threshold), sonst None
     schwelle_erlaubt: bool = True  # False: die Datenbank kann sie nicht speichern (Migration 0025 fehlt), dann wirkt auch keine
+    # Abdruck des zweiten Modells im Schattenbetrieb (stimme_schatten.py, speakers.voiceprint_shadow, Migration 0028): nur zum Messen, er
+    # entscheidet nie etwas. Gehört zum Abdruck und verschwindet mit ihm.
+    schatten_abdruck: np.ndarray | None = None
     _wer: str | None = None
     _um: float = 0.0  # Zeitpunkt der letzten sicheren Erkennung (oder des letzten Tippens)
     _nur_kurz: bool = False  # seither kamen nur kurze Äußerungen, die nach der Person klangen
@@ -231,12 +234,15 @@ class StimmGate:
         """Nachricht an die Oberfläche mit dem Stand dieses Gates (oder einem vorgegebenen, zum Beispiel laedt beim Modellstart)."""
         return stand_nachricht(self.modus, status or self.status)
 
-    def setze_abdruck(self, abdruck: np.ndarray | None, ok: bool = True, geloescht: bool = False, schwelle: float | None = None) -> None:
+    def setze_abdruck(self, abdruck: np.ndarray | None, ok: bool = True, geloescht: bool = False, schwelle: float | None = None,
+                      schatten: np.ndarray | None = None) -> None:
         """Stand des Abdrucks nach dem Laden, Einlernen oder Löschen. ok False: nicht lesbar, es ist unbekannt, ob es einen gibt.
         geloescht: die Person hat ihn gerade gelöscht, das neue Einlernen in dieser Sitzung braucht dann denselben Nachweis wie ein Ersetzen.
-        schwelle: persönliche Schwelle für kurze Äußerungen, die zu diesem Abdruck gehört (None oder unbrauchbar: die aus der Umgebung)."""
+        schwelle: persönliche Schwelle für kurze Äußerungen, die zu diesem Abdruck gehört (None oder unbrauchbar: die aus der Umgebung).
+        schatten: Abdruck des Schattenmodells zu diesem Abdruck (None: keiner), nur zum Messen."""
         self.abdruck = abdruck if ok else None
         self.schwelle_kurz = persoenliche_schwelle(schwelle) if self.abdruck is not None and self.schwelle_erlaubt else None
+        self.schatten_abdruck = schatten if self.abdruck is not None else None
         if geloescht and self.abdruck is None:
             self._geloescht = True
         self.zustand = "kaputt" if not ok else "da" if abdruck is not None else "fehlt"

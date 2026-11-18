@@ -1101,7 +1101,7 @@ Jede Person kann W.A.I.S. ihre Stimme einlernen, damit W.A.I.S. nur noch diese S
 und nur im Büro, nie im Testlabor (Laborprofile bekommen weder Einlernen noch Prüfung, die Nachricht `stimmabdruck` wird für sie von der
 Laborsperre abgewiesen). Code: `voice-core/stimme_*.py`, Tests: `voice-core/test_stimme_*.py`.
 
-**Bedienung.** Der Kern schickt beim Verbinden den Text der Einwilligung (Version `stimme-1`). In den Einstellungen der Oberfläche liest die
+**Bedienung.** Der Kern schickt beim Verbinden den Text der Einwilligung (Version `stimme-1`, mit `WAMO_STIMME_SCHATTEN=an` die Fassung `stimme-2`). In den Einstellungen der Oberfläche liest die
 Person ihn, bestätigt ihn und startet das Einlernen (Klick, nie per Sprache). W.A.I.S. sagt kurz, worum es geht, dann liest die Person den Text
 vor oder erzählt frei, bis der Balken voll ist (20 Sekunden reine Sprache). Währenddessen hört die Spracherkennung nur Stille, W.A.I.S. antwortet
 also nicht auf den Vorlesetext. Danach steht der Abdruck im Profil. **Löschen** in den Einstellungen entfernt den Abdruck
@@ -1134,6 +1134,7 @@ außer `aus` nur mit Nachweis: Die Person wurde gerade sicher an der Stimme erka
 | `WAMO_STIMME_VERWERFEN_MAX` | 0,4 | Nur Modus `streng` und `NUR_EIGEN=aus`: unklare Äußerungen unter diesem Wert verwirft der Wächter (an den Bereich `FREMD_MAX` bis `EIGEN_MIN_LANG` gesetzt; 0 oder `FREMD_MAX` schaltet das Verwerfen unklarer Äußerungen ab) |
 | `WAMO_STIMME_VERWERFEN_MIN_SECS` | 0 | Nur Modus `streng` und `NUR_EIGEN=aus`: so viel reine Sprache braucht eine Äußerung mindestens, damit sie verworfen wird (0 bis 10). Ganz wie vor dem 16.11.2026: `NUR_EIGEN=aus`, `VERWERFEN_MAX=0` und `VERWERFEN_MIN_SECS` gleich `MIN_SECS` |
 | `WAMO_STIMME_MODELL` | Cache-Ordner | Pfad der Modelldatei, Standard `XDG_CACHE_HOME/wamo/sprecher/nemo_en_titanet_large.onnx`, sonst `voice-core/.cache/sprecher/` |
+| `WAMO_STIMME_SCHATTEN` | aus | `an`: zweites Sprechermodell im Schattenbetrieb (WeSpeaker ResNet34, siehe unten). Es lernt beim Einlernen einen zweiten Abdruck mit (Migration `0028`) und schreibt je Äußerung eine Zeile mit Zahlen ins Log; das Urteil bleibt bei TitaNet. Nur über `wamo-core-env`, ein Tippfehler bleibt aus |
 
 **Wie geprüft wird.** Das Modell (NeMo TitaNet-Large als ONNX über `sherpa-onnx`, 192 Werte je Stimme) läuft im Kern auf der CPU, einmal je
 Prozess für alle Sitzungen. Abdruck und Prüfzustand gehören je Sitzung zum Profil, einen Abdruck-Zwischenspeicher über Profile hinweg gibt
@@ -1242,11 +1243,12 @@ eingelernten Stimme zu) gilt in der Oberfläche zusätzlich:
 - `{"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert": 0.78, "modus": "..."}` je Äußerung (vom Prüfer, auch im Modus `beobachten`).
 - `{"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert": 0.78 oder null, "modus": "streng", "ignoriert": true|false, "zeit": "..."}` vom Wächter nach jedem Urteil zu einem endgültigen Transkript (Modus `streng` mit Abdruck), auch bei Annahme (`ignoriert: false`, zu jedem Transkript) und bei Verwerfen (`ignoriert: true`, einmal je Äußerung). `zeit` ist genau der `timestamp`, den dasselbe Transkript in `user-transcription` trägt (Pipecat gibt `TranscriptionFrame.timestamp` unverändert aus), höchstens 64 Zeichen, sonst `null`. Kurz und keine Antwort in der Frist heißen `unklar` (ohne Wert: `null`).
 - `{"type": "stimmabdruck", "status": "start"|"aufnahme"|"rechnet"|"fertig"|"fehler"|"abgebrochen"|"geloescht", "sekunden": 8.4, "ziel": 20, "text": "..."}` beim Einlernen und Löschen.
-- `{"type": "stimmabdruck_einwilligung", "version": "stimme-1", "text": "..."}` beim Verbinden (nicht im Modus aus, nie im Labor; im Labor kommt nur `{"type": "stimme", "status": "aus", "modus": "aus"}`).
+- `{"type": "stimmabdruck_einwilligung", "version": "stimme-1", "text": "..."}` (im Schattenbetrieb `stimme-2`) beim Verbinden (nicht im Modus aus, nie im Labor; im Labor kommt nur `{"type": "stimme", "status": "aus", "modus": "aus"}`).
 - Von der Oberfläche: Client-Nachricht `stimmabdruck` mit `{"aktion": "start", "einwilligung": "stimme-1"}`, `{"aktion": "abbrechen"}` oder `{"aktion": "loeschen"}`. Der Start gilt nur mit genau der aktuellen Version der Einwilligung.
 
 **Datenschutz.** Gespeichert werden nur der Abdruck (192 Zahlen) sowie Zeitpunkt und Version der Einwilligung in `speakers` (Spalte
-`voiceprint`, Migration `0001`, Rolle `wamo_core`, für die Oberfläche nicht lesbar), nie eine Aufnahme. Berechnung und Vergleich laufen im
+`voiceprint`, Migration `0001`, Rolle `wamo_core`, für die Oberfläche nicht lesbar), im Schattenbetrieb mit der Einwilligung `stimme-2`
+dazu der zweite Abdruck (256 Zahlen, Spalte `voiceprint_shadow`, Migration `0028`), nie eine Aufnahme. Berechnung und Vergleich laufen im
 Kern auf dem eigenen Server, nichts davon geht an Soniox oder Anthropic. Zweck, Rechtsgrundlage (ausdrückliche Einwilligung, Art. 9 Abs. 2
 lit. a DSGVO), Löschung und den Wortlaut der Einwilligung nennt der Abschnitt 4 in `docs/labor-datenschutz-entwurf.md` (Entwurf, eine
 verantwortliche Person prüft ihn). Offen vor dem Echtbetrieb: die Datenschutz-Folgenabschätzung nach Art. 35 DSGVO und die Aufbewahrung der
@@ -1275,6 +1277,35 @@ Liegt die Datei woanders, nennt `WAMO_STIMME_MODELL` (über `wamo-core-env`) den
 `wamo-core-env`), und der Pfad gilt je Rechner. Die Bibliothek `sherpa-onnx` 2.0.1 steht in
 `voice-core/pyproject.toml` und `uv.lock`; für Linux aarch64 und Python 3.12 gibt es beide Wheels (`sherpa-onnx` und `sherpa-onnx-core`,
 laut PyPI am 14.11.2026). Ein echter Lauf auf dem Server steht aus.
+
+**Zweites Modell im Schattenbetrieb (seit 18.11.2026).** TitaNet trennt bei kurzen Äußerungen schwach. Mit `WAMO_STIMME_SCHATTEN=an`
+rechnet ein zweites Modell mit, ohne etwas zu entscheiden (`voice-core/stimme_schatten.py`): WeSpeaker ResNet34 (VoxCeleb2, 256 Werte,
+ohne LM-Feinschliff, ONNX `wespeaker_en_voxceleb_resnet34.onnx` aus demselben Release, SHA-256
+`5ef208a9da1453335308a6b6f4e6dfbd7e183a38b604de0a57664f45d257fe94`). Gewählt nach Quellen und Messung: auf VoxCeleb1-O mit 2 s langen
+Testäußerungen EER 2,12 % gegen 3,28 % für ERes2Net ([ERes2NetV2, Interspeech 2024](https://arxiv.org/abs/2406.02167), Tabelle 3), in voller
+Länge 0,867 % ([WeSpeaker, VoxCeleb v2](https://github.com/wenet-e2e/wespeaker/blob/master/examples/voxceleb/v2/README.md)). Die
+CAM++-Fassungen für VoxCeleb im Release (WeSpeaker und 3D-Speaker) liefern in `sherpa-onnx` 2.0.1 je nach Länge stark schwankende Abdrücke
+(Kosinus zum Abdruck derselben Aufnahme bei 1,5 s 0,19, bei 2 s 0,92, bei 2,5 s 0,09) und scheiden aus, obwohl CAM++ in der Literatur schneller
+ist. Die WeSpeaker-Dateien tragen den Metadateneintrag `feature_normalize_type` nicht, `sherpa-onnx` zieht dann den Mittelwert der Merkmale
+nicht ab, mit dem WeSpeaker trainiert ist (fremde Stimmen lagen so bei 0,75 statt 0,17). Der Kern leitet deshalb aus der Datei des Releases
+`wespeaker_en_voxceleb_resnet34.cmn.onnx` ab: dieselben Bytes plus genau dieser Eintrag (39 Bytes), SHA-256
+`6928c40c3b5c695352998c261cb6f2250c4e52a991e324c0f63c2e10fe7c31f8`. Rechenzeit auf einem x86-Laptop mit 2 Threads: rund 23 ms für 1 s, 37 ms
+für 1,5 s, 47 ms für 2 s (TitaNet 33, 41, 54 ms); die Zeit am Server steht in jeder Logzeile.
+
+Ablauf: Beim Einlernen entsteht aus denselben Stücken ein zweiter Abdruck (`speakers.voiceprint_shadow` mit `shadow_model`, Migration
+`0028`; ein neues Einlernen ohne Schatten verwirft einen alten per Trigger). Nach jedem Urteil am Sprechende rechnet der Schatten denselben Ton
+in einer eigenen Aufgabe, das Urteil wartet nie darauf; ins Log geht nur
+`Stimmschatten: titanet=0.512 schatten=0.634 secs=1.42 wamo=0 urteil=eigen ms_titanet=41 ms_schatten=37`. Ohne Schatten-Abdruck (vor dem
+Einschalten eingelernt) misst er nichts, also nach dem Einschalten einmal neu einlernen. Fehlt das Modell oder stimmt eine Summe nicht, steht
+nur ein Hinweis im Log, die Prüfung läuft unverändert mit TitaNet. Laborprofile haben keine Stimmprüfung und damit keinen Schatten.
+Auswerten: `sudo journalctl -u 'wamo-core@*' --since today -o cat | python3 scripts/wamo_stimme_schatten_auswerten.py` zeigt je Längenklasse
+(unter 1 s, 1 bis 2 s, ab 2 s) und Urteil die Verteilung beider Werte und die Trennung (AUC, EER, d'); die Gruppen sind dort an TitaNet
+geschnitten. Für die Entscheidung zählen Läufe mit bekannter Stimme: `--eigen eigen.log --fremd fremd.log` (eine Sitzung nur mit der
+eigenen Stimme, eine mit einer anderen Person am selben Profil im Modus `beobachten`). Die Datei des Releases kann wie TitaNet vorab in
+`/var/cache/wamo-core/wamo/sprecher/` liegen (`sha256sum` gegen die Summe oben), die abgeleitete schreibt der Kern selbst. Einwilligung (Entscheidung von Niko vom 18.11.2026): Mit dem Schalter zeigt der Kern die Fassung `stimme-2` (zwei
+Abdrücke, 192 Zahlen für die Prüfung und 256 Zahlen für den Vergleich, Löschen nimmt beide mit) und lernt nur damit ein; ohne Schalter bleibt
+`stimme-1`. Ein Abdruck mit `stimme-1` bekommt keinen Schatten, bis die Person neu einlernt; das erzwingt auch die Datenbank
+(`speakers_shadow_consent_chk`). Text und Fassungen stehen in `docs/labor-datenschutz-entwurf.md`, Abschnitt 4.
 
 **Grenzen.** Die Stimmprüfung ersetzt keine Freigabe: Aktionen mit Risiko brauchen weiter die Freigabe per Klick. Sie schützt nicht gegen
 Aufnahmen oder geklonte Stimmen. Sie kann sich irren (Erkältung, Lärm, Mikrofon): Eine eigene Äußerung mit einem Wert unter der Schwelle für

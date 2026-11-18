@@ -43,7 +43,7 @@ Nachrichten an die Oberfläche (RTVI-Servernachrichten, zusätzlich zu canvas, a
    "sekunden"?, "ziel"?, "text"?}                                  Einlernen des Stimmabdrucks (nie in Laborsitzungen)
   {"type": "stimmabdruck_einwilligung", "version", "text"}         Text der Einwilligung beim Verbinden (stimme_einwilligung.py)
 Nachrichten von der Oberfläche:
-  {"type": "stimmabdruck", "data": {"aktion": "start", "einwilligung": "stimme-1"} | {"aktion": "abbrechen"} | {"aktion": "loeschen"}}
+  {"type": "stimmabdruck", "data": {"aktion": "start", "einwilligung": "stimme-1" (im Schattenbetrieb "stimme-2")} | {"aktion": "abbrechen"} | {"aktion": "loeschen"}}
                                           Stimmabdruck einlernen (nur mit der aktuellen Version der Einwilligung), abbrechen oder
                                           löschen (stimme_sitzung.py; nie für Laborprofile)
   {"type": "vergessen", "data": {"id"}}   eigenen Eintrag deaktivieren (memory.forget)

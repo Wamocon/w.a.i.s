@@ -57,6 +57,10 @@ Stimmabdruck (stimme_gate.py, stimme_modell.py, seit 14.11.2026; wirkt nur für 
                                mindestens, damit der Wächter sie verwirft (0 bis 10). Ganz wie vor dem 16.11.2026: VERWERFEN_MAX=0 und
                                VERWERFEN_MIN_SECS gleich MIN_SECS
   WAMO_STIMME_MODELL           Pfad der Modelldatei (Standard: Cache-Ordner des Dienstes XDG_CACHE_HOME/wamo/sprecher/, sonst voice-core/.cache/sprecher/)
+  WAMO_STIMME_SCHATTEN         an oder aus, Standard aus (seit 18.11.2026, stimme_schatten.py): zweites Sprechermodell (WeSpeaker ResNet34)
+                               im Schattenbetrieb; es lernt beim Einlernen einen zweiten Abdruck mit (Migration 0028) und schreibt je
+                               Äußerung eine Zeile mit Zahlen ins Log, das Urteil bleibt bei TitaNet. Nur über wamo-core-env, ein
+                               Tippfehler bleibt aus
 Innehalten statt Abbrechen (wiedergabe.py, soft_interrupt.py, Entscheidung vom 14.11.2026, Messung steht aus):
   WAMO_INNEHALTEN              ein einzelnes echtes Wort der Person ("Danke", "Du"), während WAMO spricht, lässt WAMO an der nächsten
                                Wortgrenze innehalten; kommt nichts nach, spricht WAMO dort weiter (Standard an; aus = einzelne Wörter

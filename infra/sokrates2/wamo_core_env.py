@@ -76,6 +76,8 @@ ERLAUBT = set(PFLICHT) | {
     # Nur die eigene Stimme hören und unterbrechen lassen (voice-core/stimme_waechter.py, seit 17.11.2026, beide Standard an)
     "WAMO_STIMME_NUR_EIGEN", "WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN",
     "WAMO_STIMME_MODELL",
+    # Zweites Sprechermodell im Schattenbetrieb (voice-core/stimme_schatten.py, seit 18.11.2026, Standard aus): misst nur mit, entscheidet nie
+    "WAMO_STIMME_SCHATTEN",
     # Sprachpakete A und B (voice-core/soniox_tts.py, persona.py, bot.py, learning.py, soft_interrupt.py, ja_waechter.py):
     # Tempo und Pausen der Stimme, Leerzeichen am Satzende, Persona, Pausen-Texte, Lernen, Rückmeldelaut bei Werkzeug, Ja-Wächter
     "SONIOX_SPEED", "SONIOX_REDUCE_SILENCE", "WAMO_TTS_SATZLEERZEICHEN", "WAMO_PERSONA_RUECKFRAGEN", "WAMO_PERSONA_BROWSER", "WAMO_PERSONA_TAB", "WAMO_PERSONA_PC_ORDNER", "WAMO_PERSONA_GESPRAECH", "WAMO_WARTESATZ_MODELL", "WAMO_RD_AKTIV", "WAMO_WARTESATZ_MODELL_SECS",

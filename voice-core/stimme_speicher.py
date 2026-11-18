@@ -10,6 +10,12 @@ Fehlt die Spalte voice_threshold (Migration 0025 noch nicht angewandt), gilt der
 Speichern speichert ihn ohne Schwelle, beides ohne Fehler und mit einem Hinweis einmal je Prozess. Laborprofile kommen hier nie an (sie
 bekommen keine Stimmsitzung, stimme_sitzung.StimmSitzung.fuer).
 
+Schattenbetrieb (stimme_schatten.py, Migration 0028): Mit eingeschaltetem Schatten steht in derselben Zeile der Abdruck des zweiten Modells
+(voiceprint_shadow, extensions.vector ohne feste Länge) und dessen Name (shadow_model). Gespeichert wird er nach dem Abdruck mit einer
+eigenen Anweisung (schatten_speichern), gelesen nur mit eingeschaltetem Schatten (schatten_laden). Einen alten Schatten zu einem früheren
+Abdruck verwirft die Datenbank selbst (Trigger speakers_schatten_verwerfen): Wer ohne Schatten neu einlernt, hinterlässt keinen veralteten.
+Fehlen die Spalten (0028 noch nicht angewandt), gibt es keinen Schatten, mit einem Hinweis einmal je Prozess; der Abdruck bleibt gespeichert.
+
 Alle Funktionen werfen nie. Ein Fehler der Datenbank heißt: laden gibt (False, None), speichern und löschen geben False.
 """
 
@@ -22,19 +28,27 @@ import numpy as np
 from loguru import logger
 
 from memory import DB_ERRORS, MemoryStore
-from stimme_einwilligung import einwilligung_gilt
+from stimme_einwilligung import EINWILLIGUNG_VERSION_SCHATTEN, einwilligung_bekannt, schatten_erlaubt
 from stimme_gate import persoenliche_schwelle
 from stimme_modell import als_vektor, aus_vektor
 
 MAX_NAME = 60  # speakers.name: 1 bis 60 Zeichen
 OHNE_0025 = ("speakers ohne Migration 0025 (Spalte voice_threshold): persönliche Schwelle der Stimme nicht verfügbar, es gilt "
              "WAMO_STIMME_EIGEN_MIN_KURZ")
+OHNE_0028 = ("speakers ohne Migration 0028 (Spalten voiceprint_shadow und shadow_model): Schatten-Abdruck nicht verfügbar, die Prüfung "
+             "läuft allein mit TitaNet")
 _GEMELDET: set[str] = set()  # Hinweise, die schon einmal im Log stehen (einmal je Prozess)
 _spalte_da = True  # gab es die Spalte voice_threshold bei der letzten Abfrage dieses Prozesses (ein Schema je Prozess)?
 
 
 def _bereit(speicher: MemoryStore) -> bool:
     return bool(speicher.enabled)
+
+
+def _einmal_melden(hinweis: str) -> None:
+    if hinweis not in _GEMELDET:
+        _GEMELDET.add(hinweis)
+        logger.warning(hinweis)
 
 
 def _schwelle_spalte(da: bool) -> None:
@@ -89,14 +103,72 @@ async def abdruck_mit_schwelle_laden(speicher: MemoryStore) -> tuple[bool, np.nd
     return True, abdruck, schwelle
 
 
+async def schatten_laden(speicher: MemoryStore, modell: str, dim: int) -> np.ndarray | None:
+    """Der Schatten-Abdruck des Profils, nur wenn er vom Modell modell stammt, dim Werte hat und der Abdruck mit der Einwilligung stimme-2
+    gespeichert ist; sonst, ohne Abdruck, bei einem Fehler oder ohne Migration 0028 None (der Schatten misst dann nichts)."""
+    if not _bereit(speicher):
+        return None
+    db = speicher.db
+    try:
+        zeile = await db.fetchrow(
+            f"select voiceprint_shadow::text as schatten, shadow_model as modell from {db.t('speakers')} "
+            "where user_id = $1::uuid and is_owner and voiceprint is not null and consent_text_version = $2 limit 1",
+            speicher.user_id, EINWILLIGUNG_VERSION_SCHATTEN,
+        )
+    except asyncpg.UndefinedColumnError:
+        _einmal_melden(OHNE_0028)
+        return None
+    except DB_ERRORS as e:
+        logger.info("Stimmschatten: Abdruck nicht gelesen ({})", type(e).__name__)
+        return None
+    if zeile is None or zeile["schatten"] is None:
+        return None
+    if zeile["modell"] != modell:
+        logger.info("Stimmschatten: gespeicherter Abdruck stammt von einem anderen Modell, für den Schatten bitte neu einlernen")
+        return None
+    return aus_vektor(zeile["schatten"], dim)
+
+
+async def schatten_speichern(speicher: MemoryStore, schatten: np.ndarray, modell: str) -> bool:
+    """Schreibt den Schatten-Abdruck in die Zeile des Abdrucks (nur mit Abdruck und Einwilligung stimme-2). True: geschrieben. Fehlen
+    die Spalten (Migration 0028) oder geht es schief: False mit einem Hinweis, der Abdruck selbst bleibt."""
+    if not _bereit(speicher):
+        return False
+    db = speicher.db
+    try:
+        antwort = await db.execute(
+            f"update {db.t('speakers')} set voiceprint_shadow = $2::text::extensions.vector, shadow_model = $3 "
+            "where user_id = $1::uuid and is_owner and voiceprint is not null and consent_text_version = $4",
+            speicher.user_id, als_vektor(schatten), modell, EINWILLIGUNG_VERSION_SCHATTEN,
+        )
+    except asyncpg.UndefinedColumnError:
+        _einmal_melden(OHNE_0028)
+        return False
+    except DB_ERRORS as e:
+        logger.info("Stimmschatten: Abdruck nicht gespeichert ({})", type(e).__name__)
+        return False
+    return str(antwort) == "UPDATE 1"
+
+
 async def abdruck_speichern(
     speicher: MemoryStore, abdruck: np.ndarray, *, version: str | None, name: str, einwilligung_am: datetime | None,
-    schwelle: float | None = None,
+    schwelle: float | None = None, schatten: np.ndarray | None = None, schatten_modell: str | None = None,
 ) -> bool:
     """Legt den Abdruck des Profils an oder ersetzt ihn, mit Zeitpunkt und Version der Einwilligung und der persönlichen Schwelle (None oder
     unbrauchbar: NULL, eine alte Schwelle gilt für einen neuen Abdruck nie). Ohne Einwilligung geschieht nichts. Fehlt die Spalte der Schwelle
-    (Migration 0025), wird der Abdruck ohne sie gespeichert."""
-    if not _bereit(speicher) or not einwilligung_gilt(version) or einwilligung_am is None:
+    (Migration 0025), wird der Abdruck ohne sie gespeichert. Mit schatten und schatten_modell und nur mit der Einwilligung stimme-2 danach der
+    Schatten-Abdruck (schatten_speichern); scheitert nur er, gilt das Speichern trotzdem als gelungen."""
+    gespeichert = await _abdruck_speichern(speicher, abdruck, version=version, name=name, einwilligung_am=einwilligung_am, schwelle=schwelle)
+    if gespeichert and schatten is not None and schatten_modell and schatten_erlaubt(version):
+        await schatten_speichern(speicher, schatten, schatten_modell)
+    return gespeichert
+
+
+async def _abdruck_speichern(
+    speicher: MemoryStore, abdruck: np.ndarray, *, version: str | None, name: str, einwilligung_am: datetime | None,
+    schwelle: float | None,
+) -> bool:
+    if not _bereit(speicher) or not einwilligung_bekannt(version) or einwilligung_am is None:
         return False
     db = speicher.db
     anzeige = (name or "").strip()[:MAX_NAME] or "Profil"

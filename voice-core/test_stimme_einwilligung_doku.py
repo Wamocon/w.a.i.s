@@ -9,7 +9,7 @@ import re
 import unittest
 from pathlib import Path
 
-from stimme_einwilligung import EINWILLIGUNG_TEXT, EINWILLIGUNG_VERSION
+from stimme_einwilligung import EINWILLIGUNG_TEXT, EINWILLIGUNG_TEXT_SCHATTEN, EINWILLIGUNG_VERSION, EINWILLIGUNG_VERSION_SCHATTEN, TEXTE
 
 WURZEL = Path(__file__).resolve().parent.parent
 DOKUMENT = WURZEL / "docs" / "labor-datenschutz-entwurf.md"
@@ -34,17 +34,27 @@ def abschnitt_stimme() -> str:
 
 
 class EinwilligungsTextTests(unittest.TestCase):
-    def test_der_text_im_dokument_ist_die_konstante_im_kern(self):
-        self.assertIn(normal(EINWILLIGUNG_TEXT), normal(abschnitt_stimme()))
+    def test_die_texte_im_dokument_sind_die_konstanten_im_kern(self):
+        for text in (EINWILLIGUNG_TEXT, EINWILLIGUNG_TEXT_SCHATTEN):
+            self.assertIn(normal(text), normal(abschnitt_stimme()))
 
-    def test_die_version_im_dokument_ist_die_version_im_kern(self):
+    def test_die_versionen_im_dokument_sind_die_versionen_im_kern(self):
+        """stimme-1 (ohne Schatten) und stimme-2 (Schattenbetrieb, Entscheidung vom 18.11.2026), keine weitere Fassung im Abschnitt."""
         abschnitt = abschnitt_stimme()
-        self.assertRegex(abschnitt, rf"Version `{re.escape(EINWILLIGUNG_VERSION)}`")
+        for version in (EINWILLIGUNG_VERSION, EINWILLIGUNG_VERSION_SCHATTEN):
+            self.assertRegex(abschnitt, rf"Einwilligungstext \(Version `{re.escape(version)}`")
         versionen = set(re.findall(r"`(stimme-\d+)`", abschnitt))
-        self.assertEqual(versionen, {EINWILLIGUNG_VERSION})  # keine zweite, ältere Fassung im Abschnitt
+        self.assertEqual(versionen, set(TEXTE))
 
-    def test_der_text_steht_nur_einmal_im_dokument(self):
-        self.assertEqual(normal(dokument()).count(normal(EINWILLIGUNG_TEXT)), 1)
+    def test_jeder_text_steht_nur_einmal_im_dokument(self):
+        for text in (EINWILLIGUNG_TEXT, EINWILLIGUNG_TEXT_SCHATTEN):
+            self.assertEqual(normal(dokument()).count(normal(text)), 1)
+
+    def test_der_abschnitt_nennt_beide_abdruecke_und_ihren_zweck(self):
+        a = normal(abschnitt_stimme())
+        for teil in ("256 Zahlen", "voiceprint_shadow", "beide Stimmabdrücke", "Vergleich", "nie einen Ton oder einen Text",
+                     "bekommt keinen zweiten Abdruck, bis die Person neu einlernt"):
+            self.assertIn(teil, a, teil)
 
 
 class AbschnittTests(unittest.TestCase):

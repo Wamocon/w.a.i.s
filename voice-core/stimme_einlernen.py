@@ -19,6 +19,10 @@ sie als Schwelle für kurze Äußerungen, nur nach unten (stimme_gate.StimmGate.
 Segmente ebenso zu, ohne stillen Vor- und Nachlauf (stimme_modell.pruefsegment). Ins Log gehen nur Zahl der Stücke, Streuung, Quantil und
 Schwelle.
 
+Schattenbetrieb (stimme_schatten.py, WAMO_STIMME_SCHATTEN, seit 18.11.2026): Mit einem Schattenmodell entsteht aus denselben Stücken ein
+zweiter Abdruck (Mittelwert wie bei TitaNet), gespeichert mit dem ersten, aber nur mit der Einwilligung stimme-2 (stimme_einwilligung.py). Er entscheidet nichts: Ist das Schattenmodell noch nicht geladen
+oder scheitert er, wird der Abdruck von TitaNet trotzdem gespeichert, nur ohne Schatten (Hinweis im Log, das Modell wird nachgeladen).
+
 Meldungen an die Oberfläche (über senden): {"type": "stimmabdruck", "status": start | aufnahme | rechnet | fertig | fehler | abgebrochen,
 "sekunden", "ziel", "text"} und den Stand (StimmGate.stand) beim Laden des Modells und nach dem Einlernen.
 """
@@ -38,6 +42,8 @@ from loguru import logger
 
 from stimme_gate import EIGEN, StimmGate
 from stimme_modell import MIN_STUECKE, SPRACHE_DBFS, ModellQuelle, dbfs, einlern_stuecke, mittelpunkt, ohne_pausen, schwelle_einlernen
+from stimme_einwilligung import schatten_erlaubt
+from stimme_schatten import vorwaermen
 
 ZIEL_SECS = 20.0  # so viel reine Sprache für den Abdruck
 MAX_SECS = 90.0
@@ -46,6 +52,7 @@ MAX_BYTES = int(MAX_SECS * MAX_RATE) * 2  # Obergrenze des Aufnahmepuffers im Ar
 WARTE_SECS = 8.0  # spricht WAMO die Anleitung nicht, beginnt die Aufnahme trotzdem
 MIN_STREUUNG = 0.55  # die Stücke liegen im Schnitt so nah am Mittel, sonst war die Aufnahme zu unruhig
 MELDE_SECS = 0.5
+SCHATTEN_SECS = 10.0  # so lange darf der Schatten-Abdruck beim Einlernen dauern (stimme_schatten.py), danach wird ohne ihn gespeichert
 ABBRUCH_WARTE_SECS = 10.0  # so lange wartet das Abbrechen auf ein schon laufendes Speichern
 ANLEITUNG = (
     "Okay, ich lerne jetzt deine Stimme. Lies den Text auf dem Bildschirm in Ruhe vor oder erzähl einfach etwas, "
@@ -64,9 +71,11 @@ ERST_ERKENNEN = (
 )
 
 class Speichern(Protocol):
-    """Speichert Abdruck, Version und Zeitpunkt der Einwilligung und die persönliche Schwelle (None: keine), nie Ton. True: gespeichert."""
+    """Speichert Abdruck, Version und Zeitpunkt der Einwilligung, die persönliche Schwelle (None: keine) und den Abdruck des Schattenmodells
+    (None: keiner), nie Ton. True: gespeichert."""
 
-    def __call__(self, abdruck: np.ndarray, version: str, am: datetime, *, schwelle: float | None = None) -> Awaitable[bool]: ...
+    def __call__(self, abdruck: np.ndarray, version: str, am: datetime, *, schwelle: float | None = None,
+                 schatten: np.ndarray | None = None) -> Awaitable[bool]: ...
 
 
 @dataclass
@@ -94,8 +103,10 @@ class Einlernen:
         speichern: Speichern,
         uhr: Callable[[], float] = time.time,
         nachweis: Callable[[], bool] | None = None,
+        schatten: ModellQuelle | None = None,
     ):
         self._gate = gate
+        self._schatten = schatten  # Schattenmodell (stimme_schatten.py) oder None
         self._nachweis = nachweis or gate.stimme_vertraut  # wer einen Abdruck ersetzt, muss das nachweisen (stimme_sitzung.py)
         self._modell = modell
         self._senden = senden
@@ -150,6 +161,7 @@ class Einlernen:
             await self._fehler(KEIN_MODELL)
             await self._status_melden()
             return
+        vorwaermen(self._schatten)  # damit das Schattenmodell bereit ist, wenn die Aufnahme fertig ist
         if self._gate.hat_abdruck:
             logger.warning("Stimmabdruck: vorhandener Abdruck wird neu eingelernt")
         self._lauf = _Lauf(gestartet=self._uhr(), version=version, am=einwilligung_am)
@@ -258,13 +270,14 @@ class Einlernen:
         if streuung < MIN_STREUUNG:
             await self._fehler(ZU_UNRUHIG)
             return
+        schatten = await self._schatten_abdruck(stuecke, rate) if schatten_erlaubt(version) else None  # nur mit stimme-2
         if gen != self._gen:  # direkt vor dem Speichern: abgebrochen oder gelöscht, dann wird nichts gespeichert
             logger.info("Stimmabdruck: abgebrochen, nichts gespeichert")
             return
-        if not await self._speichern(abdruck, version, am, schwelle=schwelle):
+        if not await self._speichern(abdruck, version, am, schwelle=schwelle, schatten=schatten):
             await self._fehler(NICHT_GESPEICHERT)
             return
-        self._gate.setze_abdruck(abdruck, schwelle=schwelle)
+        self._gate.setze_abdruck(abdruck, schwelle=schwelle, schatten=schatten)
         self._gate.modell_ok = True
         if gen != self._gen:
             # Abbruch oder Löschen, während gespeichert wurde: der Abdruck steht schon in der Datenbank. Das Gate gibt den Stand wieder
@@ -276,6 +289,29 @@ class Einlernen:
         await self._senden({"type": "stimmabdruck", "status": "fertig", "sekunden": ZIEL_SECS, "ziel": ZIEL_SECS})
         await self._status_melden()
         await self._sagen(FERTIG_TEXT)
+
+    async def _schatten_abdruck(self, stuecke: list[bytes], rate: int) -> np.ndarray | None:
+        """Abdruck des Schattenmodells aus denselben Stücken, oder None (kein Schattenmodell, noch nicht geladen, Fehler). Wirft nie."""
+        modell = self._schatten
+        if modell is None:
+            return None
+        if not modell.bereit:
+            logger.info("Stimmschatten: Modell beim Einlernen noch nicht geladen, Abdruck ohne Schatten (danach neu einlernen)")
+            vorwaermen(modell)
+            return None
+        try:
+            rechner = await modell.get()
+            if rechner is None:
+                return None
+            start = time.perf_counter()
+            abdruecke = await asyncio.wait_for(asyncio.to_thread(lambda: [rechner.embed(s, rate) for s in stuecke]), SCHATTEN_SECS)
+            ms = (time.perf_counter() - start) * 1000 / max(1, len(stuecke))
+            schatten, streuung = mittelpunkt(abdruecke)
+        except Exception as e:  # auch TimeoutError; der Schatten entscheidet nichts, ohne ihn wird trotzdem gespeichert
+            logger.info("Stimmschatten: kein Abdruck beim Einlernen ({}), gespeichert wird nur der von TitaNet", type(e).__name__)
+            return None
+        logger.info("Stimmschatten: Abdruck aus {} Stücken, Streuung {:.2f}, {:.0f} ms je Stück", len(stuecke), round(streuung, 2), ms)
+        return schatten
 
     async def _status_melden(self) -> None:
         await self._senden(self._gate.stand())
