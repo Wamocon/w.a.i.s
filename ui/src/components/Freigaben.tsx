@@ -1,15 +1,17 @@
 "use client";
 
-import { memo, useEffect, useLayoutEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSelect } from "@/lib/store";
 import { abnahmeEintraege } from "@/lib/auftragAbnahme";
 import { speichernMoeglich } from "@/lib/auftragEntwuerfe";
 import { kartenAnsicht, repoAnzeige } from "@/lib/auftragStart";
+import { einreichenMoeglich, knopfText, ungesichertText, zahlenText } from "@/lib/einreichen";
 import { karteTexte } from "@/lib/laborKarte";
 import type { Auftrag } from "@/lib/nachrichten";
 import { wamo, type Approval } from "@/lib/wamo";
 
 type Entscheide = (a: Approval, ja: boolean) => boolean;
+type Einreiche = (a: Approval, aktion: "einreichen" | "verwerfen", bestaetigt: string[]) => boolean;
 
 // Nach einer Entscheidung den Fokus nicht verlieren: nach dem Entfernen der Karte (also nach dem
 // Commit) zur nächsten Karte oder zur Hauptschaltfläche. Gilt für Freigaben und Aufträge gemeinsam.
@@ -96,7 +98,135 @@ function ApprovalCard({ a, onDecide }: { a: Approval; onDecide: (a: Approval, ja
   );
 }
 
-export const Freigaben = memo(function Freigaben({ onDecide }: { onDecide: Entscheide }) {
+/**
+ * Karte "Einreichen" eines Entwicklungsauftrags mit dem eigenen GitHub-Token (Plan C, C.6; Logik in lib/einreichen.ts): Repo (mit "privat"),
+ * Zweig wamo/<Auftrag>, Konto, Zahlen und die markierten Pfade mit je einem Kästchen. "Einreichen" ist erst aktiv, wenn jeder markierte Pfad
+ * bestätigt ist; "Verwerfen" ist gleichgewichtig. Bei gesperrt gibt es nur "Verwerfen" und die Gründe als Sätze, bei branch_gepusht
+ * "Pull Request nachholen". Kein Tastenkürzel, keine Entscheidung per Sprache. Gemergt wird nie durch W.A.I.S.
+ */
+function EinreichenCard({ a, onEinreichen }: { a: Approval; onEinreichen?: Einreiche }) {
+  const head = useRef<HTMLHeadingElement>(null);
+  const karte = useRef<HTMLElement>(null);
+  const [bestaetigt, setBestaetigt] = useState<ReadonlySet<string>>(new Set());
+  const e = a.einreichen;
+  const id = `ap-${a.job}-${a.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+  useEffect(() => {
+    if (document.activeElement === document.body) head.current?.focus();
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = karte.current;
+    return () => {
+      if (el && el.contains(document.activeElement)) fokusNachEntscheidung = true;
+    };
+  }, []);
+
+  if (!e) return null;
+  const gesperrt = e.status === "gesperrt";
+  const moeglich = !!onEinreichen && einreichenMoeglich(e, bestaetigt);
+  const umschalten = (pfad: string, an: boolean) =>
+    setBestaetigt((alt) => {
+      const neu = new Set(alt);
+      if (an) neu.add(pfad);
+      else neu.delete(pfad);
+      return neu;
+    });
+  const ungesichert = ungesichertText(e);
+
+  return (
+    <article className="approval einreichen" aria-labelledby={id} data-approval={id} ref={karte}>
+      <p className="sr-only" role="alert">
+        Änderung wartet: {a.grund}
+      </p>
+      <p className="eyebrow">
+        Entwicklungsauftrag
+        {a.projekt && <> · {a.projekt}</>}
+      </p>
+      <h3 id={id} ref={head} tabIndex={-1}>
+        {a.grund}
+      </h3>
+      <dl className="auftrag-meta">
+        <div>
+          <dt>Repo</dt>
+          <dd>
+            {e.repo ?? "unbekannt"}
+            {e.privat && " (privat)"}
+          </dd>
+        </div>
+        <div>
+          <dt>Zweig</dt>
+          <dd>
+            <code>{e.zweig}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Konto</dt>
+          <dd>{e.konto ?? "unbekannt"}</dd>
+        </div>
+        <div>
+          <dt>Umfang</dt>
+          <dd>{zahlenText(e)}</dd>
+        </div>
+      </dl>
+      {e.titel && <p className="approval-hinweis">Titel des Pull Requests: {e.titel}</p>}
+      {gesperrt ? (
+        <section aria-label="Warum sich die Änderung nicht einreichen lässt">
+          <ul>
+            {e.gesperrt.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        e.markiert.length > 0 && (
+          <fieldset className="einreichen-markiert">
+            <legend>Bitte jede markierte Datei prüfen und bestätigen</legend>
+            {e.markiert.map((p) => (
+              <label key={p}>
+                <input type="checkbox" checked={bestaetigt.has(p)} onChange={(ev) => umschalten(p, ev.target.checked)} /> <code>{p}</code>
+              </label>
+            ))}
+          </fieldset>
+        )
+      )}
+      {e.pfade.length > 0 && (
+        <details>
+          <summary>Alle geänderten Dateien</summary>
+          <ul>
+            {e.pfade.map((p) => (
+              <li key={p}>
+                <code>{p}</code>
+              </li>
+            ))}
+          </ul>
+          {e.weitere > 0 && <p className="approval-hinweis">und {e.weitere} weitere</p>}
+        </details>
+      )}
+      {ungesichert && <p className="approval-warnung">{ungesichert}</p>}
+      {e.fehler && (
+        <p className="notice" role="alert">
+          {e.fehler}
+        </p>
+      )}
+      <p className="approval-hinweis">Erst nach deinem Klick pusht W.A.I.S. den Zweig und öffnet einen Pull Request. Gemergt wird nie durch W.A.I.S.</p>
+      <div className="approval-actions">
+        {!gesperrt && (
+          <button type="button" className="btn-decide" disabled={!moeglich} onClick={() => onEinreichen?.(a, "einreichen", [...bestaetigt])}>
+            {knopfText(e)}
+          </button>
+        )}
+        {!e.nachholen && (
+          <button type="button" className="btn-decide" disabled={!onEinreichen} onClick={() => onEinreichen?.(a, "verwerfen", [])}>
+            Verwerfen
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+export const Freigaben = memo(function Freigaben({ onDecide, onEinreichen }: { onDecide: Entscheide; onEinreichen?: Einreiche }) {
   const approvals = useSelect(wamo, (s) => s.approvals);
   useEffect(fokusWeitergeben, [approvals]);
   useEffect(fokusWeitergeben); // auch wenn die letzte Karte selbst verfiel (nach dem Aufräumen der Karte)
@@ -105,13 +235,23 @@ export const Freigaben = memo(function Freigaben({ onDecide }: { onDecide: Entsc
     fokusNachEntscheidung = true;
     if (!onDecide(a, ja)) fokusNachEntscheidung = false;
   };
+  const einreiche = (a: Approval, aktion: "einreichen" | "verwerfen", bestaetigt: string[]) => {
+    fokusNachEntscheidung = true;
+    const ok = onEinreichen ? onEinreichen(a, aktion, bestaetigt) : false;
+    if (!ok) fokusNachEntscheidung = false;
+    return ok;
+  };
 
   if (!approvals.length) return null;
   return (
     <section className="approvals" aria-label="Freigaben">
-      {approvals.map((a) => (
-        <ApprovalCard key={`${a.job}-${a.id}`} a={a} onDecide={entscheide} />
-      ))}
+      {approvals.map((a) =>
+        a.einreichen ? (
+          <EinreichenCard key={`${a.job}-${a.id}-${a.einreichen.commitId ?? ""}`} a={a} onEinreichen={onEinreichen ? einreiche : undefined} />
+        ) : (
+          <ApprovalCard key={`${a.job}-${a.id}`} a={a} onDecide={entscheide} />
+        ),
+      )}
     </section>
   );
 });
@@ -196,6 +336,12 @@ function AuftragCard({
           <div>
             <dt>Repo</dt>
             <dd>{repo}</dd>
+          </div>
+        )}
+        {a.github && (
+          <div>
+            <dt>GitHub</dt>
+            <dd>mit deinem GitHub-Token{a.github.konto && `, Konto ${a.github.konto}`}</dd>
           </div>
         )}
       </dl>

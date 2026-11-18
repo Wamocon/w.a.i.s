@@ -1,3 +1,4 @@
+import { auftragGithub, EINREICHEN_ID, pruefeEinreichen, type Einreichen } from "./einreichen.ts";
 import type { CanvasItem } from "@/components/Canvas";
 import type { AuftragStand } from "./auftragStart.ts"; // relativ, nur der Typ (beide Dateien laden unter node:test)
 import { JIRA_PROJEKTE_MAX, linkOk, projektOk, schluesselOk, type JiraErgebnis, type JiraStatus } from "./jiraStory.ts";
@@ -229,6 +230,8 @@ export type FreigabePunkt = {
   /** Warnung des Kerns (Mail: im selben Zug kamen Inhalte aus Web, Mail oder Bildschirm) */
   warnung?: string;
   gueltigS?: number;
+  /** Karte "Einreichen" eines Entwicklungsauftrags mit eigenem GitHub-Token (id "einreichen", lib/einreichen.ts) */
+  einreichen?: Einreichen;
 };
 
 /** Abnahmekriterien auf der Startkarte (voice-core/dev_agent.py): höchstens 5, je höchstens 300 Zeichen. */
@@ -247,6 +250,8 @@ export type Auftrag = {
   abnahme: string[];
   /** Ziel-Repo owner/name; fehlt bei einem Kern ohne dieses Feld und bei einer Recherche ohne Repo */
   repo?: string;
+  /** Der Auftrag läuft mit dem eigenen GitHub-Token der Person (Plan C); konto: Login laut Kern */
+  github?: { konto: string | null };
   /** Zustand der Startkarte nach dem Klick (lib/auftragStart.ts); nie vom Kern gesetzt, fehlt bis zum Klick */
   stand?: AuftragStand;
 };
@@ -833,7 +838,10 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
             typeof it.gueltig_s === "number" && Number.isInteger(it.gueltig_s) && it.gueltig_s > 0 && it.gueltig_s <= 3600
               ? it.gueltig_s
               : undefined,
-        }));
+          // nur der Eintrag "einreichen" trägt die Karte des persönlichen GitHub-Wegs; ungültig heißt: keine Karte
+          einreichen: it.id === EINREICHEN_ID ? (pruefeEinreichen(it.einreichen) ?? undefined) : undefined,
+        }))
+        .filter((it) => it.id !== EINREICHEN_ID || it.einreichen !== undefined);
       return {
         type: "freigaben",
         job: m.job.slice(0, 100),
@@ -932,6 +940,7 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
         auftrag: sauber(m.auftrag, 20_000),
         abnahme: abnahmeKriterien(m.abnahme),
         repo: repoName(m.repo),
+        github: auftragGithub(m.github),
       };
     case "auftrag_quittung": {
       if (!isStr(m.job) || !m.job || typeof m.ok !== "boolean") return null;

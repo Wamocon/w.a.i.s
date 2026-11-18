@@ -165,3 +165,11 @@ def test_persona_kennt_die_karte_und_verbietet_diktieren():
     zugang = prompt[prompt.index("Schlüssel und Modellzugang"):]
     assert not any(c in zugang[:900] for c in "–—")  # keine Gedankenstriche
     assert len(zugang.split("\nGedächtnis")[0]) < 1400  # kurz: wenige Zeilen im Prompt
+
+
+def test_github_tokens_werden_entfernt():
+    """Plan C, C.7: ein getipptes GitHub-Token erreicht weder Verlauf noch Modell."""
+    for token in ("ghp_" + "Ab1" * 12, "github_pat_" + "Cd2_" * 20 + "Ef", "gho_" + "x" * 36):
+        neu, geaendert = sf.entfernen(f"Mein Token ist {token}, bitte nutzen")
+        assert geaendert and token not in neu and sf.MARKE in neu
+    assert sf.entfernen("ghost_writer und ghp_kurz") == ("ghost_writer und ghp_kurz", False)

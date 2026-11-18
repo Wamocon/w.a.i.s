@@ -117,3 +117,45 @@ def test_ende_und_schwaerzen():
     assert SCHLUESSEL not in sauber and "sk-ant-api03-ABC" not in sauber
     assert sauber.count("sk-ant-…") == 2 and "sk-ant-kurz" in sauber  # unter acht Zeichen kein Schlüssel
     assert s.schwaerzen("nichts") == "nichts"
+
+
+# ---------- Persönlicher GitHub-Zugang (Plan C, Migration 0027) ----------
+GITHUB = "ghp_" + "Ab1" * 12  # Attrappe in der Form eines klassischen Tokens (36 Zeichen nach ghp_)
+
+
+def test_zweck_github_eigene_aad():
+    """Ein Chiffrat des Zwecks github lässt sich nicht als Claude-Schlüssel entschlüsseln und umgekehrt (C.3)."""
+    t = _tresor()
+    chiffre = t.verschluesseln(PROFIL_A, GITHUB, s.GITHUB)
+    assert GITHUB.encode() not in chiffre
+    assert t.entschluesseln(PROFIL_A, chiffre, s.GITHUB) == GITHUB
+    for zweck in (s.SCHLUESSEL, s.CODE_TOKEN):
+        with pytest.raises(s.SchluesselFehler):
+            t.entschluesseln(PROFIL_A, chiffre, zweck)
+    claude = t.verschluesseln(PROFIL_A, SCHLUESSEL)
+    with pytest.raises(s.SchluesselFehler):
+        t.entschluesseln(PROFIL_A, claude, s.GITHUB)
+    with pytest.raises(s.SchluesselFehler, match="anderen Profil"):
+        t.entschluesseln(PROFIL_B, chiffre, s.GITHUB)
+
+
+def test_aad_des_zwecks_github():
+    assert s._aad(PROFIL_A, s.GITHUB) == b"wamo-github-token:" + PROFIL_A.encode()
+
+
+@pytest.mark.parametrize("wert", [
+    GITHUB,
+    "github_pat_" + "A1b_" * 20 + "Zz",
+    "gho_" + "x" * 36, "ghu_" + "y" * 36, "ghs_" + "z" * 36, "ghr_" + "w" * 36,
+    "ghp_Teil1234",  # Teile ab acht Zeichen
+])
+def test_schwaerzen_erkennt_github_tokens(wert):
+    sauber = s.schwaerzen(f"Fehler: Token {wert} abgelehnt")
+    assert wert not in sauber and "…" in sauber
+    assert sauber.startswith("Fehler: Token ") and sauber.endswith(" abgelehnt")
+
+
+def test_schwaerzen_laesst_kurze_und_fremde_woerter():
+    assert s.schwaerzen("ghp_kurz und ghost_writer und highp_abcdefghij") == "ghp_kurz und ghost_writer und highp_abcdefghij"
+    gemischt = s.schwaerzen(f"{SCHLUESSEL} und {GITHUB}")
+    assert SCHLUESSEL not in gemischt and GITHUB not in gemischt

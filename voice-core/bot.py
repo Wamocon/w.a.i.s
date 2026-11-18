@@ -176,6 +176,7 @@ import kontingent
 from llm_anbieter import LLMNichtVerfuegbar, ausblenden_text, gespraech_llm, lesbarer_modellname, zusammenfassung_llm
 from memory import MemoryStore, Profile, ProfileDirectory, Recall, shared_database
 from modellzugang import modellzugang_nachricht, zugang_laden
+from github_zugang import github_zugang_nachricht
 from boss import Boss, entwicklung_quelle, modus_wirksam
 import canvas_sitzung as canvas_sitzung_mod
 from canvas_sitzung import CanvasSitzung
@@ -1635,6 +1636,10 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
             # Eigener Claude-Schlüssel: hinterlegen, ersetzen, löschen, Stand (gilt ab der nächsten Sitzung).
             # Der Inhalt dieser Nachricht wird nie geloggt und nie zurückgeschickt.
             await modellzugang_nachricht(identity.user_id, data, send)
+        elif msg.type == "github_zugang":
+            # Eigenes GitHub-Token für Entwicklungsaufträge (Plan C): Stand, speichern, prüfen, löschen. Zulassung, Schalter und Laborsperre
+            # prüft github_zugang.py; der Inhalt der Nachricht wird nie geloggt und das Token nie zurückgeschickt.
+            await github_zugang_nachricht(identity, data, send)
         elif msg.type == "kontingent" and not dev:
             # Anzeige "Verbrauch": gespeicherter Stand des Max-Abos dieses Profils. Mit Entwicklungsaufträgen in der
             # Sitzung antwortet der DevAgent (er legt Beobachtungen des laufenden Auftrags darüber), sonst liest ihn der Kern.

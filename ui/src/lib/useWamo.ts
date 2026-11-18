@@ -1,5 +1,6 @@
 "use client";
 
+import { EINREICHEN_ID, einreichenDaten, einreichenMoeglich } from "@/lib/einreichen";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { PipecatClient, RTVIError } from "@pipecat-ai/client-js";
 import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
@@ -192,6 +193,9 @@ export type WamoAktionen = {
   vergessen: (memo: Memo) => void;
   /** Entwicklungsauftrag starten oder verwerfen; true, wenn gesendet */
   entscheideAuftrag: (a: Auftrag, ja: boolean) => boolean;
+  /** Karte "Einreichen" (eigenes GitHub-Token): einreichen mit den bestätigten Pfaden oder verwerfen; true, wenn gesendet. Optional, damit
+   *  die Vorschau ohne Kern auskommt. Nur per Klick, nie per Sprache. */
+  einreichen?: (a: Approval, aktion: "einreichen" | "verwerfen", bestaetigt: string[]) => boolean;
   /** PC-Steuerung dieser Sitzung an- oder ausschalten (Admin oder freigeschaltetes Mitglied); true, wenn gesendet */
   pcSteuerung: (an: boolean) => boolean;
   /** Live-Bild des eigenen Laptops (Admin oder freigeschaltetes Mitglied, voice-core/bildstrom.py): Ansicht öffnen, schließen, Monitor wählen;
@@ -281,6 +285,8 @@ type ClientMessage =
   | { type: "freigabe"; data: { job: string; id: string; entscheidung: "ja" | "nein" } }
   | { type: "vergessen"; data: { id: string } }
   | { type: "auftrag_start"; data: { job: string; entscheidung: "ja" | "nein" } }
+  | { type: "einreichen"; data: { job: string; commit_id: string; tree_id: string; bestaetigt: string[] } }
+  | { type: "verwerfen"; data: { job: string } }
   | { type: "pc_steuerung"; data: { an: boolean } }
   | { type: "bildstrom"; data: { aktion: "an" | "aus" | "monitor" | "ack" | "anfordern"; monitor?: number; seq?: number; token?: string } }
   | { type: "modellzugang"; data: ModellzugangAnfrage }
@@ -1297,6 +1303,35 @@ export function useWamo(): WamoAktionen {
     return true;
   }, []);
 
+  // Karte "Einreichen" (Plan C, lib/einreichen.ts): nur per Klick. Die Karte verschwindet nach dem Senden; scheitert das Einreichen beim Kern,
+  // schickt er sie mit dem Grund neu. Einreichen geht nur, wenn jeder markierte Pfad bestätigt ist (die Karte prüft das, der Kern auch).
+  const einreichen = useCallback((a: Approval, aktion: "einreichen" | "verwerfen", bestaetigt: string[]) => {
+    const client = clientRef.current;
+    const karte = a.einreichen;
+    if (!karte || a.id !== EINREICHEN_ID) return false;
+    if (aktion === "einreichen" && !einreichenMoeglich(karte, new Set(bestaetigt))) return false;
+    if (!client || !istOnline(wamo.get())) {
+      setFehler({ art: "verbindung", text: "Keine Verbindung: Die Entscheidung konnte nicht gesendet werden." });
+      return false;
+    }
+    try {
+      if (aktion === "einreichen") {
+        senden(client, { type: "einreichen", data: einreichenDaten(a.job, karte, new Set(bestaetigt)) });
+      } else {
+        senden(client, { type: "verwerfen", data: { job: a.job } });
+      }
+    } catch {
+      setFehler({ art: "sonst", text: "Die Entscheidung konnte nicht gesendet werden. Bitte noch einmal versuchen." });
+      return false;
+    }
+    wamo.set((s) => ({
+      ...s,
+      approvals: s.approvals.filter((x) => !(x.job === a.job && x.id === a.id)),
+      ansage: aktion === "einreichen" ? "Änderung wird eingereicht." : "Änderung wird verworfen.",
+    }));
+    return true;
+  }, []);
+
   // Entwicklungsauftrag: Verwerfen entfernt die Karte erst nach erfolgreichem Senden, Starten lässt sie bis zur Quittung stehen
   const entscheideAuftrag = useCallback((a: Auftrag, ja: boolean) => {
     // Nichts senden, was der Kern nicht mehr umsetzt: Ein zweiter Start während des Wartens ist doppelt, und Verwerfen wirkt bei einem
@@ -1983,6 +2018,7 @@ export function useWamo(): WamoAktionen {
       disconnect,
       decide,
       entscheideAuftrag,
+      einreichen,
       pcSteuerung,
       toggleMic,
       vergessen,
@@ -2008,6 +2044,7 @@ export function useWamo(): WamoAktionen {
       disconnect,
       decide,
       entscheideAuftrag,
+      einreichen,
       pcSteuerung,
       toggleMic,
       vergessen,

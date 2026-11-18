@@ -37,7 +37,7 @@ def _eine_zeile(text: str) -> str:
 def test_naechste_nummer_und_beide_dateien():
     nummern = sorted(int(p.name[:4]) for p in (SUPABASE / "migrations").glob("[0-9][0-9][0-9][0-9]_*.sql")
                      if not p.name.endswith(".down.sql"))
-    assert nummern[-1] == 26 and nummern.count(26) == 1
+    assert 26 in nummern and nummern.count(26) == 1 and all(n > 26 for n in nummern[nummern.index(26) + 1:])
     assert (SUPABASE / "migrations" / "0025_stimme_schwelle.sql").is_file()
 
 
