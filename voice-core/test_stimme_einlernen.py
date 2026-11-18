@@ -407,7 +407,7 @@ class EinlernenTests(EinlernenBasis):
         await self.e.warten()
         abdruck, version, am = self.speichern.await_args.args
         self.assertEqual(abdruck.shape, (DIM,))
-        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.5})
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35})
 
 
 class EinlernenWiePruefenTests(EinlernenBasis):
@@ -436,11 +436,11 @@ class EinlernenWiePruefenTests(EinlernenBasis):
     async def test_persoenliche_schwelle_geht_an_speicher_und_gate(self):
         with mock.patch.object(se.logger, "info") as info:
             await self.saetze(0.5)
-        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.5})  # gleiche Stücke: die Obergrenze
-        self.assertEqual(self.gate.schwelle_kurz, 0.5)
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35})  # gleiche Stücke: die Obergrenze (Standardschwelle)
+        self.assertEqual(self.gate.schwelle_kurz, 0.35)
         zeilen = [c.args for c in info.call_args_list if "Stücke" in c.args[0]]
         self.assertEqual(len(zeilen), 1)
-        self.assertEqual(zeilen[0][1:], (13, 1.0, 1.0, 0.5))  # Stücke, Streuung, 10-%-Quantil, persönliche Schwelle
+        self.assertEqual(zeilen[0][1:], (13, 1.0, 1.0, 0.35))  # Stücke, Streuung, 10-%-Quantil, persönliche Schwelle
         self.assertIn("Schwelle", zeilen[0][0])
 
     async def test_schwelle_folgt_den_stuecken(self):
@@ -461,7 +461,7 @@ class EinlernenWiePruefenTests(EinlernenBasis):
         await e.warten()
         schwelle = self.speichern.await_args.kwargs["schwelle"]
         self.assertIsInstance(schwelle, float)
-        self.assertTrue(0.30 <= schwelle <= 0.50, schwelle)
+        self.assertTrue(0.30 <= schwelle <= 0.35, schwelle)
         self.assertEqual(self.gate.schwelle_kurz, schwelle)
 
     async def test_zu_wenig_stuecke_nach_dem_entfernen_der_pausen(self):

@@ -22,6 +22,7 @@ import { THEMEN, themaWaehlen, type Thema } from "@/lib/thema";
 import { useThema } from "@/lib/useThema";
 import { istOnline, wamo } from "@/lib/wamo";
 import { Block, Daten } from "./Block";
+import { MikrofonTest } from "./MikrofonTest";
 import { StillStartEinstellung } from "./StillStart";
 
 /** Version aus package.json, zur Build-Zeit eingesetzt (next.config.ts), wie in der Fußzeile der Anmeldeseite. */
@@ -78,9 +79,19 @@ export const KontoAbschnitt = memo(function KontoAbschnitt({
  * Mikrofonwahl (lib/mikrofon.ts): gespeichert je Person auf diesem Gerät, in diesem Browser oder dieser App. Die Auswahl nennt das
  * Standardgerät (im Browser das des Browsers, das nicht dem von Windows folgen muss, in der Desktop-App das von Windows) mit Namen und
  * sagt, welches Gerät gerade läuft oder beim nächsten Gespräch läuft. Ohne Freigabe nennt der Browser keine Geräte: Dann gibt es einen
- * Knopf, der das Mikrofon kurz öffnet und gleich wieder schließt.
+ * Knopf, der das Mikrofon kurz öffnet und gleich wieder schließt. Darunter der Mikrofontest (MikrofonTest.tsx) für genau dieses Gerät.
  */
-function MikrofonEinstellung({ laden, waehlen }: { laden: () => Promise<Mikrofon[]>; waehlen: (id: string) => boolean }) {
+function MikrofonEinstellung({
+  laden,
+  waehlen,
+  umschalten,
+  merken,
+}: {
+  laden: () => Promise<Mikrofon[]>;
+  waehlen: (id: string) => boolean;
+  umschalten?: () => void;
+  merken: boolean;
+}) {
   const id = useId();
   const nutzer = useNutzer();
   const desktop = useDesktopApp();
@@ -165,18 +176,32 @@ function MikrofonEinstellung({ laden, waehlen }: { laden: () => Promise<Mikrofon
           )}
         </>
       )}
+      {/* erst mit der Geräteliste: sonst träfe ein schneller Klick das Standardgerät statt des gewählten */}
+      {liste !== null && !ohneGeraete && (
+        <MikrofonTest
+          geraetId={angeschlossen ? angeschlossen.id : null}
+          geraetName={angeschlossen ? angeschlossen.label : (standard?.label ?? null)}
+          merken={merken}
+          mikrofonUmschalten={umschalten}
+        />
+      )}
     </>
   );
 }
 
-/** nurMikrofon: Laborsicht (lib/laborPlatz.ts), nur die Mikrofonwahl; die übrigen Blöcke entfallen. */
+/**
+ * nurMikrofon: Laborsicht (lib/laborPlatz.ts), nur die Mikrofonwahl mit dem Mikrofontest als reiner Anzeige (ohne Speicher); die übrigen
+ * Blöcke entfallen. mikrofonUmschalten: Mikrofon des laufenden Gesprächs umschalten (useWamo, toggleMic), für die Dauer des Tests.
+ */
 export const SpracheAbschnitt = memo(function SpracheAbschnitt({
   mikrofone,
   mikrofonWaehlen,
+  mikrofonUmschalten,
   nurMikrofon = false,
 }: {
   mikrofone: () => Promise<Mikrofon[]>;
   mikrofonWaehlen: (id: string) => boolean;
+  mikrofonUmschalten?: () => void;
   nurMikrofon?: boolean;
 }) {
   const modelle = useSelect(wamo, (s) => s.betrieb?.modelle ?? null);
@@ -184,14 +209,14 @@ export const SpracheAbschnitt = memo(function SpracheAbschnitt({
   if (nurMikrofon) {
     return (
       <Block titel="Eingabe">
-        <MikrofonEinstellung laden={mikrofone} waehlen={mikrofonWaehlen} />
+        <MikrofonEinstellung laden={mikrofone} waehlen={mikrofonWaehlen} umschalten={mikrofonUmschalten} merken={false} />
       </Block>
     );
   }
   return (
     <>
       <Block titel="Eingabe">
-        <MikrofonEinstellung laden={mikrofone} waehlen={mikrofonWaehlen} />
+        <MikrofonEinstellung laden={mikrofone} waehlen={mikrofonWaehlen} umschalten={mikrofonUmschalten} merken />
       </Block>
       <Block titel="Start beim Tippen">
         <StillStartEinstellung />

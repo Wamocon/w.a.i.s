@@ -5,7 +5,7 @@ import { MikrofonWahl } from "@/components/MikrofonWahl";
 import { einstellungenOeffnen } from "@/lib/einstellungenHash";
 import { stilleAusblenden, type Mikrofon } from "@/lib/mikrofon";
 import { useSelect } from "@/lib/store";
-import { wamo } from "@/lib/wamo";
+import { abdruckAnsichtOeffnen, wamo } from "@/lib/wamo";
 
 const OHNE_MIKROFON_HILFE =
   "Schließt die Warnung und lässt sie für dieses Mikrofon aus, bis es wieder Ton liefert. Du kannst W.A.I.S. weiter tippen.";
@@ -74,6 +74,19 @@ export const FehlerAnzeige = memo(function FehlerAnzeige({
               }}
             >
               Mikrofon wählen
+            </button>
+          )}
+          {error.aktion === "neu_einlernen" && (
+            <button
+              type="button"
+              className="btn-secondary btn-small"
+              onClick={() => {
+                onSchliessen();
+                // Einlernansicht in der Mitte (wie "Neu einlernen" im Abschnitt Stimme); ohne Sitzung geht es dorthin
+                if (!abdruckAnsichtOeffnen()) einstellungenOeffnen("stimme");
+              }}
+            >
+              Neu einlernen
             </button>
           )}
           <button type="button" className="error-close" onClick={onSchliessen}>

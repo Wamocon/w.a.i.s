@@ -226,7 +226,12 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
                 {wirksam === "modellzugang" && <ModellZugang onAnfrage={aktionen.modellzugang} />}
                 {wirksam === "verbrauch" && <VerbrauchAbschnitt />}
                 {wirksam === "sprache" && (
-                  <SpracheAbschnitt mikrofone={aktionen.mikrofone} mikrofonWaehlen={aktionen.mikrofonWaehlen} nurMikrofon={labor} />
+                  <SpracheAbschnitt
+                    mikrofone={aktionen.mikrofone}
+                    mikrofonWaehlen={aktionen.mikrofonWaehlen}
+                    mikrofonUmschalten={aktionen.toggleMic}
+                    nurMikrofon={labor}
+                  />
                 )}
                 {wirksam === "stimme" && <StimmeAbschnitt aktionen={aktionen.stimmabdruck} />}
                 {wirksam === "gedaechtnis" && <GedaechtnisAbschnitt />}

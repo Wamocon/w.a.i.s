@@ -120,6 +120,7 @@ import { GeraeteMedienManager } from "@/lib/geraeteMedien";
 import { MIKROFON_ERSATZ_TEXT, MIKROFON_STANDARD } from "@/lib/mikrofon";
 import { nutzerSetzen } from "@/lib/nutzer";
 import { LEISE_TEXT } from "@/lib/pegelWarnung";
+import { ANDERES_MIKROFON_TEXT } from "@/lib/stimmMikrofon";
 import { OHNE_ANMELDUNG, useWamo } from "@/lib/useWamo";
 import { resetWamo, wamo } from "@/lib/wamo";
 
@@ -316,6 +317,56 @@ describe("Pegelwarnung", () => {
     await act(async () => c2.opts.callbacks.onUserStartedSpeaking());
     await fluss(10_200);
     expect(aktuell().error?.text).toBe(LEISE_TEXT);
+  });
+});
+
+describe("Hinweis bei Gerätewechsel (Befund 18.11.2026)", () => {
+  const SCHLUESSEL = `wamo.stimme.mikrofon.${NUTZER}`;
+  const melden = (c: AttrappenClient, daten: unknown) => act(async () => c.opts.callbacks.onServerMessage(daten));
+
+  it("beim Einlernen merkt sich die Oberfläche das Mikrofon, beim Löschen vergisst sie es", async () => {
+    const { c } = await gespraech();
+    await mikrofonAuf(c, "Standard - Headset (Bluetooth)");
+    await melden(c, { type: "stimme", status: "bereit", modus: "streng" });
+    await melden(c, { type: "stimmabdruck", status: "fertig" });
+    expect(localStorage.getItem(SCHLUESSEL)).toBe("Headset (Bluetooth)");
+    expect(aktuell().error).toBeNull(); // dasselbe Mikrofon: kein Hinweis
+    await melden(c, { type: "stimmabdruck", status: "geloescht" });
+    expect(localStorage.getItem(SCHLUESSEL)).toBeNull();
+  });
+
+  it("ein anderes Mikrofon als beim Einlernen: Hinweis mit dem Knopf zum neu Einlernen, einmal je Gespräch und Gerät", async () => {
+    localStorage.setItem(SCHLUESSEL, "Headset (Bluetooth)");
+    const { c } = await gespraech();
+    await mikrofonAuf(c, "Mikrofonarray (Realtek)");
+    expect(aktuell().error).toBeNull(); // erst mit bereitem Abdruck
+    await melden(c, { type: "stimme", status: "bereit", modus: "streng" });
+    expect(aktuell().error).toEqual({ art: "hinweis", text: ANDERES_MIKROFON_TEXT, aktion: "neu_einlernen" });
+    await act(async () => wamo.set((s) => ({ ...s, error: null })));
+    await melden(c, { type: "stimme", status: "bereit", modus: "streng" });
+    expect(aktuell().error).toBeNull(); // für dieses Gerät schon gefragt
+    await act(async () => c.opts.callbacks.onTrackStarted(spur("Webcam-Mikrofon"), { local: true }));
+    expect(aktuell().error?.aktion).toBe("neu_einlernen"); // ein weiteres Gerät: noch einmal
+  });
+
+  it("dasselbe Mikrofon unter dem Namen des Standardgeräts, ohne gemerktes Mikrofon oder ohne Abdruck: kein Hinweis", async () => {
+    localStorage.setItem(SCHLUESSEL, "Headset (Bluetooth)");
+    const erstes = await gespraech();
+    await mikrofonAuf(erstes.c, "Standard - Headset (Bluetooth)");
+    await melden(erstes.c, { type: "stimme", status: "bereit", modus: "streng" });
+    expect(aktuell().error).toBeNull();
+    erstes.r.unmount();
+    localStorage.removeItem(SCHLUESSEL);
+    const zweites = await gespraech();
+    await mikrofonAuf(zweites.c, "Mikrofonarray (Realtek)");
+    await melden(zweites.c, { type: "stimme", status: "bereit", modus: "streng" });
+    expect(aktuell().error).toBeNull(); // vor dieser Neuerung eingelernt: unbekannt heißt nicht anders
+    zweites.r.unmount();
+    localStorage.setItem(SCHLUESSEL, "Headset (Bluetooth)");
+    const drittes = await gespraech();
+    await mikrofonAuf(drittes.c, "Mikrofonarray (Realtek)");
+    await melden(drittes.c, { type: "stimme", status: "fehlt", modus: "streng" });
+    expect(aktuell().error).toBeNull();
   });
 });
 
