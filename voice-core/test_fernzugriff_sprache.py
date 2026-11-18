@@ -84,8 +84,8 @@ class WerkzeugTests(unittest.TestCase):
 
     def test_andere_werkzeuge_bleiben(self):
         _, namen = schemas(ADMIN, fernzugriff=True)
-        self.assertEqual(namen[:4], ["aktuelle_zeit", "merken", "websuche", "canvas_zeigen"])
-        self.assertEqual(schemas(ADMIN)[1], namen[:4])
+        self.assertEqual(namen[:5], ["aktuelle_zeit", "merken", "websuche", "canvas_zeigen", "canvas_schliessen"])
+        self.assertEqual(schemas(ADMIN)[1], namen[:5])
 
     def test_aufruf_schickt_nur_die_nachricht_an_die_oberflaeche(self):
         llm, _ = schemas(ADMIN, fernzugriff=True)
