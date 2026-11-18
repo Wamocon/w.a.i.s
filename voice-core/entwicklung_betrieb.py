@@ -38,8 +38,9 @@ from loguru import logger
 
 from memory import ENTWICKLUNGSAUFTRAG, KOSTEN_JE_ZEILE_MAX, normalize_uuid
 
-# 3: gleichzeitige Aufträge (Start je Profil hintereinander, Sätze je Grenze im Ereignis belegt). Die Zeile darunter bleibt ohne Kommentar.
-SCHRANKEN_VERSION = 3
+# 3: gleichzeitige Aufträge (Start je Profil hintereinander, Sätze je Grenze im Ereignis belegt). 4: persönliche GitHub-Zugänge (Plan C,
+# Schalter WAMO_ENTWICKLUNG_GITHUB, Kopffeld github, GitHub-Zeile, Einreichen). Die Zeile darunter bleibt ohne Kommentar.
+SCHRANKEN_VERSION = 4
 
 ENV_SCHALTER = "WAMO_ENTWICKLUNG_BUERO"
 ENV_ORT = "WAMO_ENTWICKLUNG_ORT"
@@ -49,7 +50,8 @@ ENV_KOSTEN_TAG = "WAMO_ENTWICKLUNG_KOSTEN_TAG_USD"
 ENV_BEFEHLE = "WAMO_ENTWICKLUNG_BEFEHLE_BUERO"
 ENV_MITGLIEDER = "WAMO_ENTWICKLUNG_MITGLIEDER"
 ENV_HAUS = "WAMO_ENTWICKLUNG_HAUS"
-ALLE_VARIABLEN = (ENV_SCHALTER, ENV_PROFILE, ENV_KOSTEN_AUFTRAG, ENV_KOSTEN_TAG, ENV_BEFEHLE, ENV_MITGLIEDER, ENV_HAUS)
+ENV_GITHUB = "WAMO_ENTWICKLUNG_GITHUB"  # persönliche GitHub-Zugänge (Plan C, C.2.7), Standard aus
+ALLE_VARIABLEN = (ENV_SCHALTER, ENV_PROFILE, ENV_KOSTEN_AUFTRAG, ENV_KOSTEN_TAG, ENV_BEFEHLE, ENV_MITGLIEDER, ENV_HAUS, ENV_GITHUB)
 # Kostengrenzen der Mitglieder in USD (Entscheidung N6): es gilt der kleinere Wert aus Drop-in und Konstante
 
 MAX_PROFILE = 20
@@ -88,6 +90,16 @@ def mitglieder_schalter() -> str:
 def haus_schalter() -> str:
     """WAMO_ENTWICKLUNG_HAUS als "an", "aus" oder "ungueltig" (Standard aus)."""
     return _an_aus(ENV_HAUS)
+
+
+def github_schalter() -> str:
+    """WAMO_ENTWICKLUNG_GITHUB als "an", "aus" (Standard) oder "ungueltig": persönliche GitHub-Zugänge (Plan C). Ohne an speichert und prüft
+    der Kern keine Tokens (Löschen geht immer) und schickt nie das Kopffeld github; ein ungültiger Wert gilt als aus."""
+    return _an_aus(ENV_GITHUB)
+
+
+def github_an() -> bool:
+    return github_schalter() == "an"
 
 
 def haus_an() -> bool:
@@ -384,13 +396,14 @@ def kern_projektname(repo: str | None, wort: str | None = None, kennung: str | N
     return name
 
 
-def buero_projekt(art: str, repo: str | None, wort: object, zulassung: object = None) -> str:
+def buero_projekt(art: str, repo: str | None, wort: object, zulassung: object = None, *, persoenlich: bool = False) -> str:
     """Projektname für einen Büro-Auftrag oder ValueError mit einem Satz für das Modell: Arten mit GitHub-Stufe brauchen ein
     Repo (nur die Recherche geht ohne), das Projekt wird nach kern_projektname aus dem Repo abgeleitet und trägt die Kennung des Profils
-    aus der Zulassung. Mitglieder bekommen bis Folgepaket 1 kein Repo (Entscheidung N6)."""
+    aus der Zulassung. Mitglieder bekommen über die App kein Repo (Entscheidung N6); mit ihrem eigenen GitHub-Token (persoenlich, Plan C,
+    C7: nur mit ihrer Zulassung) arbeiten sie wie Admins an einem Repo."""
     from werkzeugkarte import github_stufe
 
-    mitglied = _ist_mitglied(zulassung)
+    mitglied = _ist_mitglied(zulassung) and persoenlich is not True
     if mitglied and repo:
         raise ValueError(SATZ_MITGLIED_REPO)
     if github_stufe(art) is not None and not repo:

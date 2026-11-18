@@ -39,6 +39,9 @@ _ART = rf"(?:api|oat|a{_SEP}p{_SEP}i|o{_SEP}a{_SEP}t)"
 _LOCKER = re.compile(rf"{_SKANT}{_SEP}{_ART}{_SEP}\d{{0,2}}(?:{_SEP}[A-Za-z0-9]{{1,6}}){{3,60}}", re.IGNORECASE)
 # Der Anfang allein ("sk ant oat") reicht auch: dahinter folgt ein Schlüssel, der nur nicht erkannt wurde
 _ANFANG = re.compile(rf"{_SKANT}{_SEP}{_ART}\w*", re.IGNORECASE)
+# GitHub-Tokens in der genauen Form (klassisch ghp_, fein-granular github_pat_, dazu gho_, ghu_, ghs_, ghr_; Plan C, C.7): getippt im Chat
+# gehören sie nie ins Modell, sondern in die Karte GitHub-Zugang
+_GITHUB = re.compile(r"(?<![A-Za-z0-9_])(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{8,}")
 
 
 def entfernen(text: str) -> tuple[str, bool]:
@@ -48,6 +51,7 @@ def entfernen(text: str) -> tuple[str, bool]:
     neu = _GENAU.sub(MARKE, text)
     neu = _LOCKER.sub(MARKE, neu)
     neu = _ANFANG.sub(MARKE, neu)
+    neu = _GITHUB.sub(MARKE, neu)
     return neu, neu != text
 
 

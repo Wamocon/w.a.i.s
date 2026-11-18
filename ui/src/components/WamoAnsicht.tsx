@@ -214,7 +214,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
       }
       auftraege={
         <>
-          <Freigaben onDecide={aktionen.decide} />
+          <Freigaben onDecide={aktionen.decide} onEinreichen={ansicht.labor ? undefined : aktionen.einreichen} />
           <JiraErgebnisHinweis />
           <Auftraege onDecide={aktionen.entscheideAuftrag} onSpeichern={ansicht.labor ? undefined : aktionen.entwuerfe?.speichern} />
           <AuftraegeLeer />

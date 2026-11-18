@@ -16,6 +16,7 @@ export const ABSCHNITT_IDS = [
   "konto",
   "start",
   "modellzugang",
+  "github",
   "verbrauch",
   "sprache",
   "stimme",
@@ -52,11 +53,13 @@ export const ABSCHNITTE: readonly Abschnitt[] = [
   // "Geräte und PC" gibt. Für jede Rolle, nie in der Laborsicht.
   { id: "start", titel: "Erste Schritte", kurz: "Modellzugang, Installer, Prüfliste und Updates" },
   { id: "modellzugang", titel: "Modellzugang", kurz: "API-Schlüssel, Token, Modelle und Stimme" },
+  // Persönlicher GitHub-Zugang für Entwicklungsaufträge (Plan C, components/GithubZugang.tsx); ob die Person ihn nutzen darf, sagt der Kern
+  { id: "github", titel: "GitHub-Zugang", kurz: "Eigenes Token für Entwicklungsaufträge" },
   { id: "verbrauch", titel: "Verbrauch", kurz: "Kontingent deines Claude-Abos", nurAdmin: true, auchMitToken: true },
   { id: "sprache", titel: "Sprache und Ton", kurz: "Mikrofon, Hören und Stimme", laborSicht: true, laborKurz: "Mikrofon wählen" },
   { id: "stimme", titel: "Stimme", kurz: "Eigene Stimme erkennen und einlernen" },
   { id: "gedaechtnis", titel: "Gedächtnis", kurz: "Vorschläge für alle prüfen", nurAdmin: true },
-  { id: "mitglieder", titel: "Neue Mitglieder", kurz: "Wie weit die Einrichtung je Person ist", nurAdmin: true },
+  { id: "mitglieder", titel: "Neue Mitglieder", kurz: "Einrichtung je Person und Rechte der GitHub-Zugänge", nurAdmin: true },
   { id: "darstellung", titel: "Darstellung", kurz: "Ansicht, Helligkeit und Untertitel" },
   { id: "geraete", titel: "Geräte und PC", kurz: "Verbindungen, Geräteverwaltung, PC-Steuerung und Betriebsart" },
   {

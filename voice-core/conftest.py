@@ -20,7 +20,7 @@ def _kein_echtes_sokrates2(monkeypatch):
     # Test hinein, jeder Test setzt seine Werte selbst
     for name in ("WAMO_ENTWICKLUNG_BUERO", "WAMO_ENTWICKLUNG_PROFILE", "WAMO_ENTWICKLUNG_KOSTEN_AUFTRAG_USD",
                  "WAMO_ENTWICKLUNG_KOSTEN_TAG_USD", "WAMO_ENTWICKLUNG_BEFEHLE_BUERO", "WAMO_ENTWICKLUNG_MITGLIEDER",
-                 "WAMO_ENTWICKLUNG_HAUS"):
+                 "WAMO_ENTWICKLUNG_HAUS", "WAMO_ENTWICKLUNG_GITHUB"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -57,3 +57,15 @@ def _kein_echtes_gateway(monkeypatch):
     llm_anbieter._claude_cache.clear()
     llm_anbieter._haus_pause.clear()
     boss._probe_cache_leeren()
+
+
+@pytest.fixture(autouse=True)
+def _github_bremsen_leer():
+    """Die Bremsen des GitHub-Zugangs (je Prozess, im Speicher) gelten nie über einen Test hinaus."""
+    import sys
+
+    yield
+    for modul, namen in (("github_zugang", ("_versuche", "_rechte_versuche")), ("github_zugang_api", ("_abrufe",))):
+        geladen = sys.modules.get(modul)
+        for name in namen if geladen is not None else ():
+            getattr(geladen, name).clear()

@@ -87,8 +87,10 @@ import abnahme
 import abnahme_remote
 import auftrag_entwuerfe as ae
 import entwicklung_betrieb
+import github_auftrag
 import kontingent as kt
 import pc_host
+from dev_agent_github import GithubWeg
 from dev_agent_regeln import (  # noqa: F401 (alle Namen bleiben über dev_agent erreichbar: bot.py, Tests)
     DENY_RULES, JOB_ENV_NAMES, JOB_ENV_PREFIXES, REMOTE_RULES, RULES_TEMPLATE, job_env, rules_for)
 from dev_agent_weg import (  # noqa: F401 (wie oben)
@@ -499,12 +501,20 @@ class Job:
     beendet: bool = False  # die Person hat abgelehnt: keine weiteren Runden
     ergebnisse: list[abnahme.Ergebnis] = field(default_factory=list)  # Stand der letzten Abnahme
     dateien: dict[str, None] = field(default_factory=dict)  # mit Write und Edit geänderte Dateien, relativ zum Projekt
+    # Persönlicher GitHub-Weg (Plan C, dev_agent_github.py); github None heißt App-Weg wie bisher
+    github: str | None = None  # entwicklung_betrieb.GITHUB_PERSOENLICH
+    github_konto: str | None = None  # Login laut gespeichertem Stand (Karte vor dem Start)
+    github_bekannt: bool = False  # das Ereignis github kam: die GitHub-Zeile geht nicht mehr mit (C.2.2)
+    github_neu: bool = False  # nach start_abgelehnt mit github_zeile einmal neu gestartet
+    github_info: dict | None = None  # geprüftes Ereignis github (Repo, Konto, Basis, privat, schreiben)
+    aenderung: github_auftrag.Aenderung | None = None  # geprüftes Ereignis aenderung (C.2.4)
+    einreichen_laeuft: bool = False
 
     def __post_init__(self):
         self.dir = JOBS_DIR / self.id
 
 
-class DevAgent:
+class DevAgent(GithubWeg):
     """Ein Objekt pro Gespräch. Braucht den PipelineTask, um Karten, Canvas und Meldungen zu senden.
     vorgaenge: Registry der Sitzung (vorgaenge.py); jeder Auftrag erscheint dort als Vorgang.
     beurteiler: beurteilt Aussagekriterien der Abnahme (abnahme.llm_beurteiler); ohne ihn gibt es nur Befehlskriterien.
@@ -824,8 +834,14 @@ class DevAgent:
         repo_arg = args.get("repo")
         try:  # ausdrücklich genannt (Werkzeugaufruf) oder eindeutig als GitHub-Adresse im Auftrag
             repo = repo_pruefen(repo_arg) if isinstance(repo_arg, str) and repo_arg.strip() else repo_aus_auftrag(auftrag)
+        except ValueError as e:
+            return {"ok": False, "fehler": str(e)}
+        # Persönlicher GitHub-Weg (Plan C): nur im Büro, mit Schalter, Dispatcher 10 und nutzbarem eigenem Token, sonst der App-Weg
+        github_konto = await self.persoenlich_konto(art, repo) if im_buero else None
+        try:
             if im_buero:  # Repo-Pflicht für Arten mit GitHub-Stufe, Projekt kern-<Name aus dem Repo>
-                projekt = validate_project(entwicklung_betrieb.buero_projekt(art, repo, args.get("projekt"), self._zulassung), self._ort)
+                projekt = validate_project(entwicklung_betrieb.buero_projekt(art, repo, args.get("projekt"), self._zulassung,
+                                                                             persoenlich=github_konto is not None), self._ort)
         except ValueError as e:
             return {"ok": False, "fehler": str(e)}
         await self._ping_vor_vorbereiten(args.get("abnahme"))  # nur mit befehl: auf Sokrates-2, mit Frist
@@ -838,6 +854,8 @@ class DevAgent:
         except ValueError as e:
             return {"ok": False, "fehler": str(e)}
         job = Job(id=uuid.uuid4().hex[:16], auftrag=auftrag, projekt=projekt, art=art, repo=repo)
+        if github_konto is not None:
+            job.github, job.github_konto = entwicklung_betrieb.GITHUB_PERSOENLICH, github_konto
         if kriterien:  # ohne abnahme bleibt es bei einer Runde ohne Prüfung (max_runden und zeitlimit_min gelten dann nicht)
             job.kriterien = kriterien
             job.max_runden = _ganzzahl(args.get("max_runden"), RUNDEN_STANDARD, 1, RUNDEN_MAX)
@@ -848,6 +866,8 @@ class DevAgent:
                  "auftrag": auftrag}  # derselbe Text, den Claude Code bekommt: nichts Unsichtbares kommt dazu
         if repo:
             karte["repo"] = repo
+        if job.github:  # C.6: die Karte vor dem Start nennt Konto und den eigenen Weg
+            karte["github"] = {"konto": job.github_konto, "hinweis": "mit deinem GitHub-Token"}
         if kriterien:  # die Person bestätigt mit dem Klick auch die Kriterien (und damit Befehle), also muss sie sie sehen
             karte["abnahme"] = [clean_inline(schwaerzen(k.text), abnahme.KRITERIUM_ZEICHEN) for k in kriterien[:abnahme.MAX_KRITERIEN]]
         await self._send(karte)
@@ -881,6 +901,10 @@ class DevAgent:
             await self._kontingent_senden()
         elif msg_type == ae.NACHRICHT:  # für später gespeicherte Aufträge: Liste, Speichern, Laden, Löschen
             await self._entwurf_nachricht(data)
+        elif msg_type == "einreichen":  # Karte "Einreichen" (Plan C, C.6): nur per Klick, nie als Werkzeug des Sprachmodells
+            await self.einreichen(data)
+        elif msg_type == "verwerfen":
+            await self.verwerfen(data)
 
     async def _quittung(self, job: Job | str, ok: bool, grund: str | None = None) -> None:
         """auftrag_quittung an die Oberfläche: ok, oder nicht ok mit einem Satz als Grund (nie Pfade oder Werte). Je Klick auf Starten
@@ -1320,7 +1344,7 @@ class DevAgent:
             if stderr_task is not None:
                 stderr_task.cancel()
             if proc is not None and proc.returncode not in (0, None) and stderr_tail:
-                logger.warning("Claude Code meldete: {}", " | ".join(stderr_tail)[-1500:])
+                logger.warning("Claude Code meldete: {}", schwaerzen(" | ".join(stderr_tail))[-1500:])
 
         await self._lauf_ende(job, pending_file)
 
@@ -1423,6 +1447,20 @@ class DevAgent:
             await self._announce(job)
             return
         zugang_kopf, zugang_zeile = zugang
+        github_kopf: dict = {}
+        github_zeile: bytes | None = None
+        if job.github:  # persönlicher GitHub-Weg: ohne nutzbares Token kein Start und kein Rückfall auf die App
+            github_daten = await self.github_start_daten(job)
+            if github_daten is None:
+                job.ereignisse = {}
+                job.status = "nicht gestartet (GitHub-Token nicht nutzbar)"
+                job.steps.append(github_auftrag.SATZ_TOKEN_FEHLT)
+                self._ende_melden(job, "lauf_endet", job.status, {})
+                await self._quittung_nicht_gestartet(job, github_auftrag.SATZ_TOKEN_FEHLT)
+                await self._canvas(job)
+                await self._announce(job)
+                return
+            github_kopf, github_zeile = github_daten
         self._eigener_zugang = zugang_kopf.get("zugang") == "folgt"
         job.ereignisse = {}
         job.status = "läuft"
@@ -1452,10 +1490,13 @@ class DevAgent:
             if job.repo:  # im App-Modus gilt das GitHub-Token dann nur für dieses Repo
                 kopf_daten["repo"] = job.repo
             kopf_daten.update(zugang_kopf)  # nur "zugang" und "profil"; der Wert steht nie in der Kopfzeile
+            kopf_daten.update(github_kopf)  # github und scopes_ausnahmen (Plan C), nie das Token
             daten = (json.dumps(kopf_daten, ensure_ascii=False) + "\n").encode("utf-8")
             if zugang_zeile is not None:
                 daten += zugang_zeile  # zweite Zeile, nur über stdin (nicht in argv, nicht in der Umgebung von ssh)
-            zugang_zeile = None
+            if github_zeile is not None:
+                daten += github_zeile  # GitHub-Zeile nach der Claude-Zeile, nur über stdin (C.2.2)
+            zugang_zeile = github_zeile = None
             self._proc.stdin.write(daten)
             del daten
             await self._proc.stdin.drain()  # stdin NICHT schließen: Lebenslinie des entfernten Auftrags
@@ -1486,14 +1527,20 @@ class DevAgent:
                 await asyncio.wait({stderr_task}, timeout=1.0)  # die letzten Zeilen noch einsammeln (Grund eines ssh-Fehlers)
                 stderr_task.cancel()
             if proc is not None and proc.returncode not in (0, None) and stderr_tail:
-                logger.warning("Sokrates-2 meldete: {}", " | ".join(stderr_tail)[-1500:])
+                logger.warning("Sokrates-2 meldete: {}", schwaerzen(" | ".join(stderr_tail))[-1500:])
 
+        if self.github_neu_starten(job, ende_code):  # GitHub-Zeile fehlte (C.2.2): einmal neu mit Zeile, ohne eigene Quittung davor
+            await self._run_remote(job, prompt, resume)
+            return
         self._kanal_abweisung_merken(job)
         if not job.quittiert:  # nie ein Lauf ohne Quittung: nicht angenommen, mit dem Grund aus Ereignis, Exit-Code oder stderr
-            await self._quittung_nicht_gestartet(job, entwicklung_betrieb.ablehn_grund(ende_code, job.ereignisse,
-                                                                                       " ".join(stderr_tail)))
+            grund = entwicklung_betrieb.ablehn_grund(ende_code, job.ereignisse, " ".join(stderr_tail))
+            abgelehnt = job.ereignisse.get("start_abgelehnt")
+            satz = github_auftrag.start_abgelehnt_satz(abgelehnt.get("grund")) if job.github and isinstance(abgelehnt, dict) else None
+            await self._quittung_nicht_gestartet(job, satz or grund)
         await self._kontingent_abschliessen()
         await self._lauf_ende(job, None)
+        await self.github_nach_lauf(job)
 
     async def _quittung_nicht_gestartet(self, job: Job, grund: str) -> None:
         """Quittung ok=false und der Auftrag gilt wieder als nicht gestartet: die Karte bleibt, ein zweiter Klick ist möglich."""
@@ -1615,12 +1662,15 @@ class DevAgent:
                     job.ereignisse[name] = ev
                 if name in ("gestartet", "zugang_erweitert"):  # der Dispatcher hat den Auftrag angenommen (oder wartet auf die Freigabe)
                     await self._quittung(job, True)
+                if self.github_ereignis(job, name, ev):  # github und aenderung (Plan C)
+                    continue
                 if name == "selbsttest_ok":
                     job.steps.append("Wächter-Selbsttest in der Sandbox bestanden")
                 elif name == "kanal_gesperrt":  # nur der Satz zum Grund-Code, nie ein Wert des Dispatchers
                     job.steps.append(f"Kanal gesperrt: {entwicklung_betrieb.grund_satz(ev.get('grund'))}")
                 elif name == "start_abgelehnt":  # Grund nur auf dem Canvas, nie ans Sprachmodell
-                    job.steps.append(f"Start abgelehnt: {clean_inline(str(ev.get('grund') or ''), 300)}")
+                    satz = github_auftrag.start_abgelehnt_satz(ev.get("grund")) if job.github else None
+                    job.steps.append(f"Start abgelehnt: {satz or clean_inline(str(ev.get('grund') or ''), 300)}")
                 elif name == "zugang_ungueltig":  # der Dispatcher nennt nie den Zugang selbst, nur was am Format nicht passt
                     job.steps.append(f"Claude-Zugang abgelehnt: {clean_inline(str(ev.get('grund') or ''), 200)}")
                 elif name == "gh_widerruf_fehlgeschlagen":
@@ -1708,7 +1758,9 @@ class DevAgent:
         ordner = f"`{job.projekt}` (Sokrates-2, Sandbox)" if self._ort == "sokrates2" else f"`{job.projekt}`"
         lines = ["## Auftrag", job.auftrag, "", f"**Art:** {KARTEN[job.art].titel}",
                  f"**Status:** {job.status}", f"**Ordner:** {ordner}"]
-        if job.repo and self._ort == "sokrates2":
+        if job.repo and self._ort == "sokrates2" and job.github:
+            lines.append(f"**GitHub-Repo:** `{job.repo}` (mit deinem GitHub-Token, Konto {job.github_konto or 'unbekannt'})")
+        elif job.repo and self._ort == "sokrates2":
             lines.append(f"**GitHub-Repo:** `{job.repo}` (Token nur für dieses Repo, wenn die App eingerichtet ist)")
         if job.cost_usd:
             lines.append(f"**Kosten bisher:** {job.cost_usd:.2f} USD")
@@ -1724,6 +1776,8 @@ class DevAgent:
             lines += ["", "## Ergebnis", job.result]
         if job.pending:
             lines += ["", "## Wartet auf Freigabe", *[f"- {p['grund']}" for p in job.pending.values()]]
+        if job.github:
+            lines += github_auftrag.canvas_zeilen(job.aenderung, job.github_info)
         # Ausgabe von Claude Code kann einen Schlüssel oder Token enthalten (Prompt Injection im Repo): schwärzen, bevor
         # sie auf das Canvas, in die Datenbank oder ins Teilen geht
         item = {"id": f"dev-{job.id}", "kind": "dokument", "title": f"Entwicklung: {job.projekt.name}",

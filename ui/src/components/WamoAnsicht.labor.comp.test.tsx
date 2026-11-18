@@ -372,6 +372,7 @@ describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
       "Konto und Profil",
       "Erste Schritte",
       "Modellzugang",
+      "GitHub-Zugang",
       "Verbrauch",
       "Sprache und Ton",
       "Stimme",

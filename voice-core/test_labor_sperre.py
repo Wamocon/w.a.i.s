@@ -271,6 +271,7 @@ ZUSATZ = [(m, p) for m in ("GET", "POST", "PUT", "PATCH", "DELETE") for p in (
     "/daily", "/wamo/slot", "/wamo/release/abc/freigeben", "/wamo/api", "/wamo/api/", "/wamo/api/profile",
     "/wamo/api/teilen", "/wamo/api/buero/status", "/wamo/api/geraete", "/wamo/api/modellzugang", "/wamo/api/release",
     "/wamo/api/hinweise", "/wamo/api/rd", "/wamo/api/vorgaenge", "/wamo/api/dateien", "/wamo/api/fernzugriff",
+    "/wamo/api/github-zugang", "/wamo/api/admin/github-rechte",
 )]
 
 
@@ -526,6 +527,7 @@ class RtviFilterTests(unittest.TestCase):
             self.assertTrue(labor.rtvi_nachricht_erlaubt(art, client_msg("freigabe", {"job": "labor", "id": "a", "entscheidung": "ja"})))
             for t, d in (("vergessen", {"id": "x"}), ("pc_steuerung", {"an": True}), ("bildstrom", {"aktion": "an"}),
                          ("modellzugang", {"aktion": "status"}), ("kontingent", {}), ("auftrag_start", {"job": "j", "entscheidung": "ja"}),
+                         ("github_zugang", {"aktion": "speichern", "token": "ghp_x"}),
                          ("freigabe", {"job": "pc", "id": "a", "entscheidung": "ja"}),
                          ("freigabe", {"job": "abc123", "id": "a", "entscheidung": "ja"}),
                          ("freigabe", {"job": "Labor"}), ("freigabe", {"job": ["labor"]}), ("freigabe", {}), ("freigabe", None),
@@ -544,7 +546,8 @@ class RtviFilterTests(unittest.TestCase):
 
     def test_client_nachricht_erlaubt_schicht_a(self):
         self.assertTrue(labor.client_nachricht_erlaubt("platz", "freigabe", {"job": "labor"}))
-        for typ in ("vergessen", "pc_steuerung", "bildstrom", "modellzugang", "kontingent", "auftrag_start", "freigabe", None, ""):
+        for typ in ("vergessen", "pc_steuerung", "bildstrom", "modellzugang", "github_zugang", "kontingent", "auftrag_start", "freigabe",
+                    None, ""):
             self.assertFalse(labor.client_nachricht_erlaubt("platz", typ, {"job": "pc"}))
         self.assertFalse(labor.client_nachricht_erlaubt("platz", "freigabe", None))
         self.assertFalse(labor.client_nachricht_erlaubt("platz", "freigabe", {"job": "labor "}))
