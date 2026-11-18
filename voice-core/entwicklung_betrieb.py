@@ -31,6 +31,7 @@ import re
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from loguru import logger
@@ -425,12 +426,84 @@ GRUND_SAETZE: dict[str, str] = {
     "abstand": "Zwischen zwei Aufträgen muss etwas Zeit liegen, bitte gleich noch einmal versuchen.",
     "platz": "Auf dem Server ist zu wenig Platz frei.",
     "grenze_profil": "Die Obergrenze für Aufträge dieses Profils ist erreicht, bitte später noch einmal versuchen.",
+    # Plan C (docs/persoenliche-zugaenge.md, C.2.6)
+    "persoenlich_aus": "Persönliche GitHub-Zugänge sind im Kanal nicht eingeschaltet.",
+    "grenze_einreichen": "Für heute sind genug Änderungen eingereicht.",
 }
 GRUND_UNBEKANNT = "Der Kanal hat den Auftrag abgewiesen."
 # Gründe, die nicht vom einzelnen Auftrag abhängen: Ein unveränderter zweiter Versuch scheitert genauso. Nach so einer Abweisung stellt
 # WAMO KANAL_SPERRE_SECS lang keine neue Karte (DevAgent._kanal_sperre_satz), statt Karte um Karte abweisen zu lassen.
-GRUENDE_DAUERHAFT = frozenset({"notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "herkunft_unklar"})
+GRUENDE_DAUERHAFT = frozenset({"notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "herkunft_unklar", "persoenlich_aus"})
 KANAL_SPERRE_SECS = 120.0
+
+# ---------------------------------------------------------------- Persönliche GitHub-Zugänge (Plan C, Paket S)
+# Sätze zu den Codes aus GITHUB_GRUENDE, AENDERUNG_GRUENDE und EINREICHEN_GRUENDE des Kern-Kanals (docs/persoenliche-zugaenge.md, C.2.6),
+# je mit denselben Schlüsseln in derselben Reihenfolge; test_kernkanal_vertrag.py hält beide Seiten gleich. Ein Code in zwei Tabellen hat
+# denselben Satz. Die Sätze gehen in Quittung, Karte und Status, nie mit Pfaden, Repos oder Werten.
+_SATZ_TOKEN_ABGELAUFEN = "Das GitHub-Token ist abgelaufen oder sein Ablaufdatum passt nicht zu den Regeln, bitte ein neues hinterlegen."
+_SATZ_TOKEN_RECHTE = "Die Rechte des GitHub-Tokens passen nicht zu den Regeln, bitte ein passendes Token hinterlegen."
+_SATZ_GEHEIMNIS = "In einer geänderten Datei steht etwas, das wie ein Zugangsschlüssel aussieht."
+GITHUB_SAETZE: dict[str, str] = {
+    "github_zeile": "Das GitHub-Token kam nicht wie vorgesehen am Server an.",
+    "token_ungueltig": "GitHub hat das hinterlegte Token nicht angenommen, bitte ein neues hinterlegen.",
+    "token_abgelaufen": _SATZ_TOKEN_ABGELAUFEN,
+    "token_rechte": _SATZ_TOKEN_RECHTE,
+    "repo_nicht_erreichbar": "Das Repo ist mit deinem GitHub-Token nicht erreichbar oder wurde umbenannt.",
+    "eigenes_repo": "Das Repo von W.A.I.S. selbst ist für Aufträge gesperrt, auch als Kopie oder Vorlage.",
+    "repo_zu_gross": "Das Repo ist zu groß für einen Entwicklungsauftrag.",
+    "klon_fehler": "Das Repo ließ sich nicht von GitHub holen.",
+    "bereinigung": "Im geholten Repo blieb ein Rest des Tokens zurück, deshalb startet nichts.",
+    "projekt_gewechselt": "Die Arbeitskopie gehört inzwischen zu einem anderen Auftrag, bitte einen neuen Auftrag stellen.",
+    "github_wechsel": "Dieser Auftrag lief mit einem anderen GitHub-Zugang, bitte einen neuen Auftrag stellen.",
+}
+AENDERUNG_SAETZE: dict[str, str] = {
+    "pfad_gesperrt": "Eine Änderung betrifft einen Pfad, der sich nicht einreichen lässt.",
+    "geheimnis": _SATZ_GEHEIMNIS,
+    "zu_gross": "Die Änderung ist zu groß zum Einreichen.",
+    "zu_viele_commits": "Der Auftrag hat zu viele Commits angelegt.",
+    "symlink": "Eine Änderung enthält einen Link mit einem Ziel außerhalb des Projekts.",
+    "sonderdatei": "Eine Änderung enthält eine Sonderdatei, die sich nicht einreichen lässt.",
+    "basis_fehlt": "Die Änderung baut nicht auf dem geholten Stand auf.",
+    "bundle_ungueltig": "Die Ausgabe des Auftrags war ungültig.",
+    "pruefung_fehler": "Die Prüfung der Änderung ist fehlgeschlagen.",
+    "schon_eingereicht": "Diese Änderung ist schon eingereicht, Nacharbeit braucht einen neuen Auftrag.",
+}
+EINREICHEN_SAETZE: dict[str, str] = {
+    "zustand": "Die Änderung lässt sich in diesem Zustand nicht einreichen.",
+    "veraltet": "Die Karte zeigt einen älteren Stand, bitte die Änderung neu ansehen.",
+    "bestaetigung": "Bitte zuerst alle markierten Dateien bestätigen.",
+    "konto": "Das GitHub-Token gehört inzwischen zu einem anderen Konto.",
+    "token_rechte": _SATZ_TOKEN_RECHTE,
+    "repo_geaendert": "Das Repo auf GitHub ist nicht mehr dasselbe, bitte einen neuen Auftrag stellen.",
+    "keine_schreibrechte": "Mit deinem GitHub-Token fehlt das Schreibrecht für dieses Repo.",
+    "zweig_belegt": "Den Zweig gibt es auf GitHub schon mit einem anderen Stand.",
+    "geheimnis": _SATZ_GEHEIMNIS,
+    "token_abgelaufen": _SATZ_TOKEN_ABGELAUFEN,
+    "github_fehler": "GitHub hat das Einreichen nicht angenommen, bitte später noch einmal versuchen.",
+}
+# Gegenstücke der Konstanten in infra/sokrates2/wamo_job_github.py (C.2.1, C.2.2, C.2.8), je mit demselben Wert; die Regel steht dort im
+# Modultext. Kurz: Ein klassisches Token braucht einen Scope aus SCOPES_PFLICHT_EINER, und jeder Scope muss in SCOPES_UNBEDENKLICH oder in
+# den Ausnahmen der Person stehen, sonst token_rechte (auch ein unbekannter Scope). Die Ausnahmen setzt nur der Admin je Person, nur aus
+# SCOPES_AUSNAHMEN, und der Kern schickt sie im Feld FELD_SCOPES_AUSNAHMEN mit. Fein-granulare Tokens haben keine Scopes in diesem Sinn:
+# dort gelten die Rechte am Repo (C.4 Schritt 3, C.5 Start 2).
+FELD_GITHUB = "github"
+GITHUB_PERSOENLICH = "persoenlich"
+FELD_SCOPES_AUSNAHMEN = "scopes_ausnahmen"
+GITHUB_TOKEN_FORMEN = MappingProxyType({"klassisch": "ghp_[A-Za-z0-9]{36}", "fein": "github_pat_[A-Za-z0-9_]{82}"})
+GITHUB_ABLAUF_MAX_TAGE = 366
+SCOPES_PFLICHT_EINER = ("repo", "public_repo")
+SCOPES_MAX = 30
+SCOPES_UNBEDENKLICH = ("repo", "repo:status", "repo_deployment", "public_repo", "repo:invite", "security_events", "read:org", "read:user",
+                       "read:repo_hook", "read:public_key", "read:gpg_key", "read:ssh_signing_key", "read:project", "project",
+                       "read:discussion", "write:discussion", "read:network_configurations", "notifications")
+SCOPES_NIE = ("delete_repo", "site_admin", "admin:enterprise", "manage_runners:enterprise", "manage_billing:enterprise", "read:enterprise")
+SCOPES_AUSNAHMEN = ("admin:org", "write:org", "admin:org_hook", "admin:repo_hook", "write:repo_hook", "admin:public_key", "write:public_key",
+                    "admin:gpg_key", "write:gpg_key", "admin:ssh_signing_key", "write:ssh_signing_key", "write:packages", "read:packages",
+                    "delete:packages", "user", "user:email", "user:follow", "workflow", "gist", "codespace", "codespace:secrets",
+                    "copilot", "manage_billing:copilot", "manage_runners:org", "write:network_configurations", "audit_log",
+                    "read:audit_log")
+SCOPES_STANDARD_ABGELEHNT = SCOPES_NIE + SCOPES_AUSNAHMEN
+
 SATZ_BELEGT = "Es läuft schon ein Auftrag. Bitte warte, bis er fertig ist."
 # Ein Dispatcher bis Version 8 führte genau einen Auftrag gleichzeitig aus (PARALLEL_MAX = 1) und meldete belegt ohne Code: dann war die
 # Gesamtgrenze wirklich erreicht. Ab Dispatcher 9 nennt das Ereignis belegt die Grenze (BELEGT_SAETZE), dieser Satz gilt nur noch für ältere.

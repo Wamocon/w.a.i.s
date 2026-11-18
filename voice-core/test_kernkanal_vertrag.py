@@ -12,6 +12,8 @@ bewusst als Wortlaut im Test: Weicht eine Seite ab, wird dieser Test rot, nicht 
     unveränderte Dateien (Prüfsummen von Slot-Skript, Vorprüfung und Slot-Vorlage), Namensvertrag
     Selbstschutz: jeder Name des eigenen Repos (SELF_REPOS, ist_eigenes_repo) auf allen drei Seiten gleich
     Zugangsart haus (P6b): der Kern sendet nur, was Kern-Kanal und Dispatcher annehmen; das Skript erkennt alle drei Seiten
+    Plan C, Paket S (docs/persoenliche-zugaenge.md, C.2.6 bis C.2.9): Gründe und Sätze, Rechte klassischer Tokens je Person,
+        Token-Formen, Feldnamen und die Protokoll-Klasse Werkzeuge (infra/sokrates2/wamo_job_github.py)
 
 Alles läuft ohne Netz, ohne Server, ohne ssh und ohne git. Ausführen (im Ordner voice-core/):  python -m pytest -q test_kernkanal_vertrag.py
 """
@@ -79,7 +81,8 @@ def test_geprueft_wird_der_code_dieses_arbeitsbaums():
 # ================================================================== I6: Grund-Codes
 I6_CODES = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt", "dienst",
             "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit", "grenze_folgen", "abstand", "platz",
-            "grenze_profil")
+            "grenze_profil",
+            "persoenlich_aus", "grenze_einreichen")  # Plan C (C.2.6): persönlicher Weg aus, Grenze für Einreichen je Tag
 
 # Funktionen von wamo_job_kernkanal.py, deren Rückgabe ein Code aus KANAL_GRUENDE ist
 CODE_FUNKTIONEN = {"pruefe_befehl", "pruefe_eigener_auftrag", "projekt_pruefen", "pruefe_grenzen", "pruefe_start", "fork_pruefen",
@@ -882,3 +885,356 @@ def test_p5_skript_und_rauchtest_verlangen_dispatcher_9():
     assert ">= 9" in (INFRA / "wamo_job_kern_rauchtest.py").read_text(encoding="utf-8")
     assert re.search(r"^PARALLEL_HART=6\b", SKRIPT, flags=re.M) and K.PARALLEL_HART == 6
     assert "grenze_profil" in K.KANAL_GRUENDE  # das Skript prüft das installierte Modul auf diesen Code
+
+
+# ================================================================== Plan C, Paket S: persönliche GitHub-Zugänge
+# docs/persoenliche-zugaenge.md, C.2.6 bis C.2.9. Wie bei I6 stehen die Listen als Wortlaut im Test: Weicht eine Seite ab, wird er rot.
+# Die Gründe hält der Kern-Kanal (K), Feldnamen, Token-Formen, Rechte-Regeln und das Protokoll Werkzeuge wamo_job_github.py (G),
+# die Sätze und die Gegenstücke der Konstanten der Kern (eb).
+G = _lade("wamo_job_github_vertrag", "wamo_job_github.py")
+
+C26_GITHUB = ("github_zeile", "token_ungueltig", "token_abgelaufen", "token_rechte", "repo_nicht_erreichbar", "eigenes_repo",
+              "repo_zu_gross", "klon_fehler", "bereinigung", "projekt_gewechselt", "github_wechsel")
+C26_AENDERUNG = ("pfad_gesperrt", "geheimnis", "zu_gross", "zu_viele_commits", "symlink", "sonderdatei", "basis_fehlt",
+                 "bundle_ungueltig", "pruefung_fehler", "schon_eingereicht")
+C26_EINREICHEN = ("zustand", "veraltet", "bestaetigung", "konto", "token_rechte", "repo_geaendert", "keine_schreibrechte",
+                  "zweig_belegt", "geheimnis", "token_abgelaufen", "github_fehler")
+# Liste im Kern-Kanal: (Tabelle der Sätze im Kern, Wortlaut aus C.2.6)
+C26_LISTEN = {"GITHUB_GRUENDE": ("GITHUB_SAETZE", C26_GITHUB), "AENDERUNG_GRUENDE": ("AENDERUNG_SAETZE", C26_AENDERUNG),
+              "EINREICHEN_GRUENDE": ("EINREICHEN_SAETZE", C26_EINREICHEN)}
+CODE_RE = re.compile(r"[a-z][a-z_]{1,29}")
+
+
+def test_c26_die_neuen_codes_des_kanals_haben_im_kern_einen_satz():
+    assert K.KANAL_GRUENDE[-2:] == ("persoenlich_aus", "grenze_einreichen")  # angehängt, die alten Codes bleiben in ihrer Reihenfolge
+    assert eb.GRUND_SAETZE["persoenlich_aus"] == "Persönliche GitHub-Zugänge sind im Kanal nicht eingeschaltet."
+    assert eb.GRUND_SAETZE["grenze_einreichen"] == "Für heute sind genug Änderungen eingereicht."
+
+
+def test_c26_dauerhafte_gruende_sind_codes_des_kanals():
+    """Nach einer dauerhaften Abweisung stellt der Kern eine Weile keine neue Karte. persoenlich_aus hängt nicht am einzelnen Auftrag,
+    grenze_einreichen betrifft nur das Einreichen und sperrt keine Karte."""
+    assert eb.GRUENDE_DAUERHAFT <= set(K.KANAL_GRUENDE)
+    assert "persoenlich_aus" in eb.GRUENDE_DAUERHAFT and "grenze_einreichen" not in eb.GRUENDE_DAUERHAFT
+
+
+@pytest.mark.parametrize("liste", C26_LISTEN)
+def test_c26_jede_liste_gilt_auf_beiden_seiten(liste):
+    saetze_name, wortlaut = C26_LISTEN[liste]
+    assert getattr(K, liste) == wortlaut
+    saetze = getattr(eb, saetze_name)
+    assert tuple(saetze) == wortlaut, "jeder Code hat genau einen Satz, in derselben Reihenfolge"
+    assert len(set(wortlaut)) == len(wortlaut)
+    for code, satz in saetze.items():
+        assert CODE_RE.fullmatch(code), code
+        assert isinstance(satz, str) and satz.strip(), code
+
+
+def test_c26_ein_code_in_mehreren_listen_hat_ueberall_denselben_satz():
+    tabellen = [eb.GRUND_SAETZE, eb.GITHUB_SAETZE, eb.AENDERUNG_SAETZE, eb.EINREICHEN_SAETZE]
+    gemeinsam: set[str] = set()
+    for i, a in enumerate(tabellen):
+        for b in tabellen[i + 1:]:
+            for code in set(a) & set(b):
+                assert a[code] == b[code], code
+                gemeinsam.add(code)
+    assert gemeinsam == {"token_rechte", "token_abgelaufen", "geheimnis"}  # ein neuer gemeinsamer Code braucht hier eine bewusste Zeile
+
+
+def test_c26_einreichen_fehler_ist_eindeutig():
+    """einreichen_fehler trägt einen Code aus EINREICHEN_GRUENDE oder KANAL_GRUENDE (C.2.4): beide Listen dürfen sich nicht überschneiden.
+    start_abgelehnt trägt im persönlichen Weg einen Code aus GITHUB_GRUENDE, der Weg mit der App einen Text; auch hier keine Überschneidung."""
+    assert not set(K.EINREICHEN_GRUENDE) & set(K.KANAL_GRUENDE)
+    assert not set(K.GITHUB_GRUENDE) & set(K.KANAL_GRUENDE)
+    assert not set(K.AENDERUNG_GRUENDE) & set(K.KANAL_GRUENDE)
+
+
+def test_c26_unbekannte_gruende_bleiben_im_kern_beim_allgemeinen_satz():
+    assert eb.grund_satz("persoenlich_aus") == eb.GRUND_SAETZE["persoenlich_aus"]
+    assert eb.grund_satz("token_rechte") == eb.GRUND_UNBEKANNT  # kein Code des Kanals: der Kanal-Satz greift nicht nebenbei
+
+
+# ---------------------------------------------------------------- C.2.8: Rechte klassischer Tokens je Person
+SCOPE_KONSTANTEN = ("FELD_GITHUB", "GITHUB_PERSOENLICH", "FELD_SCOPES_AUSNAHMEN", "SCOPES_PFLICHT_EINER", "SCOPES_MAX", "SCOPES_UNBEDENKLICH",
+                    "SCOPES_STANDARD_ABGELEHNT", "SCOPES_NIE", "SCOPES_AUSNAHMEN", "GITHUB_TOKEN_FORMEN", "GITHUB_ABLAUF_MAX_TAGE")
+# Entscheidung von Niko vom 18.11.2026: diese lehnt die strenge Liste ab (dazu alle admin:- und user:-Rechte), diese erlaubt der Admin nie
+NIKO_STRENG = ("delete_repo", "site_admin", "write:packages", "delete:packages", "user", "workflow", "gist", "write:org")
+NIKO_NIE = ("delete_repo", "site_admin", "admin:enterprise")
+# Die klassischen Scopes von GitHub (Stand 18.11.2026, docs.github.com "Scopes for OAuth apps"). Jeder steht in genau einer Liste.
+# Kommt bei GitHub einer dazu, ist er abgelehnt (fail closed), bis er hier und in einer der drei Listen auf beiden Seiten steht.
+BEKANNTE_SCOPES = (
+    "repo", "repo:status", "repo_deployment", "public_repo", "repo:invite", "security_events",
+    "admin:repo_hook", "write:repo_hook", "read:repo_hook", "admin:org", "write:org", "read:org",
+    "admin:public_key", "write:public_key", "read:public_key", "admin:org_hook", "gist", "notifications",
+    "user", "read:user", "user:email", "user:follow", "project", "read:project", "delete_repo",
+    "write:packages", "read:packages", "delete:packages", "admin:gpg_key", "write:gpg_key", "read:gpg_key",
+    "codespace", "codespace:secrets", "workflow", "copilot", "manage_billing:copilot",
+    "write:network_configurations", "read:network_configurations", "manage_runners:org",
+    "admin:enterprise", "manage_runners:enterprise", "manage_billing:enterprise", "read:enterprise",
+    "audit_log", "read:audit_log", "admin:ssh_signing_key", "write:ssh_signing_key", "read:ssh_signing_key",
+    "write:discussion", "read:discussion", "site_admin",
+)
+SCOPE_RE = re.compile(r"[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?")
+SCOPE_LISTEN = ("SCOPES_PFLICHT_EINER", "SCOPES_UNBEDENKLICH", "SCOPES_STANDARD_ABGELEHNT", "SCOPES_NIE", "SCOPES_AUSNAHMEN")
+
+
+@pytest.mark.parametrize("name", SCOPE_KONSTANTEN)
+def test_c28_kern_und_dispatcher_halten_dieselben_werte(name):
+    assert getattr(eb, name) == getattr(G, name), name
+
+
+def test_c28_feldnamen_und_werte():
+    assert (G.FELD_GITHUB, G.GITHUB_PERSOENLICH, G.FELD_SCOPES_AUSNAHMEN) == ("github", "persoenlich", "scopes_ausnahmen")
+    assert G.GITHUB_ABLAUF_MAX_TAGE == 366  # C5: höchstens 366 Tage in der Zukunft
+    assert G.SCOPES_MAX == 30  # wie die Spalte scopes in 0027 (C.3)
+    assert G.FELD_SCOPES_AUSNAHMEN in G.EINREICHEN_FELDER  # auch beim Einreichen gilt die Einstellung von jetzt (C.5 Einreichen 3)
+
+
+@pytest.mark.parametrize("liste", SCOPE_LISTEN)
+def test_c28_die_listen_haben_die_feste_form(liste):
+    werte = getattr(G, liste)
+    assert isinstance(werte, tuple) and werte and len(set(werte)) == len(werte), liste
+    for scope in werte:
+        assert SCOPE_RE.fullmatch(scope), (liste, scope)  # nur Namen, keine Muster
+
+
+def test_c28_jeder_bekannte_scope_steht_in_genau_einer_liste():
+    drei = (G.SCOPES_UNBEDENKLICH, G.SCOPES_AUSNAHMEN, G.SCOPES_NIE)
+    for scope in BEKANNTE_SCOPES:
+        assert sum(scope in liste for liste in drei) == 1, scope
+    assert set().union(*drei) == set(BEKANNTE_SCOPES)
+    assert set(G.SCOPES_STANDARD_ABGELEHNT) == set(G.SCOPES_NIE) | set(G.SCOPES_AUSNAHMEN)
+    assert not set(G.SCOPES_STANDARD_ABGELEHNT) & set(G.SCOPES_UNBEDENKLICH)
+
+
+def test_c28_die_entscheidung_steht_in_den_listen():
+    assert set(NIKO_STRENG) <= set(G.SCOPES_STANDARD_ABGELEHNT)
+    assert set(NIKO_NIE) <= set(G.SCOPES_NIE)
+    for scope in G.SCOPES_UNBEDENKLICH:  # admin:* und user-Rechte: kein solcher Scope ist unbedenklich
+        assert not scope.startswith(("admin:", "user:")) and scope != "user", scope
+    for scope in ("read:packages", "codespace", "codespace:secrets"):  # C.4 Schritt 3
+        assert scope in G.SCOPES_STANDARD_ABGELEHNT, scope
+    for scope in ("manage_runners:org", "write:public_key", "write:gpg_key", "write:ssh_signing_key", "write:repo_hook"):  # Review
+        assert scope in G.SCOPES_AUSNAHMEN, scope
+
+
+def test_c28_die_pflichtrechte_sind_unbedenklich():
+    assert G.SCOPES_PFLICHT_EINER == ("repo", "public_repo")
+    assert set(G.SCOPES_PFLICHT_EINER) <= set(G.SCOPES_UNBEDENKLICH)
+
+
+def _scopes_aus_kopf(wert: str) -> tuple[str, ...]:
+    """Normalisierung der Kopfzeile X-OAuth-Scopes aus C.2.8: am Komma getrennt, Leerzeichen am Rand weg, leere Einträge übergangen."""
+    return tuple(s.strip(" ") for s in wert.split(",") if s.strip(" "))
+
+
+def _scope_grund(scopes: tuple[str, ...], ausnahmen: tuple[str, ...] = ()) -> str | None:
+    """Die Regel aus C.2.8 als Referenz für K (Speichern) und D-b (Start und Einreichen): None oder token_rechte. Ausnahmen gelten nur aus
+    SCOPES_AUSNAHMEN; ein anderer Wert im Feld macht die Zeile schon vorher ungültig (Abgewiesen), hier zählt er einfach nicht.
+    Auftrag an K und D-b: ihre Prüfung zusätzlich gegen SCOPE_FAELLE laufen lassen (eigene Seiten wie bei I5)."""
+    erlaubt = set(G.SCOPES_UNBEDENKLICH) | (set(ausnahmen) & set(G.SCOPES_AUSNAHMEN))
+    if len(scopes) > G.SCOPES_MAX or not set(scopes) & set(G.SCOPES_PFLICHT_EINER):
+        return "token_rechte"
+    if any(s not in erlaubt for s in scopes):
+        return "token_rechte"
+    return None
+
+
+# (Scopes aus X-OAuth-Scopes, Ausnahmen der Person, Ergebnis)
+SCOPE_FAELLE = (
+    (("repo",), (), None),
+    (("public_repo", "read:org"), (), None),
+    (("repo", "read:user", "notifications", "project"), (), None),  # lesende und harmlose Rechte
+    ((), (), "token_rechte"),  # ohne repo oder public_repo geht nichts
+    (("read:org",), (), "token_rechte"),
+    (("repo", "workflow"), (), "token_rechte"),
+    (("repo", "workflow"), ("workflow",), None),
+    (("repo", "workflow", "gist"), ("workflow",), "token_rechte"),
+    (("repo", "admin:org"), (), "token_rechte"),
+    (("repo", "admin:org"), ("admin:org",), None),
+    (("repo", "admin:repo_hook"), ("admin:org",), "token_rechte"),  # Ausnahmen gelten genau
+    (("repo", "admin:neu_bei_github"), ("admin:neu_bei_github",), "token_rechte"),  # unbekannt: abgelehnt, auch nicht erlaubbar
+    (("repo", "ganz_neu"), (), "token_rechte"),
+    (("repo", "Repo"), (), "token_rechte"),  # Groß- und Kleinschreibung zählt
+    (("repo", "admin:enterprise"), ("admin:enterprise",), "token_rechte"),  # nie erlaubt, auch wenn der Kern es schickte
+    (("repo", "delete_repo"), ("delete_repo",), "token_rechte"),
+    (("repo", "site_admin"), ("site_admin",), "token_rechte"),
+    (("repo", "manage_runners:enterprise"), ("manage_runners:org",), "token_rechte"),
+    (("repo", "manage_runners:org"), (), "token_rechte"),  # Runner führen Code aus (Review)
+    (("repo", "manage_runners:org"), ("manage_runners:org",), None),
+    (("repo", "write:public_key"), (), "token_rechte"),  # Schlüssel auf dem Konto schaffen dauerhaften Zugriff (Review)
+    (("repo", "user:email"), ("user",), "token_rechte"),
+    (("repo", "user", "user:email"), ("user", "user:email"), None),
+    (("repo", "write:packages", "read:packages"), ("write:packages",), "token_rechte"),
+    (("repo", "codespace:secrets"), ("codespace:secrets",), None),
+    (("repo",) * 31, (), "token_rechte"),  # mehr als SCOPES_MAX Einträge
+)
+
+
+@pytest.mark.parametrize("kopf, erwartet", [("repo", ("repo",)), ("repo, gist", ("repo", "gist")), (" repo ,, read:org ", ("repo", "read:org")),
+                                            ("", ()), (" , ", ())])
+def test_c28_normalisierung_der_kopfzeile(kopf, erwartet):
+    assert _scopes_aus_kopf(kopf) == erwartet
+
+
+@pytest.mark.parametrize("scopes, ausnahmen, erwartet", SCOPE_FAELLE)
+def test_c28_wertetabelle_der_regel(scopes, ausnahmen, erwartet):
+    assert _scope_grund(scopes, ausnahmen) == erwartet
+    assert erwartet is None or (erwartet in K.GITHUB_GRUENDE and erwartet in K.EINREICHEN_GRUENDE)
+
+
+@pytest.mark.parametrize("feld", ["github", "scopes_ausnahmen"])
+def test_c28_dispatcher_9_weist_die_neuen_kopffelder_ab(feld):
+    """Fail closed bis Paket D-a: Ein Dispatcher ohne den persönlichen Weg lehnt beide Felder als unbekannt ab. D-a ändert parse_header
+    (Felder nur im Kern-Kanal, scopes_ausnahmen nur mit github=persoenlich, Werte nur aus SCOPES_AUSNAHMEN) und passt diesen Test an."""
+    wert = G.GITHUB_PERSOENLICH if feld == G.FELD_GITHUB else []
+    roh = json.dumps({"auftrag": "x", "zugang": "haus", "profil": KENNUNG, feld: wert}) + "\n"
+    assert D.VERSION == "9"
+    with pytest.raises(D.Abgewiesen, match="unbekannte Felder"):
+        D.parse_header(roh.encode("utf-8"))
+
+
+# ---------------------------------------------------------------- C.2.2: GitHub-Zeile und Token-Formen
+def _token(art: str, zeichen: str = "A") -> str:
+    # synthetisch zusammengesetzt, damit kein vollständiger Tokenwert als Text in der Datei steht
+    return "ghp_" + zeichen * 36 if art == "klassisch" else "github_pat_" + (zeichen + "_") * 41
+
+
+def _zeile_des_kerns(wert: str) -> bytes:
+    """So baut der Kern die Zeile (C.2.2: genau diese Form, ohne Leerzeichen, Zeilenende LF). Paket K übernimmt genau das."""
+    return (json.dumps({"typ": "github", "wert": wert}, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+@pytest.mark.parametrize("art", ["klassisch", "fein"])
+def test_c22_die_zeile_des_kerns_nimmt_der_dispatcher_an(art):
+    wert = _token(art)
+    assert re.fullmatch(eb.GITHUB_TOKEN_FORMEN[art], wert)
+    zeile = bytearray(_zeile_des_kerns(wert))
+    assert len(zeile) <= G.GITHUB_ZEILE_MAX_BYTES and zeile.endswith(b"\n")
+    assert G.GITHUB_ZEILE_RE.fullmatch(memoryview(zeile)[:-1]) is not None  # Bytes-Regel auf einem memoryview, ohne Kopie (C.2.2)
+
+
+@pytest.mark.parametrize("wert", [
+    "gho_" + "A" * 36, "ghu_" + "A" * 36, "ghs_" + "A" * 36, "ghr_" + "A" * 36,  # andere Formen weist schon der Kern ab (C.4 Schritt 1)
+    "ghp_" + "A" * 35, "ghp_" + "A" * 37, "ghp_" + "A" * 35 + "_", "github_pat_" + "a" * 81, "github_pat_" + "a" * 83,
+    "github_pat_" + "a" * 81 + "-", "", "ghp_" + "Ä" * 36])
+def test_c22_falsche_formen_nimmt_keine_seite_an(wert):
+    assert not any(re.fullmatch(form, wert) for form in eb.GITHUB_TOKEN_FORMEN.values())
+    assert G.GITHUB_ZEILE_RE.fullmatch(_zeile_des_kerns(wert)[:-1]) is None
+
+
+@pytest.mark.parametrize("zeile", [
+    b'{"typ": "github", "wert": "%s"}', b'{"wert":"%s","typ":"github"}', b'{"typ":"github","wert":"%s","x":1}',
+    b' {"typ":"github","wert":"%s"}', b'{"typ":"github","wert":"%s"} ', b'{"typ":"api","wert":"%s"}'])
+def test_c22_nur_genau_die_feste_form_der_zeile_gilt(zeile):
+    assert G.GITHUB_ZEILE_RE.fullmatch(zeile % _token("klassisch").encode("ascii")) is None
+
+
+def test_c22_die_formen_sind_die_aus_dem_plan():
+    assert G.GITHUB_TOKEN_FORMEN == {"klassisch": "ghp_[A-Za-z0-9]{36}", "fein": "github_pat_[A-Za-z0-9_]{82}"}
+    assert G.GITHUB_ZEILE_MAX_BYTES == 256
+
+
+# ---------------------------------------------------------------- C.2.3 bis C.5.2: Befehle, Zustände, Modi, Sperren
+def test_c23_die_neuen_befehle_passen_zur_befehlsform_des_dispatchers():
+    assert G.BEFEHLE_GITHUB == ("aenderung", "einreichen", "verwerfen")
+    assert G.BEFEHLE_GITHUB_GESCHLOSSEN == ("aenderung", "verwerfen")  # auch bei geschlossenem Kanal (C.2.3), nie einreichen
+    for befehl in G.BEFEHLE_GITHUB:
+        roh = f"{befehl} {'0' * 16} {KENNUNG}"
+        assert D.COMMAND_RE.fullmatch(roh) and len(roh) <= D.MAX_COMMAND_CHARS, befehl
+    assert G.EINREICHEN_FELDER == ("commit_id", "tree_id", "bestaetigt", "scopes_ausnahmen")
+    assert G.EINREICHEN_ZEILE_MAX_BYTES == 64 * 1024
+
+
+def test_c24_ereignisse_und_zustaende():
+    assert G.EREIGNISSE_GITHUB == ("github", "aenderung", "eingereicht", "einreichen_fehler", "verworfen")
+    assert G.AENDERUNG_STATUS == ("keine", "gesperrt", "nur_lesen", "bereit", "einreichen_laeuft", "branch_gepusht", "eingereicht",
+                                  "verworfen")
+
+
+def test_c52_die_modi_der_sandbox_schliessen_die_heutigen_ein():
+    treffer = re.search(r"\[\[ \$MODUS =~ \^\(([a-z|]+)\)\$ \]\]", _text(INFRA / "wamo-job.sh"))
+    assert treffer, "D-a: beim Umbau von wamo-job.sh auf case dieses Muster anpassen"
+    assert set(treffer.group(1).split("|")) <= set(G.SANDBOX_MODI)
+    assert G.SANDBOX_MODI == ("lauf", "pruefen", "klon", "ausgabe", "pruefung")
+    assert G.SANDBOX_MODI_NETZLOS == ("klon", "ausgabe", "pruefung")
+    assert G.SPERREN == (".lauf", ".einreichen", "kernkanal")
+    assert G.AUFTRAG_DATEIEN == ("basis.git", "aus.git", "bundle.ein", "ausgabe", "ergebnis", "github.json", "aenderung.json",
+                                 "einreichen.json")
+
+
+# ---------------------------------------------------------------- C.9: Protokoll-Klasse Werkzeuge (Schnittstelle D-a zu D-b)
+# Methode: Namen der Parameter ohne self. Ändert eine Seite die Form, wird dieser Test rot, bevor D-a und D-b auseinanderlaufen.
+# Auftrag an D-a: die echte Umsetzung hier zusätzlich prüfen (isinstance und dieselben Signaturen wie Werkzeuge).
+WERKZEUGE_FORM = {
+    "log": ("text", "pflicht"),
+    "http": ("methode", "pfad", "daten"),
+    "git": ("args", "git_dir", "eingabe", "netz", "zeitlimit_s"),
+    "sandbox": ("modus", "job", "projekt", "zeitlimit_s"),
+    "sperre": ("name",),
+    "pfad": ("name",),
+    "uhr": (),
+    "geheimnis_in": ("daten",),
+}
+WERKZEUGE_NUR_BENANNT = {"log": {"pflicht"}, "git": {"git_dir", "eingabe", "netz", "zeitlimit_s"},
+                         "sandbox": {"job", "projekt", "zeitlimit_s"}}
+
+
+def test_c9_das_protokoll_hat_genau_diese_methoden():
+    import inspect
+    import typing
+
+    assert typing.Protocol in G.Werkzeuge.__mro__
+    methoden = {n for n, v in vars(G.Werkzeuge).items() if callable(v) and not n.startswith("_")}
+    assert methoden == set(WERKZEUGE_FORM)
+    for name, parameter in WERKZEUGE_FORM.items():
+        signatur = inspect.signature(getattr(G.Werkzeuge, name))
+        assert tuple(signatur.parameters)[1:] == parameter, name
+        benannt = {p.name for p in signatur.parameters.values() if p.kind is p.KEYWORD_ONLY}
+        assert benannt == WERKZEUGE_NUR_BENANNT.get(name, set()), name
+
+
+def test_c9_eine_attrappe_mit_allen_methoden_erfuellt_das_protokoll():
+    class Attrappe:
+        def log(self, text, *, pflicht=False): ...
+        def http(self, methode, pfad, daten=None): ...
+        def git(self, args, *, git_dir, eingabe=None, netz=False, zeitlimit_s=60.0): ...
+        def sandbox(self, modus, *, job, projekt, zeitlimit_s): ...
+        def sperre(self, name): ...
+        def pfad(self, name): ...
+        def uhr(self): ...
+        def geheimnis_in(self, daten): ...
+
+    class OhneSuche:  # eigene Klasse: isinstance merkt sich ein positives Ergebnis je Klasse
+        log, http, git, sandbox, sperre, pfad, uhr = (Attrappe.log, Attrappe.http, Attrappe.git, Attrappe.sandbox, Attrappe.sperre,
+                                                      Attrappe.pfad, Attrappe.uhr)
+
+    assert isinstance(Attrappe(), G.Werkzeuge)
+    assert not isinstance(OhneSuche(), G.Werkzeuge)
+
+
+def test_c9_die_ergebnisse_sind_unveraenderlich():
+    import dataclasses
+
+    for klasse, felder in ((G.HttpAntwort, ("status", "kopf", "daten")), (G.GitErgebnis, ("code", "stdout", "stderr")),
+                           (G.SandboxErgebnis, ("code", "zeitlimit"))):
+        assert tuple(f.name for f in dataclasses.fields(klasse)) == felder, klasse.__name__
+        assert klasse.__dataclass_params__.frozen, klasse.__name__
+    assert issubclass(G.KeinToken, Exception) and issubclass(G.NetzFehler, Exception)
+
+
+def test_c9_das_modul_ist_ohne_nebenwirkung_und_nur_mit_der_standardbibliothek():
+    """Wie das Modul des Kern-Kanals: kein Netz, keine Prozesse, keine Geheimnisse beim Import (installiert unter /opt/wamo/waechter)."""
+    baum = ast.parse(_text(INFRA / "wamo_job_github.py"))
+    erlaubt = {"__future__", "collections.abc", "contextlib", "dataclasses", "pathlib", "re", "types", "typing"}
+    for knoten in baum.body:
+        if isinstance(knoten, ast.Import):
+            assert {a.name for a in knoten.names} <= erlaubt, ast.dump(knoten)
+        elif isinstance(knoten, ast.ImportFrom):
+            assert knoten.module in erlaubt, knoten.module
+        elif isinstance(knoten, ast.Expr):
+            assert isinstance(knoten.value, ast.Constant) and isinstance(knoten.value.value, str), "nur der Modultext steht frei"
+        else:
+            assert isinstance(knoten, (ast.Assign, ast.AnnAssign, ast.ClassDef, ast.FunctionDef)), ast.dump(knoten)
+    namen = {n.id for n in ast.walk(baum) if isinstance(n, ast.Name)} | {n.attr for n in ast.walk(baum) if isinstance(n, ast.Attribute)}
+    assert not namen & {"subprocess", "socket", "open", "environ", "system", "urlopen", "HTTPSConnection"}

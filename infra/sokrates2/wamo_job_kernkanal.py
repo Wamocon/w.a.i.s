@@ -79,10 +79,23 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
-# Feste Liste der Gründe (Schnittstelle zum Kern: voice-core/entwicklung_betrieb.py hält GRUND_SAETZE mit denselben Schlüsseln)
+# Feste Liste der Gründe (Schnittstelle zum Kern: voice-core/entwicklung_betrieb.py hält GRUND_SAETZE mit denselben Schlüsseln).
+# Plan C (docs/persoenliche-zugaenge.md, C.2.6): persoenlich_aus (Regel 5 bei github=persoenlich ohne PERSOENLICH=an) und
+# grenze_einreichen (MAX_EINREICHEN_TAG und MAX_EINREICHEN_TAG_PROFIL) liefert Paket D-a; bis dahin stehen sie nur hier.
 KANAL_GRUENDE = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt",
                  "dienst", "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit", "grenze_folgen",
-                 "abstand", "platz", "grenze_profil")
+                 "abstand", "platz", "grenze_profil", "persoenlich_aus", "grenze_einreichen")
+# Persönliche GitHub-Zugänge (Plan C, C.2.6), je eine feste Liste; der Kern hält GITHUB_SAETZE, AENDERUNG_SAETZE und EINREICHEN_SAETZE
+# mit denselben Schlüsseln, test_kernkanal_vertrag.py hält beide Seiten gleich. Ein Code, der in zwei Listen steht, bedeutet dasselbe.
+#   GITHUB_GRUENDE      Feld grund im Ereignis start_abgelehnt (Exit 8), wenn der GitHub-Teil eines Starts scheitert
+#   AENDERUNG_GRUENDE   Feld gruende im Ereignis aenderung (Regeln über die Änderung, Status gesperrt)
+#   EINREICHEN_GRUENDE  Feld grund im Ereignis einreichen_fehler (dort sonst nur ein Code aus KANAL_GRUENDE, beide ohne Überschneidung)
+GITHUB_GRUENDE = ("github_zeile", "token_ungueltig", "token_abgelaufen", "token_rechte", "repo_nicht_erreichbar", "eigenes_repo",
+                  "repo_zu_gross", "klon_fehler", "bereinigung", "projekt_gewechselt", "github_wechsel")
+AENDERUNG_GRUENDE = ("pfad_gesperrt", "geheimnis", "zu_gross", "zu_viele_commits", "symlink", "sonderdatei", "basis_fehlt",
+                     "bundle_ungueltig", "pruefung_fehler", "schon_eingereicht")
+EINREICHEN_GRUENDE = ("zustand", "veraltet", "bestaetigung", "konto", "token_rechte", "repo_geaendert", "keine_schreibrechte",
+                      "zweig_belegt", "geheimnis", "token_abgelaufen", "github_fehler")
 
 BEFEHLE_KERN = ("ping", "start", "status", "pending", "approve", "cancel")
 # Regel 7: Zugangsarten des Kerns (folgt: der eigene Zugang des Profils als zweite Zeile; haus: Hausmodell über den Proxy, kein Wert vom
