@@ -39,11 +39,16 @@ import { GeraeteMedienManager } from "@/lib/geraeteMedien";
 import { LEISE_TEXT, leiseNeuMessen, neueLeise, PEGEL_TAKT_MS, pruefeLeise } from "@/lib/pegelWarnung";
 import {
   ANDERES_MIKROFON_TEXT,
+  FUER_DIESES_MIKROFON_TEXT,
   geraetHinweisFaellig,
+  mehrereMikrofone,
+  MIKROFONE_VOLL_TEXT,
+  mikrofonFuerKern,
   stimmMikrofonLesen,
   stimmMikrofonMerken,
   stimmMikrofonVergessen,
   stimmSpeicher,
+  UNBEKANNT,
 } from "@/lib/stimmMikrofon";
 import {
   HINWEIS_RUHE,
@@ -223,6 +228,9 @@ export type WamoAktionen = {
   modellzugang?: (anfrage: ModellzugangAnfrage) => boolean;
   /** Stimmabdruck einlernen und löschen (lib/stimme.ts). Optional, damit die Vorschau ohne Kern auskommt. */
   stimmabdruck?: StimmabdruckAktionen;
+  /** Mikrofontest (Einstellungen, Sprache und Ton): an schaltet die Wiedergabe von W.A.I.S. stumm und bittet den Kern, eine laufende
+   *  Antwort zu unterbrechen; aus gibt die Wiedergabe wieder frei. Optional, damit die Vorschau ohne Kern auskommt. */
+  ausgabeAnhalten?: (an: boolean) => void;
   /** Knopf "Als User Story in Jira" am Canvas: fragt beim Kern die Freigabekarte für dieses eigene Dokument an (lib/jiraStory.ts), legt
    *  nie selbst etwas an; true, wenn gesendet. Optional, damit die Vorschau ohne Kern auskommt. */
   jiraStory?: (canvasId: string) => boolean;
@@ -254,8 +262,9 @@ export type StimmabdruckAktionen = {
   start: (version: string) => boolean;
   /** Ein laufendes Einlernen abbrechen und die Ansicht schließen (in der Einwilligung ohne Nachricht, es lief ja nichts) */
   abbrechen: () => boolean;
-  /** Den gespeicherten Abdruck löschen (nur mit Sitzung und vorhandenem Abdruck) */
-  loeschen: () => boolean;
+  /** Den gespeicherten Abdruck löschen (nur mit Sitzung und vorhandenem Abdruck): ohne mikrofon alle, mit der Kennung eines eingelernten
+   *  Mikrofons nur dessen Abdruck (lib/stimmMikrofon.ts) */
+  loeschen: (mikrofon?: string) => boolean;
 };
 
 export type LiveBildAktionen = {
@@ -290,7 +299,11 @@ type ClientMessage =
   | { type: "pc_steuerung"; data: { an: boolean } }
   | { type: "bildstrom"; data: { aktion: "an" | "aus" | "monitor" | "ack" | "anfordern"; monitor?: number; seq?: number; token?: string } }
   | { type: "modellzugang"; data: ModellzugangAnfrage }
-  | { type: "stimmabdruck"; data: { aktion: "start"; einwilligung: string } | { aktion: "abbrechen" } | { aktion: "loeschen" } }
+  | {
+      type: "stimmabdruck";
+      data: { aktion: "start"; einwilligung: string; mikrofon?: string } | { aktion: "abbrechen" } | { aktion: "loeschen"; mikrofon?: string };
+    }
+  | { type: "mikrofontest"; data: { aktion: "start" } }
   | { type: "kontingent"; data: Record<string, never> }
   | { type: "jira_story"; data: { canvas_id: string } }
   | { type: "canvas_export"; data: { canvas_id: string; format: OfficeFormat } }
@@ -621,6 +634,7 @@ export function useWamo(): WamoAktionen {
         abdruckLokalZu: false,
         einwilligung: null,
         einwilligungAbgelehnt: false,
+        stimmMikrofone: null, // die eingelernten Mikrofone meldet der Kern mit jeder Sitzung neu
         vorgaenge: vorgaengeBeenden(s.vorgaenge, Date.now()), // der Kern bricht seine Vorgänge mit der Sitzung ab
         aufgabe: aufgabeBeenden(s.aufgabe, performance.now()), // die letzte Aufgabe bleibt stehen, aber nie als laufend
         approvals: [],
@@ -770,6 +784,7 @@ export function useWamo(): WamoAktionen {
     const pruefe = () => {
       const s = wamo.get();
       const z = stimmMikrofon.current;
+      const liste = s.stimmMikrofone;
       const geraet = geraetHinweisFaellig(
         {
           gemerkt: z.gemerkt,
@@ -778,13 +793,17 @@ export function useWamo(): WamoAktionen {
           frei: s.error === null,
           wamoSpricht: s.presence === "speaking",
           einlernen: s.abdruck !== null,
+          eingelernt: liste,
         },
         z.gezeigt,
       );
       if (!geraet) return;
       z.gezeigt.add(geraet);
-      console.info("[WAMO] Anderes Mikrofon als beim Einlernen:", s.mikrofon);
-      setFehler({ art: "hinweis", text: ANDERES_MIKROFON_TEXT, aktion: "neu_einlernen" });
+      console.info("[WAMO] Mikrofon ohne eigenen Stimmabdruck:", s.mikrofon);
+      // Mit einem Abdruck je Mikrofon (Kern mit Migration 0029): für dieses Mikrofon einlernen, oder bei drei erst eines löschen
+      if (!mehrereMikrofone(liste)) setFehler({ art: "hinweis", text: ANDERES_MIKROFON_TEXT, aktion: "neu_einlernen" });
+      else if (liste.mikrofone.length >= liste.max) setFehler({ art: "hinweis", text: MIKROFONE_VOLL_TEXT, aktion: "mikrofone_verwalten" });
+      else setFehler({ art: "hinweis", text: FUER_DIESES_MIKROFON_TEXT, aktion: "neu_einlernen" });
     };
     return wamo.subscribe(pruefe);
   }, []);
@@ -1163,8 +1182,10 @@ export function useWamo(): WamoAktionen {
               if (msg.type === "sitzung_beendet") kernEnde.current = msg.grund;
               // Hinweis bei Gerätewechsel (lib/stimmMikrofon.ts): das Mikrofon beim Einlernen merken, beim Löschen des Abdrucks vergessen.
               // Vor applyServerMessage, damit die Prüfung im Abo schon den neuen Stand sieht. Ohne Namen der Spur ist das Gerät
-              // unbekannt: dann gilt auch der alte Name nicht mehr.
-              if (msg.type === "stimmabdruck" && (msg.status === "fertig" || msg.status === "geloescht")) {
+              // unbekannt: dann gilt auch der alte Name nicht mehr. Mit einem Abdruck je Mikrofon kennt der Kern die Namen selbst: gemerkt
+              // wird nur noch für den Abdruck ohne Namen (Kennung unbekannt, oder ein Kern, der keine Kennung schickt).
+              const ohneNamen = msg.type === "stimmabdruck" && (msg.mikrofon === undefined || msg.mikrofon === UNBEKANNT);
+              if (msg.type === "stimmabdruck" && ohneNamen && (msg.status === "fertig" || msg.status === "geloescht")) {
                 const id = nutzerLesen().id;
                 const gemerkt = msg.status === "fertig" && stimmMikrofonMerken(stimmSpeicher(), id, wamo.get().mikrofon);
                 if (!gemerkt) stimmMikrofonVergessen(stimmSpeicher(), id);
@@ -1622,7 +1643,9 @@ export function useWamo(): WamoAktionen {
         // nur aus der Einwilligung, nur mit dem Text, den die Person gesehen hat (er kommt vom Kern, die Version gehört dazu)
         if (s.abdruck?.phase !== "einwilligung" || !s.einwilligung || s.einwilligung.version !== version) return false;
         if (!kannEinlernen(s.stimme, istOnline(s))) return false;
-        if (!schicken({ aktion: "start", einwilligung: version })) return false;
+        // das Mikrofon, das im Gespräch läuft: der Kern ersetzt nur dessen Abdruck (lib/stimmMikrofon.ts)
+        const mikrofon = mikrofonFuerKern(s.mikrofon);
+        if (!schicken({ aktion: "start", einwilligung: version, ...(mikrofon ? { mikrofon } : {}) })) return false;
         wamo.set((x) => ({ ...x, abdruck: abdruckGestartet(x.abdruck) }));
         return true;
       },
@@ -1631,11 +1654,33 @@ export function useWamo(): WamoAktionen {
         abdruckAnsichtSchliessen();
         return gesendet;
       },
-      loeschen: () => {
+      loeschen: (mikrofon) => {
         const s = wamo.get();
-        return kannLoeschen(s.stimme, istOnline(s)) && schicken({ aktion: "loeschen" });
+        if (!kannLoeschen(s.stimme, istOnline(s))) return false;
+        if (mikrofon === undefined) return schicken({ aktion: "loeschen" });
+        // nur ein Mikrofon, das der Kern als eingelernt gemeldet hat
+        return Boolean(s.stimmMikrofone?.mikrofone.some((e) => e.kennung === mikrofon)) && schicken({ aktion: "loeschen", mikrofon });
       },
     };
+  }, []);
+
+  // Mikrofontest (components/einstellungen/MikrofonTest.tsx, Wunsch vom 18.11.2026): W.A.I.S. schweigt, solange er läuft. Die Wiedergabe ist
+  // stumm, der Kern unterbricht eine laufende Antwort (voice-core/stimme_sitzung.mikrofontest). Danach gilt wieder die Regel des Starts
+  // (still gestartet bleibt stumm). Spricht W.A.I.S. trotzdem, wertet der Test sich selbst als ungültig.
+  const ausgabeAnhalten = useCallback((an: boolean) => {
+    const audio = audioRef.current;
+    if (!an) {
+      if (audio) audio.muted = wamo.get().stillStart.still;
+      return;
+    }
+    if (audio) audio.muted = true;
+    const client = clientRef.current;
+    if (!client || !istOnline(wamo.get())) return;
+    try {
+      senden(client, { type: "mikrofontest", data: { aktion: "start" } });
+    } catch {
+      // Verbindung weg: dann spricht W.A.I.S. auch nicht
+    }
   }, []);
 
   // Die Person hat getippt: die Ruhezeit der Leerlaufregel (lib/stillStart.ts) beginnt neu
@@ -2027,6 +2072,7 @@ export function useWamo(): WamoAktionen {
       mikrofonWaehlen,
       modellzugang,
       stimmabdruck,
+      ausgabeAnhalten,
       liveBild,
       textSenden,
       stillStarten,
@@ -2053,6 +2099,7 @@ export function useWamo(): WamoAktionen {
       mikrofonWaehlen,
       modellzugang,
       stimmabdruck,
+      ausgabeAnhalten,
       liveBild,
       textSenden,
       stillStarten,

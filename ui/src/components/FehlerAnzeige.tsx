@@ -86,7 +86,19 @@ export const FehlerAnzeige = memo(function FehlerAnzeige({
                 if (!abdruckAnsichtOeffnen()) einstellungenOeffnen("stimme");
               }}
             >
-              Neu einlernen
+              Für dieses Mikrofon einlernen
+            </button>
+          )}
+          {error.aktion === "mikrofone_verwalten" && (
+            <button
+              type="button"
+              className="btn-secondary btn-small"
+              onClick={() => {
+                onSchliessen();
+                einstellungenOeffnen("stimme"); // Abschnitt Stimme: eingelernte Mikrofone, eines löschen
+              }}
+            >
+              Mikrofone verwalten
             </button>
           )}
           <button type="button" className="error-close" onClick={onSchliessen}>

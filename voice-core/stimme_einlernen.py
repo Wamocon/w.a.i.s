@@ -23,8 +23,13 @@ Schattenbetrieb (stimme_schatten.py, WAMO_STIMME_SCHATTEN, seit 18.11.2026): Mit
 zweiter Abdruck (Mittelwert wie bei TitaNet), gespeichert mit dem ersten, aber nur mit der Einwilligung stimme-2 (stimme_einwilligung.py). Er entscheidet nichts: Ist das Schattenmodell noch nicht geladen
 oder scheitert er, wird der Abdruck von TitaNet trotzdem gespeichert, nur ohne Schatten (Hinweis im Log, das Modell wird nachgeladen).
 
+Ein Abdruck je Mikrofon (seit 18.11.2026, stimme_mikrofon.py): Das Einlernen gilt dem Mikrofon, das beim Start im Gespräch läuft. Es ersetzt
+nur den Abdruck dieses Mikrofons (StimmGate.abdruck_eintragen), die übrigen bleiben; ein weiteres Mikrofon gibt es nur bis
+StimmGate.max_abdruecke (drei, ohne Migration 0029 einer) und nur mit demselben Nachweis wie das Ersetzen.
+
 Meldungen an die Oberfläche (über senden): {"type": "stimmabdruck", "status": start | aufnahme | rechnet | fertig | fehler | abgebrochen,
-"sekunden", "ziel", "text"} und den Stand (StimmGate.stand) beim Laden des Modells und nach dem Einlernen.
+"sekunden", "ziel", "text", "mikrofon"} und den Stand (StimmGate.stand, dazu StimmGate.mikrofone_nachricht) beim Laden des Modells und
+nach dem Einlernen.
 """
 
 from __future__ import annotations
@@ -40,7 +45,8 @@ from typing import Protocol
 import numpy as np
 from loguru import logger
 
-from stimme_gate import EIGEN, StimmGate
+from stimme_gate import EIGEN, Abdruck, StimmGate
+from stimme_mikrofon import UNBEKANNTES_MIKROFON, Mikrofon
 from stimme_modell import MIN_STUECKE, SPRACHE_DBFS, ModellQuelle, dbfs, einlern_stuecke, mittelpunkt, ohne_pausen, schwelle_einlernen
 from stimme_einwilligung import schatten_erlaubt
 from stimme_schatten import vorwaermen
@@ -69,13 +75,16 @@ ERST_ERKENNEN = (
     "Zum Ersetzen deines Stimmabdrucks muss ich dich erst an der Stimme erkennen: Sag kurz etwas in einem ganzen Satz. "
     "Oder bitte neu anmelden, mit zweitem Faktor, dann geht es auch."
 )
+ZU_VIELE_MIKROFONE = (
+    "Du hast schon drei Mikrofone eingelernt. Lösche in den Einstellungen erst eines, dann kann ich dieses einlernen."
+)
 
 class Speichern(Protocol):
-    """Speichert Abdruck, Version und Zeitpunkt der Einwilligung, die persönliche Schwelle (None: keine) und den Abdruck des Schattenmodells
-    (None: keiner), nie Ton. True: gespeichert."""
+    """Speichert Abdruck, Version und Zeitpunkt der Einwilligung, die persönliche Schwelle (None: keine), den Abdruck des Schattenmodells
+    (None: keiner) und das Mikrofon, für das er gilt (stimme_mikrofon.py), nie Ton. True: gespeichert."""
 
     def __call__(self, abdruck: np.ndarray, version: str, am: datetime, *, schwelle: float | None = None,
-                 schatten: np.ndarray | None = None) -> Awaitable[bool]: ...
+                 schatten: np.ndarray | None = None, mikrofon: Mikrofon = UNBEKANNTES_MIKROFON) -> Awaitable[bool]: ...
 
 
 @dataclass
@@ -83,6 +92,7 @@ class _Lauf:
     gestartet: float
     version: str
     am: datetime
+    mikrofon: Mikrofon = UNBEKANNTES_MIKROFON
     wartet: bool = True  # bis WAMO die Anleitung fertig gesprochen hat
     bot_begann: bool = False
     audio: bytearray = field(default_factory=bytearray)
@@ -138,13 +148,19 @@ class Einlernen:
 
     # ---------- Start und Abbruch ----------
 
-    async def starten(self, version: str, einwilligung_am: datetime) -> None:
+    async def starten(self, version: str, einwilligung_am: datetime, mikrofon: Mikrofon = UNBEKANNTES_MIKROFON) -> None:
+        """mikrofon: das Mikrofon, das im Gespräch läuft (stimme_mikrofon.py); ein vorhandener Abdruck dieses Mikrofons wird ersetzt, die
+        übrigen bleiben. Ein weiteres Mikrofon gibt es nur bis StimmGate.max_abdruecke."""
         if self.beschaeftigt:
             return
         if self._gate.abdruck_geschuetzt and self._gate.modus != "aus" and not self._nachweis():
-            # Ersetzen (auch nach dem Löschen in dieser Sitzung) nur mit Nachweis: die Person ist gerade an der Stimme erkannt oder
-            # frisch mit zweitem Faktor angemeldet. Wer nur an der angemeldeten Oberfläche sitzt, soll den Abdruck nicht umschreiben können.
+            # Ersetzen, ein weiteres Mikrofon (eine weitere Stimme, die als eigen gilt) und neu Einlernen nach dem Löschen in dieser Sitzung
+            # nur mit Nachweis: die Person ist gerade an der Stimme erkannt oder frisch mit zweitem Faktor angemeldet. Wer nur an der
+            # angemeldeten Oberfläche sitzt, soll keinen Abdruck umschreiben oder hinzufügen können.
             await self._fehler(ERST_ERKENNEN)
+            return
+        if mikrofon.kennung not in self._gate.kennungen and len(self._gate.abdruecke) >= self._gate.max_abdruecke:
+            await self._fehler(ZU_VIELE_MIKROFONE)
             return
         gen = self._gen
         self._laedt = True
@@ -164,7 +180,7 @@ class Einlernen:
         vorwaermen(self._schatten)  # damit das Schattenmodell bereit ist, wenn die Aufnahme fertig ist
         if self._gate.hat_abdruck:
             logger.warning("Stimmabdruck: vorhandener Abdruck wird neu eingelernt")
-        self._lauf = _Lauf(gestartet=self._uhr(), version=version, am=einwilligung_am)
+        self._lauf = _Lauf(gestartet=self._uhr(), version=version, am=einwilligung_am, mikrofon=mikrofon)
         logger.info("Stimmabdruck: Einlernen beginnt")
         await self._senden({"type": "stimmabdruck", "status": "start", "sekunden": 0, "ziel": ZIEL_SECS})
         await self._sagen(ANLEITUNG)
@@ -240,20 +256,22 @@ class Einlernen:
         self._lauf = None
         self._rechnet = True
         await self._senden({"type": "stimmabdruck", "status": "rechnet", "sekunden": ZIEL_SECS, "ziel": ZIEL_SECS})
-        self._task = asyncio.create_task(self._fertig(bytes(lauf.audio), rate, lauf.version, lauf.am, self._gen))
+        self._task = asyncio.create_task(self._fertig(bytes(lauf.audio), rate, lauf.version, lauf.am, self._gen, lauf.mikrofon))
 
     # ---------- Rechnen und Speichern ----------
 
-    async def _fertig(self, pcm: bytes, rate: int, version: str, am: datetime, gen: int) -> None:
+    async def _fertig(self, pcm: bytes, rate: int, version: str, am: datetime, gen: int,
+                      mikrofon: Mikrofon = UNBEKANNTES_MIKROFON) -> None:
         try:
-            await self._rechnen_und_speichern(pcm, rate, version, am, gen)
+            await self._rechnen_und_speichern(pcm, rate, version, am, gen, mikrofon)
         except Exception as e:
             logger.exception("Stimmabdruck: Einlernen fehlgeschlagen: {}", e)
             await self._fehler(NICHT_GEKLAPPT)
         finally:
             self._rechnet = False
 
-    async def _rechnen_und_speichern(self, pcm: bytes, rate: int, version: str, am: datetime, gen: int) -> None:
+    async def _rechnen_und_speichern(self, pcm: bytes, rate: int, version: str, am: datetime, gen: int,
+                                     mikrofon: Mikrofon = UNBEKANNTES_MIKROFON) -> None:
         rechner = await self._modell.get()
         if rechner is None:
             await self._fehler(KEIN_MODELL)
@@ -270,14 +288,15 @@ class Einlernen:
         if streuung < MIN_STREUUNG:
             await self._fehler(ZU_UNRUHIG)
             return
-        schatten = await self._schatten_abdruck(stuecke, rate) if schatten_erlaubt(version) else None  # nur mit stimme-2
+        schatten = await self._schatten_abdruck(stuecke, rate) if schatten_erlaubt(version) else None  # nur mit stimme-2 oder stimme-3
         if gen != self._gen:  # direkt vor dem Speichern: abgebrochen oder gelöscht, dann wird nichts gespeichert
             logger.info("Stimmabdruck: abgebrochen, nichts gespeichert")
             return
-        if not await self._speichern(abdruck, version, am, schwelle=schwelle, schatten=schatten):
+        if not await self._speichern(abdruck, version, am, schwelle=schwelle, schatten=schatten, mikrofon=mikrofon):
             await self._fehler(NICHT_GESPEICHERT)
             return
-        self._gate.setze_abdruck(abdruck, schwelle=schwelle, schatten=schatten)
+        # ersetzt nur den Abdruck dieses Mikrofons, die übrigen bleiben (mit einem Abdruck je Person: das unbekannte Mikrofon, also ersetzt)
+        self._gate.abdruck_eintragen(Abdruck(abdruck, mikrofon, schwelle=schwelle, schatten=schatten, am=am))
         self._gate.modell_ok = True
         if gen != self._gen:
             # Abbruch oder Löschen, während gespeichert wurde: der Abdruck steht schon in der Datenbank. Das Gate gibt den Stand wieder
@@ -286,7 +305,8 @@ class Einlernen:
             await self._status_melden()
             return
         self._gate.eintragen(EIGEN)  # die Person hat gerade per Klick eingelernt und gesprochen
-        await self._senden({"type": "stimmabdruck", "status": "fertig", "sekunden": ZIEL_SECS, "ziel": ZIEL_SECS})
+        await self._senden({"type": "stimmabdruck", "status": "fertig", "sekunden": ZIEL_SECS, "ziel": ZIEL_SECS,
+                            "mikrofon": mikrofon.kennung})
         await self._status_melden()
         await self._sagen(FERTIG_TEXT)
 
@@ -315,6 +335,7 @@ class Einlernen:
 
     async def _status_melden(self) -> None:
         await self._senden(self._gate.stand())
+        await self._senden(self._gate.mikrofone_nachricht())
 
     async def _fehler(self, text: str) -> None:
         logger.warning("Stimmabdruck: {}", text)

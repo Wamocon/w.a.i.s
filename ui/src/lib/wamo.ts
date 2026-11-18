@@ -47,6 +47,7 @@ import {
   type StimmeStand,
 } from "./stimme.ts"; // relativ aus demselben Grund
 import { alleFreigeben, HALTEN_MS, sichtbarerNutzerText, teilFreigeben } from "./stimmFilter.ts"; // relativ aus demselben Grund
+import type { StimmMikrofone } from "./stimmMikrofon.ts";
 import { createStore } from "./store.ts"; // relativ, damit node:test diese Datei laden kann (textEingabe.test.ts)
 import { vorgangAnsage, vorgangEinordnen } from "./vorgaenge.ts";
 
@@ -136,8 +137,9 @@ export type Fehler = {
   text: string;
   art: "verbindung" | "dienst" | "anmeldung" | "mikrofon" | "sonst" | "hinweis";
   /** zusätzlicher Knopf: "mikrofon_waehlen" öffnet die Mikrofonwahl in den Einstellungen (Pegelwarnung, lib/pegelWarnung.ts),
-   *  "neu_einlernen" das Einlernen der Stimme (Hinweis bei Gerätewechsel, lib/stimmMikrofon.ts) */
-  aktion?: "mikrofon_waehlen" | "neu_einlernen";
+   *  "neu_einlernen" das Einlernen der Stimme für dieses Mikrofon (Hinweis bei Gerätewechsel, lib/stimmMikrofon.ts),
+   *  "mikrofone_verwalten" den Abschnitt Stimme der Einstellungen (schon drei Mikrofone eingelernt) */
+  aktion?: "mikrofon_waehlen" | "neu_einlernen" | "mikrofone_verwalten";
 };
 
 /** Live-Bild des eigenen Laptops: nur der Zustand, nie ein Bild (die Bilder liegen kurz in lib/liveBild.ts). */
@@ -205,6 +207,8 @@ export type WamoState = {
   einwilligung: Einwilligung | null;
   /** Der zuletzt geschickte Einwilligungstext war ungültig (zum Beispiel zu lang): die Einlernansicht sagt es, statt weiter zu warten */
   einwilligungAbgelehnt: boolean;
+  /** Eingelernte Mikrofone, ein Abdruck je Mikrofon (vom Kern, lib/stimmMikrofon.ts); null, bis der Kern sie schickt (nur mit Sitzung) */
+  stimmMikrofone: StimmMikrofone | null;
   /** Text für role="status": nur bedeutsame Wechsel (verbunden, getrennt, Mikro, PC) */
   ansage: string;
   /** kurzer sichtbarer Hinweis (z. B. "PC-Steuerung automatisch eingeschaltet"), verschwindet selbst */
@@ -266,6 +270,7 @@ export const initialState: WamoState = {
   abdruckLokalZu: false,
   einwilligung: null,
   einwilligungAbgelehnt: false,
+  stimmMikrofone: null,
   ansage: "",
   toast: null,
   jira: JIRA_LEER,
@@ -1041,11 +1046,26 @@ export function applyServerMessage(msg: ServerMessage) {
     case "stimmabdruck_einwilligung":
       wamo.set((s) => ({ ...s, einwilligung: { version: msg.version, text: msg.text }, einwilligungAbgelehnt: false }));
       return;
+    case "stimmabdruck_mikrofone":
+      wamo.set((s) => ({ ...s, stimmMikrofone: { mikrofone: msg.mikrofone, max: msg.max } }));
+      return;
     case "stimmabdruck":
       wamo.set((s) => {
         const abdruck = abdruckAnwenden(s.abdruck, msg, s.abdruckLokalZu);
+        // gelöscht: die Liste der eingelernten Mikrofone sofort anpassen, nicht erst mit der nächsten Liste des Kerns
+        const liste = s.stimmMikrofone;
+        const stimmMikrofone =
+          msg.status !== "geloescht" || !liste
+            ? liste
+            : { ...liste, mikrofone: msg.mikrofon ? liste.mikrofone.filter((e) => e.kennung !== msg.mikrofon) : [] };
         // eine offene Ansicht (auch die von einer neuen Startmeldung geöffnete) hebt das lokale Schließen auf
-        return { ...s, abdruck, abdruckLokalZu: abdruck ? false : s.abdruckLokalZu, ansage: abdruckAnsage(msg.status) ?? s.ansage };
+        return {
+          ...s,
+          abdruck,
+          abdruckLokalZu: abdruck ? false : s.abdruckLokalZu,
+          stimmMikrofone,
+          ansage: abdruckAnsage(msg.status) ?? s.ansage,
+        };
       });
       return;
     case "jira_status":

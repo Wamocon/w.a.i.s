@@ -9,13 +9,34 @@
  * fragt die Oberfläche einmal je Gespräch und Gerät, ob für dieses Mikrofon neu eingelernt werden soll (Knopf in components/FehlerAnzeige.tsx).
  * Ist kein Name gemerkt (vor dieser Neuerung eingelernt, anderer Browser), gibt es keinen Hinweis: unbekannt heißt nicht anders.
  *
+ * Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026, Kern voice-core/stimme_mikrofon.py, Migration 0029): Der Kern schickt die Liste
+ * der eingelernten Mikrofone (Nachricht stimmabdruck_mikrofone, höchstens drei). Mit ihr fragt die Oberfläche nur noch, wenn das laufende
+ * Mikrofon nicht eingelernt ist, und bietet "Für dieses Mikrofon einlernen" an; sind schon drei eingelernt, nennt sie die Grenze. Beim
+ * Einlernen schickt sie den Namen des laufenden Mikrofons mit (mikrofonFuerKern). Ein Abdruck aus der Zeit davor heißt beim Kern "unbekannt"
+ * und hat keinen Namen: Für ihn gilt weiter der hier gemerkte Name, und nur für ihn wird er gemerkt und vergessen. Kann der Kern nur einen
+ * Abdruck (max 1, ohne Migration 0029), bleibt alles wie bisher.
+ *
  * Reine Logik ohne Browser (Tests: stimmMikrofon.test.ts); die Verdrahtung liegt in useWamo.ts.
  */
 import { geraeteName } from "./mikrofon.ts";
+import type { StimmMikrofonEintrag } from "./nachrichten.ts";
 
 export const STIMM_MIKROFON_PRAEFIX = "wamo.stimme.mikrofon.";
 
 export const ANDERES_MIKROFON_TEXT = "Deine Stimme ist mit einem anderen Mikrofon eingelernt. Für dieses Mikrofon neu einlernen?";
+/** Hinweis mit der Liste des Kerns: das laufende Mikrofon ist noch nicht eingelernt */
+export const FUER_DIESES_MIKROFON_TEXT = "Für dieses Mikrofon ist deine Stimme noch nicht eingelernt. Jetzt einlernen?";
+/** dasselbe, wenn schon drei Mikrofone eingelernt sind (der Kern nimmt kein viertes) */
+export const MIKROFONE_VOLL_TEXT =
+  "Für dieses Mikrofon ist deine Stimme noch nicht eingelernt. Du hast schon drei Mikrofone eingelernt, lösche in den Einstellungen eines.";
+
+/** Kennung des Abdrucks aus der Zeit, bevor der Kern Mikrofone unterschied (ohne Namen) */
+export const UNBEKANNT = "unbekannt";
+
+/** Ein eingelerntes Mikrofon, wie der Kern es meldet: Kennung, Name aus dem Browser (null: unbekannt), Zeitpunkt des Einlernens (ISO) */
+export type { StimmMikrofonEintrag };
+/** Die eingelernten Mikrofone und wie viele der Kern höchstens annimmt (3; 1 ohne Abdrücke je Mikrofon) */
+export type StimmMikrofone = { mikrofone: StimmMikrofonEintrag[]; max: number };
 
 type Lesen = { getItem(k: string): string | null };
 type Schreiben = { setItem(k: string, v: string): void };
@@ -74,8 +95,38 @@ export function stimmMikrofonVergessen(speicher: Entfernen | null | undefined, u
   }
 }
 
-/** Vergleichsform: wie geraeteName, ohne Unterschied in Groß- und Kleinschreibung. */
-const vergleich = (label: string | null | undefined): string | null => geraeteName(label)?.toLowerCase() ?? null;
+/** Vergleichsform: wie mikrofonFuerKern (so steht der Name beim Kern), ohne Unterschied in Groß- und Kleinschreibung. */
+const vergleich = (label: string | null | undefined): string | null => mikrofonFuerKern(label)?.toLowerCase() ?? null;
+
+/** Name des laufenden Mikrofons für den Kern (Feld mikrofon beim Start des Einlernens): wie geraeteName, Steuer- und Formatzeichen werden
+ *  zu Leerraum, Leerraum zusammengezogen, höchstens 120 Zeichen; null ohne Namen. Der Kern bereinigt noch einmal (stimme_mikrofon.py). */
+export function mikrofonFuerKern(label: string | null | undefined): string | null {
+  if (typeof label !== "string") return null;
+  return geraeteName(label.replace(/[\p{Cc}\p{Cf}\s]+/gu, " "));
+}
+
+/** Kann der Kern mehrere Abdrücke (einen je Mikrofon)? Nur dann gilt seine Liste für Hinweis und Einstellungen. */
+export const mehrereMikrofone = (liste: StimmMikrofone | null | undefined): liste is StimmMikrofone => (liste?.max ?? 0) > 1;
+
+/** Namen der eingelernten Mikrofone zum Vergleich; ein Abdruck ohne Namen bekommt den hier gemerkten Namen, sonst null. */
+function eingelernteNamen(liste: StimmMikrofone, gemerkt: string | null | undefined): (string | null)[] {
+  return liste.mikrofone.map((e) => vergleich(e.name ?? (e.kennung === UNBEKANNT ? gemerkt : null)));
+}
+
+/** Ist das laufende Mikrofon eingelernt? true, false oder null (kein laufendes Mikrofon, oder ein Abdruck ohne Namen könnte es sein). */
+export function istEingelernt(liste: StimmMikrofone, aktuell: string | null | undefined, gemerkt: string | null | undefined): boolean | null {
+  const a = vergleich(aktuell);
+  if (a === null) return null;
+  const namen = eingelernteNamen(liste, gemerkt);
+  if (namen.includes(a)) return true;
+  return namen.includes(null) ? null : false;
+}
+
+/** Der Eintrag des laufenden Mikrofons (nur mit Namen vom Kern), sonst null. */
+export function laufenderEintrag(liste: StimmMikrofone, aktuell: string | null | undefined): StimmMikrofonEintrag | null {
+  const a = vergleich(aktuell);
+  return a === null ? null : (liste.mikrofone.find((e) => vergleich(e.name) === a) ?? null);
+}
 
 /** Läuft ein anderes Mikrofon als beim Einlernen? Nur, wenn beide Namen bekannt sind. */
 export function anderesMikrofon(gemerkt: string | null | undefined, aktuell: string | null | undefined): boolean {
@@ -97,6 +148,8 @@ export type GeraetHinweisLage = {
   wamoSpricht: boolean;
   /** die Einlernansicht ist offen */
   einlernen: boolean;
+  /** die eingelernten Mikrofone vom Kern (null: keine Liste); mit mehreren gilt sie statt gemerkt */
+  eingelernt?: StimmMikrofone | null;
 };
 
 /**
@@ -105,7 +158,8 @@ export type GeraetHinweisLage = {
  */
 export function geraetHinweisFaellig(lage: GeraetHinweisLage, gezeigt: ReadonlySet<string>): string | null {
   if (!lage.stimmeBereit || !lage.frei || lage.wamoSpricht || lage.einlernen) return null;
-  if (!anderesMikrofon(lage.gemerkt, lage.aktuell)) return null;
+  if (mehrereMikrofone(lage.eingelernt) ? istEingelernt(lage.eingelernt, lage.aktuell, lage.gemerkt) !== false
+      : !anderesMikrofon(lage.gemerkt, lage.aktuell)) return null;
   const geraet = vergleich(lage.aktuell);
   return geraet && !gezeigt.has(geraet) ? geraet : null;
 }

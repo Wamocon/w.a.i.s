@@ -31,9 +31,14 @@ import "./mikrofonTest.css";
  * dann 3 s still sein und 5 s sprechen, danach Ampel, ein Satz, der Name des Mikrofons und die Messwerte. Getestet wird das Gerät, das die
  * Auswahl darüber nennt (fehlt es, das Standardgerät), mit denselben Einstellungen wie im Gespräch. Der Ton bleibt im Browser; nach dem Test,
  * beim Abbrechen, beim Verlassen der Seite und wenn das Gerät getrennt wird, schließt sich das Mikrofon. Läuft ein Gespräch mit offenem
- * Mikrofon, ist es dort während des Tests stumm (sonst hörte W.A.I.S. den Testsatz) und danach wieder an. Spricht W.A.I.S. während des Tests,
- * sagt das Ergebnis, dass es ungenau sein kann. Gespeichert wird nur das letzte Ergebnis je Person und Gerät, in der Laborsicht gar nichts
- * (merken). Eine Statuszeile bleibt immer eingehängt und sagt Phase und Ergebnis an; der Fokus wandert zum Abbrechen und danach zurück.
+ * Mikrofon, ist es dort während des Tests stumm (sonst hörte W.A.I.S. den Testsatz) und danach wieder an. Während des Tests schweigt W.A.I.S.
+ * (Wunsch vom 18.11.2026, einmal war das Ergebnis orange, weil W.A.I.S. dazwischen geredet hat): Läuft ein Gespräch, hält ausgabeAnhalten
+ * die Wiedergabe an und lässt den Kern eine laufende Antwort unterbrechen, danach ist sie wieder frei. Meldet der Kern trotzdem, dass W.A.I.S.
+ * spricht, während gemessen wird, ist der Test ungültig: kein Ergebnis, keine Ampel, nichts gemerkt, nur der Satz, noch einmal zu testen.
+ * Spricht W.A.I.S. beim Start noch, wartet das Einschwingen bis SCHWEIGEN_WARTE_MS, bis die Unterbrechung angekommen ist. Die Laborsicht
+ * bekommt kein ausgabeAnhalten und bleibt, wie sie war: Spricht W.A.I.S. dort, sagt das Ergebnis nur, dass es ungenau sein kann.
+ * Gespeichert wird nur das letzte Ergebnis je Person und Gerät, in der Laborsicht gar nichts (merken). Eine Statuszeile bleibt immer
+ * eingehängt und sagt Phase und Ergebnis an; der Fokus wandert zum Abbrechen und danach zurück.
  */
 
 /** Ein offenes Mikrofon für den Test: Name der Spur, ein Messfenster lesen (RMS linear, Spitze in dBFS), getrennt?, schließen. */
@@ -94,6 +99,9 @@ const UHR = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit",
 const GETRENNT_TEXT = "Das Mikrofon wurde während des Tests getrennt. Schließe es wieder an oder wähle oben ein anderes und teste noch einmal.";
 const UNVOLLSTAENDIG_TEXT =
   "Die Messung war unvollständig. Lass die Seite während des Tests im Vordergrund und versuche es noch einmal.";
+export const GESPROCHEN_TEXT = "W.A.I.S. hat gesprochen, bitte noch einmal testen.";
+/** So lange wartet das Einschwingen höchstens, bis W.A.I.S. nach der Unterbrechung verstummt ist */
+const SCHWEIGEN_WARTE_MS = 3000;
 
 function Ampel({ e }: { e: Ergebnis }) {
   return (
@@ -132,7 +140,8 @@ function ErgebnisAnzeige({ e, alt, gestoert = false }: { e: Ergebnis; alt: boole
   );
 }
 
-type Lauf = { quelle: MikrofonQuelle | null; takt: ReturnType<typeof setInterval> | null; stumm: boolean; aus: boolean };
+/** stumm: dieser Test hat das Mikrofon des Gesprächs stumm geschaltet; ausgabe: er hat die Wiedergabe von W.A.I.S. angehalten */
+type Lauf = { quelle: MikrofonQuelle | null; takt: ReturnType<typeof setInterval> | null; stumm: boolean; ausgabe: boolean; aus: boolean };
 
 export function MikrofonTest({
   geraetId,
@@ -140,6 +149,7 @@ export function MikrofonTest({
   merken = true,
   oeffnen = mikrofonOeffnen,
   mikrofonUmschalten,
+  ausgabeAnhalten,
 }: {
   /** Kennung des Geräts, das getestet wird; null: Standardgerät */
   geraetId: string | null;
@@ -150,6 +160,8 @@ export function MikrofonTest({
   oeffnen?: (geraetId: string | null) => Promise<MikrofonQuelle>;
   /** schaltet das Mikrofon des laufenden Gesprächs um (useWamo, toggleMic) */
   mikrofonUmschalten?: () => void;
+  /** hält die Wiedergabe von W.A.I.S. an (true) und gibt sie wieder frei (false), useWamo ausgabeAnhalten; nicht in der Laborsicht */
+  ausgabeAnhalten?: (an: boolean) => void;
 }) {
   const { id: userId } = useNutzer();
   const desktop = useDesktopApp();
@@ -171,6 +183,7 @@ export function MikrofonTest({
     l.aus = true;
     if (l.takt) clearInterval(l.takt);
     l.quelle?.schliessen();
+    if (l.ausgabe) ausgabeAnhalten?.(false);
     setStumm(false);
     const s = wamo.get();
     if (l.stumm && istOnline(s) && !s.micOn && !s.stillStart.still) mikrofonUmschalten?.();
@@ -195,8 +208,12 @@ export function MikrofonTest({
     beenden();
     setErgebnis(null);
     fokusFolgt.current = typeof document !== "undefined" && document.activeElement === testKnopf.current;
-    const l: Lauf = { quelle: null, takt: null, stumm: false, aus: false };
+    const l: Lauf = { quelle: null, takt: null, stumm: false, ausgabe: false, aus: false };
     lauf.current = l;
+    if (ausgabeAnhalten && istOnline(wamo.get())) {
+      ausgabeAnhalten(true); // W.A.I.S. schweigt, eine laufende Antwort wird unterbrochen
+      l.ausgabe = true;
+    }
     if (mikrofonUmschalten && gespraechHoert(wamo.get())) {
       mikrofonUmschalten();
       l.stumm = !wamo.get().micOn; // nur, wenn es wirklich stumm wurde
@@ -218,7 +235,10 @@ export function MikrofonTest({
     }
     l.quelle = quelle;
     const messung = neueMessung();
-    const beginn = Date.now();
+    const start = Date.now();
+    let beginn = start;
+    // Mit ausgabeAnhalten soll W.A.I.S. schweigen: spricht es doch, ist der Test ungültig. Ohne (Laborsicht) nur ein Hinweis wie bisher.
+    const schweigen = ausgabeAnhalten !== undefined;
     let gestoert = false;
     setStand({ art: "laeuft", phase: "einschwingen", rest: RUHE_MS + SPRECHEN_MS });
     l.takt = setInterval(() => {
@@ -227,11 +247,21 @@ export function MikrofonTest({
         setStand({ art: "fehler", text: GETRENNT_TEXT });
         return;
       }
+      const spricht = wamo.get().presence === "speaking";
+      if (schweigen && spricht && phaseBei(Date.now() - beginn) === "einschwingen" && Date.now() - start < SCHWEIGEN_WARTE_MS) {
+        beginn = Date.now(); // die Unterbrechung braucht einen Moment: das Einschwingen wartet, bis W.A.I.S. still ist
+      }
       const ms = Date.now() - beginn;
       const phase = phaseBei(ms);
       if (phase === "ruhe" || phase === "sprechen") {
+        if (spricht && schweigen) {
+          // W.A.I.S. spricht, während gemessen wird: der Raum klingt anders, das Ergebnis taugt nicht
+          beenden();
+          setStand({ art: "fehler", text: GESPROCHEN_TEXT });
+          return;
+        }
+        gestoert ||= spricht;
         fensterAufnehmen(messung, phase, quelle.lesen());
-        gestoert ||= wamo.get().presence === "speaking";
       }
       if (phase !== "fertig") {
         setStand({ art: "laeuft", phase, rest: phase === "sprechen" ? RUHE_MS + SPRECHEN_MS - ms : RUHE_MS - ms });
@@ -274,7 +304,9 @@ export function MikrofonTest({
       <p className="ez-klein">
         Der Test misst, wie gut dein Mikrofon deine Stimme liefert: erst 3 Sekunden still sein, dann 5 Sekunden sprechen. Der Ton bleibt
         {desktop ? " in der App" : " im Browser"}, gespeichert wird nur das Ergebnis.
-        {(hoert || stumm) && mikrofonUmschalten ? " Während des Tests ist dein Mikrofon im Gespräch stumm." : ""}
+        {(hoert || stumm) && mikrofonUmschalten
+          ? ` Während des Tests ist dein Mikrofon im Gespräch stumm${ausgabeAnhalten ? " und W.A.I.S. schweigt" : ""}.`
+          : ""}
       </p>
       <div className="ez-tasten">
         <button ref={testKnopf} type="button" className="btn-secondary btn-small" disabled={laeuft} onClick={() => void starten()}>

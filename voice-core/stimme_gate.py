@@ -24,6 +24,10 @@ verworfen, ihre Werte lagen bei 0,4 bis 1,8 s meist bei 0,35 bis 0,60, eine zwei
 (Literatur: EER 2,4 % bei 3 s, 18,4 % bei 1 s, Schwelle des EER unter 1 s bei etwa 0,30). Hat das Profil eine persönliche Schwelle vom
 Einlernen (speakers.voice_threshold, Migration 0025, stimme_modell.schwelle_einlernen), ersetzt sie die kurze, aber nur nach unten (seit
 18.11.2026 nie über WAMO_STIMME_EIGEN_MIN_KURZ); die lange liegt nie darunter.
+Mehrere Abdrücke (seit 18.11.2026, Migration 0029, stimme_mikrofon.py): je eingelerntem Mikrofon einer, höchstens drei. Verglichen wird mit
+allen, es zählt der beste Wert (vergleichen; Empfehlung aus Apple Personalized Hey Siri und Idiap: bester Wert statt Mittel), und für die
+Länge gilt die persönliche Schwelle des Abdrucks mit diesem Wert. Bewusst nicht der Abdruck mit dem größten Abstand zu seiner Schwelle:
+Die persönlichen Schwellen liegen nur zwischen 0,30 und 0,35 und wirken nur bei kurzen Äußerungen, der beste Wert ist das klarere Maß.
 Das alte WAMO_STIMME_EIGEN_MIN gilt nur noch, wo KURZ oder LANG leer sind (ist nur es gesetzt, also für beide Längen wie bisher).
 WAMO_STIMME_FREMD_MAX (bis hier fremd, 0,3, für alle Längen), WAMO_STIMME_MIN_SECS (kürzere Äußerungen reichen nicht für "eigen", 1 s; sie
 werden mit der kurzen Schwelle bewertet),
@@ -39,13 +43,15 @@ sie verworfen wird, 0 s).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import functools
 import math
 import numbers
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import numpy as np
 from loguru import logger
@@ -53,6 +59,8 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 from env_schalter import schalter_an, zahl_im_bereich
+from stimme_mikrofon import MAX_ABDRUECKE, UNBEKANNTES_MIKROFON, Mikrofon
+from stimme_modell import kosinus
 
 EIGEN, FREMD, UNKLAR, KURZ = "eigen", "fremd", "unklar", "kurz"
 GETIPPT = "getippt"
@@ -178,19 +186,33 @@ def persoenliche_schwelle(wert: object) -> float | None:
     return zahl if math.isfinite(zahl) and PERSOENLICH_MIN <= zahl <= PERSOENLICH_MAX else None
 
 
+@dataclass(frozen=True, eq=False)
+class Abdruck:
+    """Ein Stimmabdruck (eine Zeile in speakers): vektor von TitaNet, das Mikrofon, mit dem er eingelernt ist (stimme_mikrofon.py, Migration
+    0029; vorher immer das unbekannte), die persönliche Schwelle für kurze Äußerungen vom Einlernen (speakers.voice_threshold, Migration
+    0025, None: die aus der Umgebung), der Abdruck des Schattenmodells (stimme_schatten.py, Migration 0028, nur zum Messen) und der Zeitpunkt
+    des Einlernens (nur zur Anzeige)."""
+
+    vektor: np.ndarray
+    mikrofon: Mikrofon = UNBEKANNTES_MIKROFON
+    schwelle: float | None = None
+    schatten: np.ndarray | None = None
+    am: datetime | None = None
+
+
 @dataclass
 class StimmGate:
     modus: str = STANDARD_MODUS
     schwellen: Schwellen = field(default_factory=Schwellen)
     uhr: Callable[[], float] = time.monotonic
-    abdruck: np.ndarray | None = None
+    # Die Abdrücke des Profils, einer je eingelerntem Mikrofon (seit 18.11.2026, höchstens max_abdruecke; ohne Migration 0029 einer). Ein Tupel,
+    # das bei jeder Änderung ersetzt wird: Wer rechnet, merkt an der Identität, dass sich inzwischen etwas geändert hat. Die Prüfung nimmt den
+    # besten Wert über alle (vergleichen), der Schatten ebenso über seine eigenen Abdrücke (stimme_schatten.py), nie gemischt.
+    abdruecke: tuple[Abdruck, ...] = ()
+    max_abdruecke: int = MAX_ABDRUECKE
     zustand: str = "laedt"  # laedt | da | fehlt | kaputt (Stand des Abdrucks in der Datenbank)
     modell_ok: bool | None = None  # nur für ein Profil mit Abdruck von Belang
-    schwelle_kurz: float | None = None  # persönliche Schwelle für kurze Äußerungen (vom Einlernen, speakers.voice_threshold), sonst None
     schwelle_erlaubt: bool = True  # False: die Datenbank kann sie nicht speichern (Migration 0025 fehlt), dann wirkt auch keine
-    # Abdruck des zweiten Modells im Schattenbetrieb (stimme_schatten.py, speakers.voiceprint_shadow, Migration 0028): nur zum Messen, er
-    # entscheidet nie etwas. Gehört zum Abdruck und verschwindet mit ihm.
-    schatten_abdruck: np.ndarray | None = None
     _wer: str | None = None
     _um: float = 0.0  # Zeitpunkt der letzten sicheren Erkennung (oder des letzten Tippens)
     _nur_kurz: bool = False  # seither kamen nur kurze Äußerungen, die nach der Person klangen
@@ -204,8 +226,28 @@ class StimmGate:
         return cls(modus=pruefmodus(), schwellen=schwellen_aus_env())
 
     @property
+    def abdruck(self) -> np.ndarray | None:
+        """Der erste Abdruck (mit einem Abdruck: der Abdruck), None ohne Abdruck."""
+        return self.abdruecke[0].vektor if self.abdruecke else None
+
+    @property
+    def schwelle_kurz(self) -> float | None:
+        """Persönliche Schwelle des ersten Abdrucks (mit einem Abdruck: seine), sonst None."""
+        return self.abdruecke[0].schwelle if self.abdruecke else None
+
+    @property
+    def schatten_abdruck(self) -> np.ndarray | None:
+        """Schatten-Abdruck des ersten Abdrucks (mit einem Abdruck: seiner), sonst None."""
+        return self.abdruecke[0].schatten if self.abdruecke else None
+
+    @property
+    def kennungen(self) -> tuple[str, ...]:
+        """Die Kennungen der eingelernten Mikrofone, in der Reihenfolge der Abdrücke."""
+        return tuple(a.mikrofon.kennung for a in self.abdruecke)
+
+    @property
     def hat_abdruck(self) -> bool:
-        return self.abdruck is not None
+        return bool(self.abdruecke)
 
     @property
     def status(self) -> str:
@@ -239,31 +281,87 @@ class StimmGate:
         """Stand des Abdrucks nach dem Laden, Einlernen oder Löschen. ok False: nicht lesbar, es ist unbekannt, ob es einen gibt.
         geloescht: die Person hat ihn gerade gelöscht, das neue Einlernen in dieser Sitzung braucht dann denselben Nachweis wie ein Ersetzen.
         schwelle: persönliche Schwelle für kurze Äußerungen, die zu diesem Abdruck gehört (None oder unbrauchbar: die aus der Umgebung).
-        schatten: Abdruck des Schattenmodells zu diesem Abdruck (None: keiner), nur zum Messen."""
-        self.abdruck = abdruck if ok else None
-        self.schwelle_kurz = persoenliche_schwelle(schwelle) if self.abdruck is not None and self.schwelle_erlaubt else None
-        self.schatten_abdruck = schatten if self.abdruck is not None else None
-        if geloescht and self.abdruck is None:
+        schatten: Abdruck des Schattenmodells zu diesem Abdruck (None: keiner), nur zum Messen. Ein Abdruck mit dem unbekannten Mikrofon; für
+        mehrere gilt setze_abdruecke."""
+        liste = [] if abdruck is None else [Abdruck(abdruck, schwelle=schwelle, schatten=schatten)]
+        self.setze_abdruecke(liste, ok=ok, geloescht=geloescht)
+
+    def setze_abdruecke(self, abdruecke: Iterable[Abdruck], ok: bool = True, geloescht: bool = False) -> None:
+        """Alle Abdrücke des Profils nach dem Laden oder Löschen (höchstens max_abdruecke, bei mehr die zuletzt genannten). ok False: nicht
+        lesbar, dann gilt keiner. Ohne Spalte für die Schwelle (schwelle_erlaubt False) wirkt keine persönliche Schwelle."""
+        liste = tuple(abdruecke)
+        self.abdruecke = tuple(self._gefiltert(a) for a in liste)[-self.max_abdruecke:] if ok else ()
+        if geloescht and not self.abdruecke:
             self._geloescht = True
-        self.zustand = "kaputt" if not ok else "da" if abdruck is not None else "fehlt"
-        if abdruck is None:
+        self.zustand = "kaputt" if not ok else "da" if liste else "fehlt"
+        if not liste:
             self._wer = None  # ein gelöschter Abdruck lässt kein Vertrauen zurück
             self._nur_kurz = False
 
+    def _gefiltert(self, a: Abdruck) -> Abdruck:
+        schwelle = persoenliche_schwelle(a.schwelle) if self.schwelle_erlaubt else None
+        return a if schwelle == a.schwelle else dataclasses.replace(a, schwelle=schwelle)
+
+    def abdruck_eintragen(self, a: Abdruck) -> None:
+        """Nach dem Einlernen: ersetzt den Abdruck desselben Mikrofons oder kommt dazu (als neuester, höchstens max_abdruecke)."""
+        uebrige = tuple(x for x in self.abdruecke if x.mikrofon.kennung != a.mikrofon.kennung)
+        self.abdruecke = (*uebrige, self._gefiltert(a))[-self.max_abdruecke:]
+        self.zustand = "da"
+
+    def abdruck_entfernen(self, kennung: str) -> bool:
+        """Der Abdruck eines Mikrofons ist gelöscht. False, wenn es ihn nicht gab. War es der letzte, gilt es wie ein gelöschter Abdruck.
+        Das Vertrauen geht in jedem Fall verloren: Es kann vom gelöschten Abdruck stammen, die Person spricht oder tippt einfach wieder."""
+        uebrige = tuple(x for x in self.abdruecke if x.mikrofon.kennung != kennung)
+        if len(uebrige) == len(self.abdruecke):
+            return False
+        if uebrige:
+            self.abdruecke = uebrige
+            self._wer = None
+            self._nur_kurz = False
+        else:
+            self.setze_abdruecke((), geloescht=True)
+        return True
+
+    def schatten_setzen(self, schatten: Mapping[str, np.ndarray]) -> None:
+        """Schatten-Abdrücke je Kennung des Mikrofons, nach dem Laden (stimme_sitzung.py). Unbekannte Kennungen zählen nicht."""
+        self.abdruecke = tuple(dataclasses.replace(a, schatten=schatten.get(a.mikrofon.kennung)) for a in self.abdruecke)
+
+    def vergleichen(self, vektor: np.ndarray) -> tuple[float, Abdruck] | None:
+        """Bester Wert über alle Abdrücke (Kosinus) und der Abdruck dazu; None ohne Abdruck. Zählt nur endliche Werte; gibt es keinen,
+        kommt NaN mit dem ersten Abdruck zurück (der Prüfer wertet das als fehlgeschlagen)."""
+        if not self.abdruecke:
+            return None
+        werte = [(w, a) for a in self.abdruecke if math.isfinite(w := kosinus(vektor, a.vektor))]
+        if not werte:
+            return math.nan, self.abdruecke[0]
+        return max(werte, key=lambda x: x[0])
+
+    def mikrofone_nachricht(self) -> dict:
+        """Die eingelernten Mikrofone für die Einstellungen der Oberfläche: Kennung, Name (None: unbekannt), Zeitpunkt des Einlernens."""
+        return {
+            "type": "stimmabdruck_mikrofone",
+            "mikrofone": [{"kennung": a.mikrofon.kennung, "name": a.mikrofon.name, "am": a.am.isoformat() if a.am else None}
+                          for a in self.abdruecke],
+            "max": self.max_abdruecke,
+        }
+
     @property
     def abdruck_geschuetzt(self) -> bool:
-        """Es gibt einen Abdruck oder er wurde in dieser Sitzung gelöscht: Ersetzen, Löschen und neu Einlernen brauchen einen Nachweis (die erkannte
-        Stimme oder eine frische Anmeldung, siehe stimme_sitzung.py), sonst könnte jemand an der angemeldeten Oberfläche den Schutz aushebeln."""
-        return self.abdruck is not None or self._geloescht
+        """Es gibt einen Abdruck oder er wurde in dieser Sitzung gelöscht: Ersetzen, Löschen, ein weiteres Mikrofon und neu Einlernen brauchen
+        einen Nachweis (die erkannte Stimme oder eine frische Anmeldung, siehe stimme_sitzung.py), sonst könnte jemand an der angemeldeten
+        Oberfläche den Schutz aushebeln (ein weiteres Mikrofon wäre eine weitere Stimme, die als eigen gilt)."""
+        return bool(self.abdruecke) or self._geloescht
 
-    def schwelle_fuer(self, secs: float) -> float:
+    def schwelle_fuer(self, secs: float, abdruck: Abdruck | None = None) -> float:
         """Ab diesem Wert gilt eine Äußerung mit secs Sekunden Sprache als die eigene Stimme. Kurz ist die persönliche Schwelle (wenn es
         eine gibt, nie unter fremd_max und nie über eigen_min_kurz) oder eigen_min_kurz, lang eigen_min_lang (nie unter der kurzen); bis
         KURZ_BIS_SECS gilt die kurze, ab LANG_AB_SECS die lange, dazwischen linear. Unter min_secs (Urteil kurz) gilt immer die kurze.
         Die persönliche Schwelle senkt die kurze nur (18.11.2026): Bis zum 17.11. rechnete das Einlernen bis 0,50, die eigenen Werte im
-        Gespräch lagen aber bei 0,35 bis 0,60; ein so gespeicherter Wert soll nie strenger wirken als die Schwelle aus der Umgebung."""
+        Gespräch lagen aber bei 0,35 bis 0,60; ein so gespeicherter Wert soll nie strenger wirken als die Schwelle aus der Umgebung.
+        abdruck: der Abdruck mit dem besten Wert (vergleichen), seine persönliche Schwelle gilt; ohne Angabe die des ersten."""
         s = self.schwellen
-        kurz = s.eigen_min_kurz if self.schwelle_kurz is None else min(max(self.schwelle_kurz, s.fremd_max), s.eigen_min_kurz)
+        persoenlich = abdruck.schwelle if abdruck is not None else self.schwelle_kurz
+        kurz = s.eigen_min_kurz if persoenlich is None else min(max(persoenlich, s.fremd_max), s.eigen_min_kurz)
         lang = max(s.eigen_min_lang, kurz)
         if secs < s.min_secs or secs <= KURZ_BIS_SECS:
             return kurz
@@ -271,13 +369,13 @@ class StimmGate:
             return lang
         return kurz + (lang - kurz) * (secs - KURZ_BIS_SECS) / (LANG_AB_SECS - KURZ_BIS_SECS)
 
-    def einstufen(self, wert: float, secs: float, ueberlappung: bool) -> str:
+    def einstufen(self, wert: float, secs: float, ueberlappung: bool, abdruck: Abdruck | None = None) -> str:
         """eigen: sicher die Person. fremd: sicher nicht. unklar: nicht sicher (entzieht das Vertrauen), auch eine kurze Äußerung, die nicht
         nach der Person klingt. kurz: zu wenig Sprache zum Urteilen ("Ja"), klingt aber nach der Person (das Vertrauen läuft nur begrenzt
         weiter, siehe grund_der_stimme). ueberlappung: WAMO sprach gleichzeitig, es kann Echo sein. Die Schwelle für eigen hängt von der
-        Länge ab (schwelle_fuer), fremd gilt bis fremd_max für alle Längen."""
+        Länge ab (schwelle_fuer, mit der persönlichen Schwelle von abdruck), fremd gilt bis fremd_max für alle Längen."""
         s = self.schwellen
-        if wert >= self.schwelle_fuer(secs):
+        if wert >= self.schwelle_fuer(secs, abdruck):
             return EIGEN if secs >= s.min_secs else KURZ
         if self.erbt(wert, secs, ueberlappung):
             logger.info("Stimme: {:.2f} bei {:.1f} s ist zu kurz für ein Urteil, erbt eigen von vor {:.0f} s", wert, secs,

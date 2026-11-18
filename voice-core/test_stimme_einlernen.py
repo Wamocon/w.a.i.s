@@ -15,6 +15,7 @@ import numpy as np
 import stimme_einlernen as se
 from stimme_einlernen import ANLEITUNG, FERTIG_TEXT, ZIEL_SECS, Einlernen
 from stimme_gate import EIGEN, StimmGate
+from stimme_mikrofon import UNBEKANNTES_MIKROFON
 from stimme_modell import DIM
 
 RATE = 16000
@@ -400,14 +401,15 @@ class EinlernenTests(EinlernenBasis):
         self.speichern.assert_not_awaited()
 
     async def test_die_aufnahme_wird_nirgends_gespeichert(self):
-        """Nur der Abdruck geht an speichern: drei Argumente, die persönliche Schwelle und der Schatten-Abdruck (hier keiner), kein Ton."""
+        """Nur der Abdruck geht an speichern: drei Argumente, die persönliche Schwelle, der Schatten-Abdruck (hier keiner) und das Mikrofon
+        (nur Kennung und Name), kein Ton."""
         await self.e.starten("stimme-1", EINWILLIGUNG_AM)
         await self.anleitung_vorbei()
         await self.aufnehmen(ZIEL_SECS + 0.1)
         await self.e.warten()
         abdruck, version, am = self.speichern.await_args.args
         self.assertEqual(abdruck.shape, (DIM,))
-        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35, "schatten": None})
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35, "schatten": None, "mikrofon": UNBEKANNTES_MIKROFON})
 
 
 class EinlernenWiePruefenTests(EinlernenBasis):
@@ -436,7 +438,8 @@ class EinlernenWiePruefenTests(EinlernenBasis):
     async def test_persoenliche_schwelle_geht_an_speicher_und_gate(self):
         with mock.patch.object(se.logger, "info") as info:
             await self.saetze(0.5)
-        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35, "schatten": None})  # gleiche Stücke: die Obergrenze (Standardschwelle)
+        # gleiche Stücke: die Obergrenze (Standardschwelle)
+        self.assertEqual(self.speichern.await_args.kwargs, {"schwelle": 0.35, "schatten": None, "mikrofon": UNBEKANNTES_MIKROFON})
         self.assertEqual(self.gate.schwelle_kurz, 0.35)
         zeilen = [c.args for c in info.call_args_list if "Stücke" in c.args[0]]
         self.assertEqual(len(zeilen), 1)
@@ -473,6 +476,68 @@ class EinlernenWiePruefenTests(EinlernenBasis):
             await self.e.warten()
         self.speichern.assert_not_awaited()
         self.assertIn("zu wenig", self.meldungen()[-1]["text"])
+
+
+class MikrofonEinlernenTests(EinlernenBasis):
+    """Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026): Einlernen mit einem Mikrofon ersetzt nur dessen Abdruck, höchstens drei."""
+
+    def andere(self, *namen):
+        from stimme_gate import Abdruck
+        from stimme_mikrofon import mikrofon_aus
+
+        self.gate.setze_abdruecke([Abdruck(np.eye(DIM, dtype=np.float32)[5 + i], mikrofon_aus(n)) for i, n in enumerate(namen)])
+        self.e = Einlernen(self.gate, self.modell, senden=self.e._senden, sagen=self.sagen, speichern=self.speichern, uhr=self.uhr,
+                           nachweis=lambda: True)
+
+    async def einlernen(self, mikrofon):
+        await self.e.starten("stimme-3", EINWILLIGUNG_AM, mikrofon)
+        await self.anleitung_vorbei()
+        await self.aufnehmen(ZIEL_SECS + 0.1)
+        await self.e.warten()
+
+    async def test_mikrofon_geht_an_speicher_gate_und_meldung(self):
+        from stimme_mikrofon import mikrofon_aus
+
+        headset = mikrofon_aus("Headset (Jabra)")
+        await self.einlernen(headset)
+        self.assertIs(self.speichern.await_args.kwargs["mikrofon"], headset)
+        self.assertEqual([a.mikrofon for a in self.gate.abdruecke], [headset])
+        fertig = [m for m in self.meldungen() if m["status"] == "fertig"]
+        self.assertEqual(fertig[-1]["mikrofon"], headset.kennung)
+        self.assertEqual(self.meldungen("stimmabdruck_mikrofone")[-1]["mikrofone"][0]["name"], "Headset (Jabra)")
+
+    async def test_dasselbe_mikrofon_ersetzt_nur_seinen_abdruck(self):
+        from stimme_mikrofon import mikrofon_aus
+
+        self.andere("Laptop", "Headset")
+        await self.einlernen(mikrofon_aus("Headset"))
+        self.assertEqual([a.mikrofon.name for a in self.gate.abdruecke], ["Laptop", "Headset"])
+        self.assertIs(self.gate.abdruecke[-1].vektor, self.speichern.await_args.args[0])
+
+    async def test_ein_viertes_mikrofon_wird_nicht_eingelernt(self):
+        from stimme_einlernen import ZU_VIELE_MIKROFONE
+        from stimme_mikrofon import mikrofon_aus
+
+        self.andere("Laptop", "Headset", "Webcam")
+        await self.e.starten("stimme-3", EINWILLIGUNG_AM, mikrofon_aus("Konferenz"))
+        self.assertFalse(self.e.aktiv)
+        self.assertEqual(self.meldungen()[-1], {"type": "stimmabdruck", "status": "fehler", "text": ZU_VIELE_MIKROFONE})
+        self.speichern.assert_not_awaited()
+        self.assertEqual(len(self.gate.abdruecke), 3)
+        # ein vorhandenes der drei geht
+        await self.e.starten("stimme-3", EINWILLIGUNG_AM, mikrofon_aus("Webcam"))
+        self.assertTrue(self.e.aktiv)
+
+    async def test_ein_weiteres_mikrofon_braucht_den_nachweis(self):
+        from stimme_einlernen import ERST_ERKENNEN
+        from stimme_mikrofon import mikrofon_aus
+
+        self.andere("Laptop")
+        self.e = Einlernen(self.gate, self.modell, senden=self.e._senden, sagen=self.sagen, speichern=self.speichern, uhr=self.uhr,
+                           nachweis=lambda: False)
+        await self.e.starten("stimme-3", EINWILLIGUNG_AM, mikrofon_aus("Headset"))
+        self.assertFalse(self.e.aktiv)
+        self.assertEqual(self.meldungen()[-1]["text"], ERST_ERKENNEN)
 
 
 if __name__ == "__main__":

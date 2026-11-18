@@ -9,7 +9,7 @@ import re
 import unittest
 from pathlib import Path
 
-from stimme_einwilligung import EINWILLIGUNG_TEXT, EINWILLIGUNG_TEXT_SCHATTEN, EINWILLIGUNG_VERSION, EINWILLIGUNG_VERSION_SCHATTEN, TEXTE
+from stimme_einwilligung import TEXTE
 
 WURZEL = Path(__file__).resolve().parent.parent
 DOKUMENT = WURZEL / "docs" / "labor-datenschutz-entwurf.md"
@@ -35,20 +35,28 @@ def abschnitt_stimme() -> str:
 
 class EinwilligungsTextTests(unittest.TestCase):
     def test_die_texte_im_dokument_sind_die_konstanten_im_kern(self):
-        for text in (EINWILLIGUNG_TEXT, EINWILLIGUNG_TEXT_SCHATTEN):
+        for text in TEXTE.values():
             self.assertIn(normal(text), normal(abschnitt_stimme()))
 
     def test_die_versionen_im_dokument_sind_die_versionen_im_kern(self):
-        """stimme-1 (ohne Schatten) und stimme-2 (Schattenbetrieb, Entscheidung vom 18.11.2026), keine weitere Fassung im Abschnitt."""
+        """stimme-1 (ohne Schatten), stimme-2 (Schattenbetrieb) und stimme-3 (je Mikrofon ein Abdruck, beide Entscheidungen vom
+        18.11.2026), keine weitere Fassung im Abschnitt."""
         abschnitt = abschnitt_stimme()
-        for version in (EINWILLIGUNG_VERSION, EINWILLIGUNG_VERSION_SCHATTEN):
+        for version in TEXTE:
             self.assertRegex(abschnitt, rf"Einwilligungstext \(Version `{re.escape(version)}`")
         versionen = set(re.findall(r"`(stimme-\d+)`", abschnitt))
         self.assertEqual(versionen, set(TEXTE))
+        self.assertEqual(set(TEXTE), {"stimme-1", "stimme-2", "stimme-3"})
 
     def test_jeder_text_steht_nur_einmal_im_dokument(self):
-        for text in (EINWILLIGUNG_TEXT, EINWILLIGUNG_TEXT_SCHATTEN):
+        for text in TEXTE.values():
             self.assertEqual(normal(dokument()).count(normal(text)), 1)
+
+    def test_der_abschnitt_nennt_die_abdruecke_je_mikrofon(self):
+        a = normal(abschnitt_stimme())
+        for teil in ("je eingelerntem Mikrofon", "höchstens drei Mikrofone", "der beste Wert", "mikrofon_name", "aller Stimmabdrücke",
+                     "bleiben gültig", "unbekanntes Mikrofon"):
+            self.assertIn(teil, a, teil)
 
     def test_der_abschnitt_nennt_beide_abdruecke_und_ihren_zweck(self):
         a = normal(abschnitt_stimme())

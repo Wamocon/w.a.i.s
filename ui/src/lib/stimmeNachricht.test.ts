@@ -169,3 +169,70 @@ test("stimmabdruck_einwilligung: Steuer- und Bidi-Zeichen fliegen aus dem Text",
   assert.ok(m && m.type === "stimmabdruck_einwilligung");
   assert.equal(m.text, "Einabdruck wird gespeichert.");
 });
+
+// ---------- Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026) ----------
+
+const K1 = "0123456789abcdef0123456789abcdef";
+
+test("stimmabdruck: die Kennung des Mikrofons bei fertig und geloescht ist freiwillig, eine ungültige fällt weg", () => {
+  assert.deepEqual(parseServerMessage({ type: "stimmabdruck", status: "fertig", mikrofon: K1 }), { type: "stimmabdruck", status: "fertig", mikrofon: K1 });
+  assert.deepEqual(parseServerMessage({ type: "stimmabdruck", status: "geloescht", mikrofon: "unbekannt" }), {
+    type: "stimmabdruck",
+    status: "geloescht",
+    mikrofon: "unbekannt",
+  });
+  assert.deepEqual(parseServerMessage({ type: "stimmabdruck", status: "geloescht", mikrofon: null }), { type: "stimmabdruck", status: "geloescht" });
+  // eine ungültige Kennung verwirft nicht die Meldung (sonst hinge die Einlernansicht auf "rechnet"), nur das Feld
+  for (const falsch of ["Headset", K1.toUpperCase(), 3, ["x"]]) {
+    assert.deepEqual(parseServerMessage({ type: "stimmabdruck", status: "fertig", mikrofon: falsch }), { type: "stimmabdruck", status: "fertig" });
+  }
+});
+
+test("stimmabdruck_mikrofone: Liste mit Kennung, Name und Zeitpunkt, höchstens max Einträge", () => {
+  assert.deepEqual(
+    parseServerMessage({
+      type: "stimmabdruck_mikrofone",
+      mikrofone: [
+        { kennung: K1, name: " Headset\u202e (Jabra) ", am: "2026-11-18T09:30:00+00:00" },
+        { kennung: "unbekannt", name: null, am: null },
+      ],
+      max: 3,
+    }),
+    {
+      type: "stimmabdruck_mikrofone",
+      mikrofone: [
+        { kennung: K1, name: "Headset (Jabra)", am: "2026-11-18T09:30:00+00:00" },
+        { kennung: "unbekannt", name: null, am: null },
+      ],
+      max: 3,
+    },
+  );
+  assert.deepEqual(parseServerMessage({ type: "stimmabdruck_mikrofone", mikrofone: [], max: 1 }), {
+    type: "stimmabdruck_mikrofone",
+    mikrofone: [],
+    max: 1,
+  });
+});
+
+test("stimmabdruck_mikrofone: falsche Kennung, Zeitpunkt, Grenze oder zu viele Einträge lehnen die Nachricht ab", () => {
+  const eintrag = { kennung: K1, name: "Headset", am: null };
+  for (const falsch of [
+    { mikrofone: [{ ...eintrag, kennung: "Headset" }], max: 3 },
+    { mikrofone: [{ ...eintrag, am: "gestern" }], max: 3 },
+    { mikrofone: [{ ...eintrag, name: 7 }], max: 3 },
+    { mikrofone: [eintrag], max: 0 },
+    { mikrofone: [eintrag], max: 4 },
+    { mikrofone: [eintrag, { ...eintrag, kennung: "unbekannt" }], max: 1 },
+    { mikrofone: "Headset", max: 3 },
+    { mikrofone: [eintrag, { ...eintrag, name: "Zweimal" }], max: 3 },
+    { max: 3 },
+  ]) {
+    assert.equal(parseServerMessage({ type: "stimmabdruck_mikrofone", ...falsch }), null, JSON.stringify(falsch));
+  }
+  // ein leerer Name nach dem Bereinigen gilt wie keiner
+  assert.deepEqual(parseServerMessage({ type: "stimmabdruck_mikrofone", mikrofone: [{ ...eintrag, name: "\u0000 " }], max: 3 }), {
+    type: "stimmabdruck_mikrofone",
+    mikrofone: [{ kennung: K1, name: null, am: null }],
+    max: 3,
+  });
+});

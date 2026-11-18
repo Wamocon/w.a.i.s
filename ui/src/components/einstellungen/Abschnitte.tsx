@@ -85,11 +85,13 @@ function MikrofonEinstellung({
   laden,
   waehlen,
   umschalten,
+  ausgabeAnhalten,
   merken,
 }: {
   laden: () => Promise<Mikrofon[]>;
   waehlen: (id: string) => boolean;
   umschalten?: () => void;
+  ausgabeAnhalten?: (an: boolean) => void;
   merken: boolean;
 }) {
   const id = useId();
@@ -183,6 +185,7 @@ function MikrofonEinstellung({
           geraetName={angeschlossen ? angeschlossen.label : (standard?.label ?? null)}
           merken={merken}
           mikrofonUmschalten={umschalten}
+          ausgabeAnhalten={ausgabeAnhalten}
         />
       )}
     </>
@@ -192,16 +195,19 @@ function MikrofonEinstellung({
 /**
  * nurMikrofon: Laborsicht (lib/laborPlatz.ts), nur die Mikrofonwahl mit dem Mikrofontest als reiner Anzeige (ohne Speicher); die übrigen
  * Blöcke entfallen. mikrofonUmschalten: Mikrofon des laufenden Gesprächs umschalten (useWamo, toggleMic), für die Dauer des Tests.
+ * ausgabeAnhalten: W.A.I.S. schweigt während des Tests (useWamo, ausgabeAnhalten); die Laborsicht bekommt es nicht.
  */
 export const SpracheAbschnitt = memo(function SpracheAbschnitt({
   mikrofone,
   mikrofonWaehlen,
   mikrofonUmschalten,
+  ausgabeAnhalten,
   nurMikrofon = false,
 }: {
   mikrofone: () => Promise<Mikrofon[]>;
   mikrofonWaehlen: (id: string) => boolean;
   mikrofonUmschalten?: () => void;
+  ausgabeAnhalten?: (an: boolean) => void;
   nurMikrofon?: boolean;
 }) {
   const modelle = useSelect(wamo, (s) => s.betrieb?.modelle ?? null);
@@ -216,7 +222,13 @@ export const SpracheAbschnitt = memo(function SpracheAbschnitt({
   return (
     <>
       <Block titel="Eingabe">
-        <MikrofonEinstellung laden={mikrofone} waehlen={mikrofonWaehlen} umschalten={mikrofonUmschalten} merken />
+        <MikrofonEinstellung
+          laden={mikrofone}
+          waehlen={mikrofonWaehlen}
+          umschalten={mikrofonUmschalten}
+          ausgabeAnhalten={ausgabeAnhalten}
+          merken
+        />
       </Block>
       <Block titel="Start beim Tippen">
         <StillStartEinstellung />

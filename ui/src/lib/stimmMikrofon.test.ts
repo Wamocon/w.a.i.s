@@ -7,12 +7,18 @@ import { test } from "node:test";
 import { geraeteName } from "./mikrofon.ts";
 import {
   ANDERES_MIKROFON_TEXT,
+  FUER_DIESES_MIKROFON_TEXT,
+  MIKROFONE_VOLL_TEXT,
   anderesMikrofon,
   geraetHinweisFaellig,
+  istEingelernt,
+  laufenderEintrag,
+  mikrofonFuerKern,
   stimmMikrofonLesen,
   stimmMikrofonMerken,
   stimmMikrofonVergessen,
   type GeraetHinweisLage,
+  type StimmMikrofone,
 } from "./stimmMikrofon.ts";
 
 const ID = "0b7f3c1e-2d4a-4c55-9a10-1a2b3c4d5e6f";
@@ -107,4 +113,45 @@ test("einmal je Gerät und Gespräch", () => {
 
 test("der Satz fragt und nennt keinen Gerätenamen", () => {
   assert.equal(ANDERES_MIKROFON_TEXT, "Deine Stimme ist mit einem anderen Mikrofon eingelernt. Für dieses Mikrofon neu einlernen?");
+});
+
+// ---------- Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026, Kern stimme_mikrofon.py) ----------
+
+const LISTE: StimmMikrofone = {
+  mikrofone: [
+    { kennung: "a".repeat(32), name: "Mikrofonarray (Realtek)", am: "2026-11-18T09:00:00+00:00" },
+    { kennung: "b".repeat(32), name: "Headset (Jabra)", am: null },
+  ],
+  max: 3,
+};
+
+test("der Name für den Kern ist bereinigt und begrenzt", () => {
+  assert.equal(mikrofonFuerKern("  Standard - Headset (Jabra)\u0000\u202e "), "Headset (Jabra)");
+  assert.equal(mikrofonFuerKern("x".repeat(300))?.length, 120);
+  assert.equal(mikrofonFuerKern("Head\tset"), "Head set");
+  assert.equal(mikrofonFuerKern(null), null);
+  assert.equal(mikrofonFuerKern("\u0001"), null);
+});
+
+test("ist das laufende Mikrofon eingelernt? ja, nein oder unbekannt", () => {
+  assert.equal(istEingelernt(LISTE, "Standard - headset (jabra)", null), true);
+  assert.equal(istEingelernt(LISTE, "Webcam", null), false);
+  assert.equal(istEingelernt(LISTE, null, null), null);
+  const mitAltem: StimmMikrofone = { mikrofone: [...LISTE.mikrofone, { kennung: "unbekannt", name: null, am: null }], max: 3 };
+  assert.equal(istEingelernt(mitAltem, "Webcam", null), null); // ein Abdruck ohne Namen könnte dieses Mikrofon sein
+  assert.equal(istEingelernt(mitAltem, "Webcam", "Webcam"), true); // dieser Browser hat sich den Namen beim Einlernen gemerkt
+  assert.equal(istEingelernt(mitAltem, "Webcam", "Laptop"), false);
+  assert.equal(laufenderEintrag(LISTE, "Headset (Jabra)")?.kennung, "b".repeat(32));
+  assert.equal(laufenderEintrag(LISTE, "Webcam"), null);
+});
+
+test("mit der Liste des Kerns kommt der Hinweis nur für ein nicht eingelerntes Mikrofon", () => {
+  const lage = { ...LAGE, gemerkt: null, eingelernt: LISTE };
+  assert.equal(geraetHinweisFaellig({ ...lage, aktuell: "Webcam" }, new Set()), "webcam");
+  assert.equal(geraetHinweisFaellig({ ...lage, aktuell: "Headset (Jabra)" }, new Set()), null);
+  // ohne Abdrücke je Mikrofon (Kern ohne Migration 0029, max 1) gilt der gemerkte Name wie bisher
+  const alt = { ...LAGE, eingelernt: { mikrofone: [{ kennung: "unbekannt", name: null, am: null }], max: 1 } };
+  assert.equal(geraetHinweisFaellig(alt, new Set()), "mikrofonarray (realtek)");
+  assert.equal(FUER_DIESES_MIKROFON_TEXT, "Für dieses Mikrofon ist deine Stimme noch nicht eingelernt. Jetzt einlernen?");
+  assert.match(MIKROFONE_VOLL_TEXT, /drei Mikrofone/);
 });

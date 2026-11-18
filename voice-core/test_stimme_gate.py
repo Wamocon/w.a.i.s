@@ -839,5 +839,98 @@ class StandNachrichtTests(unittest.TestCase):
             self.assertNotIn('"type": "stimme", "status"', (ordner / datei).read_text(encoding="utf-8").split('"""', 2)[-1], datei)
 
 
+class MehrereAbdrueckeTests(unittest.TestCase):
+    """Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026): bester Wert über alle, Schwelle des besten, höchstens drei."""
+
+    def setUp(self):
+        from stimme_mikrofon import Mikrofon
+
+        self.laptop = stimme_gate.Abdruck(np.eye(DIM, dtype=np.float32)[0], Mikrofon("a" * 32, "Laptop"), schwelle=0.31)
+        self.headset = stimme_gate.Abdruck(np.eye(DIM, dtype=np.float32)[1], Mikrofon("b" * 32, "Headset"), schwelle=0.34)
+        self.gate = StimmGate(modus="streng", uhr=Uhr())
+        self.gate.setze_abdruecke([self.laptop, self.headset])
+        self.gate.modell_ok = True
+
+    def test_bester_wert_ueber_alle_abdruecke(self):
+        v = np.zeros(DIM, dtype=np.float32)
+        v[0], v[1] = 0.2, 0.9
+        wert, treffer = self.gate.vergleichen(v)
+        self.assertAlmostEqual(wert, 0.9 / np.hypot(0.2, 0.9), places=5)
+        self.assertEqual(treffer.mikrofon.name, "Headset")
+        self.assertEqual(self.gate.status, "bereit")
+        self.assertIsNone(StimmGate().vergleichen(v))
+
+    def test_die_schwelle_des_besten_abdrucks_gilt(self):
+        self.assertAlmostEqual(self.gate.schwelle_fuer(0.8, self.laptop), 0.31)
+        self.assertAlmostEqual(self.gate.schwelle_fuer(0.8, self.headset), 0.34)
+        self.assertEqual(self.gate.einstufen(0.32, 1.2, False, self.laptop), EIGEN)
+        self.assertEqual(self.gate.einstufen(0.32, 1.2, False, self.headset), UNKLAR)
+
+    def test_nicht_endliche_werte_zaehlen_nicht(self):
+        kaputt = stimme_gate.Abdruck(np.full(DIM, np.nan, dtype=np.float32))
+        self.gate.setze_abdruecke([kaputt, self.laptop])
+        wert, treffer = self.gate.vergleichen(np.eye(DIM, dtype=np.float32)[0])
+        self.assertAlmostEqual(wert, 1.0, places=5)
+        self.assertIs(treffer.vektor, self.laptop.vektor)
+        self.gate.setze_abdruecke([kaputt])
+        wert, _ = self.gate.vergleichen(np.eye(DIM, dtype=np.float32)[0])
+        self.assertTrue(np.isnan(wert))
+
+    def test_eintragen_ersetzt_nur_dasselbe_mikrofon_und_haelt_die_grenze(self):
+        from stimme_mikrofon import Mikrofon
+
+        neu = stimme_gate.Abdruck(np.eye(DIM, dtype=np.float32)[2], Mikrofon("b" * 32, "Headset"))
+        self.gate.abdruck_eintragen(neu)
+        self.assertEqual([a.mikrofon.name for a in self.gate.abdruecke], ["Laptop", "Headset"])
+        self.assertIs(self.gate.abdruecke[-1], neu)
+        for i, k in enumerate(("c", "d")):
+            self.gate.abdruck_eintragen(stimme_gate.Abdruck(np.eye(DIM, dtype=np.float32)[3 + i], Mikrofon(k * 32, k)))
+        self.assertEqual(len(self.gate.abdruecke), 3)
+        self.assertEqual([a.mikrofon.kennung[0] for a in self.gate.abdruecke], ["b", "c", "d"])
+
+    def test_entfernen_eines_abdrucks_und_des_letzten(self):
+        self.gate.eintragen(EIGEN)
+        self.assertTrue(self.gate.abdruck_entfernen("a" * 32))
+        self.assertFalse(self.gate.abdruck_entfernen("a" * 32))
+        self.assertEqual(self.gate.status, "bereit")
+        # das Vertrauen kann vom gelöschten Abdruck stammen: es ist weg, die Person spricht oder tippt wieder
+        self.assertEqual(self.gate.grund_der_stimme(), "Stimme noch nicht erkannt")
+        self.gate.eintragen(EIGEN)
+        self.assertTrue(self.gate.abdruck_entfernen("b" * 32))
+        self.assertEqual(self.gate.status, "fehlt")
+        self.assertTrue(self.gate.abdruck_geschuetzt)  # gelöscht: ein neues Einlernen braucht den Nachweis
+        self.assertEqual(self.gate.grund_der_stimme(), "Stimme noch nicht erkannt")
+
+    def test_schatten_je_mikrofon_und_alte_eigenschaften(self):
+        schatten = np.ones(256, dtype=np.float32)
+        self.gate.schatten_setzen({"b" * 32: schatten, "x" * 32: schatten})
+        self.assertIsNone(self.gate.abdruecke[0].schatten)
+        self.assertIs(self.gate.abdruecke[1].schatten, schatten)
+        self.assertIs(self.gate.abdruck, self.laptop.vektor)  # der erste, wie bisher mit einem Abdruck
+        self.assertEqual(self.gate.schwelle_kurz, 0.31)
+        self.assertEqual(self.gate.kennungen, ("a" * 32, "b" * 32))
+
+    def test_schwelle_ohne_spalte_gilt_fuer_keinen_abdruck(self):
+        gate = StimmGate(modus="streng", uhr=Uhr())
+        gate.schwelle_erlaubt = False
+        gate.setze_abdruecke([self.laptop, self.headset])
+        self.assertEqual([a.schwelle for a in gate.abdruecke], [None, None])
+
+    def test_nachricht_mit_den_mikrofonen(self):
+        from datetime import datetime, timezone
+
+        am = datetime(2026, 11, 18, 9, 30, tzinfo=timezone.utc)
+        self.gate.setze_abdruecke([stimme_gate.Abdruck(self.laptop.vektor, self.laptop.mikrofon, am=am), stimme_gate.Abdruck(ABDRUCK)])
+        self.gate.max_abdruecke = 3
+        self.assertEqual(self.gate.mikrofone_nachricht(), {
+            "type": "stimmabdruck_mikrofone",
+            "mikrofone": [{"kennung": "a" * 32, "name": "Laptop", "am": "2026-11-18T09:30:00+00:00"},
+                          {"kennung": "unbekannt", "name": None, "am": None}],
+            "max": 3,
+        })
+        self.gate.setze_abdruck(None)
+        self.assertEqual(self.gate.mikrofone_nachricht()["mikrofone"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

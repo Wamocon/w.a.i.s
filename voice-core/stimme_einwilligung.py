@@ -13,6 +13,11 @@ WAMO_STIMME_SCHATTEN=an (stimme_schatten.py) zeigt der Kern stimme-2 und lernt n
 Prüfung und 256 Zahlen für den Vergleich eines zweiten Modells. Nur zu einem Abdruck mit stimme-2 entsteht und gilt ein Schatten-Abdruck
 (schatten_erlaubt, in der Datenbank zusätzlich speakers_shadow_consent_chk, Migration 0028); ein Abdruck mit stimme-1 bekommt keinen, bis
 die Person neu einlernt. Beide Fassungen bleiben für gespeicherte Abdrücke gültig (einwilligung_bekannt).
+
+Dritte Fassung (Entscheidung vom 18.11.2026, Migration 0029): stimme-3 nennt je eingelerntem Mikrofon einen Abdruck aus 192 Zahlen
+und einen aus 256 Zahlen, höchstens drei Mikrofone (stimme_mikrofon.py). Sobald die Datenbank Abdrücke je Mikrofon speichern kann, zeigt der
+Kern nur noch stimme-3 und lernt nur damit ein, mit und ohne Schattenbetrieb; ein Abdruck mit stimme-1 oder stimme-2 bleibt gültig, jedes
+weitere Mikrofon und jedes neue Einlernen verlangt stimme-3. stimme-3 deckt wie stimme-2 einen Schatten-Abdruck (schatten_erlaubt).
 """
 
 from __future__ import annotations
@@ -41,30 +46,52 @@ EINWILLIGUNG_TEXT_SCHATTEN = (
     "Stimmabdruck jederzeit in den Einstellungen löschen, damit werden beide Stimmabdrücke gelöscht. Das gilt zugleich als Widerruf meiner "
     "Einwilligung, er wirkt für die Zukunft."
 )
-TEXTE = {EINWILLIGUNG_VERSION: EINWILLIGUNG_TEXT, EINWILLIGUNG_VERSION_SCHATTEN: EINWILLIGUNG_TEXT_SCHATTEN}
+EINWILLIGUNG_VERSION_MIKROFONE = "stimme-3"
+EINWILLIGUNG_TEXT_MIKROFONE = (
+    "Ich willige ausdrücklich ein, dass W.A.I.S. aus kurzen Aufnahmen meiner Stimme Stimmabdrücke berechnet und in meinem Profil "
+    "speichert: je eingelerntem Mikrofon einen Abdruck aus 192 Zahlen für die Prüfung meiner Stimme und einen aus 256 Zahlen für den "
+    "Vergleich mit einem zweiten Modell, für höchstens drei Mikrofone. Den zweiten Abdruck berechnet W.A.I.S. nur, solange es die beiden "
+    "Modelle vergleicht. Zu jedem Mikrofon speichert W.A.I.S. dessen Namen, wie mein Browser oder die App ihn nennt. Es wird keine Aufnahme "
+    "gespeichert. Die Berechnung läuft im Kern von W.A.I.S. auf dem eigenen Server der WAMOCON GmbH. W.A.I.S. nutzt die Stimmabdrücke "
+    "allein, um meine Stimme von anderen Stimmen zu unterscheiden und um zu messen, welches der beiden Modelle das besser kann: Stimmen, die "
+    "W.A.I.S. sicher als fremd erkennt, werden nicht verarbeitet und lösen nichts aus. Für den Vergleich hält W.A.I.S. je Äußerung nur "
+    "Zahlen im Protokoll des Servers fest, nie einen Ton oder einen Text. Die Stimmabdrücke sind biometrische Daten nach Artikel 9 DSGVO, "
+    "deshalb brauche ich diese ausdrückliche Einwilligung. Sie ist freiwillig: Ohne sie nutze ich W.A.I.S. ohne Nachteil weiter. Ich kann "
+    "den Stimmabdruck eines Mikrofons oder alle meine Stimmabdrücke jederzeit in den Einstellungen löschen. Das Löschen aller Stimmabdrücke "
+    "gilt zugleich als Widerruf meiner Einwilligung, er wirkt für die Zukunft."
+)
+TEXTE = {
+    EINWILLIGUNG_VERSION: EINWILLIGUNG_TEXT,
+    EINWILLIGUNG_VERSION_SCHATTEN: EINWILLIGUNG_TEXT_SCHATTEN,
+    EINWILLIGUNG_VERSION_MIKROFONE: EINWILLIGUNG_TEXT_MIKROFONE,
+}
 
 
-def aktuelle_version(schatten: bool = False) -> str:
-    """Die Fassung, die der Kern zeigt und für ein neues Einlernen verlangt: stimme-2 im Schattenbetrieb, sonst stimme-1."""
+def aktuelle_version(schatten: bool = False, mikrofone: bool = False) -> str:
+    """Die Fassung, die der Kern zeigt und für ein neues Einlernen verlangt: stimme-3 mit Abdrücken je Mikrofon (mikrofone: Migration 0029
+    ist da, stimme_speicher.abdruecke_laden), sonst stimme-2 im Schattenbetrieb und stimme-1 ohne ihn."""
+    if mikrofone:
+        return EINWILLIGUNG_VERSION_MIKROFONE
     return EINWILLIGUNG_VERSION_SCHATTEN if schatten else EINWILLIGUNG_VERSION
 
 
-def einwilligung_nachricht(schatten: bool = False) -> dict:
-    """Nachricht an die Oberfläche beim Start der Sitzung, mit der Fassung zum Betrieb (schatten: WAMO_STIMME_SCHATTEN an)."""
-    version = aktuelle_version(schatten)
+def einwilligung_nachricht(schatten: bool = False, mikrofone: bool = False) -> dict:
+    """Nachricht an die Oberfläche, mit der Fassung zum Betrieb (schatten: WAMO_STIMME_SCHATTEN an, mikrofone: Abdrücke je Mikrofon)."""
+    version = aktuelle_version(schatten, mikrofone)
     return {"type": "stimmabdruck_einwilligung", "version": version, "text": TEXTE[version]}
 
 
-def einwilligung_gilt(version: object, schatten: bool = False) -> bool:
+def einwilligung_gilt(version: object, schatten: bool = False, mikrofone: bool = False) -> bool:
     """Für ein neues Einlernen zählt nur genau die aktuelle Fassung (kein Vergleich ohne Typ: True oder 1 sind keine Einwilligung)."""
-    return isinstance(version, str) and version == aktuelle_version(schatten)
+    return isinstance(version, str) and version == aktuelle_version(schatten, mikrofone)
 
 
 def einwilligung_bekannt(version: object) -> bool:
-    """Eine Fassung, mit der ein Abdruck gespeichert werden darf (stimme-1 oder stimme-2); welche gerade verlangt wird, prüft die Sitzung."""
+    """Eine Fassung, mit der ein Abdruck gespeichert werden darf (stimme-1, stimme-2 oder stimme-3); welche gerade verlangt wird, prüft
+    die Sitzung. Ein Abdruck mit einer älteren Fassung bleibt gültig."""
     return isinstance(version, str) and version in TEXTE
 
 
 def schatten_erlaubt(version: object) -> bool:
-    """Deckt diese Fassung einen Schatten-Abdruck (nur stimme-2)?"""
-    return isinstance(version, str) and version == EINWILLIGUNG_VERSION_SCHATTEN
+    """Deckt diese Fassung einen Schatten-Abdruck (stimme-2 und stimme-3)?"""
+    return isinstance(version, str) and version in (EINWILLIGUNG_VERSION_SCHATTEN, EINWILLIGUNG_VERSION_MIKROFONE)
