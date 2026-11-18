@@ -54,6 +54,68 @@ class Params:
         self.result_callback = mock.AsyncMock()
 
 
+class KurzErbenTests(unittest.TestCase):
+    """Befund 18.11.2026: Unter 1 s lagen die eigenen Werte bei 0,14 bis 0,49 (11 Äußerungen, nur 27 % erkannt), eine fremde Stimme bei
+    0,10 bis 0,30. Eine so kurze Äußerung erbt deshalb das Urteil eigen, wenn WAMO nicht spricht und die letzte sichere Erkennung
+    höchstens 60 s zurückliegt."""
+
+    def setUp(self):
+        self.uhr = Uhr()
+        self.gate = bereites_gate(uhr=self.uhr)
+        self.gate.eintragen(EIGEN)
+
+    def test_kurz_nach_eigen_erbt(self):
+        for wert in (0.14, 0.21, 0.31):  # die eigenen Werte vom 18.11.2026
+            self.assertEqual(self.gate.einstufen(wert, 0.7, False), KURZ, wert)
+        self.uhr.t += 60
+        self.assertEqual(self.gate.einstufen(0.2, 0.5, False), KURZ)
+
+    def test_nicht_mehr_nach_der_frist(self):
+        self.uhr.t += 61
+        self.assertEqual(self.gate.einstufen(0.2, 0.5, False), FREMD)
+        self.assertEqual(self.gate.einstufen(0.33, 0.5, False), UNKLAR)
+
+    def test_nie_waehrend_wamo_spricht(self):
+        self.assertEqual(self.gate.einstufen(0.2, 0.5, True), UNKLAR)  # Echo bleibt draußen
+
+    def test_klar_fremd_erbt_nie(self):
+        self.assertEqual(self.gate.einstufen(0.09, 0.5, False), FREMD)  # unter kurz_erben_min: Echo, Rauschen oder klar fremd
+        self.assertEqual(self.gate.einstufen(-0.4, 0.5, False), FREMD)
+        self.assertEqual(self.gate.einstufen(0.10, 0.5, False), KURZ)
+
+    def test_nie_ab_einer_sekunde(self):
+        self.assertEqual(self.gate.einstufen(0.2, 1.2, False), FREMD)  # dort trennt der Wert, das Urteil gilt
+
+    def test_nie_nach_tippen_fremd_oder_ohne_urteil(self):
+        for vorher in ("getippt", FREMD, UNKLAR, None):
+            gate = bereites_gate(uhr=self.uhr)
+            if vorher == "getippt":
+                gate.getippt()
+            elif vorher is not None:
+                gate.eintragen(vorher)
+            self.assertNotEqual(gate.einstufen(0.2, 0.5, False), KURZ, vorher)
+
+    def test_geerbt_oeffnet_werkzeuge_nur_kurz(self):
+        self.gate.eintragen(self.gate.einstufen(0.2, 0.5, False))
+        self.uhr.t += 10
+        self.assertIsNone(self.gate.grund_der_stimme())
+        self.uhr.t += 6  # über kurz_vertrauen_secs (15 s) seit der letzten sicheren Erkennung
+        self.assertEqual(self.gate.grund_der_stimme(), "Stimme nur kurz gehört, nicht sicher erkannt")
+
+    def test_schalter(self):
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_KURZ_ERBEN_SECS": "0"}, clear=True):
+            self.assertEqual(schwellen_aus_env().kurz_erben_secs, 0.0)
+        with mock.patch.dict("os.environ", {"WAMO_STIMME_KURZ_ERBEN_SECS": "kaputt"}, clear=True):
+            self.assertEqual(schwellen_aus_env().kurz_erben_secs, 60.0)
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(schwellen_aus_env().kurz_erben_secs, 60.0)
+        aus = StimmGate(modus="streng", uhr=self.uhr, schwellen=Schwellen(kurz_erben_secs=0.0))
+        aus.setze_abdruck(ABDRUCK)
+        aus.modell_ok = True
+        aus.eintragen(EIGEN)
+        self.assertEqual(aus.einstufen(0.2, 0.5, False), FREMD)
+
+
 class EinstufungTests(unittest.TestCase):
     def test_einstufung(self):
         gate = StimmGate()

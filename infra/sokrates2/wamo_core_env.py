@@ -66,6 +66,8 @@ ERLAUBT = set(PFLICHT) | {
     # (Standard /var/cache/wamo-core/wamo/sprecher/nemo_en_titanet_large.onnx). Keine Geheimnisse.
     "WAMO_STIMME_PRUEFUNG", "WAMO_STIMME_EIGEN_MIN", "WAMO_STIMME_FREMD_MAX", "WAMO_STIMME_MIN_SECS", "WAMO_STIMME_VERTRAUEN_SECS",
     "WAMO_STIMME_KURZ_VERTRAUEN_SECS",
+    # Äußerungen unter 1 s erben das Urteil eigen bis so viele Sekunden nach der letzten sicheren Erkennung (Standard 60, 0 aus, seit 18.11.2026)
+    "WAMO_STIMME_KURZ_ERBEN_SECS",
     # Schwelle für "eigen" nach Länge der Äußerung (voice-core/stimme_gate.py, Kalibrierung vom 17.11.2026): bis 1,5 s Sprache die kurze
     # (Standard 0,35), ab 3 s die lange (Standard 0,45), dazwischen linear; WAMO_STIMME_EIGEN_MIN gilt nur noch, wo eine davon leer ist
     "WAMO_STIMME_EIGEN_MIN_KURZ", "WAMO_STIMME_EIGEN_MIN_LANG",
