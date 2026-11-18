@@ -173,12 +173,20 @@ class EinlernenTests(EinlernenBasis):
         self.assertIn("anmelden", self.meldungen()[-1]["text"])
         self.assertFalse(self.e.aktiv)
 
-    async def test_neu_einlernen_braucht_den_nachweis_in_jedem_modus_ausser_aus(self):
+    async def test_neu_einlernen_braucht_den_nachweis_nur_im_modus_streng(self):
+        self.gate.setze_abdruck(EIGENER)
+        self.gate.modell_ok = True
+        self.gate.modus = "streng"
+        await self.e.starten("stimme-1", EINWILLIGUNG_AM)
+        self.assertEqual(self.letzter_status(), "fehler")
+
+    async def test_neu_einlernen_im_modus_beobachten_ohne_nachweis(self):
+        # 18.11.2026: ein schlechter Abdruck muss sich ersetzen lassen, auch wenn er die Person gerade nicht erkennt
         self.gate.setze_abdruck(EIGENER)
         self.gate.modell_ok = True
         self.gate.modus = "beobachten"
         await self.e.starten("stimme-1", EINWILLIGUNG_AM)
-        self.assertEqual(self.letzter_status(), "fehler")
+        self.assertEqual(self.letzter_status(), "start")
 
     async def test_beim_ersten_einlernen_ist_keine_erkennung_noetig(self):
         await self.e.starten("stimme-1", EINWILLIGUNG_AM)

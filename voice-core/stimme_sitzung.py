@@ -294,7 +294,7 @@ class StimmSitzung:
             await self._fehler(MIKROFON_FEHLT)
             await self.status_melden()  # die Oberfläche bekommt die aktuelle Liste
             return
-        if gate.modus != "aus" and (gate.abdruck_geschuetzt or gate.zustand in ("laedt", "kaputt")) and not self.nachweis_ok():
+        if gate.sperrt and (gate.abdruck_geschuetzt or gate.zustand in ("laedt", "kaputt")) and not self.nachweis_ok():
             await self._fehler(LOESCHEN_NACHWEIS)  # vielleicht gibt es einen Abdruck: nicht ohne Nachweis löschen
             return
         # Erst das Einlernen beenden und ein schon laufendes Speichern abwarten, sonst käme der Abdruck nach dem Löschen wieder

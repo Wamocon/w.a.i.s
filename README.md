@@ -1106,16 +1106,17 @@ Person ihn, bestätigt ihn und startet das Einlernen (Klick, nie per Sprache). W
 vor oder erzählt frei, bis der Balken voll ist (20 Sekunden reine Sprache). Währenddessen hört die Spracherkennung nur Stille, W.A.I.S. antwortet
 also nicht auf den Vorlesetext. Danach steht der Abdruck im Profil. **Löschen** in den Einstellungen entfernt den Abdruck
 vollständig (DSGVO Art. 17, zugleich Widerruf der Einwilligung). Wer nicht einlernt, hat keinen Nachteil: Ohne Abdruck prüft W.A.I.S. nichts und
-sperrt nichts. Einen vorhandenen Abdruck zu **ersetzen oder zu löschen** (und danach in derselben Sitzung neu einzulernen) geht in jedem Modus
-außer `aus` nur mit Nachweis: Die Person wurde gerade sicher an der Stimme erkannt, oder die Anmeldung mit zweitem Faktor ist jünger als
-10 Minuten (Zeitpunkt aus dem Token, `amr`). Sonst meldet die Oberfläche einen Fehler und bittet, sich neu anzumelden. Im Modus `aus` geht Löschen weiter immer.
+sperrt nichts. Einen vorhandenen Abdruck zu **ersetzen oder zu löschen** (und danach in derselben Sitzung neu einzulernen) geht seit 18.11.2026 im Standard
+(`beobachten`) und im Modus `aus` immer. Nur im Modus `streng` braucht es einen Nachweis: Die Person wurde gerade sicher an der Stimme erkannt, oder die
+Anmeldung mit zweitem Faktor ist jünger als 10 Minuten (Zeitpunkt aus dem Token, `amr`); sonst meldet die Oberfläche einen Fehler und bittet, sich neu
+anzumelden. Davor lag darin eine Falle: Ein schlechter Abdruck erkannte die Person nicht und verhinderte so das Ersetzen des schlechten Abdrucks.
 
 **Modi** (`WAMO_STIMME_PRUEFUNG`, wirkt nur für Profile mit Abdruck):
 
 | Modus | Wirkung |
 | --- | --- |
-| `streng` (Standard) | **Nur die eigene Stimme** erreicht das Sprachmodell (Entscheidung vom 17.11.2026, `WAMO_STIMME_NUR_EIGEN`): durch geht nur eine Äußerung mit Wert ab der Schwelle für eigen (nach Länge, siehe Schwellen), auch ein kurzes eigenes "Ja". Alles andere wird verworfen: fremd, unklar mit jedem Wert, unklar ohne Wert (Prüfung fehlgeschlagen) und keine Antwort des Prüfers in der Frist; kein Zug, kein Eintrag im Verlauf und im Gedächtnis, eine Meldung an die Oberfläche (`ignoriert`). Während W.A.I.S. spricht, **unterbricht nur die eigene Stimme** (`WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN`): eine andere Stimme dämpft W.A.I.S. kurz, W.A.I.S. spricht weiter, ihr Satz wird verworfen. Werkzeuge außer Uhrzeit, Websuche und Canvas sind gesperrt, solange die Stimme nicht sicher die eigene war (oder die Person nicht getippt hat). |
-| `beobachten` | Misst, zeigt das Ergebnis in der Oberfläche und schreibt es ins Log, sperrt und verwirft nichts. Geeignet zum Einstellen der Schwellen. |
+| `streng` (nur auf ausdrücklichen Wunsch) | **Nur die eigene Stimme** erreicht das Sprachmodell (Entscheidung vom 17.11.2026, `WAMO_STIMME_NUR_EIGEN`): durch geht nur eine Äußerung mit Wert ab der Schwelle für eigen (nach Länge, siehe Schwellen), auch ein kurzes eigenes "Ja". Alles andere wird verworfen: fremd, unklar mit jedem Wert, unklar ohne Wert (Prüfung fehlgeschlagen) und keine Antwort des Prüfers in der Frist; kein Zug, kein Eintrag im Verlauf und im Gedächtnis, eine Meldung an die Oberfläche (`ignoriert`). Während W.A.I.S. spricht, **unterbricht nur die eigene Stimme** (`WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN`): eine andere Stimme dämpft W.A.I.S. kurz, W.A.I.S. spricht weiter, ihr Satz wird verworfen. Werkzeuge außer Uhrzeit, Websuche und Canvas sind gesperrt, solange die Stimme nicht sicher die eigene war (oder die Person nicht getippt hat). |
+| `beobachten` (Standard seit 18.11.2026) | Misst, zeigt das Ergebnis in der Oberfläche und schreibt es ins Log, **sperrt und verwirft nichts**: kein Wächter, keine Sperre von Werkzeugen (Entwicklungsaufträge, Tastatur, Bildschirm und alle übrigen), keine Färbung eines Zugs als Fremdinhalt, Unterbrechen darf jede Stimme. Entscheidung von Niko am 18.11.2026 abends: Die Erkennung war bei Mikrofon- oder Raumwechsel zu ungenau (eigene Sätze bei 0,0 bis 0,35), Aufträge und Aktionen blieben stehen. Es schützen weiter die Anmeldung mit zweitem Faktor und die Freigabekarten für kritische Änderungen. Eine Ausnahme bleibt für Mitglieder: PC-Befehle per Sprache gehen nur mit eingelerntem Abdruck (Entscheidung N10), das Urteil selbst sperrt dort nichts mehr. |
 | `aus` | Keine Prüfung, kein Einlernen. Löschen eines vorhandenen Abdrucks geht trotzdem. Ohne Datenbank ist die Prüfung ebenfalls aus. |
 
 **Schwellen** (alle in `voice-core/.env.example`, am Server über `wamo-core-env`; leer heißt Standard, Unbrauchbares auch):

@@ -56,7 +56,8 @@ class BotDb(FakeDb):
 def _umgebung(monkeypatch):
     for name, wert in smoke.DUMMY_ENV.items():
         monkeypatch.setenv(name, wert)
-    monkeypatch.delenv("WAMO_STIMME_PRUEFUNG", raising=False)
+    # Die Tests dieser Datei prüfen die strenge Maschinerie (Standard seit 18.11.2026 ist beobachten, siehe test_standard_sperrt_nichts)
+    monkeypatch.setenv("WAMO_STIMME_PRUEFUNG", "streng")
     with mock.patch("llm_anbieter.claude_problem", mock.AsyncMock(return_value=None)), \
          mock.patch.object(labor_limit, "LIMITS", labor_limit.LimitRegister()):
         yield
@@ -323,6 +324,27 @@ async def test_nicht_sicher_eigener_zug_ist_gefaerbt_und_im_protokoll_markiert()
     assert session.turn.section_tainted(0, 5) is True  # das Lernen überspringt den Abschnitt
     ja = next(p for p in stufen if isinstance(p, JaWaechter))
     assert ja._gefaerbt() is True  # kein Hinweis "Ja auf Rückfrage"
+    await session.cleanup()
+
+
+@pytest.mark.parametrize("urteil", [UNKLAR, FREMD])
+async def test_standard_sperrt_nichts(monkeypatch, urteil):
+    """18.11.2026 (Entscheidung von Niko): ohne WAMO_STIMME_PRUEFUNG ist die Stimme nur ein Hinweis. Ein nicht sicher erkannter Zug bleibt
+    ungefärbt (Lernen und Ja-Wächter wie immer), der Wächter verwirft nichts, und kein Werkzeug wird gesperrt."""
+    monkeypatch.delenv("WAMO_STIMME_PRUEFUNG", raising=False)
+    store = m.MemoryStore(USER, BotDb())
+    session, stufen, _llm = await bauen(Identity(USER, "Erika", "mitglied", "sie"), store=store)
+    gate = bereit_machen(session)
+    assert gate.modus == "beobachten" and not gate.sperrt and not gate.verwirft and not gate.nur_eigen_unterbricht()
+    gate.eintragen(urteil)
+    with mock.patch.object(m.MemoryStore, "log_turn", mock.AsyncMock()) as log_turn:
+        await zug_beenden(stufen, "Starte den Entwicklungsauftrag")
+        log_turn.assert_awaited_once_with(role="user", content="Starte den Entwicklungsauftrag")
+    assert session.turn.tainted is False
+    ja = next(p for p in stufen if isinstance(p, JaWaechter))
+    assert not ja._gefaerbt()
+    assert await gate.pruefen("entwicklung_vorbereiten") is None
+    assert await gate.pruefen("tastatur_tippen") is None
     await session.cleanup()
 
 

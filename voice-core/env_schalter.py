@@ -24,8 +24,9 @@ Füllwörter und Sprechweise (fuellwoerter.py, persona.py, Entscheidung vom 14.1
                                WAMO_FUELLWORT_SECS: Zahl, Standard 0,4
   WAMO_MHM                     Rückmeldelaut "Mhm", wenn das Modell den Satz der Person für unfertig hält (Standard aus)
 Stimmabdruck (stimme_gate.py, stimme_modell.py, seit 14.11.2026; wirkt nur für Profile mit eingelerntem Abdruck, nie für Laborprofile):
-  WAMO_STIMME_PRUEFUNG         aus | beobachten | streng (Standard streng): beobachten misst und meldet nur, streng lässt nur die eigene
-                               Stimme ans Modell und sperrt Werkzeuge außer Uhrzeit, Websuche und Canvas
+  WAMO_STIMME_PRUEFUNG         aus | beobachten | streng (Standard beobachten seit 18.11.2026): beobachten misst und meldet nur und sperrt
+                               nichts, streng (nur auf ausdrücklichen Wunsch) lässt nur die eigene Stimme ans Modell und sperrt Werkzeuge
+                               außer Uhrzeit, Websuche und Canvas
   WAMO_STIMME_EIGEN_MIN_KURZ   Zahl, Standard 0,35 (seit 17.11.2026): ab diesem Wert (Kosinus, 0,35 bis 0,95) gilt eine Äußerung bis
                                1,5 s Sprache als die eigene Stimme; eine persönliche Schwelle vom Einlernen (speakers.voice_threshold,
                                Migration 0025) ersetzt sie für das Profil

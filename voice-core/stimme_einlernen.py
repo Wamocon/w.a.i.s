@@ -153,7 +153,7 @@ class Einlernen:
         übrigen bleiben. Ein weiteres Mikrofon gibt es nur bis StimmGate.max_abdruecke."""
         if self.beschaeftigt:
             return
-        if self._gate.abdruck_geschuetzt and self._gate.modus != "aus" and not self._nachweis():
+        if self._gate.abdruck_geschuetzt and self._gate.sperrt and not self._nachweis():
             # Ersetzen, ein weiteres Mikrofon (eine weitere Stimme, die als eigen gilt) und neu Einlernen nach dem Löschen in dieser Sitzung
             # nur mit Nachweis: die Person ist gerade an der Stimme erkannt oder frisch mit zweitem Faktor angemeldet. Wer nur an der
             # angemeldeten Oberfläche sitzt, soll keinen Abdruck umschreiben oder hinzufügen können.

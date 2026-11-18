@@ -91,14 +91,36 @@ def test_ohne_abdruck_nur_getippt_in_jedem_modus(modus):
     assert g.pflicht_grund() is not None
 
 
-@pytest.mark.parametrize("modus", ["beobachten", "streng"])
-def test_mit_abdruck_gilt_die_erkannte_stimme(modus):
-    g = gate(modus, abdruck=True)
+def test_mit_abdruck_gilt_im_modus_streng_die_erkannte_stimme():
+    g = gate("streng", abdruck=True)
     assert g.status == "bereit"
     g.eintragen(EIGEN)
     assert g.pflicht_grund() is None
     g.eintragen(FREMD)
     assert g.pflicht_grund() == "fremde Stimme"
+
+
+def test_mit_abdruck_sperrt_im_modus_beobachten_kein_urteil():
+    """18.11.2026: Eine ungenaue Erkennung sperrt keine Aktion mehr. Der Abdruck bleibt die Voraussetzung, das Urteil entscheidet nicht."""
+    g = gate("beobachten", abdruck=True)
+    assert g.status == "bereit"
+    assert g.pflicht_grund() is None  # noch nie erkannt
+    for urteil in (FREMD, "unklar", EIGEN):
+        g.eintragen(urteil)
+        assert g.pflicht_grund() is None, urteil
+
+
+async def test_im_modus_beobachten_geht_der_pc_befehl_trotz_fremder_stimme_durch():
+    g = gate("beobachten", abdruck=True)
+    g.eintragen(FREMD)
+    assert await g.pflicht_pruefen("programm_oeffnen") is None
+
+
+def test_beobachten_mit_abdruck_aber_ladendem_modell_sperrt_nicht():
+    g = gate("beobachten", abdruck=True)
+    g.modell_ok = None  # das Modell lädt noch oder ist ausgefallen
+    assert g.status != "bereit" and g.zustand == "da"
+    assert g.pflicht_grund() is None
 
 
 def test_abdruck_aber_modus_aus_heisst_nur_getippt():

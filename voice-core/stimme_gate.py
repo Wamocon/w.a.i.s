@@ -11,10 +11,15 @@ vor dem Ausführen das Gate (werkzeuge_absichern, schemas_absichern): geprüft w
 - Getippter Text aus der Oberfläche zählt wie die eigene Stimme: die Oberfläche ist mit zweitem Faktor angemeldet (tippen_beobachten).
   Prüfergebnisse zu früheren Äußerungen überschreiben ihn nicht.
 
-Modi (WAMO_STIMME_PRUEFUNG): aus | beobachten (messen, melden, ins Log schreiben, nichts sperren) | streng (Standard). Alles wirkt nur für ein
+Modi (WAMO_STIMME_PRUEFUNG): aus | beobachten (Standard seit 18.11.2026: messen, melden, ins Log schreiben, nichts sperren) | streng (nur noch
+auf ausdrücklichen Wunsch). Entscheidung von Niko am 18.11.2026 abends: Die Stimmerkennung ist zu ungenau, um etwas zu sperren (eigene Sätze
+lagen bei Mikrofon- oder Raumwechsel bei 0,0 bis 0,35 und wurden verworfen, Entwicklungsaufträge und Aktionen blieben stehen). Die Stimme ist
+jetzt ein Hinweis (Anzeige, Log), nie eine Sperre. Aktionen schützen weiter die Anmeldung mit zweitem Faktor und die Freigabekarten für
+kritische Änderungen. Alles wirkt nur für ein
 Profil mit eingelerntem Abdruck: ohne Abdruck wird nicht geprüft und nichts gesperrt (status fehlt), die Einwilligung ist freiwillig und
 ihr Fehlen ohne Nachteil. Ausnahme (Entscheidung N10, Plan docs/ausrollen-neue-nutzer.md 4.5): PC-Werkzeuge der Mitglieder fragen zusätzlich
-die Pflichtstufe (pflicht_pruefen), unabhängig vom Modus; ohne Abdruck nehmen sie nur getippte Befehle an. Streng sperrt Werkzeuge außerdem, solange für ein Profil mit Abdruck oder bei unbekanntem Stand (Datenbank nicht
+die Pflichtstufe (pflicht_pruefen), unabhängig vom Modus; ohne Abdruck nehmen sie nur getippte Befehle an (das Einlernen ist die Voraussetzung,
+nicht die Genauigkeit). Mit Abdruck und bereiter Prüfung entscheidet das Urteil dort nur noch im Modus streng. Streng sperrt Werkzeuge außerdem, solange für ein Profil mit Abdruck oder bei unbekanntem Stand (Datenbank nicht
 lesbar) Modell oder Abdruck nicht geladen sind oder die Prüfung länger als WARTEN_WERKZEUG_SECS dauert; getippter Text geht immer.
 
 Schwellen (alle als Schalter in der Umgebung, siehe schwellen_aus_env): Ab welchem Wert eine Äußerung die eigene Stimme ist, hängt seit der
@@ -65,7 +70,7 @@ from stimme_modell import kosinus
 EIGEN, FREMD, UNKLAR, KURZ = "eigen", "fremd", "unklar", "kurz"
 GETIPPT = "getippt"
 MODI = ("aus", "beobachten", "streng")
-STANDARD_MODUS = "streng"
+STANDARD_MODUS = "beobachten"  # seit 18.11.2026 (siehe oben): die Stimme sperrt nichts, streng gilt nur auf ausdrücklichen Wunsch
 # Werkzeuge, die jede Stimme auslösen darf: nichts ändern, nichts Privates zeigen
 # fehler_erklaeren (fehlerbuch.py) liest nur, was in dieser Sitzung nicht ging: Es muss gerade dann gehen, wenn die Stimme nicht sicher war
 OFFENE_WERKZEUGE = frozenset({"aktuelle_zeit", "websuche", "canvas_zeigen", "fehler_erklaeren"})
@@ -263,6 +268,12 @@ class StimmGate:
         return "bereit"
 
     @property
+    def sperrt(self) -> bool:
+        """Darf die Stimme etwas sperren (Werkzeuge, Äußerungen, Einlernen)? Nur im Modus streng, den es seit 18.11.2026 nur noch auf
+        ausdrücklichen Wunsch gibt. Sonst ist das Urteil ein Hinweis."""
+        return self.modus == "streng"
+
+    @property
     def verwirft(self) -> bool:
         """Verwirft der Wächter Äußerungen (stimme_waechter.py)? Nur im Modus streng mit bereiter Prüfung (Abdruck und Modell geladen); ohne
         Abdruck nie, und ein Laborprofil bekommt gar kein Gate."""
@@ -418,11 +429,14 @@ class StimmGate:
         """Pflichtstufe für PC-Befehle der Mitglieder (rechte.stimme_pflicht, Entscheidung N10), unabhängig vom Modus: Sprache nur mit
         eingelerntem Abdruck und bereiter Prüfung (dann dieselbe Regel wie grund_der_stimme), sonst nur getippter Text, und nur, solange seit
         dem Tippen niemand gesprochen hat. None heißt erlaubt, sonst der Grund. Ohne Abdruck, im Modus aus oder solange die Prüfung nicht
-        bereit ist, gehen PC-Befehle eines Mitglieds also nur getippt."""
-        if self._ausstehend is not None and not self._ausstehend.done():
+        bereit ist, gehen PC-Befehle eines Mitglieds also nur getippt. Mit Abdruck und bereiter Prüfung entscheidet das Urteil nur im Modus
+        streng (seit 18.11.2026 sonst nie: eine ungenaue Erkennung sperrt keine Aktion)."""
+        if self.sperrt and self._ausstehend is not None and not self._ausstehend.done():
             return "Stimmprüfung dauert zu lange"
         if self.status == "bereit":
-            return self.grund_der_stimme()
+            return self.grund_der_stimme() if self.sperrt else None
+        if self.modus == "beobachten" and self.zustand == "da":
+            return None  # Abdruck eingelernt, das Modell lädt noch oder ist ausgefallen: das Urteil sperrt ohnehin nichts mehr
         if self._wer == GETIPPT and self._getippt_um >= self._gesprochen_um:
             return self.grund_der_stimme()  # getippt gilt so lange wie eine erkannte Stimme (vertrauen_secs)
         if self.modus == "aus":
@@ -443,8 +457,9 @@ class StimmGate:
         return {
             "status": "blocked",
             "grund": f"Stimmabdruck: {grund}",
-            "hinweis": "PC-Befehle per Sprache gehen für dieses Profil nur mit eingelerntem Stimmabdruck und sicher erkannter Stimme. "
-                       "Sonst den Befehl in der Oberfläche tippen. Nicht erneut versuchen.",
+            "hinweis": "PC-Befehle per Sprache gehen für dieses Profil nur mit eingelerntem Stimmabdruck"
+                       + (" und sicher erkannter Stimme" if self.sperrt else "")
+                       + ". Sonst den Befehl in der Oberfläche tippen. Nicht erneut versuchen.",
         }
 
     def grund_der_stimme(self) -> str | None:

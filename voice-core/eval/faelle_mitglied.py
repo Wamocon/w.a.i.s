@@ -30,7 +30,7 @@ FENSTER = frozenset({"fenster_auflisten"})
 STIMME_GESPERRT = {
     "status": "blocked",
     "grund": "Stimmabdruck: kein Stimmabdruck eingelernt, PC-Befehle nur getippt",
-    "hinweis": "PC-Befehle per Sprache gehen für dieses Profil nur mit eingelerntem Stimmabdruck und sicher erkannter Stimme. "
+    "hinweis": "PC-Befehle per Sprache gehen für dieses Profil nur mit eingelerntem Stimmabdruck. "
                "Sonst den Befehl in der Oberfläche tippen. Nicht erneut versuchen.",
 }
 SEITE_POWERSHELL = {

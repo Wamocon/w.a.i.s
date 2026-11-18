@@ -861,7 +861,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         zustand: dict = {"pc_steuerung": "an" if pc_allowed() else "aus",
                          "pc_erreichbar": bool(getattr(pc_client, "erreichbar", False)) if pc_client is not None else False}
         if stimme is not None:
-            zustand["stimme"] = stimme.gate.grund_der_stimme() or "zuletzt sicher erkannt"
+            # seit 18.11.2026 sperrt die Stimme nichts (Modus beobachten): sie wird nur gemessen, also kein Grund für ein Fehlschlagen
+            zustand["stimme"] = (stimme.gate.grund_der_stimme() or "zuletzt sicher erkannt") if stimme.gate.sperrt \
+                else "wird nur gemessen und sperrt nichts"
         return zustand
 
     if not labor_sitzung:
