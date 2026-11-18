@@ -451,7 +451,7 @@ class SperrTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Nicht erneut", gesperrt["hinweis"])
 
     async def test_offene_werkzeuge_und_modus_beobachten_und_aus_sperren_nie(self):
-        self.assertEqual(OFFENE_WERKZEUGE, {"aktuelle_zeit", "websuche", "canvas_zeigen"})
+        self.assertEqual(OFFENE_WERKZEUGE, {"aktuelle_zeit", "websuche", "canvas_zeigen", "fehler_erklaeren"})
         gate = bereites_gate()
         gate.eintragen(FREMD)
         for name in OFFENE_WERKZEUGE:

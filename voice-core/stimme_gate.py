@@ -58,7 +58,8 @@ GETIPPT = "getippt"
 MODI = ("aus", "beobachten", "streng")
 STANDARD_MODUS = "streng"
 # Werkzeuge, die jede Stimme auslösen darf: nichts ändern, nichts Privates zeigen
-OFFENE_WERKZEUGE = frozenset({"aktuelle_zeit", "websuche", "canvas_zeigen"})
+# fehler_erklaeren (fehlerbuch.py) liest nur, was in dieser Sitzung nicht ging: Es muss gerade dann gehen, wenn die Stimme nicht sicher war
+OFFENE_WERKZEUGE = frozenset({"aktuelle_zeit", "websuche", "canvas_zeigen", "fehler_erklaeren"})
 WARTEN_WERKZEUG_SECS = 2.0  # so lange wartet ein Werkzeug höchstens auf die laufende Prüfung
 MARKE = "_wamo_stimme_gate"  # am eingepackten Handler: welches Gate ihn schon prüft
 _GEWARNT: set[object] = set()  # was schon einmal gewarnt wurde (unbekannter Modus, VERWERFEN_MAX außerhalb des Bereichs)

@@ -184,6 +184,7 @@ from cache_waerme import vorwaermen
 from env_schalter import schalter_an
 from latenz import LatenzObserver, api_messen, latenz_log_an
 from pc_geraet import geraet_wache, rechnername_passt
+import fehlerbuch
 from pipeline_protokoll import PipelineProtokoll
 from schluessel_filter import SchluesselFilter, absichern
 from sprache_anbieter import haus_stt, haus_tts, sprach_wahl
@@ -842,6 +843,19 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     ausgaben = Ausgaben(schwelle=0) if labor_sitzung else Ausgaben()
     if ausgaben.schwelle > 0:
         standard_tools.append(register_nachladen(llm, ausgaben, turn.taint))
+    # Fehlerbuch (fehlerbuch.py, Wunsch vom 18.11.2026): was in dieser Sitzung nicht ging und warum, nur im Speicher. fehler_erklaeren
+    # gibt es nicht im Labor (Laborprofile bekommen keine neuen Werkzeuge); gesammelt wird trotzdem, das kostet nichts.
+    fehler = fehlerbuch.Fehlerbuch()
+
+    def fehler_zustand() -> dict:
+        zustand: dict = {"pc_steuerung": "an" if pc_allowed() else "aus",
+                         "pc_erreichbar": bool(getattr(pc_client, "erreichbar", False)) if pc_client is not None else False}
+        if stimme is not None:
+            zustand["stimme"] = stimme.gate.grund_der_stimme() or "zuletzt sicher erkannt"
+        return zustand
+
+    if not labor_sitzung:
+        standard_tools.append(fehlerbuch.registrieren(llm, fehler, zustand=lambda: fehler_zustand(), on_foreign_content=turn.taint))
     dev: DevAgent | None = None
     if entwicklung:
         # Entwicklungsaufträge an Claude Code; Start und Freigaben per Klick in der UI (dev_agent.py). Mit eigenem
@@ -1114,7 +1128,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_frames=IDLE_FRAMES,
-        observers=[PipelineProtokoll(), *([latenz_beobachter] if latenz_beobachter else [])],
+        observers=[PipelineProtokoll(), fehlerbuch.FehlerBeobachter(fehler), *([latenz_beobachter] if latenz_beobachter else [])],
         # Labor: Client-Nachrichten gegen die Erlaubnisliste prüfen, bevor Pipecat sie auswertet (labor_rtvi.py)
         rtvi_processor=(LaborRTVIProcessor(art=identity.labor_art, begrenzer=labor_grenzen.text, klicks=labor_grenzen.klicks)
                         if labor_sitzung else None),
@@ -1131,6 +1145,10 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     guard = SessionGuard(identity, profiles)
 
     async def send(data: dict) -> None:
+        try:
+            fehler.aus_meldung(data)  # gescheiterte Klicks und Vorgänge ins Fehlerbuch (fehlerbuch.py), stört nie das Senden
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Fehlerbuch: Meldung nicht gelesen ({})", type(e).__name__)
         await task.queue_frames([RTVIServerMessageFrame(data=data)])
 
     async def canvas_legen(item: dict) -> None:
