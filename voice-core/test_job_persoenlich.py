@@ -155,7 +155,8 @@ class HelferTests(unittest.TestCase):
 import contextlib  # noqa: E402
 import inspect  # noqa: E402
 
-G = sys.modules.get("wamo_job_github") or _laden("wamo_job_github", "wamo_job_github.py")
+# Eigene Kopie der Schnittstelle: andere Testdateien laden wamo_job_github neu; der Dispatcher bekommt in den Tests genau diese (github_modul)
+G = _laden("wamo_job_github_persoenlich", "wamo_job_github.py")
 K = sys.modules.get("wamo_job_kernkanal") or _laden("wamo_job_kernkanal", "wamo_job_kernkanal.py")
 
 
@@ -209,7 +210,7 @@ class DispatcherBasis(unittest.TestCase):
                         mock.patch.object(D, "Sperre", _Sperre), mock.patch.object(D, "aufraeumen"),
                         mock.patch.object(D, "exklusiv", lambda pfad: contextlib.nullcontext()),
                         mock.patch.object(D, "exklusiv_mit_frist", lambda pfad, frist: contextlib.nullcontext()),
-                        mock.patch.object(D, "LESER", None)]
+                        mock.patch.object(D, "LESER", None), mock.patch.object(D, "github_modul", lambda: G)]
         for patch in self.patches:
             patch.start()
 
@@ -263,6 +264,11 @@ class SchnittstelleTests(unittest.TestCase):
         self.assertEqual(set(K.BEFEHLE_GESCHLOSSEN) & set(G.BEFEHLE_GITHUB), set(G.BEFEHLE_GITHUB_GESCHLOSSEN))
         self.assertNotIn("einreichen", K.BEFEHLE_GESCHLOSSEN)
         self.assertEqual(K.BEFEHLE_NOTAUS, ("ping", "status"))
+
+    def setUp(self):
+        patch = mock.patch.object(D, "github_modul", lambda: G)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def test_die_werkzeuge_erfuellen_das_protokoll_mit_denselben_signaturen(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -669,6 +675,14 @@ class WerkzeugeTests(DispatcherBasis):
         erlaubt = [((("clone", "--bare", "--single-branch", "--branch", "main", "--no-tags", "--template=", "--", url,
                        str(w.pfad("basis.git")))), None, True),
                    (("push", "--no-verify", "--porcelain", "--", url, f"{'c' * 40}:refs/heads/wamo/{JOB}"), "aus.git", True),
+                   # genau die Aufrufe von wamo_job_github (Paket D-b)
+                   (("-c", "push.negotiate=true", "push", "--no-verify", "--no-follow-tags", "--porcelain", "--", url,
+                     f"{'c' * 40}:refs/heads/wamo/{JOB}"), "aus.git", True),
+                   (("clone", "--bare", "--single-branch", "--branch=main", "--no-tags", "--template=", "--", url, str(w.pfad("basis.git"))),
+                    None, True),
+                   (("ls-tree", "-r", "-z", "--full-tree", "b" * 40), "basis.git", False), (("init", "--bare", "--quiet", "--template="), "aus.git", False),
+                   (("rev-parse", "--verify", "--quiet", "--end-of-options", "refs/heads/main"), "basis.git", False),
+                   (("update-index", "-z", "--index-info"), "aus.git", False), (("update-ref", "refs/wamo/kandidat", "c" * 40), "aus.git", False),
                    (("ls-remote", "--", url, f"refs/heads/wamo/{JOB}"), "basis.git", True),
                    (("hash-object", "-w", "--no-filters", "--stdin"), "aus.git", False),
                    (("commit-tree", "-F", "-", "d" * 40, "-p", "b" * 40), "aus.git", False)]
@@ -691,6 +705,9 @@ class WerkzeugeTests(DispatcherBasis):
                     (("ls-remote", "--", url, f"refs/heads/wamo/{JOB}"), "aus.git", False),  # ohne netz
                     (("fetch", "--", url), "aus.git", True), (("config", "remote.x.url", url), "aus.git", False),
                     (("rev-parse", "HEAD"), "basis.git", True), (("rev-parse", "HEAD"), None, False),
+                    (("-c", "push.negotiate=true", "fetch", "--", url), "aus.git", True), (("-c", "core.hooksPath=/tmp", "push"), "aus.git", True),
+                    (("diff-tree", "-r", "--output=/tmp/x", "b" * 40, "c" * 40), "aus.git", False),
+                    (("diff-tree", "--ext-diff", "b" * 40, "c" * 40), "aus.git", False),
                     (("rev-parse", "$(id)"), "aus.git", False), (("rev-parse", "a b"), "aus.git", False),
                     (("-c", "x=y", "rev-parse"), "aus.git", False), (("cat-file", "--batch", "file:///etc/passwd"), "aus.git", False)]
         # Die Regeln je Aufruf (_git_regeln); unter Windows enthält der Pfad von basis.git Laufwerk und Backslash, die GIT_ARG_RE in
@@ -856,8 +873,10 @@ class VorlaufTests(DispatcherBasis):
         (self.projekte / "kern-1a2b3c4d-demo").mkdir()
         self.kopf = D.Kopf("Baue etwas", "", None, "octo/demo", "folgt", PROFIL, "persoenlich", ("workflow",))
         self.schritte = []
-        self.patches.append(mock.patch.object(D, "sandbox_schritt", side_effect=self._schritt))
-        self.patches[-1].start()
+        for patch in (mock.patch.object(D, "sandbox_schritt", side_effect=self._schritt),
+                      mock.patch.object(D, "projekt_entschaerfen", return_value=[])):
+            self.patches.append(patch)
+            patch.start()
 
     def _schritt(self, modus, job, projekt, platz, argumente=(), zeitlimit_s=None):
         self.schritte.append((modus, list(argumente)))
@@ -878,8 +897,8 @@ class VorlaufTests(DispatcherBasis):
         geheimnis = geheimnis_aus()
         with mock.patch.object(G, "start", side_effect=start, create=True):
             lauf = D.github_vorlauf(self.jobdir, JOB, "kern-1a2b3c4d-demo", "umsetzung", self.kopf, 2, geheimnis)
-        self.assertEqual(aufrufe[0][1], {"job": JOB, "repo": "octo/demo", "art": "umsetzung", "profil": PROFIL,
-                                         "scopes_ausnahmen": ("workflow",), "max_klon_mb": 2048})
+        self.assertEqual(aufrufe[0][1], {"job": JOB, "repo": "octo/demo", "art": "umsetzung", "profil": PROFIL, "token_art": "klassisch",
+                                         "scopes_ausnahmen": ["workflow"], "max_klon_mb": 2048})
         self.assertFalse(geheimnis.gueltig)  # danach überschrieben, vor dem Lauf
         self.assertEqual((lauf.login, lauf.konto_id, lauf.basis), ("octo-cat", 4242, "b" * 40))
         self.assertEqual(self.ereignis("github"), [{"type": "wamo", "ereignis": "github", "repo": "octo/demo", "konto": "octo-cat",
@@ -1092,12 +1111,14 @@ class EinreichenTests(DispatcherBasis):
             self.assertTrue(w._zugang.gueltig)
             with w.sperre(".einreichen") as gehalten:
                 self.assertTrue(gehalten)
-            self.assertIsNone(kw["kanal"](True))
+            self.assertIsNone(kw["kanal"]())
+            self.assertIsNone(kw["zaehlen"]())
+            self.assertEqual(kw["token_art"], "klassisch")
             return {"zweig": f"wamo/{JOB}", "pr": 12, "adresse": "https://github.com/octo/demo/pull/12"}
         with mock.patch.object(G, "einreichen", side_effect=einreichen, create=True):
             self.assertEqual(self.einreichen(self.ZEILE), D.EXIT_OK)
-        self.assertEqual(gesehen["eingabe"], {"commit_id": "c" * 40, "tree_id": "d" * 40, "bestaetigt": ("a.lock", "b.lock"),
-                                              "scopes_ausnahmen": ()})
+        self.assertEqual(gesehen["eingabe"], {"commit_id": "c" * 40, "tree_id": "d" * 40, "bestaetigt": ["a.lock", "b.lock"],
+                                              "scopes_ausnahmen": []})
         self.assertEqual(self.ereignis("eingereicht"), [{"type": "wamo", "ereignis": "eingereicht", "job": JOB, "zweig": f"wamo/{JOB}",
                                                          "pr": 12, "adresse": "https://github.com/octo/demo/pull/12"}])
         self.assertNotIn(TOKEN.encode(), self.letzter_puffer)
@@ -1149,9 +1170,9 @@ class EinreichenTests(DispatcherBasis):
             self.ereignisse.clear()
 
             def einreichen(w, **kw):
-                self.assertIsNone(kw["kanal"](False))
-                self.assertIsNone(kw["kanal"](True))
-                self.assertEqual(kw["kanal"](True), "grenze_einreichen")  # MAX_EINREICHEN_TAG_PROFIL 1
+                self.assertIsNone(kw["kanal"]())
+                self.assertIsNone(kw["zaehlen"]())
+                self.assertEqual(kw["zaehlen"](), "grenze_einreichen")  # MAX_EINREICHEN_TAG_PROFIL 1
                 return {"zweig": f"wamo/{JOB}", "pr": 3, "adresse": "https://github.com/octo/demo/pull/3"}
             with self.subTest(persoenlich=persoenlich), mock.patch.object(D, "kern_modul", return_value=K), \
                     mock.patch.object(D, "KERN_PFADE", pfade), mock.patch.object(D, "kern_zustand", return_value=zustand), \

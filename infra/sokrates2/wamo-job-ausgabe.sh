@@ -6,8 +6,8 @@
 #
 #   wamo-job-ausgabe.sh --auftrag <job> --basis <40 Hex>
 #       schreibt die Commits des Zweigs wamo/<job> seit der Basis als /run/wamo/ausgabe/aenderung.bundle (höchstens 201 Commits: mehr weist
-#       die Prüfung mit zu_viele_commits ab) und /run/wamo/ausgabe/status.json mit genau {"ungesichert": <Zahl>} (Dateien, die nicht
-#       committet sind). Kein Bundle heißt Status keine (der Zweig fehlt oder hat keine Commits über der Basis). Fehlt die Basis im Repo
+#       die Prüfung mit zu_viele_commits ab) und /run/wamo/ausgabe/status.json mit genau einer ganzen Zahl (Dateien, die nicht committet
+#       sind, wamo_job_github._status_lesen). Kein Bundle heißt Status keine (der Zweig fehlt oder hat keine Commits über der Basis). Fehlt die Basis im Repo
 #       (etwa eine umgeschriebene Geschichte), geht der Zweig ohne Untergrenze ins Bundle; die Prüfung meldet dann basis_fehlt.
 # Exit 0 ok (auch ohne Bundle), 2 falsche Aufrufform, 70 Fehler.
 set -euo pipefail
@@ -55,5 +55,5 @@ if "${G[@]}" rev-parse -q --verify "$ZWEIG^{commit}" >/dev/null 2>&1; then
     "${G[@]}" bundle create --quiet "$A/aenderung.bundle" --max-count=201 "$ZWEIG" || fehler "Bundle nicht erstellbar"
   fi
 fi
-printf '{"ungesichert": %d}\n' "$ungesichert" > "$A/status.json"
+printf '%d\n' "$ungesichert" > "$A/status.json"
 echo "ausgabe ok"

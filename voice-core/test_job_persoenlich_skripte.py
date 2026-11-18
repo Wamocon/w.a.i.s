@@ -188,7 +188,7 @@ def test_ausgabe_und_folgelauf_aus_dem_bundle(repos):
     p = _skript(repos["ausgabe"], "--auftrag", JOB, "--basis", repos["basis"], cwd=projekt)
     assert p.returncode == 0, p.stderr
     assert not (repos["ordner"] / "ausgabe" / "aenderung.bundle").exists()  # keine Commits: kein Bundle (Status keine)
-    assert json.loads((repos["ordner"] / "ausgabe" / "status.json").read_text()) == {"ungesichert": 0}
+    assert (repos["ordner"] / "ausgabe" / "status.json").read_bytes() == b"0\n"  # nur eine ganze Zahl (wamo_job_github._status_lesen)
     (projekt / "neu.py").write_text("print(2)\n", encoding="utf-8")
     _git("add", "neu.py", cwd=projekt)
     _git("commit", "-q", "-m", f"Neu\n\nWAIS-Auftrag: {JOB}", cwd=projekt)
@@ -198,7 +198,7 @@ def test_ausgabe_und_folgelauf_aus_dem_bundle(repos):
     assert _skript(repos["ausgabe"], "--auftrag", JOB, "--basis", repos["basis"], cwd=projekt).returncode == 0
     bundle = repos["ordner"] / "ausgabe" / "aenderung.bundle"
     assert bundle.is_file()
-    assert json.loads((repos["ordner"] / "ausgabe" / "status.json").read_text()) == {"ungesichert": 1}
+    assert (repos["ordner"] / "ausgabe" / "status.json").read_bytes() == b"1\n"
     # Folgelauf in einem Ordner, den inzwischen ein anderer Auftrag gebaut hat: neu aus basis.git und dem letzten Bundle
     shutil.copy(bundle, repos["ordner"] / "letztes.bundle")
     for kind in list(projekt.iterdir()):
@@ -238,9 +238,11 @@ def test_die_einrichtung_installiert_helfer_skripte_modul_und_timer():
                  'install -o root -g "$WAMO_USER" -m 0640 "$HERE/wamo_job_github.py" "$APP/waechter/"',
                  '"bin/wamo-git-zugang:wamo-git-zugang"', '"waechter/wamo_job_github.py:wamo_job_github.py"',
                  '"waechter/wamo-job-klon.sh:wamo-job-klon.sh"', '"waechter/wamo-job-ausgabe.sh:wamo-job-ausgabe.sh"',
-                 "systemctl enable --now wamo-job-aufraeumen.timer", "for datei in wamo_job_pfadregeln.py wamo_job_auszug.py; do"):
+                 "systemctl enable --now wamo-job-aufraeumen.timer", "GITHUB_LOGIK=(wamo_job_pfadregeln.py wamo_job_auszug.py)"):
         assert teil in text, teil
-    assert "wamo-git-zugang wamo-job-klon.sh wamo-job-ausgabe.sh wamo-job-aufraeumen.service wamo-job-aufraeumen.timer" in text
+    assert "wamo_job_github.py wamo_job_pfadregeln.py wamo_job_auszug.py wamo-git-zugang wamo-job-klon.sh wamo-job-ausgabe.sh" in text
+    for datei in ("wamo_job_github.py", "wamo_job_pfadregeln.py", "wamo_job_auszug.py", "wamo-git-zugang", "wamo-job-klon.sh"):
+        assert (INFRA / datei).is_file(), datei  # alles, was die Einrichtung verlangt, liegt im Repo
 
 
 def _sicherung(w: Path, dispatcher: str, neu: str = "") -> Path:

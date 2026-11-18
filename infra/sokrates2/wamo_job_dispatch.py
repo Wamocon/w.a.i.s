@@ -291,6 +291,7 @@ GIT_ZEITLIMIT_S = 300
 GIT_SPEICHER = 2 * 1024 * 1024 * 1024  # RLIMIT_AS je git-Aufruf des Dispatchers
 GIT_DATEI_MAX = 4 * 1024 * 1024 * 1024  # RLIMIT_FSIZE je git-Aufruf
 MAX_GIT_AUSGABE = 4 * 1024 * 1024
+MAX_GIT_LISTE = 64 * 1024 * 1024  # ls-tree und diff-tree eines großen Repos (über 50 000 Dateien); darüber endet der Aufruf mit einem Fehler
 GIT_ARG_RE = re.compile(r"[A-Za-z0-9_@%+=:,./^~-]{1,4096}")  # argv eines git-Aufrufs: druckbar, ohne Leerzeichen, Anführungszeichen, $
 # Sandbox-Schritte ohne Netz (wamo-job.sh --modus klon|ausgabe|pruefung, C.5.2): je Modus genau das feste Programm in /opt/wamo/waechter
 SCHRITT_PROGRAMME = {"klon": (str(WAECHTER / "wamo-job-klon.sh"),),
@@ -3048,6 +3049,11 @@ class GithubGeheimnis:
     def gueltig(self) -> bool:
         return self._bis > self._von and any(self._puffer[self._von:self._von + 4])
 
+    @property
+    def art(self) -> str:
+        """klassisch (ghp_) oder fein (github_pat_), aus dem Anfang des Tokens (kein Geheimnis)."""
+        return "fein" if self._puffer[self._von:self._von + 11] == b"github_pat_" else "klassisch"
+
     def ansicht(self) -> memoryview:
         """memoryview auf das Token (für Schwärzung und Vergleich); der Aufrufer gibt es mit release() frei."""
         return memoryview(self._puffer)[self._von:self._bis]
@@ -3509,14 +3515,16 @@ def kern_buchung(job: str, profil: str | None = None, pruefung=None):
 #
 # Einstiege der GitHub-Logik (Vertrag D-a zu D-b; Fehler: eine Ausnahme mit dem Attribut grund, ein Code aus GITHUB_GRUENDE, AENDERUNG_GRUENDE,
 # EINREICHEN_GRUENDE oder KANAL_GRUENDE; jede andere Ausnahme endet geschlossen mit dem Standardcode des Einstiegs):
-#   start(w, *, job, repo, art, profil, scopes_ausnahmen)   C.5 Start 2 bis 4: GitHub prüfen, basis.git klonen und bereinigen, github.json
-#                                                            schreiben. Den Sandbox-Schritt klon und die Entschärfung macht danach der
-#                                                            Dispatcher (ruft start ihn selbst, erkennt der Dispatcher das am Eigner).
-#   laufende(w, *, job, projekt, art, profil, auftrag, lauf) C.5 Laufende 1 bis 5 über w.sandbox("ausgabe") und w.sandbox("pruefung"):
-#                                                            aenderung.json, einreichen.json, aus.git. Ohne Token.
-#   einreichen(w, *, job, profil, eingabe, kanal)            C.5 Einreichen 2 bis 8; kanal(buchen) liefert None oder einen Code: vor dem
-#                                                            Push mit buchen=True (Notaus, Konfiguration, MAX_EINREICHEN_*, bucht einreichen),
-#                                                            vor dem Pull Request mit buchen=False. Ergebnis: dict mit zweig, pr, adresse.
+#   start(w, *, job, repo, art, profil, token_art, scopes_ausnahmen, max_klon_mb)
+#       C.5 Start 2 bis 4: GitHub prüfen, basis.git klonen und bereinigen, github.json schreiben. Den Sandbox-Schritt klon und die
+#       Entschärfung macht danach der Dispatcher. token_art (klassisch oder fein) bestimmt der Dispatcher aus dem Anfang der GitHub-Zeile.
+#   laufende(w, *, job, projekt, art, profil, auftrag, lauf)
+#       C.5 Laufende 1 bis 5 über w.sandbox("ausgabe") und w.sandbox("pruefung"): aenderung.json, einreichen.json, aus.git. Ohne Token;
+#       der Dispatcher hat das Projekt vorher entschärft.
+#   einreichen(w, *, job, profil, eingabe, token_art, kanal, zaehlen)
+#       C.5 Einreichen 2 bis 8. kanal(): zweite Prüfung des Kern-Kanals (Notaus, Konfiguration, PERSOENLICH); zaehlen(): Grenzen
+#       MAX_EINREICHEN_* und Buchung von einreichen, nur für einen neuen Push. Ergebnis: dict mit zweig, pr, adresse.
+# Die Sperren .lauf und .einreichen hält der Dispatcher für die ganze Dauer, die Logik nimmt sie nicht selbst.
 GITHUB_EINSTIEGE = ("start", "laufende", "einreichen")
 LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
@@ -3531,7 +3539,10 @@ GIT_BEFEHLE = frozenset({*GIT_NETZ_BEFEHLE, "init", "read-tree", "hash-object", 
 # Optionen, die nie hinter dem Unterbefehl stehen dürfen: fremde Programme, Konfiguration, andere Repos oder Vorlagen, Untermodule
 GIT_OPTIONEN_GESPERRT = ("-c", "--config", "--config-env", "--git-dir", "--work-tree", "--exec-path", "--namespace", "--super-prefix",
                          "--upload-pack", "--receive-pack", "--exec", "--reference", "--reference-if-able", "--separate-git-dir",
-                         "--recurse-submodules", "--shared", "--dissociate", "--server-option", "--filter", "--bundle-uri")
+                         "--recurse-submodules", "--shared", "--dissociate", "--server-option", "--filter", "--bundle-uri",
+                         "--output", "--ext-diff", "--textconv", "--open-files-in-pager")  # schreiben Dateien oder starten Programme
+GIT_PUSH_VORSPANN = ("-c", "push.negotiate=true")
+GIT_GROSSE_AUSGABE = ("ls-tree", "diff-tree", "rev-list", "ls-files")  # Listen über das ganze Repo: höhere Grenze MAX_GIT_LISTE
 GIT_KURZ_GESPERRT = {"clone": "uc", "ls-remote": "u", "push": "fdo"}  # Kurzoptionen je Unterbefehl (-u upload-pack, -f force, -d delete, -o)
 GIT_PUSH_GESPERRT = ("--force", "--force-with-lease", "--force-if-includes", "--mirror", "--delete", "--prune", "--all", "--tags",
                      "--follow-tags", "--set-upstream", "--atomic", "--push-option", "--signed")
@@ -3689,7 +3700,8 @@ def _git_umgebung() -> dict[str, str]:
 
 
 def git_aufruf(args: list[str] | tuple[str, ...], *, git_dir: Path | None = None, eingabe: bytes | None = None,
-               zugang: "GithubGeheimnis | None" = None, netz: bool = False, zeitlimit_s: float = 60) -> tuple[int, bytes, bytes]:
+               zugang: "GithubGeheimnis | None" = None, netz: bool = False, zeitlimit_s: float = 60,
+               ausgabe_max: int = MAX_GIT_AUSGABE) -> tuple[int, bytes, bytes]:
     """Ein git-Aufruf des Dispatchers (C.5 gemeinsam): --git-dir auf ein eigenes Repo (oder keins für clone), cwd="/", Umgebung
     _git_umgebung, Einstellungen GIT_GEMEINSAM, Grenzen über prlimit (Speicher, Dateigröße, keine Core-Datei) und ein Zeitlimit. Jedes
     Argument muss GIT_ARG_RE erfüllen. Ohne netz ist auch https gesperrt (kein Protokoll erlaubt). Mit netz und zugang meldet sich git
@@ -3725,7 +3737,9 @@ def git_aufruf(args: list[str] | tuple[str, ...], *, git_dir: Path | None = None
     if proc is not None:
         try:
             stdout, stderr = proc.communicate(eingabe if eingabe is not None else b"", timeout=zeitlimit_s)
-            code, stdout, stderr = proc.returncode, stdout[:MAX_GIT_AUSGABE], stderr[-8192:]
+            code, stderr = proc.returncode, stderr[-8192:]
+            if len(stdout) > ausgabe_max:  # nie still gekürzt: eine abgeschnittene Liste sähe vollständig aus
+                code, stdout, stderr = 1, b"", b"git: Ausgabe zu gross"
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(proc.pid, getattr(signal, "SIGKILL", 9))
@@ -3845,6 +3859,10 @@ class DispatcherWerkzeuge:
         """argv-Regeln für Werkzeuge.git (die Umsetzung ist die einzige Stelle, die sie durchsetzt): ein bekannter Unterbefehl zuerst, keine
         gesperrte Option, eine Adresse nur mit netz und dann genau https://github.com/<Repo des Auftrags>.git nach "--", clone nur nach
         basis.git, push genau <Commit>:refs/heads/wamo/<job> ohne Force, ls-remote genau refs/heads/wamo/<job>. ValueError sonst."""
+        if args[:2] == GIT_PUSH_VORSPANN:  # die einzige Einstellung vor dem Unterbefehl, nur für push (wamo_job_github)
+            args = args[2:]
+            if not args or args[0] != "push":
+                raise ValueError("git: -c nur für push.negotiate vor push")
         befehl = args[0]
         if befehl not in GIT_BEFEHLE:
             raise ValueError("git: Unterbefehl nicht erlaubt")
@@ -3889,8 +3907,10 @@ class DispatcherWerkzeuge:
             raise g.KeinToken("kein Token in diesem Aufruf")
         if not 0 < float(zeitlimit_s) <= GIT_ZEITLIMIT_S:
             raise ValueError("git: Zeitlimit ungültig")
+        befehl = args[2] if args[:2] == GIT_PUSH_VORSPANN else args[0]
         code, stdout, stderr = git_aufruf(args, git_dir=Path(git_dir) if git_dir is not None else None, eingabe=eingabe,
-                                          zugang=self._zugang if netz else None, netz=bool(netz), zeitlimit_s=float(zeitlimit_s))
+                                          zugang=self._zugang if netz else None, netz=bool(netz), zeitlimit_s=float(zeitlimit_s),
+                                          ausgabe_max=MAX_GIT_LISTE if befehl in GIT_GROSSE_AUSGABE else MAX_GIT_AUSGABE)
         ersetzungen = self._ersetzungen()
         try:
             text = schwaerzen(stderr, ersetzungen).decode("utf-8", "replace")
@@ -4009,6 +4029,8 @@ def schritt_argumente(modus: str, lauf: PersoenlicherLauf, jobdir: Path) -> list
     if modus == "klon":
         bundle = (jobdir / "bundle.ein").is_file() and not (jobdir / "bundle.ein").is_symlink()
         return ["--repo", lauf.repo, "--auftrag", lauf.job, "--basis", lauf.basis, *(["--bundle"] if bundle else [])]
+    if modus == "pruefung":  # wamo_job_auszug.py: --job und --basis, die Pfade stehen fest unter /run/wamo, Arbeitsordner unter TMPDIR
+        return ["--job", lauf.job, "--basis", lauf.basis]
     return ["--auftrag", lauf.job, "--basis", lauf.basis]
 
 
@@ -4174,7 +4196,7 @@ def einreichen_eingabe_pruefen(raw: bytes) -> dict:
         scopes = scopes_pruefen(obj["scopes_ausnahmen"]) if "scopes_ausnahmen" in obj else ()
     except Abgewiesen:
         raise GithubAbgelehnt("token_rechte") from None
-    return {"commit_id": commit, "tree_id": tree, "bestaetigt": tuple(sorted(set(pfade))), "scopes_ausnahmen": scopes}
+    return {"commit_id": commit, "tree_id": tree, "bestaetigt": sorted(set(pfade)), "scopes_ausnahmen": list(scopes)}
 
 
 def _kern_einreichen_pruefen(job: str, profil: str, buchen: bool = False, versuch: bool = False) -> str | None:
@@ -4240,8 +4262,9 @@ def cmd_einreichen(job: str, profil: str) -> int:
         projekt = read_json(jobdir / "auftrag.json", {}).get("projekt", "")
         werkzeuge = DispatcherWerkzeuge(job, projekt, jobdir, zugang=geheimnis, gehalten=(".lauf", ".einreichen"))
         try:
-            ergebnis = _github_aufruf("einreichen", werkzeuge, job=job, profil=profil, eingabe=eingabe,
-                                      kanal=lambda buchen=False: _kern_einreichen_pruefen(job, profil, buchen))
+            ergebnis = _github_aufruf("einreichen", werkzeuge, job=job, profil=profil, eingabe=eingabe, token_art=geheimnis.art,
+                                      kanal=lambda: _kern_einreichen_pruefen(job, profil),
+                                      zaehlen=lambda: _kern_einreichen_pruefen(job, profil, buchen=True))
         except GithubAbgelehnt as e:
             return _einreichen_fehler(job, e.grund)
         felder = _eingereicht_felder(ergebnis, read_json(jobdir / "auftrag.json", {}).get("repo"), job)
@@ -4477,8 +4500,8 @@ def github_vorlauf(jobdir: Path, job: str, projekt: str, art: str, kopf: Kopf, p
         github_dateien_entfernen(jobdir)  # ein neuer Klon: keine Reste eines früheren Versuchs (Bundle, Kandidat, Ausgaben)
         (jobdir / "github.json").unlink(missing_ok=True)
         try:
-            _github_aufruf("start", werkzeuge, job=job, repo=kopf.repo, art=art, profil=kopf.profil,
-                           scopes_ausnahmen=kopf.scopes_ausnahmen, max_klon_mb=max_klon_mb, fehler="klon_fehler")
+            _github_aufruf("start", werkzeuge, job=job, repo=kopf.repo, art=art, profil=kopf.profil, token_art=geheimnis.art,
+                           scopes_ausnahmen=list(kopf.scopes_ausnahmen), max_klon_mb=max_klon_mb, fehler="klon_fehler")
             lauf = PersoenlicherLauf.aus_datei(jobdir, job, kopf.repo)
             if baum_groesse_mb(jobdir / "basis.git", max_klon_mb + 1) > max_klon_mb:  # zweite Sicherung neben der Angabe von GitHub
                 raise GithubAbgelehnt("repo_zu_gross")
@@ -4545,16 +4568,20 @@ def github_nachlauf(jobdir: Path, job: str, projekt: str, art: str, platz: int, 
     try:
         werte = tuple(w for w, _ in schwaerzungen(env))
         werkzeuge = DispatcherWerkzeuge(job, projekt, jobdir, platz=platz, werte=werte, gehalten=(".lauf",))
+        for entfernt in projekt_entschaerfen(PROJEKTE / projekt):  # Vorbedingung der Logik (C.5 Laufende 1)
+            log(f"entschärft {job} {projekt}: {entfernt}")
         _github_aufruf("laufende", werkzeuge, job=job, projekt=projekt, art=art, profil=kopf.profil, auftrag=kopf.auftrag,
                        lauf=_lauf_ergebnis(code), fehler="pruefung_fehler")
-    except GithubAbgelehnt as e:
+    except Exception as e:  # noqa: BLE001 (der Abschluss des Auftrags darf nie an der Auswertung scheitern; fail closed: gesperrt)
+        grund = e.grund if isinstance(e, GithubAbgelehnt) else "pruefung_fehler"
+        if not isinstance(e, GithubAbgelehnt):
+            log(f"aenderung {job} FEHLER {type(e).__name__}")
         try:
-            write_json_atomic(jobdir / "aenderung.json", {"job": job, "status": "gesperrt", "gruende": [e.grund],
-                                                         "lauf": _lauf_ergebnis(code)})
+            if aenderung_lesen(jobdir).get("status", "keine") in LAUF_ERLAUBT:  # einen Zustand nach dem Einreichen nie überschreiben
+                write_json_atomic(jobdir / "aenderung.json", {"job": job, "status": "gesperrt", "gruende": [grund],
+                                                             "lauf": _lauf_ergebnis(code)})
         except OSError:
             log(f"aenderung {job}: aenderung.json nicht schreibbar")
-    except Exception as e:  # noqa: BLE001 (der Abschluss des Auftrags darf nie an der Auswertung scheitern)
-        log(f"aenderung {job} FEHLER {type(e).__name__}")
     try:
         wamo_event("aenderung", **aenderung_ereignis(job))
     except Exception as e:  # noqa: BLE001
