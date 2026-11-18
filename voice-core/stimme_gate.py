@@ -79,6 +79,12 @@ class Schwellen:
     min_secs: float = 1.0
     vertrauen_secs: float = 120.0
     kurz_vertrauen_secs: float = 15.0
+    # Befund 18.11.2026: Unter min_secs (1 s) lagen die eigenen Werte bei 0,14 bis 0,49, eine fremde Stimme bei 0,10 bis 0,30; der Wert
+    # trennt dort nicht. Solange WAMO nicht spricht, erbt eine so kurze Äußerung deshalb das Urteil eigen, wenn die letzte sichere
+    # Erkennung höchstens so lange zurückliegt (WAMO_STIMME_KURZ_ERBEN_SECS, 0 schaltet es ab). Sie zählt dann als kurz: Werkzeuge bleiben
+    # nur kurz_vertrauen_secs offen. Unter kurz_erben_min (Echo, Rauschen, klar fremd) erbt nichts; der kleinste eigene Wert lag bei 0,14.
+    kurz_erben_secs: float = 60.0
+    kurz_erben_min: float = 0.10
     # nur für den Wächter (stimme_waechter.verwerfen, Modus streng): unklare Äußerungen unter diesem Wert verwerfen (zwischen fremd_max
     # und eigen_min_lang), und nur Äußerungen mit mindestens so viel Sprache; beides gilt nur mit nur_eigen aus
     verwerfen_max: float = 0.4
@@ -132,6 +138,7 @@ def schwellen_aus_env() -> Schwellen:
                        fremd_max, eigen_kurz)
         eigen_kurz, eigen_lang, fremd_max = standard.eigen_min_kurz, standard.eigen_min_lang, standard.fremd_max
     verwerfen_min_secs = zahl_im_bereich("WAMO_STIMME_VERWERFEN_MIN_SECS", 0.0, 10.0)  # 0 ist gültig: nicht mit "or" abkürzen
+    kurz_erben = zahl_im_bereich("WAMO_STIMME_KURZ_ERBEN_SECS", 0.0, 600.0)  # 0 schaltet das Erben ab: nicht mit "or" abkürzen
     return Schwellen(
         eigen_min_kurz=eigen_kurz,
         eigen_min_lang=eigen_lang,
@@ -139,6 +146,7 @@ def schwellen_aus_env() -> Schwellen:
         min_secs=zahl_im_bereich("WAMO_STIMME_MIN_SECS", 0.3, 10.0) or standard.min_secs,
         vertrauen_secs=zahl_im_bereich("WAMO_STIMME_VERTRAUEN_SECS", 10.0, 3600.0) or standard.vertrauen_secs,
         kurz_vertrauen_secs=zahl_im_bereich("WAMO_STIMME_KURZ_VERTRAUEN_SECS", 1.0, 120.0) or standard.kurz_vertrauen_secs,
+        kurz_erben_secs=standard.kurz_erben_secs if kurz_erben is None else kurz_erben,
         verwerfen_max=_verwerfen_max(fremd_max, eigen_lang, standard.verwerfen_max),
         verwerfen_min_secs=standard.verwerfen_min_secs if verwerfen_min_secs is None else verwerfen_min_secs,
         nur_eigen=schalter_an("WAMO_STIMME_NUR_EIGEN", standard=standard.nur_eigen),
@@ -261,9 +269,22 @@ class StimmGate:
         s = self.schwellen
         if wert >= self.schwelle_fuer(secs):
             return EIGEN if secs >= s.min_secs else KURZ
+        if self.erbt(wert, secs, ueberlappung):
+            logger.info("Stimme: {:.2f} bei {:.1f} s ist zu kurz für ein Urteil, erbt eigen von vor {:.0f} s", wert, secs,
+                        self.uhr() - self._um)
+            return KURZ
         if wert <= s.fremd_max:
             return UNKLAR if ueberlappung else FREMD
         return UNKLAR
+
+    def erbt(self, wert: float, secs: float, ueberlappung: bool) -> bool:
+        """Erbt eine zu kurze Äußerung (unter min_secs) das Urteil eigen? Nur, solange WAMO nicht spricht (sonst könnte es Echo sein), nur
+        ab kurz_erben_min (klar fremd erbt nie), nur nach einer sicher erkannten Stimme (nicht nach Tippen) und nur bis kurz_erben_secs
+        danach (Befund 18.11.2026, siehe Schwellen)."""
+        s = self.schwellen
+        if ueberlappung or secs >= s.min_secs or s.kurz_erben_secs <= 0 or wert < s.kurz_erben_min or self._wer != EIGEN:
+            return False
+        return self.uhr() - self._um <= s.kurz_erben_secs
 
     def eintragen(self, urteil: str, gehoert_um: float | None = None) -> None:
         """gehoert_um: Ende der Äußerung (Uhr des Gates). Was vor getipptem Text gesagt wurde, zählt nicht mehr.

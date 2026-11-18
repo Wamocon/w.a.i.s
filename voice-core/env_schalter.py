@@ -40,6 +40,8 @@ Stimmabdruck (stimme_gate.py, stimme_modell.py, seit 14.11.2026; wirkt nur für 
   WAMO_STIMME_VERTRAUEN_SECS   Zahl, Standard 120: so lange gilt "eigen" für kurze Folgesätze und Werkzeuge (10 bis 3600)
   WAMO_STIMME_KURZ_VERTRAUEN_SECS  Zahl, Standard 15: so lange läuft das Vertrauen höchstens weiter, wenn seit der letzten sicheren
                                Erkennung nur kurze Äußerungen kamen (1 bis 120)
+  WAMO_STIMME_KURZ_ERBEN_SECS  Zahl, Standard 60 (seit 18.11.2026): eine Äußerung unter MIN_SECS erbt das Urteil eigen, wenn WAMO nicht
+                               spricht und die letzte sichere Erkennung höchstens so lange zurückliegt (0 bis 600, 0 schaltet es ab)
   WAMO_STIMME_NUR_EIGEN        an oder aus, Standard an (seit 17.11.2026): im Modus streng mit Abdruck erreicht nur die eigene Stimme
                                das Modell (Wert ab der Schwelle für eigen, auch kurz); fremd, unklar mit jedem Wert, fehlgeschlagene Prüfung und keine
                                Antwort in der Frist verwirft der Wächter (stimme_waechter.py). aus: die Regel vom 16.11.2026 mit

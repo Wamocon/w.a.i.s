@@ -6,6 +6,7 @@ Das Modell ist hier ein Ersatz: positiver Ton = eigene Stimme, negativer = fremd
 """
 
 import asyncio
+import dataclasses
 import time
 import unittest
 from unittest import mock
@@ -151,12 +152,23 @@ class PruefenTests(PrueferBasis):
         self.assertEqual(self.meldungen("stimme")[-1]["ergebnis"], UNKLAR)  # die Oberfläche zeigt "unklar"
 
     async def test_kurze_aeusserung_die_nicht_nach_der_person_klingt_entzieht_das_vertrauen(self):
+        """Ohne Erben (WAMO_STIMME_KURZ_ERBEN_SECS=0): eine kurze Äußerung unter der Schwelle ist unklar und entzieht das Vertrauen."""
+        self.gate.schwellen = dataclasses.replace(self.gate.schwellen, kurz_erben_secs=0.0)
         await self.sprechen(8000, 2.0)
         self.v.on_turn_end()
         self.modell.rechner.festes_ergebnis = HALB
         urteil = await self.sprechen(8000, 0.5)
         self.assertEqual(urteil.urteil, UNKLAR)
         self.assertEqual(self.gate.grund_der_stimme(), "Stimme nicht sicher erkannt")
+
+    async def test_kurze_aeusserung_nach_eigener_stimme_erbt(self):
+        """Befund 18.11.2026: Unter 1 s trennt der Wert nicht (eigene 0,14 bis 0,49). Nach einem sicher erkannten Satz erbt "Ja" mit 0,33."""
+        await self.sprechen(8000, 2.0)
+        self.v.on_turn_end()
+        self.modell.rechner.festes_ergebnis = HALB
+        urteil = await self.sprechen(8000, 0.5)
+        self.assertEqual(urteil.urteil, KURZ)
+        self.assertIsNone(self.gate.grund_der_stimme())
 
     async def test_satzende_beginnt_einen_eigenen_zug(self):
         """Ein fremder Einwurf nach einem fertigen Satz erbt nicht das Urteil des Satzes davor."""
