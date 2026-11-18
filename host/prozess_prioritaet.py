@@ -25,6 +25,7 @@ IO_PRIORITY_NORMAL = 2
 POWER_THROTTLING_VERSION = 1
 POWER_THROTTLING_EXECUTION_SPEED = 0x1
 _FEHLER = (AttributeError, OSError, TypeError, ValueError)
+SELBST = ctypes.c_void_p(-1)  # GetCurrentProcess() liefert immer dieses Pseudo-Handle
 
 
 class _Speicher(ctypes.Structure):
@@ -43,9 +44,11 @@ def normal_setzen(kernel32: object | None = None, ntdll: object | None = None) -
     try:
         k32 = kernel32 or ctypes.WinDLL("kernel32", use_last_error=True)
         nt = ntdll or ctypes.WinDLL("ntdll")
-        selbst = k32.GetCurrentProcess()
     except _FEHLER as e:
         return {"fehler": type(e).__name__}
+    # Pseudo-Handle des eigenen Prozesses in voller Zeigerbreite. Befund 18.11.2026: k32.GetCurrentProcess() kam ohne restype als
+    # 32-Bit-int -1 zurück und ging so wieder hinein; unter 64-Bit-Windows ist das ein ungültiges Handle, alle Aufrufe scheiterten.
+    selbst = SELBST
     ergebnis: dict = {}
     try:
         vorher = int(k32.GetPriorityClass(selbst))
