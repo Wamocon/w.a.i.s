@@ -3,6 +3,419 @@
 > **Planpapier, Stand 18.11.2026 nach Sicherheitsreview**, Basis `main` 4d41a1c, Zweig `docs/persoenliche-zugaenge-plan`. Dieses Papier ändert weder Code noch Server.
 > Kennzeichnung wie in `docs/folgepaket-1.md`: **B** belegt (Datei:Zeile im Arbeitsbaum der Basis), **A** abgeleitet, **Annahme** nicht belegt (Prüfstelle in 2.3).
 > Pfade relativ zur Repo-Wurzel, Bezeichner in ASCII. Schritte, die nur der Admin ausführen kann, heißen **Admin, manuell**. Die Pakete heißen PZ-0 bis PZ-16 (Abschnitt 4).
+>
+> **Entschieden am 18.11.2026: Plan C.** Der Abschnitt „Plan C“ direkt hierunter ist die verbindliche Bauvorlage bis zum Freeze (Pakete S, K, D-a, D-b, R). Alles ab
+> „Kurzfassung der Ausbaustufe“ beschreibt Plan A und B mit Zugangsdienst, Git-Tor und Geräteschlüssel; das ist die Ausbaustufe für nach dem Labortag am 05.12.
+
+## Plan C (entschieden 18.11.2026)
+
+**Kurzfassung.** Das GitHub-Token der Person wird wie der persönliche Claude-Zugang gespeichert (AES-256-GCM mit `WAMO_SCHLUESSEL_KEK`, eigener Zweck in der AAD), der Kern
+entschlüsselt es je Aufruf frisch und gibt es dem Dispatcher nur über stdin. Der Dispatcher klont damit **außerhalb der Sandbox** als bare Repo in den Auftragsordner, prüft und
+bereinigt den Klon und verwirft das Token, bevor die Sandbox startet. Die Arbeitskopie entsteht **in einem netzlosen Sandbox-Schritt** aus diesem bare Repo, danach entschärft
+der Dispatcher den Projektordner wie heute. Die Sandbox hat keinen GitHub-Zugang und committet nur lokal auf `wamo/<job>`. Am Laufende exportiert ein netzloser Schritt die Commits
+als Bundle, ein zweiter netzloser Schritt **ohne Projektordner** liest das Bundle und gibt nur eine Dateiliste mit den Inhalten zurück. Der Dispatcher prüft diese Bytes und baut
+daraus mit eigenem git **einen** Commit (Autor die Person, Trailer mit dem Auftrag); er verarbeitet selbst nie Git-Objekte aus der Sandbox und führt nie git mit der Konfiguration
+oder den Hooks eines Repos aus, das die Sandbox beschrieben hat. Erst nach dem Klick auf der Freigabekarte schickt der Kern das Token erneut, und der Dispatcher pusht genau
+`<commit>:refs/heads/wamo/<job>` (nie Force, nie ein anderer Ref, nie Tags) und öffnet den Pull Request per API. Gemergt wird nie durch W.A.I.S. Alles steht hinter Schaltern, die
+standardmäßig aus sind, der App-Weg bleibt unverändert.
+
+**IQ:** Das Token liegt nur kurz im Speicher von Kern, Dispatcher und einem git-Prozess, nie in einer Umgebung, nie in der Sandbox, nie in einer Datei, nie in argv. Alles, was
+feindlich sein kann (Arbeitskopie, Hooks, Konfiguration, Checkout, Pack-Daten der Sandbox), läuft in netzlosen Sandbox-Schritten; außerhalb verarbeitet der Dispatcher nur geprüfte
+Dateibytes und eigene Repos. **EQ:** Die Person hinterlegt ihr Token einmal, sieht danach nur Konto, Art und Ablauf, und gibt jede Veröffentlichung auf der vertrauten Freigabekarte
+frei. **VQ:** Ablaufbild, Schnittstellentabellen, Zustandsautomat, Fehlertabelle, Paketliste mit getrennten Dateien. **Synthese:** Plan C ist bis Sonntag knapp baubar, wenn Paket D
+auf zwei Agenten verteilt wird und die Zweige `feat/auftrag-speichern` und `feat/fp1-1-expiry-time` vorher gemergt sind (C.9); der gekaperte Kern bleibt bewusst als Restrisiko wie
+beim Claude-Zugang.
+
+### C.0 Entscheidungen (verbindlich)
+
+| Nr. | Entscheidung |
+| --- | --- |
+| C1 | Das GitHub-Token kommt nie in die Sandbox. Gespeichert verschlüsselt wie der persönliche Claude-Zugang (`voice-core/modellzugang.py`, `dev_agent.persoenlicher_zugang`), je Aufruf frisch entschlüsselt, an den Dispatcher nur über stdin, nie in Argumenten oder Log |
+| C2 | Der Dispatcher klont außerhalb der Sandbox mit dem Token (Credential-Helfer oder `GIT_ASKPASS`, nie in der URL), entfernt danach alle Zugangsdaten und gibt den Arbeitsordner an die Sandbox. Die Sandbox committet nur lokal (Autor GitHub-Login und noreply-Adresse der Person, Trailer mit Auftrags-ID) |
+| C3 | Erst nach dem Klick auf der Freigabekarte pusht der Dispatcher außerhalb der Sandbox mit fester Refspec nur `refs/heads/wamo/<job>` (nie Force, nie ein anderer Ref, nie Tags) und öffnet den Pull Request per API. Kein Merge durch W.A.I.S. |
+| C4 | Restrisiko gekaperter Kern (sieht das entschlüsselte Token) ist bewusst akzeptiert, wie beim Claude-Zugang |
+| C5 | Klassische Tokens nur mit Ablaufdatum (höchstens 366 Tage) und ohne `delete_repo`, `admin:*`, `site_admin`, Paket- und `user`-Rechte; fein-granulare Tokens mit Ablauf. Prüfung beim Speichern (`GET /user`, Kopfzeilen zu Ablauf und Scopes), Login anzeigen, Wert nie wieder anzeigen |
+| C6 | Lesen und Pull Requests in allen Repos, auf die das Token Zugriff hat, außer dem eigenen Repo (`SELF_REPOS`, `SELF_REPO_IDS`, auch Forks und Vorlagen davon) |
+| C7 | Vercel und Supabase erst nach dem 05.12. Laborprofile nie; Mitglieder nur mit ihrer bestehenden Zulassung für Entwicklungsaufträge |
+| C8 | Alles hinter einem Schalter (Standard aus), App-Weg unverändert |
+
+**Umsetzung von C2 und C3 im Detail (begründet):** „Arbeitsordner an die Sandbox geben“ heißt, dass der Dispatcher ein bare Repo ohne Arbeitsbaum klont und die Arbeitskopie in
+einem Sandbox-Schritt ohne Netz daraus entsteht; so läuft kein Checkout, kein Filter und kein Hook des Repos außerhalb der Sandbox. „Pusht nur `wamo/<job>`“ heißt, dass der
+Dispatcher einen eigenen Commit aus dem Dateistand der lokalen Spitze baut (Eltern die Basis). Gepusht werden damit nie Zwischenstände der Sandbox (ein Geheimnis in Commit 1, in
+Commit 2 gelöscht, wäre sonst im Pull Request), nie Metadaten der Sandbox (Autor, Trailer, Nachricht) und nie Git-Objekte, die die Sandbox gebaut hat.
+
+### C.1 Ablauf
+
+```text
+Hinterlegen  Oberfläche ── POST /wamo/api/github-zugang {aktion: speichern, token} ──> Kern: Form, GET /user, Regeln C5, Chiffrat in github_zugang
+Start        Kern ── ssh "start <job> <projekt> <art>" ──> Dispatcher 10
+             stdin: Kopfzeile {..., "github": "persoenlich"}, [Claude-Zeile], GitHub-Zeile (nur solange der Kern für den Auftrag kein Ereignis github kennt)
+             Dispatcher: Regeln 1-9, GitHub-Prüfung, git clone --bare --single-branch nach JOBDIR/basis.git über den Helfer, Prüfung auf Token-Reste, Token verworfen
+             Sandbox-Schritt klon (ohne Netz): Projektordner leeren, Arbeitskopie aus basis.git, Zweig wamo/<job>
+             Dispatcher: projekt_entschaerfen (wie heute), Selbsttest, Lauf ohne GitHub-Zugang; lokale Commits auf wamo/<job>
+             Dispatcher: projekt_entschaerfen; Sandbox-Schritt ausgabe (ohne Netz, Projekt nur lesend): git bundle create
+             Sandbox-Schritt pruefung (ohne Netz, ohne Projektordner): Bundle lesen, Dateiliste und Inhalte nach JOBDIR/ergebnis
+             Dispatcher (ohne Token): Bytes prüfen, Commit mit eigenem git in aus.git bauen, aenderung.json, Ereignis aenderung
+Karte        Kern zeigt die Freigabekarte "Einreichen" (Daten aus dem Ereignis aenderung)
+Einreichen   Klick (nur UI-Nachricht) ── Kern entschlüsselt frisch ── ssh "einreichen <job> <profil>" ──> Dispatcher
+             stdin: {commit_id, tree_id, bestaetigt}, GitHub-Zeile
+             Dispatcher: Zustand, Bindung, Konto, Scopes, Repo-ID, Geheimnissuche mit dem Token, ls-remote, push aus aus.git, PR, Ereignis eingereicht
+```
+
+### C.2 Schnittstelle Kern zu Dispatcher
+
+**C.2.1 Kopfzeile von `start`.** Neues optionales Feld `github` mit dem einzigen Wert `"persoenlich"` (fehlt es, gilt der App-Weg wie heute). `parse_header` nimmt es nur im
+Kanal `kern` an; im Kanal `pc` und `lokal` ist es `Abgewiesen` (Kopfzeile: github nur im Kern-Kanal). Pflicht dazu: `repo` und `profil`. Der Wert wird in `auftrag.json` gebunden
+wie Projekt, Art, Repo und Profil: Ein Folgelauf mit anderem `github` (auch ohne Feld) wird abgewiesen. Der Kern schickt das Feld nur, wenn `ping` `"version": "10"` und
+`"persoenlich": true` meldet.
+
+**C.2.2 stdin-Zeilen von `start`.** Feste Reihenfolge, JSON-Objekt, Zeilenende `\n`:
+
+| Zeile | Wann | Inhalt |
+| --- | --- | --- |
+| 1 | immer | Kopfzeile (C.2.1), wie heute höchstens `MAX_HEADER_BYTES` |
+| 2 | nur bei `"zugang": "folgt"` | Claude-Zeile wie heute (`{"typ", "wert", "workspace"}`), höchstens 2048 Byte |
+| 2 oder 3 | bei `"github": "persoenlich"`, solange der Kern für diesen Auftrag noch kein Ereignis `github` erhalten hat | GitHub-Zeile `{"typ":"github","wert":"<token>"}`, genau diese Form ohne Leerzeichen, höchstens 256 Byte, `wert` passt auf `ghp_[A-Za-z0-9]{36}` oder `github_pat_[A-Za-z0-9_]{82}` |
+
+**Lesen ohne Kopien.** Im persönlichen Weg liest der Dispatcher stdin von Anfang an mit einem eigenen Leser (`os.readv` bzw. `readinto` in ein `bytearray`, kein `sys.stdin`,
+kein `readline`). Die GitHub-Zeile wird nie zu `str` oder `bytes` gewandelt: Prüfung mit einer Bytes-Regel auf einem `memoryview`, der Wert geht direkt in die Pipe des
+Credential-Helfers (C.5 Start 3) und das `bytearray` wird danach überschrieben. Vor dem Lesen setzt der Dispatcher `PR_SET_DUMPABLE=0` (prctl) und `RLIMIT_CORE=0`: Seine
+`/proc`-Einträge gehören dann root, ein Prozess desselben Benutzers (etwa eine ausgebrochene Sandbox) kann Speicher und Umgebung nicht lesen. Fehlt die Zeile, obwohl kein
+`basis.git` existiert, endet `start` mit `start_abgelehnt`, Grund `github_zeile`, Exit 8; der Kern startet einmal neu mit Zeile. Ist sie da, obwohl `basis.git` existiert, wird sie
+ungelesen verworfen. Fehlertexte nennen nie den Inhalt.
+
+**C.2.3 Neue Befehle** (passen zu `COMMAND_RE`, nur im Kern-Kanal, im PC-Kanal `befehl`, im Kanal `lokal` nur für Rauchtests):
+
+| Befehl | stdin | Antwort |
+| --- | --- | --- |
+| `aenderung <job> <profil>` | nichts | Ereignis `aenderung` aus `aenderung.json`, rechnet nie neu. Auch bei geschlossenem Kanal, nicht bei Notaus |
+| `einreichen <job> <profil>` | Zeile 1 `{"commit_id": "<40 Hex>", "tree_id": "<40 Hex>", "bestaetigt": ["<pfad>", ...]}` höchstens 64 KiB, Zeile 2 GitHub-Zeile | Ereignis `eingereicht` oder `einreichen_fehler`, Exit 0 oder 2 |
+| `verwerfen <job> <profil>` | nichts | Ereignis `verworfen`; nur aus `keine`, `gesperrt`, `nur_lesen`, `bereit`, unter den Sperren `.lauf` und `.einreichen`; löscht `aus.git`, `ergebnis/`, Bundle und `basis.git`, nie den Projektordner (er gehört dem Eigner, C.10). Auch bei geschlossenem Kanal |
+
+`profil` ist bei allen drei Pflicht; Regel 4 prüft zusätzlich, dass es mit `auftrag.json` übereinstimmt (sonst `fremd`). `BEFEHLE_KERN` bekommt die drei Befehle,
+`BEFEHLE_GESCHLOSSEN` bekommt `aenderung` und `verwerfen`. `einreichen` löst der Kern nur auf die UI-Nachricht `einreichen` aus, nie als Werkzeug des Sprachmodells (Test).
+
+**C.2.4 Ereignisse im Datenstrom** (`{"type": "wamo", "ereignis": ...}`):
+
+| Ereignis | Wann | Felder |
+| --- | --- | --- |
+| `github` | nach Klon und Prüfung, vor dem Lauf | `repo`, `konto` (Login), `basis` (Commit-ID), `standardzweig`, `privat` (bool), `schreiben` (bool: Art schreibend und `permissions.push`) |
+| `start_abgelehnt` | GitHub-Teil gescheitert | `grund` aus `GITHUB_GRUENDE`, Exit 8 |
+| `aenderung` | am Laufende und auf `aenderung` | `job`, `status` (C.5.1), `commit_id`, `tree_id`, `basis`, `zweig` (`wamo/<job>`), `dateien`, `plus`, `minus`, `liste` (Einträge `pfad`, `art` `neu`, `geaendert` oder `geloescht`, `klasse` `normal` oder `sensibel`, `plus`, `minus`; sensible zuerst und vollständig, insgesamt höchstens 200), `nicht_gelistet`, `gruende` (aus `AENDERUNG_GRUENDE`), `ungesichert` (Zahl nicht committeter Dateien), `lauf` (`fertig`, `zeitlimit`, `fehler`), `titel`, `pr`, `adresse` (bei `branch_gepusht` und `eingereicht`) |
+| `eingereicht` | nach Push und Pull Request | `job`, `zweig`, `pr` (Nummer), `adresse` |
+| `einreichen_fehler` | sonst | `job`, `grund` aus `EINREICHEN_GRUENDE` oder `KANAL_GRUENDE` |
+| `verworfen` | nach `verwerfen` | `job` |
+
+Der Kern prüft `adresse` gegen `^https://github\.com/<repo>/pull/[0-9]+$` und gibt `titel`, Pfade und Adressen nie an das Sprachmodell, nur an Canvas und Karte.
+
+**C.2.5 Zähler in `kernkanal.jsonl`.** `EREIGNISSE` wird zu `("start", "ende", "versuch", "einreichen", "eingereicht")` (unbekannte Ereignisse überspringt `zaehler_lesen`
+schon heute, der Rückweg ist sicher). `einreichen`: jeder Aufruf, der bis zum Push kommt (Schritt 6), Felder `t`, `job`, `ereignis`, `profil`; zählt gegen `MAX_EINREICHEN_TAG`
+und `MAX_EINREICHEN_TAG_PROFIL`. Fehlklicks vor dem Push zählen nicht gegen diese Grenzen, aber als `versuch` gegen `MAX_VERSUCH_STUNDE_PROFIL`. `eingereicht`: nach Erfolg,
+zusätzlich `pr` (Nummer). Kein Token, kein Repo-Inhalt.
+
+**C.2.6 Gründe.** Alle Listen sind die feste Schnittstelle; `voice-core/test_kernkanal_vertrag.py` hält Dispatcher und Kern gleich.
+
+| Liste (Dispatcher) | Neue Codes | Sätze im Kern (`voice-core/entwicklung_betrieb.py`) |
+| --- | --- | --- |
+| `KANAL_GRUENDE` (ergänzt) | `persoenlich_aus`, `grenze_einreichen` | in `GRUND_SAETZE`: „Persönliche GitHub-Zugänge sind im Kanal nicht eingeschaltet.“, „Für heute sind genug Änderungen eingereicht.“ |
+| `GITHUB_GRUENDE` (neu) | `github_zeile`, `token_ungueltig`, `token_abgelaufen`, `token_rechte`, `repo_nicht_erreichbar`, `eigenes_repo`, `repo_zu_gross`, `klon_fehler`, `bereinigung`, `projekt_gewechselt`, `github_wechsel` | `GITHUB_SAETZE`, je ein Satz |
+| `AENDERUNG_GRUENDE` (neu) | `pfad_gesperrt`, `geheimnis`, `zu_gross`, `zu_viele_commits`, `symlink`, `sonderdatei`, `basis_fehlt`, `bundle_ungueltig`, `pruefung_fehler`, `schon_eingereicht` | `AENDERUNG_SAETZE` |
+| `EINREICHEN_GRUENDE` (neu) | `zustand`, `veraltet`, `bestaetigung`, `konto`, `token_rechte`, `repo_geaendert`, `keine_schreibrechte`, `zweig_belegt`, `geheimnis`, `token_abgelaufen`, `github_fehler` | `EINREICHEN_SAETZE` |
+
+**C.2.7 Konfiguration und Schalter.** `kernkanal.conf`: `PERSOENLICH` (`an` oder `aus`, Standard aus), `MAX_EINREICHEN_TAG` (1 bis 50, Standard 10), `MAX_EINREICHEN_TAG_PROFIL`
+(1 bis 50, Standard 5), `MAX_KLON_MB` (100 bis 4096, Standard 2048; verglichen mit `size` aus der API, das GitHub in KB liefert). Gesetzt mit
+`wamo-job-kern-einrichten.sh kanal --persoenlich an|aus` und den Optionen für die Zahlen. Erst nach Dispatcher 10 setzen (Dispatcher 9 schließt bei unbekannten Schlüsseln den
+Kanal), Rückweg umgekehrt. Kern: `WAMO_ENTWICKLUNG_GITHUB` (`an` oder `aus`, Standard aus) im Drop-in `wamo-entwicklung-buero.conf`, geschrieben nur von
+`wamo-job-kern-einrichten.sh schalter ... --github an|aus`; `--github an` verlangt Dispatcher 10 und ein Kern-Release mit `SCHRANKEN_VERSION = 4` (`MIN_SCHRANKEN_GITHUB`).
+`ping` meldet `persoenlich: true`, wenn `PERSOENLICH=an` gilt. Regel 5 im Kern-Kanal bei `github=persoenlich`: Repo Pflicht, nicht in `REPOS` nötig, nicht das eigene Repo
+(Name), App-Modus nicht nötig, Dienste der Art zählen nicht (der persönliche Weg gibt keine Dienst-Tokens aus `geheim.env` weiter); ohne `PERSOENLICH=an` ergibt das
+`persoenlich_aus`.
+
+### C.3 Migration 0027_github_zugang
+
+0026 ist im Zweig `feat/auftrag-speichern` belegt (`0026_auftrag_entwuerfe`), Plan C nimmt deshalb **0027**. Neue Tabelle statt neuer Spalten in `model_access` (deren Wächter
+und die Regel „0010 nie erneut anwenden“ bleiben unberührt). Dateien `supabase/migrations/0027_github_zugang.sql`, `0027_github_zugang.down.sql`,
+`supabase/tests/0027_github_zugang_test.sql`, Platzhalter `__SCHEMA__`, Regeln aus CLAUDE.md.
+
+| Spalte | Typ und Prüfung |
+| --- | --- |
+| `user_id` | uuid, Primärschlüssel, FK `profiles(user_id)` `on delete cascade` |
+| `art` | text, `fein` oder `klassisch` |
+| `token` | bytea, Chiffrat, `octet_length` 40 bis 1024 |
+| `token_ende` | text, `^[A-Za-z0-9_]{4}$` |
+| `login` | text, `^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$` |
+| `konto_id` | bigint, größer 0 |
+| `scopes` | text[], höchstens 30 Einträge (bei fein-granular leer) |
+| `ablauf` | timestamptz, Pflicht (C5) |
+| `geprueft_at`, `angelegt_at` | timestamptz |
+
+Trigger `github_zugang_guard` (`drop trigger if exists` davor): Einfügen und Ändern nur für ein Profil ohne `labor_art`. RLS an, Policy `core_all` für `wamo_core`. Rechte:
+`wamo_core` select, insert, update, delete (delete für den Widerruf); `wamo_admin` select nur auf `user_id`, `art`, `login`, `ablauf`, `geprueft_at`; `revoke all` für `public`,
+`anon`, `authenticated`, `service_role`, `wamo_release`, `wamo_anker`. Die Tabelle kommt in `voice-core/labor_loeschliste.py` (gehört nicht zum Labor, `test_labor_loeschen.py`
+bleibt grün). Audit ohne Migration in `actions` (Werkzeug `github_zugang` mit `aktion`, `art`, `login`, `ablauf`, nie der Wert; Werkzeug `auftrag_einreichen` mit Repo, Zweig, Pull
+Request, Commit). Test: `wamo_core` liest und schreibt, `wamo_admin` liest `token` nicht, `anon` nichts, Laborprofil abgewiesen, zweiter Lauf bricht nicht ab, Down entfernt alles.
+
+**Verschlüsselung:** `voice-core/schluessel.py` bekommt den Zweck `GITHUB = "github"` mit der AAD `wamo-github-token:<user_id>`; ein Chiffrat dieses Zwecks lässt sich nicht als
+Claude-Schlüssel entschlüsseln und umgekehrt. `schwaerzen` erkennt zusätzlich `ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_` und `github_pat_` ab 8 Zeichen.
+
+### C.4 Speichern und Prüfen (Kern)
+
+Neues Modul `voice-core/github_zugang.py` nach dem Muster von `modellzugang.py`, Route `POST /wamo/api/github-zugang` und Client-Nachricht `github_zugang` (Aktionen `stand`,
+`speichern`, `pruefen`, `loeschen`), nur für zugelassene Profile (`entwicklung_betrieb.zulassung_fuer`), nie für Laborprofile (nicht in der Erlaubnisliste des Labors), 5 Versuche je
+10 Minuten.
+
+1. Form: `ghp_` plus 36 Zeichen (klassisch) oder `github_pat_` plus 82 Zeichen (fein-granular); `gho_`, `ghu_`, `ghs_`, `ghr_` mit eigenem Satz abgewiesen.
+2. `GET https://api.github.com/user` (Zeitlimit 10 s, keine Weiterleitung): 200 mit `login`, `id`, `type` `User`; 401 heißt ungültig.
+3. Klassisch: `X-OAuth-Scopes` muss `repo` oder `public_repo` enthalten und darf `delete_repo`, kein `admin:*`, `site_admin`, `write:packages`, `delete:packages`, `read:packages`,
+   `user`, `user:*` und `codespace` enthalten (C5). Beide Arten: `GitHub-Authentication-Token-Expiration` Pflicht, höchstens 366 Tage in der Zukunft (Annahme A2 aus 2.3).
+   Fein-granular: Die Karte nennt die nötigen Rechte (Contents lesen und schreiben, Pull requests lesen und schreiben, Metadata lesen) und rät von allen anderen ab
+   (Administration, Secrets, Workflows sind nicht abfragbar).
+4. Speichern als Chiffrat mit Metadaten, Zeile in `actions`. Antwort nur Metadaten (Art, Login, Scopes, Ablauf, „endet auf …abcd“). Kein Weg gibt den Wert zurück.
+5. `github_zugang_fuer(user_id)` liefert für genau einen Aufruf `{"typ": "github", "wert": ...}` oder None (nichts hinterlegt, abgelaufen, Chiffrat unlesbar, Labor); abgelaufene
+   Tokens setzen keinen Rückfall auf die App.
+
+Weil klassische Scopes sich bei GitHub nachträglich erweitern lassen, prüft der **Dispatcher bei jedem Start und Einreichen** Scopes und Ablauf erneut aus den Kopfzeilen von
+`GET /user` mit denselben Regeln (Grund `token_rechte` bzw. `token_abgelaufen`).
+
+### C.5 Ablauf im Dispatcher mit Fehlerfällen
+
+**Gemeinsam für alle git-Aufrufe des Dispatchers:** immer mit `--git-dir=<eigenes Repo>`, `cwd="/"`, `GIT_CEILING_DIRECTORIES=/`, `GIT_CONFIG_NOSYSTEM=1`,
+`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_TERMINAL_PROMPT=0`, `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `gc.auto=0`, `maintenance.auto=false`, Zeit- und Speichergrenzen
+(rlimits), nie in einem Repo, das die Sandbox beschrieben hat. Werte aus GitHub oder Sandbox stehen nie in argv, außer geprüft: Repo nach `REPO_RE`, Job nach `JOB_RE`, Commit-IDs
+40 Hex, `default_branch` nach `[A-Za-z0-9._/-]{1,100}` ohne führendes `-`, ohne `..`, nur als `refs/heads/<name>` nach `--end-of-options`.
+
+**Start, erster Lauf eines Auftrags**
+
+1. Kopfzeile, Claude-Zeile, GitHub-Zeile lesen (C.2.2); Regeln 1 bis 9 (Regel 5 wie C.2.7); zweite Prüfung unter der Sperre `kernkanal` wie heute.
+2. Mit dem Token über `api.github.com` (Muster der App-Aufrufe, `http.client`, Zertifikatsprüfung, keine Weiterleitung, Antwort höchstens 256 KiB): `GET /user` (Login, ID, Scopes und
+   Ablauf wie C.4), `GET /repos/<repo>`: `full_name` gleich dem Repo (sonst `repo_nicht_erreichbar`, eine Umbenennung fällt so auf), `id`, `id` von `parent`, `source` und
+   `template_repository` nicht in `SELF_REPO_IDS` und deren Name nicht in `SELF_REPOS` (sonst `eigenes_repo`), `size` in KB höchstens `MAX_KLON_MB` mal 1024, `default_branch`
+   (Prüfung oben), `private`, `permissions.pull` Pflicht, `permissions.push` für `schreiben`.
+3. Klon: `git clone --bare --single-branch --branch <default_branch> --no-tags --template=<leerer Ordner> -- https://github.com/<repo>.git JOBDIR/basis.git` mit der gemeinsamen
+   Umgebung, dazu `protocol.allow=never`, `protocol.https.allow=always`, `http.followRedirects=false`, `transfer.fsckObjects=true`, `fetch.fsckObjects=true`, `credential.helper`
+   leer und danach genau der feste Helfer `/opt/wamo/bin/wamo-git-zugang <fd-Nummer>`, `GIT_ASKPASS=/bin/false`. Der Helfer liest Benutzername und Token aus der geerbten Pipe
+   (die Nummer steht als Argument, sie ist nicht geheim), beantwortet nur `get` für genau `protocol=https` und `host=github.com`, ignoriert `store` und `erase` und schließt die Pipe.
+   Das Token steht so in keiner Umgebung und keinem argv. Rückfall nur nach der Vorprobe, falls git den Deskriptor nicht weiterreicht: `GIT_ASKPASS` auf denselben Helfer. Zeitlimit
+   300 s, stderr nur geschwärzt und gekürzt ins Protokoll.
+4. Bereinigen und prüfen: `basis.git/config` neu schreiben (nur `core.bare`, `remote.origin.url=https://github.com/<repo>.git`, Fetch-Refspec), `hooks/`, `FETCH_HEAD` und `logs/`
+   löschen, dann alle Dateien in `basis.git` außer `objects/` mit `O_NOFOLLOW` auf das Token durchsuchen (exakte Bytes, dazu Base64 von `<benutzername>:<token>` mit dem tatsächlich
+   benutzten Benutzernamen): ein Treffer ergibt `bereinigung` und löscht `basis.git`. Größe gegen `MAX_KLON_MB`. `github.json` im Auftragsordner (für die Sandbox unsichtbar):
+   `v`, `repo`, `repo_id`, `login`, `konto_id`, `basis`, `standardzweig`, `privat`, `schreiben`, `geklont_at`. Pipe-Puffer überschrieben, Ereignis `github`.
+5. Sandbox-Schritt `klon` (C.5.2): leert den Projektordner (Rechte vorher setzen, nie Links folgen), klont aus `/run/wamo/basis.git` ohne Hardlinks und ohne Vorlage, setzt
+   `origin` auf `https://github.com/<repo>.git`, legt `wamo/<job>` auf `basis` an und checkt ihn aus. Den Eigner des Projektordners schreibt der Dispatcher nach
+   `sperren/eigner-<projekt>.json`.
+6. **Danach** `projekt_entschaerfen` wie heute (entfernt `.claude/settings*.json`, `.mcp.json`, Hooks, filtert `.git/config`), dann Selbsttest und Lauf. So laufen Autostart-Flächen
+   des geklonten Repos nie mit dem Claude-Zugang in der Sandbox.
+7. Lauf wie heute, Umgebung ohne `GH_TOKEN` und ohne jedes Dienst-Token aus `geheim.env` (der Runner entfernt sie bei `WAMO_GITHUB=persoenlich` zusätzlich selbst), dazu
+   `GIT_AUTHOR_NAME` und `GIT_COMMITTER_NAME` = Login, `GIT_AUTHOR_EMAIL` und `GIT_COMMITTER_EMAIL` = `<id>+<login>@users.noreply.github.com` (Werte aus der Antwort von GitHub,
+   nie vom Kern), `WAMO_GITHUB=persoenlich`, `WAMO_ZWEIG=wamo/<job>`; `ERLAUBT_RE` bekommt genau diese sechs Namen. Systemtext `github_hinweis` für diesen Weg: kein GitHub-Zugang,
+   lokal auf `wamo/<job>` committen, Trailer `WAIS-Auftrag: <job>`, nicht pushen, Einreichen übernimmt W.A.I.S. nach der Freigabe. Der Wächter sperrt bei
+   `WAMO_GITHUB=persoenlich` `git push`, `git send-pack`, `gh` und `git remote set-url` mit diesem Satz.
+
+**Folgelauf.** `basis.git` und `github.json` vorhanden: kein Klon, eine mitgeschickte Zeile wird ungelesen verworfen. Zustand nach C.5.1 muss einen Lauf erlauben (sonst
+`schon_eingereicht`, Nacharbeit ist ein neuer Auftrag). Ist der Eigner des Projektordners ein anderer Auftrag, baut der Schritt `klon` die Arbeitskopie neu aus `basis.git` und dem
+letzten Bundle dieses Auftrags; danach wieder Entschärfung. Ohne Bundle und mit fremdem Eigner: `projekt_gewechselt`, kein Lauf.
+
+**Laufende (ohne Token im Prozess)**
+
+1. `projekt_entschaerfen`, dann Sandbox-Schritt `ausgabe` (C.5.2): `git -c core.hooksPath=/dev/null -c core.fsmonitor=false bundle create /run/wamo/ausgabe/aenderung.bundle
+   refs/heads/wamo/<job> ^<basis>` und `status.json` (Zahl nicht committeter Dateien). Fehlt der Zweig oder gibt es keine Commits, Status `keine`. Der Ordner `ausgabe/` wird vorher
+   geleert.
+2. Dispatcher übernimmt das Bundle nur so: `lstat`, `O_NOFOLLOW|O_NONBLOCK`, `S_ISREG`, Größe höchstens 200 MB, Kopie in eine eigene Datei `JOBDIR/bundle.ein` (für die Sandbox
+   unsichtbar); `status.json` höchstens 4 KiB, nur eine ganze Zahl in Grenzen.
+3. Sandbox-Schritt `pruefung` (C.5.2, ohne Projektordner, ohne Netz, ohne `/etc/wamo`): festes Programm `/opt/wamo/waechter/wamo_job_auszug.py` legt ein leeres Repo mit Alternates
+   auf `/run/wamo/basis.git` an, holt `bundle.ein` mit fsck und `fetch.unpackLimit=1`, prüft genau einen Kopf `refs/heads/wamo/<job>` (sonst `bundle_ungueltig`),
+   `merge-base --is-ancestor basis spitze` (sonst `basis_fehlt`), höchstens 200 Commits (`zu_viele_commits`), prüft Größen mit `cat-file --batch-check` vor dem Lesen und schreibt nach
+   `/run/wamo/ergebnis`: `liste.json` (je Änderung `pfad` als Bytes in Base64, `modus`, `art`, `groesse`) und je neue oder geänderte Datei ihren Inhalt als eigene Datei
+   (`dateien/<n>`), für Links das Ziel. Grenzen: 300 Dateien, 5 MB je Datei, 20 MB gesamt, Zeitlimit 60 s, rlimits. Die Sandbox verarbeitet damit die Pack-Daten, nicht der Dispatcher.
+4. Dispatcher liest `ergebnis/` mit denselben Regeln wie in Schritt 2 (kein Link, nur reguläre Dateien, Größen) und wendet auf die Bytes die Regeln aus Folgepaket 1, 3.1.3 an:
+   gesperrt (`.git` in jeder Schreibweise, `.gitmodules`, `.github/`, `.claude/`, `.vscode/`, `.devcontainer/`, `.cursor/`, `.githooks/`, `.mcp.json`, Zeichen außerhalb der
+   Allowlist, Kollisionen, Gerätenamen, Links mit absolutem oder hinausführendem Ziel, Gitlinks), sensibel (Lockfiles, Build- und Skriptdateien, `.env*`, `.envrc`, `CLAUDE.md`,
+   `AGENTS.md`, `conftest.py`, `Jenkinsfile`, `azure-pipelines.yml`, `.circleci/`, ausführbare und binäre Dateien). **Pfade, die die Entschärfung entfernt** (`.claude/`, `.mcp.json`):
+   immer der Eintrag der Basis; eine Löschung dort wird nicht gemeldet und nicht übernommen, eine neue oder geänderte Datei dort ist gesperrt. Geheimnissuche über die Bytes aller
+   neuen und geänderten Dateien mit Mustern (`sk-ant-`, `ghp_`, `gho_`, `ghs_`, `github_pat_`, `wh1-`, `AKIA`, PEM) und den exakten Werten des Laufs (Claude-Zugang aus
+   `schwaerzungen(env)`). Ein Fehler der Prüfung oder ungültige Ausgabe heißt `pruefung_fehler`.
+5. Commit mit eigenem git in `JOBDIR/aus.git` (bare, vom Dispatcher angelegt, Alternates auf `basis.git`): `read-tree <basis>` in einen eigenen Index, je Datei
+   `hash-object -w --no-filters --stdin` mit den geprüften Bytes, `update-index -z --index-info` (Pfade nur über stdin, Löschungen als Modus 0), `write-tree`, Abgleich mit
+   `diff-tree -r -z --no-renames` gegen die Liste (Abweichung heißt `pruefung_fehler`), `commit-tree -F - <tree> -p <basis>`: Autor Login und noreply-Adresse aus `github.json`,
+   Committer `W.A.I.S.` mit `wais@wamocon.invalid`, Zeit einmal gesetzt. Nachricht nur aus der Vorlage: Titel aus der ersten Zeile des Auftragstexts, nur ASCII-Buchstaben,
+   Ziffern, Leerzeichen und `. , ; ( ) - _ +`, ohne `/`, `:` und `://`, Schließwörter (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`) entfernt,
+   höchstens 72 Zeichen, sonst „Änderung aus W.A.I.S.“; dann `Erstellt von W.A.I.S. im Entwicklungsauftrag <job>.` und die Trailer `WAIS-Auftrag: <job>`, `WAIS-Art: <art>`,
+   `WAIS-Beauftragt-von: <login aus github.json>`, `WAIS-Profil: <kennung>`. Ref `refs/wamo/kandidat`, `aenderung.json` und `einreichen.json` atomar, Ereignis `aenderung`.
+
+**Einreichen**
+
+1. Regeln 1 bis 4 mit `profil`, `PERSOENLICH=an`; Sperren `.einreichen` und `.lauf` (kein Lauf dieses Auftrags aktiv).
+2. Zustand nach C.5.1 aus `bereit`, `einreichen_laeuft` (nach Klärung über `ls-remote`) oder `branch_gepusht` (sonst `zustand`, bei `eingereicht` mit Adresse); `commit_id` und
+   `tree_id` gleich `aenderung.json` und gleich `rev-parse refs/wamo/kandidat` in `aus.git` (sonst `veraltet`); `bestaetigt` als Menge enthält alle sensiblen Pfade (sonst
+   `bestaetigung`).
+3. GitHub-Zeile (Lesen wie C.2.2); `GET /user`: `id` gleich `konto_id` (sonst `konto`), Scopes und Ablauf wie C.4; `GET /repos/<repo>`: `id` gleich `repo_id` (sonst
+   `repo_geaendert`), eigenes Repo wie beim Start, `permissions.push` (sonst `keine_schreibrechte`).
+4. Geheimnissuche erneut über die Bytes aus `ergebnis/`, jetzt auch mit dem exakten GitHub-Token. Zweite Kanalprüfung (Notaus, Konfiguration). Zähler `einreichen` (sonst
+   `grenze_einreichen`).
+5. `git ls-remote -- https://github.com/<repo>.git refs/heads/wamo/<job>` (über den Helfer): fehlt der Zweig, wird gepusht; zeigt er auf `commit_id`, entfällt der Push; sonst
+   `zweig_belegt`.
+6. Zustand `einreichen_laeuft`, dann `git --git-dir=aus.git push --no-verify --no-follow-tags --porcelain -- https://github.com/<repo>.git <commit_id>:refs/heads/wamo/<job>` mit
+   `push.followTags=false`, `push.recurseSubmodules=no`, ohne `+`. Die Ausgabe muss genau eine Zeile für `refs/heads/wamo/<job>` mit Erfolg enthalten, jede andere Zeile heißt
+   `github_fehler`. Zustand `branch_gepusht`.
+7. Notaus erneut prüfen. `GET /repos/<repo>/pulls?head=<owner>:wamo/<job>&state=open`: wiederverwendet wird nur ein offener Pull Request mit `head.sha` gleich `commit_id` und
+   `head.repo.id` gleich `repo_id`; sonst `POST /repos/<repo>/pulls` mit `head` `wamo/<job>`, `base` `default_branch` aus Schritt 3 (bei einem Fork dessen eigener Standardzweig, nie
+   das Ursprungsprojekt), `draft` an (bei 422 ohne), `maintainer_can_modify` aus. Titel `W.A.I.S.: <Titel>`, Text aus der Vorlage: Auftrags-ID (nie der Auftragstext), Art,
+   Konto, Zahl der Dateien, Plus und Minus, höchstens 50 Pfade in einem Codeblock (dann „und N weitere“; Pfade enthalten nach der Allowlist keine Backticks), Satz „Nicht gemergt,
+   bitte prüfen.“ Kein Text des Agenten, kein `@`, kein `#`.
+8. Zustand `eingereicht` mit Nummer und Adresse, Ereignis `eingereicht`, Zähler `eingereicht`, Puffer überschrieben.
+
+#### C.5.1 Zustände eines Auftrags mit `github=persoenlich`
+
+| Zustand (`aenderung.status`) | Bedeutung | erlaubt | Übergänge |
+| --- | --- | --- | --- |
+| `keine` | kein Commit auf `wamo/<job>` | Folgelauf, `verwerfen` | `bereit`, `gesperrt` (nach einem Folgelauf), `verworfen` |
+| `gesperrt` | Regel verletzt | Folgelauf, `verwerfen` | `bereit`, `keine` (Folgelauf), `verworfen` |
+| `nur_lesen` | Art lesend oder kein Schreibrecht | Folgelauf, `verwerfen` | `verworfen` |
+| `bereit` | Kandidat in `aus.git` | Folgelauf (ersetzt den Kandidaten), `einreichen`, `verwerfen` | `einreichen_laeuft`, `keine`, `gesperrt`, `bereit` (neuer Kandidat), `verworfen` |
+| `einreichen_laeuft` | Push oder Pull Request laufen | nichts außer `einreichen` nach Klärung | `branch_gepusht`, `bereit` (Fehler vor dem Push), `eingereicht` |
+| `branch_gepusht` | Zweig gepusht, Pull Request fehlt | nur `einreichen` (holt den Pull Request nach) | `eingereicht` |
+| `eingereicht` | Pull Request offen | nichts; Nacharbeit ist ein neuer Auftrag | Ende |
+| `verworfen` | verworfen | nichts | Ende |
+
+Übergänge nur unter der Sperre `.einreichen`, Dateien atomar (`write_json_atomic`). Nach `branch_gepusht` und `eingereicht` gibt es keinen Folgelauf, damit der Zweig nie einen
+anderen Commit braucht (sonst dauerhaft `zweig_belegt`).
+
+#### C.5.2 Neue Sandbox-Modi in `wamo-job.sh`
+
+`MODUS` mit `case` und Ablehnung als Standard: `lauf`, `pruefen`, `klon`, `ausgabe`, `pruefung`. Für `klon`, `ausgabe` und `pruefung` gilt immer `--unshare-net`, eine eigene enge
+Umgebungs-Allowlist (nur `XDG_RUNTIME_DIR` und die Git-Einträge für Hooks und fsmonitor), kein Claude, kein Wächter-Hook nötig, kein `/etc/wamo`, Zeitlimit 300 s (`klon`) bzw.
+60 s, Dateigrenze per `ulimit -f`. Mounts: `klon` Projektordner beschreibbar, `basis.git` nur lesend, letztes Bundle nur lesend; `ausgabe` Projektordner **nur lesend**
+(`--ro-bind`), `ausgabe/` beschreibbar; `pruefung` ohne Projektordner, `bundle.ein` und `basis.git` nur lesend, `ergebnis/` beschreibbar. Die festen Skripte liegen unter
+`/opt/wamo/waechter/` (in der Sandbox sichtbar): `wamo-job-klon.sh`, `wamo-job-ausgabe.sh`, `wamo_job_auszug.py`. Rauchtest-Probe: in allen drei Modi kein Netz und keine Token in
+der Umgebung.
+
+| Fall | Verhalten |
+| --- | --- |
+| GitHub-Zeile fehlt oder Form falsch | `start_abgelehnt` `github_zeile`, kein Lauf |
+| 401, Ablauf überschritten, Scopes außerhalb von C5 | `token_ungueltig`, `token_abgelaufen` oder `token_rechte`, kein Lauf; der Kern bittet um ein neues Token |
+| Repo nicht lesbar, umbenannt, zu groß | `repo_nicht_erreichbar` oder `repo_zu_gross` |
+| Eigenes Repo, auch als Fork oder Vorlage | `eigenes_repo` |
+| Klon scheitert oder Zeitlimit | `klon_fehler`, `basis.git` gelöscht |
+| Token-Rest im Klon gefunden | `bereinigung`, `basis.git` gelöscht, Protokoll ohne Wert |
+| Folgelauf mit anderem `github` | `github_wechsel` |
+| Sandbox-Schritt `klon` scheitert | kein Lauf, Ereignis wie ein Selbsttestfehler |
+| Kein Commit auf `wamo/<job>` | Status `keine`, Karte „keine Änderung“, Hinweis bei `ungesichert` |
+| Bundle ist Link, FIFO, zu groß; Ergebnis ungültig | `bundle_ungueltig` oder `pruefung_fehler` |
+| Regel verletzt | Status `gesperrt` mit Gründen, die Karte zeigt nur „Verwerfen“ |
+| Art lesend oder kein Schreibrecht | Status `nur_lesen`, keine Freigabekarte |
+| Notaus während des Einreichens | vor dem Push: Zustand `bereit`; nach dem Push: `branch_gepusht`, ein neuer Klick holt nur den Pull Request nach |
+| Pull Request scheitert nach dem Push | `branch_gepusht`, `github_fehler` |
+| Dispatcher stirbt in `einreichen_laeuft` | nächster Aufruf klärt über `ls-remote`: Zweig mit `commit_id` heißt `branch_gepusht`, sonst `bereit` |
+| Fein-granulares Token ohne Contents-Schreibrecht | Push 403, `keine_schreibrechte` |
+| Token inzwischen eines anderen Kontos | `konto` |
+
+### C.6 Freigabekarte für den Push
+
+**Heute.** Der Kern schickt `{"type": "freigaben", "job", "projekt", "items": [{"id", "grund", "detail", "warnung", "von"}]}`; `ui/src/components/Freigaben.tsx` zeigt je Eintrag
+eine Karte (`ApprovalCard`) oben in der Präsenzspalte mit Überschrift, Grund, Detail, Warnung und den gleichgewichtigen Knöpfen „Freigeben“ und „Ablehnen“, ohne Tastenkürzel und
+ohne Sprache. Der Klick schickt `{"type": "freigabe", "job", "id", "entscheidung"}`, der Kern ruft `approve <job> <fingerabdruck>` (voice-core/dev_agent.py:943-972).
+
+**Neu.** Ein Eintrag mit `"id": "einreichen"` und dem Zusatzfeld `einreichen`: `repo`, `privat`, `zweig`, `konto`, `commit_id`, `tree_id`, `dateien`, `plus`, `minus`, `markiert`
+(sensible Pfade), `gesperrt` (Gründe), `ungesichert`, `lauf`. Die Karte zeigt Repo (mit „privat“), Zweig `wamo/<job>`, Konto, Zahlen, die markierten Pfade mit je einem Kästchen;
+„Einreichen“ ist erst aktiv, wenn alle markierten Pfade bestätigt sind, „Verwerfen“ ist gleichgewichtig. Bei `gesperrt` gibt es nur „Verwerfen“ und die Gründe als Sätze. Der
+Klick schickt `{"type": "einreichen", "job", "commit_id", "tree_id", "bestaetigt": [...]}` oder `{"type": "verwerfen", "job"}`. Der Kern entschlüsselt das Token frisch, ruft
+`einreichen <job> <profil>` und zeigt danach eine Quittung mit dem geprüften Link zum Pull Request im Canvas; `actions` bekommt `auftrag_einreichen`. Bei `branch_gepusht` (auch nach
+einem Neustart über `aenderung`) zeigt die Karte „Pull Request nachholen“. Die Auftragskarte vor dem Start zeigt bei `github=persoenlich` Repo und Konto und den Hinweis „mit deinem
+GitHub-Token“. Texte und Prüfung der Felder in `ui/src/lib/einreichen.ts`.
+
+### C.7 Logs und Schwärzung
+
+- Dispatcher: `schwaerzen` bekommt `GH_PAT_RE` (`ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_`, `github_pat_`) und das exakte Token des Aufrufs; stderr von git und Antworten von GitHub
+  gehen nur geschwärzt und gekürzt ins Protokoll. Ausgaben der Sandbox werden wie heute geschwärzt. `kernkanal.jsonl` trägt nur Kennungen und Zahlen.
+- Kern: der Wert steht nie in einem Objekt außer für den einen Aufruf, nie in `actions`, `turns` oder Gedächtnis; `schluessel.schwaerzen` erkennt die GitHub-Formen; loguru läuft
+  ohne `diagnose`.
+- Test in beiden Paketen: ein Lauf mit einem Attrappen-Token, danach kommt der Wert in keinem Protokoll, keiner Datei unter `/srv/wamo`, keinem Ereignis und keiner Umgebung eines
+  Kindprozesses vor.
+
+### C.8 Tests je Teil
+
+| Teil | Tests (rot zuerst) |
+| --- | --- |
+| Migration | `supabase/tests/0027_github_zugang_test.sql`: Rechte je Rolle, Spaltenrechte für `wamo_admin`, Laborprofil abgewiesen, Prüfregeln, zweiter Lauf, Down; `voice-core/test_labor_loeschen.py` grün |
+| Kern, Speichern | `voice-core/test_github_zugang.py`: Formen, 401, Scopes erlaubt und verboten, Ablauf fehlt, über 366 Tage, Drosselung, Labor, nicht zugelassen, kein Wert in Antwort und Log; `test_schluessel.py`: Zweck GitHub, Schwärzung |
+| Kern, Aufträge | `voice-core/test_dev_agent_sokrates2.py`: Kopffeld nur mit Schalter und Dispatcher 10, GitHub-Zeile nach der Claude-Zeile nur bis zum Ereignis `github`, Neustart nach `github_zeile`, nie in argv, Freigabekarte aus `aenderung`, Einreichen nur aus der UI-Nachricht, frisches Token, Quittung mit geprüfter Adresse, Verwerfen, nichts davon ans Sprachmodell; `test_entwicklung_betrieb.py`: Sätze, `SCHRANKEN_VERSION` |
+| Oberfläche | `ui/src/lib/githubZugang.test.ts`, `ui/src/components/GithubZugang.comp.test.tsx` (Feld wird geleert, Wert nie angezeigt), `ui/src/lib/einreichen.test.ts`, `ui/src/components/Freigaben.comp.test.tsx` (Kästchen, Sperre, Verwerfen, Nachholen) |
+| Vertrag | `voice-core/test_kernkanal_vertrag.py`: alle vier Listen gleich auf beiden Seiten, jeder Code hat einen Satz |
+| Dispatcher | `voice-core/test_sokrates2_dispatch.py`: Feld nur im Kern-Kanal, Bindung in `auftrag.json`, Zeilenfolge, Bytes-Leser ohne `str`, `PR_SET_DUMPABLE`, keine Dienst-Tokens, sechs Umgebungsnamen, Token nie in argv, Umgebung oder Datei (Attrappe von git mit Zähler), Helfer nur `get` für `github.com`, Schwärzung; neu `voice-core/test_job_github.py`: API-Antworten (Umbenennung, Fork des eigenen Repos per ID, Vorlage, `size` in KB, `push`, `default_branch` mit `-` und `..`), Bereinigung mit gepflanztem Token-Rest, Bundle als Link und FIFO, Ergebnis mit Link, Basis fehlt, Pfadregeln (aus FP1 3.1.8), Entschärfungs-Pfade aus der Basis, Commit aus Bytes mit Abgleich, Titel-Allowlist mit Schließwörtern und URL, Einreichen in jeder Reihenfolge der Fehler, Zustände aus C.5.1, Refspec exakt, PR-Wiederverwendung nur offen mit gleichem SHA, höchstens 50 Pfade, Absturz nach dem Push |
+| Auszug | `voice-core/test_job_auszug.py`: zwei Köpfe, fremde Basis, zu viele Commits, Größen vor dem Lesen, Ausgabe nur reguläre Dateien |
+| Kern-Kanal | `voice-core/test_kernkanal.py`: `PERSOENLICH`, Regel 5 für den persönlichen Weg, Befehle offen und geschlossen, `profil` in Regel 4, Zähler und Grenzen |
+| Sandbox-Modi | `voice-core/test_job_kern_skripte.py` bzw. Probelauf von `wamo-job.sh` in `klon`, `ausgabe`, `pruefung` (kein Netz, Mounts, nur lesend, Grenzen, unbekannter Modus abgewiesen); Rauchtest-Proben in `wamo_job_kern_rauchtest.py` |
+| Wächter | `voice-core/test_dev_guard.py`: Sperren bei `WAMO_GITHUB=persoenlich`, sonst unverändert |
+
+### C.9 Arbeitspakete
+
+**Reihenfolge der Zweige.** `feat/auftrag-speichern` (ändert `dev_agent.py`, `Freigaben.tsx`, `nachrichten.ts`, `useWamo.ts`, `wamo.ts`, `WamoAnsicht.tsx`, Migration 0026) wird vor
+K gemergt, `feat/fp1-1-expiry-time` (ändert `wamo-job-kern-einrichten.sh`, `wamo_job_kern_rauchtest.py`, `test_job_kern_skripte.py`, `test_kernkanal_vertrag.py`) vor S und D-a;
+sonst baut K bzw. D-a auf diesen Zweigen auf. Danach ändern S, K, D-a und D-b keine gemeinsamen Dateien, außer in der festgelegten Folge S vor K und D-a.
+
+**Schnittstelle D-a zu D-b.** D-b liefert die Module ohne Abhängigkeit vom Dispatcher; D-a reicht beim Aufruf eine kleine Umgebung hinein (`Werkzeuge`: `log`, `http`
+(GitHub-Aufruf mit Token aus der Pipe), `git` (Aufruf mit der gemeinsamen Umgebung), `sandbox` (Start eines Modus), `sperre`, `uhr`). Die Signaturen stehen vor dem Bau in
+`wamo_job_github.py` als Protokoll-Klasse (Teil von S).
+
+| Paket | Inhalt | Dateien | h |
+| --- | --- | --- | --- |
+| **S** Schnittstelle (zuerst, ein Pull Request) | Gründe und Sätze aus C.2.6, Vertragstest, Protokoll-Klasse `Werkzeuge` | `infra/sokrates2/wamo_job_kernkanal.py` (nur die vier Listen der Gründe), `voice-core/entwicklung_betrieb.py` (nur Sätze), `voice-core/test_kernkanal_vertrag.py`, `infra/sokrates2/wamo_job_github.py` (nur Protokoll-Klasse und Konstanten) | 3 |
+| **K** Kern, Oberfläche, Migration | C.3, C.4, Kern-Teil von C.2, C.6, C.7, Schalter lesen, `SCHRANKEN_VERSION = 4` | `supabase/migrations/0027_github_zugang.sql`, `.down.sql`, `supabase/tests/0027_github_zugang_test.sql`, `voice-core/schluessel.py`, `voice-core/github_zugang.py` (neu), `voice-core/bot.py`, `voice-core/labor_loeschliste.py`, `voice-core/dev_agent.py`, `voice-core/entwicklung_betrieb.py` (nach S: Schalter, Version), `ui/src/lib/githubZugang.ts`, `ui/src/components/GithubZugang.tsx`, `ui/src/lib/einreichen.ts`, `ui/src/components/Freigaben.tsx`, `ui/src/lib/nachrichten.ts`, `ui/src/lib/useWamo.ts`, `ui/src/lib/wamo.ts`, `ui/src/components/WamoAnsicht.tsx`, Tests aus C.8 (Kern, Oberfläche, Migration) | 34 |
+| **D-a** Dispatcher, Kern-Kanal, Runner, Skripte | Einhängepunkte, C.2 Dispatcher-Seite, Bytes-Leser, Helfer, C.5.2, Wächter, Aufräumen, Einrichten und Rückweg | `infra/sokrates2/wamo_job_dispatch.py` (nur Einhängepunkte, `VERSION = "10"`, Kopffeld, Zeile, Umgebung, Schwärzung, Befehle, `ping`), `infra/sokrates2/wamo_job_kernkanal.py` (nach S: Schlüssel, Regel 5, `BEFEHLE_KERN`, `EREIGNISSE`, Zähler), `infra/sokrates2/wamo-job.sh`, `infra/sokrates2/wamo-job-klon.sh`, `wamo-job-ausgabe.sh`, `wamo-git-zugang` (neu), `infra/sokrates2/wamo-job-einrichten.sh`, `wamo-job-rueckweg.sh`, `wamo-job-kern-einrichten.sh`, `wamo-job-kern-rueckweg.sh`, `wamo_job_kern_rauchtest.py`, `voice-core/dev_guard.py`, Aufräum-Timer (neu), Tests dazu | 24 |
+| **D-b** GitHub-Logik und Auszug | API, Klon, Bereinigung, Übernahme der Sandbox-Ausgaben, Regeln, Commit aus Bytes, Einreichen, Pull Request, Auszug in der Sandbox | `infra/sokrates2/wamo_job_github.py` (nach S), `infra/sokrates2/wamo_job_pfadregeln.py` (neu, Regeln aus FP1 3.1.3), `infra/sokrates2/wamo_job_auszug.py` (neu), `voice-core/test_job_github.py`, `voice-core/test_job_pfadregeln.py`, `voice-core/test_job_auszug.py` | 29 |
+| **R** Review, Rollout, Doku (nach K und D) | Sicherheitsreview des Codes und Korrekturen (6), Migration dev, test, prod mit `database-reviewer`, Dispatcher 10, `kanal --persoenlich an`, Kern- und Oberflächen-Release, Rauchtest mit Testrepo und Wegwerf-Token, Rückweg-Probe, Schalter zuerst nur für das Admin-Profil, Zeile im Namensvertrag von CLAUDE.md, Abschnitt in `infra/sokrates2/README.md` (6) | Server, `CLAUDE.md`, `infra/sokrates2/README.md` | 12 |
+| | **Summe Plan C** | | **102** |
+
+Kritischer Pfad: S (3) → D-b (29) → R (12) = 44 Stunden mit drei Agenten (K, D-a, D-b); mit einem Agenten für D sind es S (3) → D (53) → R (12) = 68 Stunden.
+**Admin, manuell:** Testrepo und Wegwerf-Token (fein-granular und klassisch, Ablauf 7 Tage) am Donnerstagmorgen, Merge von `feat/auftrag-speichern` und `feat/fp1-1-expiry-time`
+oder Zustimmung zum Aufbauen darauf, Ja zu den Pull Requests, Go oder No-Go am Samstag 21.11. 18 Uhr.
+
+### C.10 Rückweg und Aufräumen
+
+1. `wamo-job-kern-einrichten.sh schalter ... --github aus`: der Kern schickt nie mehr `github`, die Karte verschwindet.
+2. `kanal --persoenlich aus`, dann die Schlüssel `PERSOENLICH`, `MAX_EINREICHEN_*`, `MAX_KLON_MB` entfernen, erst danach Dispatcher 9 zurück (`wamo-job-rueckweg.sh`).
+3. Gespeicherte Tokens bleiben verschlüsselt; `0027_github_zugang.down.sql` löscht sie. Die Personen widerrufen ihre Tokens bei GitHub.
+4. Aufräumen: ein Timer (`wamo-job-aufraeumen.timer`, täglich) löscht `basis.git`, `aus.git`, `bundle.ein`, `ausgabe/`, `ergebnis/` von Aufträgen, die `eingereicht` oder
+   `verworfen` sind, nach einem Tag, alle anderen nach 7 Tagen, und leert Projektordner mit `github=persoenlich`, deren Eigner-Auftrag so alt ist. `wamo-job-rueckweg.sh` macht
+   denselben Schritt sofort, damit nach dem Rückweg keine Kopien privater Repos liegen bleiben.
+
+### C.11 Restrisiken von Plan C
+
+| Nr. | Restrisiko | Begründung |
+| --- | --- | --- |
+| RC1 | Gekaperter Kern hat alle GitHub-Tokens | bewusst akzeptiert (C4), wie beim Claude-Zugang. Begrenzt durch Ablaufpflicht und Scope-Regeln (C5), die der Dispatcher bei jeder Benutzung erneut prüft |
+| RC2 | Ausbruch aus einer Sandbox auf `wamo` greift auf einen gleichzeitig laufenden Klon oder Push einer anderen Person zu | Der Dispatcher ist nicht dumpable, das Token steht in keiner Umgebung; offen bleibt der Speicher des git-Kindes für die Dauer von Klon oder Push. Schutz durch Yama (`ptrace_scope` mindestens 1, Vorprobe). Kleiner als beim Claude-Zugang, der während des ganzen Laufs in der Umgebung der Sandbox steht |
+| RC3 | Code des Agenten läuft nach dem Push in CI und Vorschau mit Secrets | Push auf `wamo/**` startet Workflows; `.github/` und weitere CI-Flächen sind gesperrt, sensible Dateien zu bestätigen. Die CI-Prüfung der Ausbaustufe (3.5 Schicht 3) folgt nach dem 05.12. |
+| RC4 | Fehler in git beim Lesen des Bundles | läuft nur im netzlosen Sandbox-Schritt `pruefung` ohne `/etc/wamo` und ohne Token; der Dispatcher übernimmt nur Dateibytes. Ein Fehler in git beim Push aus `aus.git` betrifft nur Objekte, die der Dispatcher selbst gebaut hat |
+| RC5 | Quelltext des Auftragsrepos fließt über 443 ab | wie heute |
+| RC6 | Fein-granulare Rechte sind nicht abfragbar | Anleitung auf der Karte; W.A.I.S. benutzt das Token nur für die festen Wege aus C.5 |
+
+### C.12 Review von Plan C
+
+Adversariales Review durch `ecc:security-reviewer` mit Fokus Token-Leck, Git-Hooks und Konfiguration, Ref- und Refspec-Injektion, PR-Text, Logs: 0 CRITICAL, 2 HIGH, 7 MEDIUM,
+4 LOW. HIGH und MEDIUM sind eingearbeitet, LOW überwiegend.
+
+| Nr. | Befund | Schwere | Lösung | Abschnitt |
+| --- | --- | --- | --- | --- |
+| 1 | Bundle und Objekte würden im Dispatcher verarbeitet (Prozess mit `geheim.env`, Claude-Zugang, App-Schlüssel); RC4 war falsch | HIGH | eigener netzloser Sandbox-Schritt `pruefung` ohne Projektordner und `/etc/wamo` gibt nur Dateiliste und Bytes zurück; der Dispatcher baut Blobs und Tree aus geprüften Bytes; Grenzen und rlimits; RC4 neu | C.5 Laufende 3 bis 5, C.11 |
+| 2 | Reihenfolge Klon und Entschärfung: Autostart-Flächen des Klons liefen mit dem Claude-Zugang, und entschärfte Pfade machten Repos mit `.claude/` nie einreichbar | HIGH | Entschärfung nach `klon` und vor `ausgabe`; für entschärfte Pfade gilt immer der Basis-Eintrag | C.5 Start 6, Laufende 1 und 4 |
+| 3 | Neue Modi nicht netzlos, falsche Allowlist, Projekt beschreibbar, Skript nicht sichtbar | MEDIUM | `case` mit Ablehnung, `--unshare-net`, eigene Allowlist, `--ro-bind`, Skripte unter `waechter/`, Runner entfernt Token zusätzlich | C.5.2 |
+| 4 | Zustandsautomat widersprüchlich, `github` nicht gebunden, `verwerfen` ohne Sperre | MEDIUM | Zustandstabelle, Bindung in `auftrag.json`, `verwerfen` nur aus vier Zuständen mit Sperren | C.2.1, C.2.3, C.5.1 |
+| 5 | Token bleibt als `str` im Speicher des Dispatchers, Helfer ungenau, Folgeläufe laden es unnötig | MEDIUM | Bytes-Leser ohne Kopien, `PR_SET_DUMPABLE=0`, `RLIMIT_CORE=0`, Helfer nur `get` für `github.com`, Zeile nur bis zum Ereignis `github` | C.2.2, C.5 Start 3 |
+| 6 | `ausgabe/` als Schreibfläche der Sandbox (Link, FIFO, Reste) | MEDIUM | Ordner leeren, `lstat`, `O_NOFOLLOW`, Kopie, git nur mit `--git-dir`, `cwd="/"`, `GIT_CEILING_DIRECTORIES` | C.5 gemeinsam, Laufende 1 bis 2 |
+| 7 | Scope-Prüfung nur beim Speichern | MEDIUM | Prüfung bei jedem Start und Einreichen; Allowlist statt Blacklist bleibt als Empfehlung (C5 ist entschieden) | C.4 |
+| 8 | Pakete überschneiden sich mit offenen Zweigen, 0026 belegt, Abhängigkeit D-b zum Dispatcher | MEDIUM | Migration 0027, Reihenfolge der Zweige, Protokoll `Werkzeuge`, Dateilisten ergänzt | C.3, C.9 |
+| 9 | PR-Wiederverwendung zu weit, PR-Text zu lang, Titel mit URL und Schließwörtern | MEDIUM | nur offener PR mit gleichem SHA und Repo, höchstens 50 Pfade, ASCII-Titel ohne `/` und `:`, Schließwörter entfernt, `commit-tree -F -`, Login aus `github.json` | C.5 Laufende 5, Einreichen 7 |
+| 10 | Grenze der Einreichen-Zeile, Zähler zählt Fehlklicks | LOW | 64 KiB, Menge, nur Versuche bis zum Push | C.2.3, C.2.5 |
+| 11 | `size` in KB, Klon aller Zweige, `default_branch` ungeprüft | LOW | Umrechnung, `--single-branch`, Prüfung und `--end-of-options`, 300 s | C.5 |
+| 12 | Aufräumen nur beim nächsten Start | LOW | Timer und Schritt im Rückweg | C.10 |
+| 13 | Ereignistexte ins Sprachmodell, `einreichen` als Werkzeug, Base64 nur mit festem Namen, Startkarte, Sensibel-Liste | LOW | alles übernommen | C.2.3, C.2.4, C.5, C.6 |
+
+**Nicht übernommen:** Allowlist der klassischen Scopes statt der Liste aus C5 (würde auch `workflow`, `write:org` und `gist` verbieten). Das weicht von der Entscheidung C5 ab und
+ist dem Admin als Empfehlung vorgelegt; die erneute Prüfung bei jeder Benutzung ist übernommen.
+
+## Kurzfassung der Ausbaustufe (Plan A und B, nach dem 05.12.)
 
 **Kurzfassung.** Entwicklungsaufträge sollen mit den eigenen Zugängen der Person arbeiten (GitHub mit fein-granularem oder klassischem Token, Vercel mit eigenem
 Token), weil die GitHub-App nicht alle Repos der Person sieht. Leitsatz: **Das persönliche Token verlässt den Zugangsdienst nie.** Es geht nicht in die Sandbox, nicht in
@@ -205,9 +618,9 @@ Einreichen (Klick im Bedienfeld auf der Änderungskarte)
 | **Laborprofil** | Zugang zu Tokens oder Repos im Testlabor | Dienst weist jedes Profil mit `labor_art` ab (`labor_pfad_gesperrt`), Bedienfeld erscheint nie, der Kern schickt für Laborsitzungen nie `persoenlich`, Tests auf allen Ebenen | keins erkennbar |
 | **Eigenes Repo und Kopien** | W.A.I.S. ändert sich selbst über das Token des Admins | Name und ID gegen `SELF_REPO_IDS`, auch für `parent`, `source` und `template_repository`, beim Start, nach dem Spiegeln und vor dem Push; keine Weiterleitungen | Eine Kopie ohne Fork-Beziehung unter anderem Namen; das gilt heute ebenso |
 
-### 3.2 Datenmodell (Migration 0026)
+### 3.2 Datenmodell (Migration 00NN, nächste freie Nummer nach Plan C, 0026 und 0027 sind belegt)
 
-Neue Migration `supabase/migrations/0026_entwicklung_zugaenge.sql` mit `.down.sql` und Test `supabase/tests/0026_entwicklung_zugaenge_test.sql`, Platzhalter `__SCHEMA__`, nach
+Neue Migration `supabase/migrations/00NN_entwicklung_zugaenge.sql` mit `.down.sql` und Test `supabase/tests/00NN_entwicklung_zugaenge_test.sql` (0026 und 0027 sind belegt), Platzhalter `__SCHEMA__`, nach
 den Regeln aus CLAUDE.md (RLS, eigene Policies, nur nötige Grants, FK-Indizes, keine Rechte für `anon`, `authenticated`, `service_role`, `drop ... if exists` vor Policies und
 Triggern), keine `admin_all`-Policy auf den neuen Tabellen, ausdrückliches `revoke all` für `wamo_admin`, `wamo_release`, `wamo_anker` nach dem Muster von 0013. Rolle
 `wamo_zugang` `nologin` wie in 0013, das Anmelden richtet `zugang-einrichten.sh` ein. Agent `database-reviewer` vor jedem Apply in PROD.
@@ -411,7 +824,7 @@ Git-Integration von Vercel nach dem Push ohnehin selbst (A8).
 2. **Kern-Kanal:** Schlüssel `PERSOENLICH` aus `kernkanal.conf` entfernen (zuerst), dann Dispatcher 9 zurück.
 3. **Dienste:** `zugang-rueckweg.sh` stoppt Dienst, Tor, Prüfer und Proxy, entfernt Caddy-Route (Sicherung `wamo-core.caddy.vorher`), Ausgangsregeln und Loopback-Port; mit
    `--entfernen` auch Benutzer, Ordner und Schlüssel.
-4. **Datenbank:** `0026_entwicklung_zugaenge.down.sql` löscht die Tabellen; die Personen widerrufen ihre Tokens bei GitHub.
+4. **Datenbank:** `00NN_entwicklung_zugaenge.down.sql` löscht die Tabellen; die Personen widerrufen ihre Tokens bei GitHub.
 
 ## 4. Arbeitspakete
 
@@ -423,7 +836,7 @@ Review durch `ecc:security-reviewer` (A und B), `ecc:react-reviewer` (C), `ecc:d
 | Paket | Kurzbrief | Dateien (Auswahl) | Abnahme | h | hängt ab von | Strang |
 | --- | --- | --- | --- | --- | --- | --- |
 | PZ-0 | Vorprobe und Schnittstellenblatt: A1 bis A12, Formate von Startdatensatz, Auftragsdatei, Übergabe, Bericht, Signatur, Routen, Codes. **Admin, manuell:** Testrepo, Wegwerf-Tokens (fein und klassisch, Ablauf 7 Tage) | dieses Papier | jede Annahme mit Ergebnis | 5 | keins | A1 |
-| PZ-1 | Migration 0026 mit Down und SQL-Test, Rolle `wamo_zugang` | `supabase/migrations/0026_*`, `supabase/tests/0026_*` | `wamo_core` liest kein `chiffrat` und keinen Schlüssel, schreibt nichts; andere Rollen nichts; zweiter Lauf bricht nicht ab | 6 | PZ-0 | C |
+| PZ-1 | Migration 00NN mit Down und SQL-Test, Rolle `wamo_zugang` | `supabase/migrations/00NN_*`, `supabase/tests/00NN_*` | `wamo_core` liest kein `chiffrat` und keinen Schlüssel, schreibt nichts; andere Rollen nichts; zweiter Lauf bricht nicht ab | 6 | PZ-0 | C |
 | PZ-2 | Regeln und Tresor ohne Netz: Formprüfung, Auswertung der GitHub-Antworten, D1, AES-GCM, Repo-Regeln mit IDs, Pfad-, Geheimnis- und CI-Regeln als ein Modul für Prüfer und Push-Kind, Signaturprüfung | `infra/sokrates2/zugang/zugang_regeln.py`, `zugang_tresor.py`, `zugang_signatur.py`, Tests `voice-core/test_zugang_*.py` | jede Regel mit Grenzfall, kein Wert in Fehlertexten | 10 | PZ-0 | A1 |
 | PZ-3 | Zugangsdienst: Unix-Socket, JWT, aal2 und Frische, Geräte, Signaturen, Routen, Zulassung und Grenzen, Ereignisse, Auslieferung des Bedienfelds mit CSP; Unit mit Härtung, Benutzer, Credentials, Domain-Proxy, Ausgangsregel, Caddy-Route, `zugang-einrichten.sh`, `zugang-rueckweg.sh`, Rauchtest; optional Netzregel gegen `wamo-core` (A11) | `infra/sokrates2/zugang/wamo_zugang_dienst.py`, `wamo-zugang.service`, `wamo-zugang-proxy` (Instanz), `zugang-einrichten.sh`, `zugang-rueckweg.sh`, `zugang_rauchtest.py`, `wamo-caddy/kern/wamo-core.caddy` | Labor 403, ohne Signatur 403, Signatur wiederverwendet 403, Gerät ohne frischen Code 403, kein Weg gibt den Wert zurück, Peer fremd abgewiesen, Probelauf ohne root | 20 | PZ-1, PZ-2 | A1 |
 | PZ-4 | Git-Tor: Loopback 18091, `http-backend`, Prozess-Konfiguration, root-eigene Hooks als einzige Instanz, Startdatensatz und Auftragsdatei, Übergabe-Pack, Grenzen; Unit ohne Internet; Fuzz-Tests mit echtem git | `infra/sokrates2/zugang/wamo_zugang_git.py`, `hooks/`, `wamo-zugang-git.service`, tmpfiles | alle Fälle aus 3.5 Schicht 2 abgewiesen; echter Klon und Push gegen ein Wegwerf-Repo | 16 | PZ-0 | A2 |
@@ -505,7 +918,9 @@ Realistisch ist Plan B: bis Sonntag gebaut und je Paket geprüft, in der Freeze-
 8. Verwendungsliste vom Dienst, Widerruf mit Verwerfen aller offenen Datensätze, Ablauf vor jeder Benutzung (3.7, 3.8). Regeln nach D1.
 9. Schalter standardmäßig aus, Rückweg geprobt, Rauchtest am Server, Review des Codes ohne offene CRITICAL und HIGH mit Korrekturfenster (PZ-10, PZ-11).
 
-## 6. Offene Entscheidungen
+## 6. Entscheidungen der Ausbaustufe
+
+Stand 18.11.2026: D1 ist mit C5 entschieden, D2 mit C6 (Lesen und Pull Requests in allen erreichbaren Repos außer dem eigenen). D3 und D4 sind durch Plan C für den Freeze ersetzt und werden vor dem Bau der Ausbaustufe nach dem 05.12. neu entschieden. Die Empfehlungen unten bleiben als Grundlage dafür.
 
 | Nr. | Frage | Empfehlung |
 | --- | --- | --- |
