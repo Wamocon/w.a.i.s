@@ -1,0 +1,33 @@
+# WAMO: Kopien privater Repos aus Entwicklungsaufträgen mit persönlichem GitHub-Zugang aufräumen (Plan C, docs/persoenliche-zugaenge.md C.10).
+# Löscht basis.git, aus.git, bundle.ein, ausgabe/ und ergebnis/ von eingereichten und verworfenen Aufträgen nach einem Tag, von allen anderen
+# nach sieben Tagen, und leert Projektordner, die aus dem Klon eines so aufgeräumten Auftrags stammen. Läuft als wamo (nie als root über
+# Ordner, die die Sandbox beschreiben kann), ohne Netz, nur mit Schreibrecht in /srv/wamo. Installiert durch wamo-job-einrichten.sh.
+[Unit]
+Description=WAMO: Kopien privater Repos aus Entwicklungsaufträgen aufräumen
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=wamo
+Group=wamo
+ExecStart=/opt/wamo/bin/wamo-job-dispatch aufraeumen
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30min
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+ReadWritePaths=/srv/wamo/jobs /srv/wamo/projekte /srv/wamo/logs

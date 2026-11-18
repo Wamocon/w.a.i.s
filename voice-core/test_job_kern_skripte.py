@@ -1188,7 +1188,7 @@ def test_die_versionspruefung_liest_die_echte_zeile_des_dispatchers(tmp_path):
     funktion = re.search(r"^dispatcher_version\(\) \{.*?^\}$", text, flags=re.M | re.S).group(0)
     proben = {"echt": (INFRA / "wamo_job_dispatch.py").read_text(encoding="utf-8"), "kommentar": 'VERSION = "9"  # neu\n',
               "alt": 'VERSION = "7"\n', "kaputt": "VERSION = 8\n", "fehlt": "x = 1\n"}
-    erwartet = {"echt": "9", "kommentar": "9", "alt": "7", "kaputt": "", "fehlt": ""}
+    erwartet = {"echt": "10", "kommentar": "9", "alt": "7", "kaputt": "", "fehlt": ""}
     for name, inhalt in proben.items():
         datei = tmp_path / f"{name}.py"
         datei.write_text(inhalt, encoding="utf-8", newline="\n")
@@ -1661,7 +1661,9 @@ def test_das_einrichtungsskript_schreibt_nie_in_die_pc_datei_und_hat_die_standar
                    "MAX_LAUFZEIT_TAG_S": "14400", "MAX_FOLGEN": "5", "MIN_ABSTAND_S": "60", "MIN_PLATZ_MB": "2048",
                    "MAX_VERSUCH_STUNDE": "60", "KOSTEN_AUFTRAG_USD": "3", "KOSTEN_TAG_USD": "10", "MITGLIEDER": "aus",
                    "MAX_NEU_STUNDE_PROFIL": "3", "MAX_NEU_TAG_PROFIL": "8", "MAX_VERSUCH_STUNDE_PROFIL": "10", "MAX_LAUFZEIT_TAG_S_PROFIL": "7200",
-                   "MAX_PARALLEL": "6", "MAX_PARALLEL_PROFIL": "3"}
+                   "MAX_PARALLEL": "6", "MAX_PARALLEL_PROFIL": "3",
+                   # persönlicher GitHub-Weg (Dispatcher 10): nur geschrieben, wenn kanal --persoenlich sie setzt (KONFIG_SCHLUESSEL_PERSOENLICH)
+                   "MAX_EINREICHEN_TAG": "10", "MAX_EINREICHEN_TAG_PROFIL": "5", "MAX_KLON_MB": "2048"}
     schluessel = re.search(r"^KONFIG_SCHLUESSEL=\((.*?)\)$", text, re.M | re.S).group(1).split()
     assert schluessel == ["KANAL", "ABLAUF", "ARTEN", "REPOS", "DIENSTE", "MAX_TURNS", "MAX_BUDGET_USD", "MAX_START_STUNDE", "MAX_START_TAG",
                           "MAX_LAUFZEIT_TAG_S", "MAX_FOLGEN", "MIN_ABSTAND_S", "MIN_PLATZ_MB", "MAX_VERSUCH_STUNDE", "MAX_NEU_STUNDE_PROFIL",

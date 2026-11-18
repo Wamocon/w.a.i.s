@@ -1,4 +1,4 @@
-"""Kern-Kanal des WAMO-Auftragsdispatchers auf Sokrates-2 (Dispatcher Version 9).
+"""Kern-Kanal des WAMO-Auftragsdispatchers auf Sokrates-2 (Dispatcher Version 10).
 
 Installiert als /opt/wamo/waechter/wamo_job_kernkanal.py (root:wamo 0640) durch wamo-job-einrichten.sh. Der Dispatcher
 (wamo_job_dispatch.py) lädt dieses Modul erst, wenn er es braucht, und ruft nur die Funktionen von hier auf. Hier steht
@@ -80,8 +80,8 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 # Feste Liste der Gründe (Schnittstelle zum Kern: voice-core/entwicklung_betrieb.py hält GRUND_SAETZE mit denselben Schlüsseln).
-# Plan C (docs/persoenliche-zugaenge.md, C.2.6): persoenlich_aus (Regel 5 bei github=persoenlich ohne PERSOENLICH=an) und
-# grenze_einreichen (MAX_EINREICHEN_TAG und MAX_EINREICHEN_TAG_PROFIL) liefert Paket D-a; bis dahin stehen sie nur hier.
+# Plan C (docs/persoenliche-zugaenge.md, C.2.6): persoenlich_aus (Regel 5 bei github=persoenlich ohne PERSOENLICH=an, pruefe_start und
+# pruefe_einreichen) und grenze_einreichen (MAX_EINREICHEN_TAG und MAX_EINREICHEN_TAG_PROFIL, pruefe_einreichen).
 KANAL_GRUENDE = ("notaus", "konfig_ungueltig", "kanal_zu", "abgelaufen", "befehl", "fremd", "art", "repo", "repo_fehlt",
                  "dienst", "projekt", "zugang", "fork", "herkunft_unklar", "grenze_start", "grenze_laufzeit", "grenze_folgen",
                  "abstand", "platz", "grenze_profil", "persoenlich_aus", "grenze_einreichen")
@@ -97,11 +97,13 @@ AENDERUNG_GRUENDE = ("pfad_gesperrt", "geheimnis", "zu_gross", "zu_viele_commits
 EINREICHEN_GRUENDE = ("zustand", "veraltet", "bestaetigung", "konto", "token_rechte", "repo_geaendert", "keine_schreibrechte",
                       "zweig_belegt", "geheimnis", "token_abgelaufen", "github_fehler")
 
-BEFEHLE_KERN = ("ping", "start", "status", "pending", "approve", "cancel")
+# Dispatcher 10 (Plan C, C.2.3): aenderung, einreichen und verwerfen, je mit <job> <profil> (wamo_job_github.BEFEHLE_GITHUB)
+BEFEHLE_KERN = ("ping", "start", "status", "pending", "approve", "cancel", "aenderung", "einreichen", "verwerfen")
 # Regel 7: Zugangsarten des Kerns (folgt: der eigene Zugang des Profils als zweite Zeile; haus: Hausmodell über den Proxy, kein Wert vom
 # Kern). Nie server: der Zugang des Servers gilt im Kern-Kanal nicht. test_kernkanal_vertrag.py hält die Liste mit dem Dispatcher gleich.
 ZUGAENGE_KERN = ("folgt", "haus")
-BEFEHLE_GESCHLOSSEN = ("ping", "status", "pending", "cancel")  # bei geschlossenem oder fehlerhaftem Kanal
+# bei geschlossenem oder fehlerhaftem Kanal; aenderung und verwerfen auch dann (wamo_job_github.BEFEHLE_GITHUB_GESCHLOSSEN), nie einreichen
+BEFEHLE_GESCHLOSSEN = ("ping", "status", "pending", "cancel", "aenderung", "verwerfen")
 BEFEHLE_NOTAUS = ("ping", "status")
 
 PRAEFIX = "kern-"
@@ -127,7 +129,9 @@ MAX_SCHLUESSELDATEI_BYTES = 256 * 1024
 MAX_AUTH_BYTES = 16 * 1024
 MAX_KONFIG_BYTES = 64 * 1024
 MAX_ZAEHLER_BYTES = 2 * 1024 * 1024  # größere Dateien: nur das Ende wird gelesen
-EREIGNISSE = ("start", "ende", "versuch")  # versuch: ein Start, der die erste Prüfung bestand (auch wenn er später an einer Sperre scheitert)
+# versuch: ein Start, der die erste Prüfung bestand (auch wenn er später an einer Sperre scheitert), oder ein Aufruf von einreichen;
+# einreichen: ein Einreichen, das bis zum Push kam (zählt gegen MAX_EINREICHEN_*); eingereicht: danach erfolgreich, mit der Nummer pr
+EREIGNISSE = ("start", "ende", "versuch", "einreichen", "eingereicht")
 STUNDE_S = 3600
 TAG_S = 86400
 MIB = 1024 * 1024
@@ -154,9 +158,14 @@ ZAHLEN = {"MAX_TURNS": (1, 200), "MAX_START_STUNDE": (1, 60), "MAX_START_TAG": (
           "MAX_NEU_STUNDE_PROFIL": (1, 60), "MAX_NEU_TAG_PROFIL": (1, 200), "MAX_VERSUCH_STUNDE_PROFIL": (1, MAX_VERSUCH_STUNDE_FEST),
           "MAX_LAUFZEIT_TAG_S_PROFIL": (60, 86400),
           # gleichzeitige Aufträge (Dispatcher 9): gesamt und je Person, nie über PARALLEL_HART; je Person nie über gesamt (konfig_lesen)
-          "MAX_PARALLEL": (1, PARALLEL_HART), "MAX_PARALLEL_PROFIL": (1, PARALLEL_HART)}
+          "MAX_PARALLEL": (1, PARALLEL_HART), "MAX_PARALLEL_PROFIL": (1, PARALLEL_HART),
+          # persönlicher GitHub-Weg (Dispatcher 10, C.2.7): Einreichen je Tag gesamt und je Profil, Größe eines Repos für den Klon in MB
+          "MAX_EINREICHEN_TAG": (1, 50), "MAX_EINREICHEN_TAG_PROFIL": (1, 50), "MAX_KLON_MB": (100, 4096)}
 LISTEN = ("ARTEN", "REPOS", "DIENSTE")
-BEKANNTE_SCHLUESSEL = frozenset({"KANAL", "ABLAUF", "MAX_BUDGET_USD", *ZAHLEN, *LISTEN})
+# PERSOENLICH (an oder aus, Standard aus): der persönliche GitHub-Weg im Kern-Kanal (C.2.7). Dispatcher 9 kennt die vier neuen Schlüssel nicht
+# und schließt bei ihnen den Kanal (konfig_ungueltig): das Skript setzt sie erst nach Dispatcher 10, der Rückweg entfernt sie vorher.
+SCHLUESSEL_PERSOENLICH = ("PERSOENLICH", "MAX_EINREICHEN_TAG", "MAX_EINREICHEN_TAG_PROFIL", "MAX_KLON_MB")
+BEKANNTE_SCHLUESSEL = frozenset({"KANAL", "ABLAUF", "MAX_BUDGET_USD", "PERSOENLICH", *ZAHLEN, *LISTEN})
 
 
 @dataclass(frozen=True)
@@ -208,6 +217,11 @@ class Konfig:
     max_parallel_profil: int = 1
     min_abstand_s: int = 60
     min_platz_mb: int = 2048
+    # persönlicher GitHub-Weg (Dispatcher 10): ohne PERSOENLICH=an aus (persoenlich_aus)
+    persoenlich: bool = False
+    max_einreichen_tag: int = 10
+    max_einreichen_tag_profil: int = 5
+    max_klon_mb: int = 2048
 
 
 @dataclass(frozen=True)
@@ -238,6 +252,7 @@ class StartAnfrage:
     projekt_fremd: bool  # der Projektordner besteht schon und stammt aus keinem Auftrag mit kanal=kern
     projekt_kollision: bool  # ein Kern-Auftrag hat denselben Projektordner mit einem anderen Repo belegt
     projekt_profil_fremd: bool  # ein Kern-Auftrag eines anderen Profils (oder ohne Profil) hat den Projektordner angelegt
+    persoenlich: bool = False  # github=persoenlich in der Kopfzeile (Plan C): Regel 5 mit dem persönlichen Token statt der App
 
 
 class KonfigFehler(Exception):
@@ -495,12 +510,19 @@ def konfig_lesen(pfad, *, jetzt: float | None = None, lesen: Callable = datei_le
     kanal = werte.get("KANAL")
     if "KANAL" in werte and kanal not in ("zu", "offen"):
         raise KonfigFehler("KANAL ist weder zu noch offen")
+    if "PERSOENLICH" in werte and werte["PERSOENLICH"] not in ("an", "aus"):
+        raise KonfigFehler("PERSOENLICH ist weder an noch aus")
+    if "MAX_EINREICHEN_TAG_PROFIL" in werte and _zahl("MAX_EINREICHEN_TAG_PROFIL", werte["MAX_EINREICHEN_TAG_PROFIL"]) > \
+            _zahl("MAX_EINREICHEN_TAG", werte.get("MAX_EINREICHEN_TAG", str(Konfig.max_einreichen_tag))):
+        raise KonfigFehler("MAX_EINREICHEN_TAG_PROFIL ist größer als MAX_EINREICHEN_TAG")
     standard = Konfig()
     zahlen = {n.lower(): _zahl(n, werte[n]) if n in werte else getattr(standard, n.lower()) for n in ZAHLEN}
     if "MAX_PARALLEL_PROFIL" not in werte:  # der Standard je Person gilt höchstens bis zur Gesamtgrenze
         zahlen["max_parallel_profil"] = min(zahlen["max_parallel_profil"], zahlen["max_parallel"])
     elif zahlen["max_parallel_profil"] > zahlen["max_parallel"]:
         raise KonfigFehler("MAX_PARALLEL_PROFIL ist größer als MAX_PARALLEL")
+    if "MAX_EINREICHEN_TAG_PROFIL" not in werte:  # wie oben: der Standard je Person höchstens bis zum Tageswert gesamt
+        zahlen["max_einreichen_tag_profil"] = min(zahlen["max_einreichen_tag_profil"], zahlen["max_einreichen_tag"])
     return Konfig(
         kanal=kanal,
         ablauf=_ablauf(werte["ABLAUF"], _heute(jetzt)) if "ABLAUF" in werte else None,
@@ -508,6 +530,7 @@ def konfig_lesen(pfad, *, jetzt: float | None = None, lesen: Callable = datei_le
         repos=_repos(werte.get("REPOS", "")),
         dienste=_dienste(werte.get("DIENSTE", "")),
         max_budget_usd=_budget(werte["MAX_BUDGET_USD"]) if "MAX_BUDGET_USD" in werte else standard.max_budget_usd,
+        persoenlich=werte.get("PERSOENLICH") == "an",
         **zahlen)
 
 
@@ -683,22 +706,30 @@ def zaehler_lesen(pfad) -> list[dict]:
             continue
         if not isinstance(e, dict) or not isinstance(e.get("t"), int) or isinstance(e.get("t"), bool):
             continue
-        job, art, dauer = e.get("job"), e.get("ereignis"), e.get("dauer_s")
+        job, art, dauer, pr, befehl = e.get("job"), e.get("ereignis"), e.get("dauer_s"), e.get("pr"), e.get("befehl")
         if not isinstance(job, str) or not JOB_RE.fullmatch(job) or art not in EREIGNISSE:
             continue
         if art == "ende" and (not isinstance(dauer, int) or isinstance(dauer, bool) or dauer < 0):
             continue
         profil = e.get("profil")
         ereignisse.append({"t": e["t"], "job": job, "ereignis": art, **({"dauer_s": dauer} if art == "ende" else {}),
-                           **({"profil": profil} if isinstance(profil, str) and PROFIL_RE.fullmatch(profil) else {})})
+                           **({"profil": profil} if isinstance(profil, str) and PROFIL_RE.fullmatch(profil) else {}),
+                           **({"pr": pr} if art == "eingereicht" and type(pr) is int and pr > 0 else {}),
+                           **({"befehl": "einreichen"} if art == "versuch" and befehl == "einreichen" else {})})
     return ereignisse
 
 
-def zaehler_schreiben(pfad, job: str, ereignis: str, jetzt: float, dauer_s: int | None = None, profil: str | None = None) -> None:
+def zaehler_schreiben(pfad, job: str, ereignis: str, jetzt: float, dauer_s: int | None = None, profil: str | None = None,
+                      pr: int | None = None, befehl: str | None = None) -> None:
     """Hängt eine Zeile an den Zähler (eine Zeile je Schreibaufruf, atomar genug für zwei Prozesse). OSError, wenn es nicht geht.
-    profil: die Kennung (8 Hexzeichen) für die Grenzen je Profil, nie eine volle user_id."""
+    profil: die Kennung (8 Hexzeichen) für die Grenzen je Profil, nie eine volle user_id. pr: nur bei eingereicht, die Nummer des Pull
+    Requests (kein Token, kein Repo-Inhalt, C.2.5)."""
     if not JOB_RE.fullmatch(job) or ereignis not in EREIGNISSE:
         raise ValueError("Auftrag oder Ereignis ungültig")
+    if pr is not None and (ereignis != "eingereicht" or type(pr) is not int or pr <= 0):
+        raise ValueError("pr nur bei eingereicht, eine Nummer größer 0")
+    if befehl is not None and (ereignis != "versuch" or befehl != "einreichen"):
+        raise ValueError("befehl nur bei versuch, nur einreichen")
     zeile: dict = {"t": int(jetzt), "job": job, "ereignis": ereignis}
     if dauer_s is not None:
         if not isinstance(dauer_s, int) or dauer_s < 0:
@@ -708,6 +739,10 @@ def zaehler_schreiben(pfad, job: str, ereignis: str, jetzt: float, dauer_s: int 
         if not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil):
             raise ValueError("profil ungültig")
         zeile["profil"] = profil
+    if pr is not None:
+        zeile["pr"] = pr
+    if befehl is not None:
+        zeile["befehl"] = befehl
     daten = (json.dumps(zeile) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     fd = os.open(pfad, flags, 0o640)
@@ -802,7 +837,7 @@ def pruefe_grenzen(konfig: Konfig, ereignisse: list[dict], job: str, jetzt: floa
     starts = [e for e in ereignisse if e["ereignis"] == "start"]
     in_stunde = sum(1 for e in starts if e["t"] > jetzt - STUNDE_S)
     am_tag = sum(1 for e in starts if e["t"] > jetzt - TAG_S)
-    versuche = sum(1 for e in ereignisse if e["ereignis"] == "versuch" and e["t"] > jetzt - STUNDE_S)
+    versuche = sum(1 for e in ereignisse if e["ereignis"] == "versuch" and e.get("befehl") != "einreichen" and e["t"] > jetzt - STUNDE_S)
     if in_stunde >= konfig.max_start_stunde or am_tag >= konfig.max_start_tag or versuche >= konfig.max_versuch_stunde:
         return "grenze_start"
     if laufzeit_tag(ereignisse, jetzt, laufzeit_reserve_s) >= konfig.max_laufzeit_tag_s:
@@ -840,14 +875,21 @@ def pruefe_start(anfrage: StartAnfrage, zustand: KernZustand, *, ereignisse: lis
     if anfrage.art not in konfig.arten:
         return "art"
     repo = anfrage.repo
-    if anfrage.github:
+    if anfrage.persoenlich:  # Regel 5 im persönlichen Weg (C.2.7): Repo Pflicht, nicht REPOS, nie das eigene, keine App, keine Dienste
+        if not konfig.persoenlich:
+            return "persoenlich_aus"
+        if not repo:
+            return "repo_fehlt"
+        if ist_eigenes_repo(repo):
+            return "repo"
+    elif anfrage.github:
         if not repo:
             return "repo_fehlt"
         if repo.lower() not in konfig.repos or not anfrage.app_modus:
             return "repo"
     elif repo and repo.lower() not in konfig.repos:
         return "repo"
-    for dienst in anfrage.dienste:
+    for dienst in () if anfrage.persoenlich else anfrage.dienste:
         if dienst == "supabase" or dienst not in konfig.dienste:
             return "dienst"
     grund = projekt_pruefen(anfrage.projekt, repo, anfrage.profil)
@@ -860,6 +902,33 @@ def pruefe_start(anfrage: StartAnfrage, zustand: KernZustand, *, ereignisse: lis
     if ereignisse is None:  # der Zähler ist nicht lesbar: die Grenzen lassen sich nicht prüfen
         return "grenze_start"
     return pruefe_grenzen(konfig, ereignisse, anfrage.job, jetzt, freier_platz_mb, anfrage.profil, laufzeit_reserve_s)
+
+
+def pruefe_einreichen(zustand: KernZustand, *, ereignisse: list[dict] | None, jetzt: float, profil: str | None,
+                      buchen: bool = False) -> str | None:
+    """Regeln für einreichen im Kern-Kanal (C.2.5, C.2.7): Kanal offen (Notaus, Konfiguration), PERSOENLICH=an (sonst persoenlich_aus), Versuche
+    je Stunde und Profil (grenze_profil, jeder Aufruf zählt als versuch) und, mit buchen=True unmittelbar vor dem Push, die Grenzen
+    MAX_EINREICHEN_TAG und MAX_EINREICHEN_TAG_PROFIL über die Ereignisse einreichen im gleitenden Tag (grenze_einreichen). ereignisse None
+    heißt: der Zähler ist nicht lesbar (fail closed)."""
+    grund = pruefe_befehl("einreichen", zustand)
+    if grund is not None:
+        return grund
+    konfig = zustand.konfig
+    if konfig is None:
+        return "konfig_ungueltig"
+    if not konfig.persoenlich:
+        return "persoenlich_aus"
+    if not isinstance(profil, str) or not PROFIL_RE.fullmatch(profil):
+        return "grenze_profil"
+    if ereignisse is None:
+        return "grenze_einreichen" if buchen else "grenze_profil"
+    if not buchen:
+        versuche = sum(1 for e in ereignisse if e["ereignis"] == "versuch" and e.get("profil") == profil and e["t"] > jetzt - STUNDE_S)
+        return "grenze_profil" if versuche >= konfig.max_versuch_stunde_profil else None
+    am_tag = [e for e in ereignisse if e["ereignis"] == "einreichen" and e["t"] > jetzt - TAG_S]
+    if len(am_tag) >= konfig.max_einreichen_tag or sum(1 for e in am_tag if e.get("profil") == profil) >= konfig.max_einreichen_tag_profil:
+        return "grenze_einreichen"
+    return None
 
 
 # ---------------------------------------------------------------- Regel 8: Fork-Prüfung

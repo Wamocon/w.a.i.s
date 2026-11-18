@@ -573,5 +573,37 @@ class HookEntryPointTests(unittest.TestCase):
         self.assertEqual(p.returncode, 2)
 
 
+class PersoenlicherWegTests(unittest.TestCase):
+    """Plan C: mit WAMO_GITHUB=persoenlich sperrt der Wächter push, send-pack, gh und das Ändern von Remotes; ohne die Variable wie bisher."""
+
+    GESPERRT = ["git push origin wamo/abc", "git push", "git -C /srv/wamo/projekte/x push -u origin HEAD", "git send-pack x",
+                "gh pr create --fill", "gh repo view", "gh --version", "/usr/bin/gh api user", "bash -c 'gh auth status'",
+                "git remote set-url origin https://evil.example/x.git", "git remote add fremd https://github.com/a/b.git",
+                "git remote rename origin alt", "eval \"git push\"", "cd x && git push", "GH_TOKEN=x gh issue list"]
+    ERLAUBT = ["git status", "git commit -m 'WAIS-Auftrag: abc'", "git log --oneline", "git remote -v", "git diff HEAD~1",
+               "echo pushen ist hier verboten", "npm test"]
+
+    def test_mit_dem_persoenlichen_weg(self):
+        with mock.patch.dict(os.environ, {"WAMO_GITHUB": "persoenlich"}):
+            for cmd in self.GESPERRT:
+                with self.subTest(cmd=cmd):
+                    entscheidung, grund = g.decide("Bash", {"command": cmd}, Path("/srv/wamo/projekte/x"))
+                    self.assertEqual(entscheidung, "block")
+                    self.assertIn("Persönlicher GitHub-Weg", grund)
+            for cmd in self.ERLAUBT:
+                with self.subTest(cmd=cmd):
+                    self.assertEqual(g.decide("Bash", {"command": cmd}, Path("/srv/wamo/projekte/x"))[0], "allow")
+            self.assertEqual(g.decide("mcp__github__create_pull_request", {}, None)[0], "block")
+
+    def test_ohne_den_persoenlichen_weg_wie_bisher(self):
+        umgebung = {k: v for k, v in os.environ.items() if k != "WAMO_GITHUB"}
+        for wert in (None, "app", "PERSOENLICH"):
+            with self.subTest(wert=wert), mock.patch.dict(os.environ, umgebung if wert is None else {**umgebung, "WAMO_GITHUB": wert},
+                                                          clear=True):
+                self.assertEqual(g.decide("Bash", {"command": "git push origin main"}, None)[0], "approval")
+                self.assertEqual(g.decide("Bash", {"command": "gh repo view"}, None)[0], "allow")
+                self.assertNotEqual(g.decide("mcp__github__create_pull_request", {}, None)[0], "block")
+
+
 if __name__ == "__main__":
     unittest.main()

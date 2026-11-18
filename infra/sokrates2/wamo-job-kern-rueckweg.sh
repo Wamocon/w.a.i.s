@@ -166,12 +166,15 @@ lokal_cancel() {   # lokaler Aufruf des Dispatchers (ohne SSH-Variablen: Kanal l
 }
 
 # ---------------------------------------------------------------- notaus
-kanal_zu_setzen() {   # KANAL=zu in kernkanal.conf: ein späteres notaus-aufheben und schluessel öffnen den Kanal nie von allein
+kanal_zu_setzen() {   # KANAL=zu in kernkanal.conf: ein späteres notaus-aufheben und schluessel öffnen den Kanal nie von allein. Steht dort
+  # PERSOENLICH=an (persönlicher GitHub-Weg, Dispatcher 10), wird es zu PERSOENLICH=aus: auch der Weg geht nur ausdrücklich wieder an
   [ -f "$KONFIG" ] || return 0
-  if grep -qx 'KANAL=zu' "$KONFIG" && [ "$(grep -c '^KANAL=' "$KONFIG")" = 1 ]; then echo "  Kanal steht schon auf zu"; return 0; fi
-  if [ "$TROCKEN" = 1 ]; then echo "  [trocken] setzt KANAL=zu in ${KONFIG#"$WURZEL"}"; return 0; fi
+  if grep -qx 'KANAL=zu' "$KONFIG" && [ "$(grep -c '^KANAL=' "$KONFIG")" = 1 ] && ! grep -q '^PERSOENLICH=an' "$KONFIG"; then
+    echo "  Kanal steht schon auf zu"; return 0
+  fi
+  if [ "$TROCKEN" = 1 ]; then echo "  [trocken] setzt KANAL=zu (und PERSOENLICH=aus, falls an) in ${KONFIG#"$WURZEL"}"; return 0; fi
   sichern "$KONFIG"
-  { grep -v '^KANAL=' "$KONFIG" || true; echo "KANAL=zu"; } > "$KONFIG.neu"
+  { grep -v '^KANAL=' "$KONFIG" | sed 's/^PERSOENLICH=an$/PERSOENLICH=aus/' || true; echo "KANAL=zu"; } > "$KONFIG.neu"
   chmod 0640 "$KONFIG.neu"
   [ -n "$WURZEL" ] || chown root:wamo "$KONFIG.neu"
   mv -f "$KONFIG.neu" "$KONFIG"

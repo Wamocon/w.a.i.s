@@ -17,6 +17,10 @@ aus SSH_ORIGINAL_COMMAND und wird streng geprüft (feste Muster, keine Shell):
     approve <job> <fingerabdruck>               Freigabe für den nächsten Lauf des Auftrags
     cancel  <job>                               laufenden Auftrag beenden
     pruefen <job>                               ein Befehl der Abnahme in der Sandbox des Auftrags (JSON-Zeile, standardmäßig AUS)
+    aenderung  <job> <profil>                   persönlicher GitHub-Weg: das Ereignis aenderung aus aenderung.json (Dispatcher 10)
+    einreichen <job> <profil>                   persönlicher GitHub-Weg: Push des Kandidaten und Pull Request (zwei stdin-Zeilen)
+    verwerfen  <job> <profil>                   persönlicher GitHub-Weg: Kandidat und Kopien des Repos löschen
+    aufraeumen [alle]                           nur lokal (Timer, Rückweg): Kopien privater Repos löschen
 
 start: Die erste stdin-Zeile ist ein JSON-Objekt {"auftrag": "...", "system": "...", "modell": "..." (optional),
 "repo": "owner/name" (optional, Ziel-Repo für das GitHub-Token), "zugang": "folgt" | "server" | "haus" (optional),
@@ -102,6 +106,12 @@ Grenze endet mit dem Ereignis belegt, Feld grenze aus BELEGT_GRENZEN (auftrag, p
 Jeder Platz hat seinen Teil der Entwicklungsports (Landlock, siehe wamo-job.sh). Im Kern-Kanal laufen die zweite Prüfung und das Buchen des
 Starts unter der Sperre kernkanal (gleichzeitige Starts prüfen nie denselben Stand), laufende Aufträge reservieren in der Laufzeit je Tag ihr
 Zeitlimit (lauf_zeitlimit_s).
+Version 10 bringt den persönlichen GitHub-Weg (Plan C, docs/persoenliche-zugaenge.md, standardmäßig aus über PERSOENLICH in
+kernkanal.conf): Kopffeld github=persoenlich (nur Kern-Kanal, mit repo und profil, gebunden in auftrag.json) und scopes_ausnahmen, die
+GitHub-Zeile auf stdin nur über den Bytes-Leser StdinLeser (das Token ist ein Ausschnitt eines bytearray, nie str oder bytes, der Prozess ist
+nicht dumpable), git außerhalb der Sandbox nur über den Credential-Helfer wamo-git-zugang mit einer Pipe, die Sandbox-Schritte klon, ausgabe
+und pruefung ohne Netz, die Befehle aenderung, einreichen und verwerfen und das Aufräumen. Die GitHub-Logik steht in wamo_job_github.py, die
+Schnittstelle dorthin ist das Protokoll Werkzeuge (DispatcherWerkzeuge). Ohne github in der Kopfzeile ist der Weg genau der von Version 9.
 Die Regeln stehen in wamo_job_kernkanal.py, hier nur die Einhängepunkte. Jeder Verstoß: {"type": "wamo", "ereignis":
 "kanal_gesperrt", "grund": <Code>} und Exit 2. ping meldet kanal und kernkanal, dazu haus (Schalter an und Ordner des Proxys bereit).
 
@@ -135,11 +145,13 @@ from collections import namedtuple
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import MappingProxyType
 
+# 10: persönlicher GitHub-Weg (Plan C): Kopffeld github, GitHub-Zeile, Befehle aenderung, einreichen, verwerfen, Sandbox-Schritte ohne Netz.
 # 9: gleichzeitige Aufträge (Plätze gesamt und je Person, eigene Entwicklungsports je Platz, Laufzeit mit Reserve laufender Aufträge).
 # 8: Trennung je Profil im Kern-Kanal (Projektname kern-<Kennung>-<Name>, Kennung in auftrag.json, Grenzen je Profil). Die Zeile darunter
 # bleibt genau so (ohne Kommentar am Ende): wamo-job-kern-einrichten.sh liest die Zahl daraus.
-VERSION = "9"
+VERSION = "10"
 
 HEIM = Path("/srv/wamo")
 APP = Path("/opt/wamo")  # root-eigen; Programme in bin/, Wächter in waechter/ (in der Sandbox derselbe Pfad)
@@ -257,6 +269,49 @@ MAX_ZEILE_STDOUT = 4 * 1024 * 1024  # dev_agent liest bis 10 MiB je Zeile; läng
 MAX_ZEILE_STDERR = 1024 * 1024
 SPEICHER_DISPATCHER = 1024 * 1024 * 1024  # weiche Adressraumgrenze dieses Prozesses (RLIMIT_AS)
 
+# Persönlicher GitHub-Weg (Plan C, Dispatcher 10, docs/persoenliche-zugaenge.md C.2 und C.5). Standard aus: ohne PERSOENLICH=an in
+# kernkanal.conf weist der Kern-Kanal jeden Start mit github=persoenlich ab (persoenlich_aus). Das Token der Person kommt nur über stdin
+# (GitHub-Zeile), wird nie zu str oder bytes, steht nie in einer Umgebung, argv, Datei oder einem Protokoll und erreicht die Sandbox nie.
+# Die Werte stehen gleich in wamo_job_github.py (Paket S); test_job_persoenlich.py hält beide gleich.
+GITHUB_WEG = "persoenlich"  # einziger Wert des Kopfzeilenfelds github (GITHUB_PERSOENLICH)
+# GitHub-Zeile ohne Zeilenende (GITHUB_ZEILE_RE der Schnittstelle): nur fullmatch und Positionen, nie group()
+GITHUB_ZEILE_RE = re.compile(rb'\{"typ":"github","wert":"(?:ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82})"\}')
+MAX_GITHUB_ZEILE = 256  # GITHUB_ZEILE_MAX_BYTES, mit Zeilenende
+MAX_EINREICHEN_ZEILE = 64 * 1024  # EINREICHEN_ZEILE_MAX_BYTES, erste stdin-Zeile von einreichen
+STDIN_PUFFER = MAX_HEADER_BYTES + 1 + MAX_ZUGANG_BYTES + 1 + MAX_EINREICHEN_ZEILE + MAX_GITHUB_ZEILE + 4096
+LESEN_FRIST_S = 30.0  # so lange wartet der Dispatcher höchstens auf eine stdin-Zeile
+# jedes GitHub-Token in Ausgaben, Protokollen und Fehlertexten (auch fremde und kodierte Teile ab 8 Zeichen); das exakte Token kommt dazu
+GH_PAT_RE = re.compile(rb"(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}")
+GH_PAT_ERSATZ = b"[GITHUB_TOKEN]"
+GIT_BENUTZER = b"x-access-token"  # Benutzername für git über HTTPS mit einem persönlichen Token (der Helfer gibt ihn mit aus)
+HELFER = BIN / "wamo-git-zugang"  # Credential-Helfer: liest den Zugang aus einer geerbten Pipe, nur get für https://github.com
+GIT_PROGRAMM = "/usr/bin/git"
+PRLIMIT = "/usr/bin/prlimit"
+GIT_ZEITLIMIT_S = 300
+GIT_SPEICHER = 2 * 1024 * 1024 * 1024  # RLIMIT_AS je git-Aufruf des Dispatchers
+GIT_DATEI_MAX = 4 * 1024 * 1024 * 1024  # RLIMIT_FSIZE je git-Aufruf
+MAX_GIT_AUSGABE = 4 * 1024 * 1024
+GIT_ARG_RE = re.compile(r"[A-Za-z0-9_@%+=:,./^~-]{1,4096}")  # argv eines git-Aufrufs: druckbar, ohne Leerzeichen, Anführungszeichen, $
+# Sandbox-Schritte ohne Netz (wamo-job.sh --modus klon|ausgabe|pruefung, C.5.2): je Modus genau das feste Programm in /opt/wamo/waechter
+SCHRITT_PROGRAMME = {"klon": (str(WAECHTER / "wamo-job-klon.sh"),),
+                     "ausgabe": (str(WAECHTER / "wamo-job-ausgabe.sh"),),
+                     "pruefung": ("/usr/bin/python3", "-I", str(WAECHTER / "wamo_job_auszug.py"))}
+SCHRITT_ZEITLIMIT_S = {"klon": 300, "ausgabe": 60, "pruefung": 60}  # wie ZEITLIMIT_SCHRITT_* in wamo-job.sh
+SCHRITT_ARG_RE = re.compile(r"--[a-z]{2,20}|[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
+MAX_SCHRITT_AUSGABE = 256 * 1024
+# Zustände eines Auftrags mit github=persoenlich (aenderung.json, Feld status, C.5.1; AENDERUNG_STATUS der Schnittstelle)
+ZUSTAENDE = ("keine", "gesperrt", "nur_lesen", "bereit", "einreichen_laeuft", "branch_gepusht", "eingereicht", "verworfen")
+VERWERFEN_AUS = ("keine", "gesperrt", "nur_lesen", "bereit")
+LAUF_ERLAUBT = ("keine", "gesperrt", "nur_lesen", "bereit")  # Folgelauf nur aus diesen Zuständen, sonst schon_eingereicht
+AENDERUNG_FELDER = ("job", "status", "commit_id", "tree_id", "basis", "zweig", "dateien", "plus", "minus", "liste", "nicht_gelistet",
+                    "gruende", "ungesichert", "lauf", "titel", "pr", "adresse")
+MAX_AENDERUNG_BYTES = 512 * 1024
+GITHUB_DATEIEN = ("basis.git", "aus.git", "bundle.ein", "ausgabe", "ergebnis")  # Kopien privater Repos im Auftragsordner (Aufräumen)
+AUFRAEUMEN_FERTIG_S = 86400  # eingereicht oder verworfen: nach einem Tag
+AUFRAEUMEN_SONST_S = 7 * 86400  # alle anderen: nach sieben Tagen
+EIGNER_PRAEFIX = "eigner-"  # sperren/eigner-<projekt>.json: welcher Auftrag den Projektordner zuletzt aus seinem Klon gebaut hat
+EXIT_GITHUB = EXIT_GITHUB_APP  # start_abgelehnt im persönlichen Weg (Grund aus GITHUB_GRUENDE), Exit 8 wie im App-Modus
+
 SELFTEST_EVENT = {"tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}}
 SELFTEST_GRUND = "GESPERRT: Force-Push"  # Anfang der erwarteten Ablehnung durch dev_guard.py
 PLUGIN_SETTINGS = json.dumps({"enabledPlugins": {"ecc@ecc": True}})
@@ -285,8 +340,10 @@ class HausNichtBereit(Exception):
     sich nicht schreiben. Der Text nennt nie das Token."""
 
 
-# Kopfzeile von start; zugang: None (älterer Kern), "folgt" (zweite Zeile mit dem Zugang), "server" oder "haus" (Hausmodell, keine Zeile)
-Kopf = namedtuple("Kopf", ("auftrag", "system", "modell", "repo", "zugang", "profil"))
+# Kopfzeile von start; zugang: None (älterer Kern), "folgt" (zweite Zeile mit dem Zugang), "server" oder "haus" (Hausmodell, keine Zeile);
+# github: None (App-Weg wie bis Dispatcher 9) oder "persoenlich" (Plan C, nur im Kern-Kanal, mit repo und profil, GitHub-Zeile auf stdin)
+# scopes_ausnahmen: die Ausnahmen der Person von der strengen Liste klassischer Scopes (C.2.8), nur mit github=persoenlich
+Kopf = namedtuple("Kopf", ("auftrag", "system", "modell", "repo", "zugang", "profil", "github", "scopes_ausnahmen"), defaults=(None, ()))
 
 
 @dataclass(frozen=True, slots=True)
@@ -415,6 +472,18 @@ def check_fp(value: str) -> str:
     return value
 
 
+def check_profil(value: str) -> str:
+    if not PROFIL_RE.fullmatch(value):
+        raise Abgewiesen("Profil ungültig (8 Hexzeichen)")
+    return value
+
+
+def check_alle(value: str) -> str:
+    if value != "alle":
+        raise Abgewiesen("aufraeumen kennt nur das Wort alle")
+    return value
+
+
 BEFEHLE: dict[str, tuple[int, tuple]] = {
     # Befehl: (Pflichtargumente, Prüfer je Position)
     "ping": (0, ()),
@@ -424,7 +493,14 @@ BEFEHLE: dict[str, tuple[int, tuple]] = {
     "approve": (2, (check_job, check_fp)),
     "cancel": (1, (check_job,)),
     "pruefen": (1, (check_job,)),  # das Projekt steht nie im Aufruf: es kommt aus auftrag.json
+    # persönlicher GitHub-Weg (Dispatcher 10, C.2.3): nur im Kern-Kanal, im Kanal lokal für Rauchtests, im PC-Kanal befehl
+    "aenderung": (2, (check_job, check_profil)),
+    "einreichen": (2, (check_job, check_profil)),
+    "verwerfen": (2, (check_job, check_profil)),
+    "aufraeumen": (0, (check_alle,)),  # nur lokal (Timer wamo-job-aufraeumen und wamo-job-rueckweg.sh)
 }
+BEFEHLE_PERSOENLICH = ("aenderung", "einreichen", "verwerfen")
+BEFEHLE_NUR_LOKAL = ("aufraeumen",)
 
 
 def parse_command(raw: str | None) -> tuple[str, list[str]]:
@@ -468,7 +544,7 @@ def parse_header(raw: bytes) -> Kopf:
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError):
         raise Abgewiesen("Kopfzeile ist kein JSON") from None
-    if not isinstance(data, dict) or set(data) - {"auftrag", "system", "modell", "repo", "zugang", "profil"}:
+    if not isinstance(data, dict) or set(data) - {"auftrag", "system", "modell", "repo", "zugang", "profil", "github", "scopes_ausnahmen"}:
         raise Abgewiesen("Kopfzeile hat unbekannte Felder")
     modell = data.get("modell")
     if modell is not None and (not isinstance(modell, str) or not MODELL_RE.fullmatch(modell)):
@@ -483,6 +559,19 @@ def parse_header(raw: bytes) -> Kopf:
         raise Abgewiesen("Kopfzeile: profil ungültig")
     if zugang in ("folgt", "haus") and profil is None:  # sonst teilten sich alle Profile eine Kennung in der Buchführung
         raise Abgewiesen(f"Kopfzeile: profil fehlt bei zugang {zugang}")
+    github = data.get("github")
+    if github is not None:  # persönlicher GitHub-Weg (Plan C, C.2.1): nur im Kern-Kanal, nur mit Repo und Profil
+        if github != GITHUB_WEG:
+            raise Abgewiesen("Kopfzeile: github ungültig (nur persoenlich)")
+        if KANAL != "kern":
+            raise Abgewiesen("Kopfzeile: github nur im Kern-Kanal")
+        if repo is None or profil is None:
+            raise Abgewiesen("Kopfzeile: github braucht repo und profil")
+    scopes: tuple[str, ...] = ()
+    if "scopes_ausnahmen" in data:  # nur mit github=persoenlich (und damit nur im Kern-Kanal), Werte nur aus SCOPES_AUSNAHMEN
+        if github is None:
+            raise Abgewiesen("Kopfzeile: scopes_ausnahmen nur mit github")
+        scopes = scopes_pruefen(data["scopes_ausnahmen"])
     auftrag, system = data.get("auftrag"), data.get("system", "")
     if not isinstance(auftrag, str) or not isinstance(system, str):
         raise Abgewiesen("Kopfzeile: auftrag und system müssen Text sein")
@@ -493,7 +582,7 @@ def parse_header(raw: bytes) -> Kopf:
         raise Abgewiesen("Auftrag ist leer")
     if len(auftrag) > MAX_TEXT_CHARS or len(system) > MAX_TEXT_CHARS:
         raise Abgewiesen("Auftrag oder Systemtext zu lang")
-    return Kopf(auftrag, system, modell or None, repo, zugang, profil)
+    return Kopf(auftrag, system, modell or None, repo, zugang, profil, github, scopes)
 
 
 def parse_zugang(raw: bytes, profil: str | None = None) -> ClaudeZugang:
@@ -845,13 +934,14 @@ def _github_variablen() -> set[str]:
 
 
 def zugangs_quellen(art: str, geheim: dict[str, str], app_modus: bool = False, repo: str | None = None,
-                    zugang: ClaudeZugang | None = None) -> set[str]:
+                    zugang: ClaudeZugang | None = None, persoenlich: bool = False) -> set[str]:
     """Namen in geheim.env, deren Werte ein Lauf dieser Art bekommt (für die Buchführung je Projekt). Im
     App-Modus steht statt GH_TOKEN bzw. GH_TOKEN_LESEN der Name GH_APP_SCHREIBEN bzw. GH_APP_LESEN, mit dem
     Umfang des Tokens: "@owner/name" (kleingeschrieben) für ein Repo, "@*" für die ganze Installation. Ein anderes
     oder breiteres Repo als in früheren Läufen des Projekts zählt so als neuer Zugang und braucht eine Freigabe.
     Ein persönlicher Claude-Zugang heißt <Variable>@<Profil> (nie der Wert): der Zugang einer anderen Person, auch
-    der aus geheim.env, ist für ein Projekt ein neuer Zugang. Ein Lauf mit Hausmodell heißt HAUS@<Profil>."""
+    der aus geheim.env, ist für ein Projekt ein neuer Zugang. Ein Lauf mit Hausmodell heißt HAUS@<Profil>. Im persönlichen GitHub-Weg
+    (persoenlich) bekommt die Sandbox kein Token aus geheim.env und keins von GitHub: es zählt nur der Claude-Zugang."""
     wk = werkzeugkarte()
     if zugang is not None and zugang.typ == "haus":
         claude = f"HAUS@{zugang.profil or '?'}"
@@ -859,6 +949,8 @@ def zugangs_quellen(art: str, geheim: dict[str, str], app_modus: bool = False, r
         claude = f"{ZUGANG_VARIABLE[zugang.typ]}@{zugang.profil or '?'}"
     else:
         claude = next((name for name in wk.CLAUDE_VARIABLEN if geheim.get(name)), None)
+    if persoenlich:
+        return {claude} if claude else set()
     namen = {n for n in wk.zugangs_variablen(art) if geheim.get(n)}
     if app_modus:
         namen -= _github_variablen()
@@ -869,7 +961,8 @@ def zugangs_quellen(art: str, geheim: dict[str, str], app_modus: bool = False, r
 
 
 def sandbox_env(art: str, geheim: dict[str, str], app_modus: bool = False,
-                gh_token: str | None = None, zugang: ClaudeZugang | None = None, modell: str | None = None) -> dict[str, str] | None:
+                gh_token: str | None = None, zugang: ClaudeZugang | None = None, modell: str | None = None,
+                persoenlich: "PersoenlicherLauf | None" = None) -> dict[str, str] | None:
     """Basis plus genau ein Claude-Zugang und die Token der Auftragsart. None ohne Claude-Zugang. Im App-Modus
     kommt GitHub nur als gh_token (kurzlebiges Installations-Token dieses Laufs) an, nie GH_TOKEN oder
     GH_TOKEN_LESEN aus geheim.env; die App-Variablen (WAMO_GH_APP_*) gelangen nie in die Umgebung.
@@ -877,7 +970,9 @@ def sandbox_env(art: str, geheim: dict[str, str], app_modus: bool = False,
     geheim.env, auch nicht der Workspace-Header des Organisationsschlüssels (kein Mischen mit einem fremden Schlüssel).
     Mit zugang.typ haus: Basis-URL des Proxys, das Auftragstoken als ANTHROPIC_API_KEY, jede Modellklasse auf das
     Hausmodell (modell, nur aus HAUS_MODELLE, sonst HAUS_MODELL) und kein Verkehr nebenbei; kein Claude-Zugang, kein
-    Workspace und kein Schlüssel für LiteLLM. modell gilt nur für haus."""
+    Workspace und kein Schlüssel für LiteLLM. modell gilt nur für haus.
+    Mit persoenlich (persönlicher GitHub-Weg, Plan C): kein GH_TOKEN und kein Dienst-Token der Art aus geheim.env, dafür genau die
+    sechs Namen PERSOENLICH_VARIABLEN (Autor und Committer aus der Antwort von GitHub, nie vom Kern, Weg und Zweig des Auftrags)."""
     wk = werkzeugkarte()
     env = basis_env()
     if zugang is not None and zugang.typ == "haus":
@@ -900,14 +995,17 @@ def sandbox_env(art: str, geheim: dict[str, str], app_modus: bool = False,
         if claude == "ANTHROPIC_API_KEY" and WORKSPACE_RE.fullmatch(workspace):
             # Organisationsschlüssel ohne festen Workspace: Claude Code schickt den Header bei jeder Anfrage mit
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"anthropic-workspace-id: {workspace}"
-    persoenlich = _github_variablen()
-    for name in wk.zugangs_variablen(art):
-        if app_modus and name in persoenlich:
-            continue
-        if geheim.get(name):
-            env[wk.sandbox_name(name)] = geheim[name]
-    if app_modus and gh_token and wk.github_stufe(art):
-        env["GH_TOKEN"] = gh_token
+    if persoenlich is not None:
+        env.update(persoenlich.umgebung())
+    else:
+        gh_variablen = _github_variablen()
+        for name in wk.zugangs_variablen(art):
+            if app_modus and name in gh_variablen:
+                continue
+            if geheim.get(name):
+                env[wk.sandbox_name(name)] = geheim[name]
+        if app_modus and gh_token and wk.github_stufe(art):
+            env["GH_TOKEN"] = gh_token
     # Git in jedem Repo der Sandbox: keine Hooks und kein fsmonitor (Vorrang vor Repo-Konfigurationen, auch in
     # Submodulen und eingebetteten Repos, die die Entschärfung vor dem Lauf nicht erreicht)
     git = list(GIT_OHNE_HOOKS)
@@ -1452,6 +1550,23 @@ def read_json(path: Path, default):
 
 
 @contextmanager
+def exklusiv_mit_frist(pfad: Path, frist_s: float):
+    """Wie exklusiv, aber höchstens frist_s Sekunden warten (TimeoutError danach): für Sperren, die eine Logik von außen auch halten kann."""
+    import fcntl
+    ende = time.monotonic() + frist_s
+    with open(pfad, "a+") as f:
+        while True:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= ende:
+                    raise TimeoutError(f"Sperre {pfad.name} belegt") from None
+                time.sleep(0.1)
+        yield
+
+
+@contextmanager
 def exklusiv(pfad: Path):
     """Wartende Sperre (kurze Abschnitte wie das Eintragen einer Freigabe)."""
     import fcntl
@@ -1704,24 +1819,29 @@ def claude_konfiguration(claude_dir: Path, geheim: dict[str, str]) -> None:
 
 
 def vorbereiten(jobdir: Path, job: str, projekt: str, art: str, repo: str | None = None, kanal: str | None = None,
-                profil: str | None = None) -> None:
+                profil: str | None = None, github: str | None = None) -> None:
     """Legt den Auftragsordner an oder prüft die Bindung an Projekt, Art und Ziel-Repo (unter der Auftragssperre).
     Das Repo begrenzt das GitHub-Token; eine Fortsetzung mit einem anderen Repo wird abgewiesen. Neue Aufträge aus dem
     Kern-Kanal oder dem PC-Kanal tragen kanal (kern oder pc); ein Auftrag ohne das Feld gehört nie dem Kern-Kanal. Im Kern-Kanal
-    steht auch die Kennung des Profils darin (profil), eine Fortsetzung aus einem anderen Profil wird abgewiesen."""
+    steht auch die Kennung des Profils darin (profil), eine Fortsetzung aus einem anderen Profil wird abgewiesen. github
+    (persoenlich, Plan C) ist ebenso gebunden: ein Folgelauf mit anderem Wert, auch ohne das Feld, endet mit GithubWechsel."""
     meta_path = jobdir / "auftrag.json"
     meta = read_json(meta_path, None)
     kern_profil = profil if kanal == "kern" and isinstance(profil, str) and PROFIL_RE.fullmatch(profil) else None
+    github = github if kanal == "kern" and github == GITHUB_WEG else None
     if meta is None:
         write_json_atomic(meta_path, {"job": job, "projekt": projekt, "art": art, "repo": repo,
                                       "erstellt": int(time.time()), **({"kanal": kanal} if kanal in ("kern", "pc") else {}),
-                                      **({"profil": kern_profil} if kern_profil else {})})
+                                      **({"profil": kern_profil} if kern_profil else {}),
+                                      **({"github": github} if github else {})})
     elif not isinstance(meta, dict) or meta.get("projekt") != projekt or meta.get("art") != art:
         raise Abgewiesen("Auftrag gehört zu einem anderen Projekt oder einer anderen Art")
     elif meta.get("repo") != repo:
         raise Abgewiesen("Auftrag gehört zu einem anderen Ziel-Repo")
     elif kanal == "kern" and meta.get("profil") != kern_profil:
         raise Abgewiesen("Auftrag gehört zu einem anderen Profil")
+    elif meta.get("github") != github:
+        raise GithubWechsel("Auftrag gehört zu einem anderen GitHub-Weg")
     for sub in ("claude", "zustand", "etc"):
         _no_symlink(jobdir / sub).mkdir(mode=0o700, exist_ok=True)
     claude_konfiguration(jobdir / "claude", lese_geheimnisse())
@@ -2439,7 +2559,8 @@ def cmd_ping() -> int:
           "github": github_status(), "serverzugang": serverzugang_erlaubt(geheim),
           "kontingent": kontingent_modul() is not None, "pruefen": pruefen_aktiv(geheim), "haus": haus_aktiv(geheim),
           "abnahme_befehl_sha256": modul_sha256("abnahme_befehl"), "kanal": KANAL, "kernkanal": kernkanal_ping(),
-          "parallel": dict(zip(("gesamt", "profil"), parallel_grenzen()), hart=PARALLEL_MAX)})
+          "parallel": dict(zip(("gesamt", "profil"), parallel_grenzen()), hart=PARALLEL_MAX),
+          "persoenlich": persoenlich_aktiv(), "github_helfer": HELFER.is_file()})
     return EXIT_OK
 
 
@@ -2770,12 +2891,254 @@ def _zeile_lesen(limit: int, was: str, fehler=Abgewiesen) -> bytes:
         signal.alarm(0)
 
 
+class StdinLeser:
+    """Liest stdin (fd 0) ohne Kopien in Python-Objekte: alles landet in einem festen bytearray, eine Zeile ist ein memoryview darauf.
+    Kein sys.stdin, kein readline (dessen Puffer hielte eine nachfolgende GitHub-Zeile als bytes fest). Ab Dispatcher 10 liest start so von
+    Anfang an (C.2.2), auch die Kopfzeile, weil die GitHub-Zeile im selben Lesevorgang mitkommen kann. Nach dem Lesen der Zeilen bleibt stdin
+    die Lebenslinie: bis_eof liest in einen eigenen kleinen Puffer, der jedes Mal überschrieben wird. Wirft nie mit dem Inhalt."""
+
+    def __init__(self, fd: int = 0, groesse: int = STDIN_PUFFER):
+        self.fd = fd
+        self.puffer = bytearray(groesse)
+        self.anfang = 0  # Beginn der noch nicht gelieferten Daten
+        self.ende = 0  # Ende der gelesenen Daten
+        self.eof = False
+
+    def _lesen(self, frist: float | None) -> int:
+        """Liest einmal an das Ende der Daten. 0 bei EOF oder vollem Puffer; wirft _Zeitueberschreitung nach der Frist."""
+        if self.ende >= len(self.puffer):
+            return 0
+        if frist is not None:
+            try:
+                import select
+                rest = max(0.0, frist - time.monotonic())
+                bereit, _, _ = select.select([self.fd], [], [], rest)
+                if not bereit:
+                    raise _Zeitueberschreitung()
+            except (OSError, ValueError, ImportError):
+                pass  # kein select für diesen Deskriptor (nur Tests unter Windows): ohne Frist lesen
+        ansicht = memoryview(self.puffer)
+        try:
+            if hasattr(os, "readv"):
+                n = os.readv(self.fd, [ansicht[self.ende:]])
+            else:  # nur Tests unter Windows
+                stueck = os.read(self.fd, len(self.puffer) - self.ende)
+                n = len(stueck)
+                ansicht[self.ende:self.ende + n] = stueck
+        finally:
+            ansicht.release()
+        if n == 0:
+            self.eof = True
+        self.ende += n
+        return n
+
+    def zeile(self, limit: int, was: str, fehler=Abgewiesen, frist_s: float = LESEN_FRIST_S) -> memoryview:
+        """Die nächste Zeile mit Zeilenende, höchstens limit Bytes (wie readline(limit): ohne Zeilenende bei EOF oder Grenze, der Prüfer
+        lehnt sie dann ab). Kommt in frist_s Sekunden nichts Vollständiges, wirft fehler("<was> kam nicht rechtzeitig")."""
+        frist = time.monotonic() + frist_s
+        while True:
+            pos = self.puffer.find(b"\n", self.anfang, min(self.ende, self.anfang + limit))
+            if pos >= 0:
+                von, self.anfang = self.anfang, pos + 1
+                return memoryview(self.puffer)[von:pos + 1]
+            if self.ende - self.anfang >= limit or self.eof or self.ende >= len(self.puffer):
+                von = self.anfang
+                self.anfang = min(self.ende, von + limit)
+                return memoryview(self.puffer)[von:self.anfang]
+            try:
+                self._lesen(frist)
+            except _Zeitueberschreitung:
+                raise fehler(f"{was} kam nicht rechtzeitig") from None
+
+    def ueberschreiben(self, von: int = 0, bis: int | None = None) -> None:
+        """Überschreibt einen Bereich (Standard: alles Gelesene) mit Nullen, ohne die Größe zu ändern."""
+        bis = self.ende if bis is None else bis
+        if bis > von:
+            self.puffer[von:bis] = bytes(bis - von)
+
+    def rest_verwerfen(self) -> None:
+        """Was nach den gelesenen Zeilen schon im Puffer steht (etwa eine GitHub-Zeile im Folgelauf), ungelesen überschreiben."""
+        self.ueberschreiben(self.anfang, self.ende)
+        self.anfang = self.ende
+
+    def bis_eof(self) -> None:
+        """Lebenslinie: blockiert bis EOF. Liest in einen eigenen Puffer, der nach jedem Lesen überschrieben wird."""
+        self.rest_verwerfen()
+        if self.eof:
+            return
+        klein = bytearray(65536)
+        ansicht = memoryview(klein)
+        try:
+            while True:
+                if hasattr(os, "readv"):
+                    n = os.readv(self.fd, [ansicht])
+                else:
+                    n = len(os.read(self.fd, len(klein)))
+                if n == 0:
+                    self.eof = True
+                    return
+                klein[:n] = bytes(n)
+        finally:
+            ansicht.release()
+
+
+LESER: StdinLeser | None = None  # der Leser dieses Aufrufs (start, einreichen); None: noch nichts über ihn gelesen
+
+
+def _leser() -> StdinLeser:
+    global LESER
+    if LESER is None:
+        LESER = StdinLeser(0)
+    return LESER
+
+
+def _als_bytes(zeile: memoryview, fehler=Abgewiesen) -> bytes:
+    """Eine Zeile ohne Geheimnis als bytes. Steht an dieser Stelle eine GitHub-Zeile (falsche Reihenfolge), wird sie überschrieben und
+    abgewiesen, ohne je zu bytes oder str zu werden."""
+    try:
+        if zeile[:len(GITHUB_ZEILE_KOPF)] == GITHUB_ZEILE_KOPF:
+            zeile[:] = bytes(len(zeile))
+            raise fehler("GitHub-Zeile an falscher Stelle")
+        return zeile.tobytes()
+    finally:
+        zeile.release()
+
+
 def _kopfzeile_lesen() -> bytes:
-    return _zeile_lesen(MAX_HEADER_BYTES + 1, "Kopfzeile")
+    return _als_bytes(_leser().zeile(MAX_HEADER_BYTES + 1, "Kopfzeile"))
 
 
 def _zugangszeile_lesen() -> bytes:
-    return _zeile_lesen(MAX_ZUGANG_BYTES + 1, "Zugangszeile", ZugangUngueltig)
+    return _als_bytes(_leser().zeile(MAX_ZUGANG_BYTES + 1, "Zugangszeile", ZugangUngueltig), ZugangUngueltig)
+
+
+def _lebenslinie_warten() -> None:
+    """Blockiert, bis stdin endet. Mit dem eigenen Leser (start ab Dispatcher 10) über ihn, sonst wie bisher über sys.stdin."""
+    if LESER is not None:
+        LESER.bis_eof()
+        return
+    while sys.stdin.buffer.read1(65536):
+        pass
+
+
+class GithubGeheimnis:
+    """Das GitHub-Token eines Aufrufs als Ausschnitt des Lesepuffers: nie str, nie bytes, nicht darstellbar, nicht kopierbar. Es geht nur
+    über in_pipe (Credential-Helfer) und kopfzeile (Authorization für api.github.com) hinaus; ueberschreiben setzt es auf Nullen."""
+
+    __slots__ = ("_puffer", "_von", "_bis")
+
+    def __init__(self, puffer: bytearray, von: int, bis: int):
+        self._puffer, self._von, self._bis = puffer, von, bis
+
+    def __repr__(self) -> str:
+        return "GithubGeheimnis(<verborgen>)"
+
+    __str__ = __repr__
+
+    def __reduce__(self):
+        raise TypeError("GithubGeheimnis lässt sich nicht kopieren")
+
+    def __copy__(self):
+        raise TypeError("GithubGeheimnis lässt sich nicht kopieren")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("GithubGeheimnis lässt sich nicht kopieren")
+
+    @property
+    def gueltig(self) -> bool:
+        return self._bis > self._von and any(self._puffer[self._von:self._von + 4])
+
+    def ansicht(self) -> memoryview:
+        """memoryview auf das Token (für Schwärzung und Vergleich); der Aufrufer gibt es mit release() frei."""
+        return memoryview(self._puffer)[self._von:self._bis]
+
+    def in_pipe(self, benutzer: bytes = GIT_BENUTZER) -> int:
+        """Eine Pipe mit genau "username=<benutzer>\\npassword=<token>\\n" (für wamo-git-zugang); liefert das Leseende, das Schreibende
+        ist geschlossen. Geschrieben mit writev aus dem Puffer, ohne eine zusammengesetzte Kopie."""
+        r, w = os.pipe()
+        try:
+            ansicht = self.ansicht()
+            try:
+                teile = [b"username=", benutzer, b"\npassword=", ansicht, b"\n"]
+                if hasattr(os, "writev"):
+                    os.writev(w, teile)
+                else:  # nur Tests unter Windows
+                    for teil in teile:
+                        os.write(w, teil)
+            finally:
+                ansicht.release()
+        except BaseException:
+            os.close(r)
+            raise
+        finally:
+            os.close(w)
+        return r
+
+    def kopfzeile(self) -> bytearray:
+        """"Bearer <token>" als eigenes bytearray für die Kopfzeile Authorization; der Aufrufer überschreibt es danach."""
+        praefix = b"Bearer "
+        wert = bytearray(len(praefix) + self._bis - self._von)  # feste Größe: kein Umkopieren beim Wachsen
+        wert[:len(praefix)] = praefix
+        ansicht = self.ansicht()
+        try:
+            wert[len(praefix):] = ansicht
+        finally:
+            ansicht.release()
+        return wert
+
+    def ueberschreiben(self) -> None:
+        if self._bis > self._von:
+            self._puffer[self._von:self._bis] = bytes(self._bis - self._von)
+
+
+class GithubZeileFehlt(Exception):
+    """Die GitHub-Zeile fehlt, kam nicht rechtzeitig oder hat nicht genau die Form aus C.2.2. Nennt nie den Inhalt."""
+
+
+def github_zeile_pruefen(leser: StdinLeser, zeile: memoryview) -> GithubGeheimnis:
+    """Prüft die GitHub-Zeile mit einer Bytes-Regel auf dem memoryview (ohne Zeilenende genau {"typ":"github","wert":"<token>"}, ohne
+    Leerzeichen, mit Zeilenende höchstens MAX_GITHUB_ZEILE Bytes) und liefert das Token als Ausschnitt des Lesepuffers: es beginnt nach
+    GITHUB_ZEILE_KOPF und endet vor den letzten drei Zeichen (Anführungszeichen, Klammer, Zeilenende). Nur fullmatch und Positionen, nie
+    group(). Bei falscher Form wird die Zeile überschrieben und GithubZeileFehlt geworfen."""
+    von = leser.anfang - len(zeile)  # zeile endet genau am Lesezeiger (StdinLeser.zeile)
+    try:
+        passt = (len(zeile) <= MAX_GITHUB_ZEILE and zeile.obj is leser.puffer and von >= 0 and zeile[-1:] == b"\n"
+                 and GITHUB_ZEILE_RE.fullmatch(zeile[:-1]) is not None)
+        if not passt:
+            leser.ueberschreiben(max(0, von), leser.anfang)
+            raise GithubZeileFehlt("GitHub-Zeile hat nicht die erwartete Form")
+        return GithubGeheimnis(leser.puffer, von + len(GITHUB_ZEILE_KOPF), von + len(zeile) - 3)
+    finally:
+        zeile.release()
+
+
+def _githubzeile_lesen() -> GithubGeheimnis:
+    leser = _leser()
+    try:
+        zeile = leser.zeile(MAX_GITHUB_ZEILE + 1, "GitHub-Zeile", GithubZeileFehlt)
+    except GithubZeileFehlt:
+        raise GithubZeileFehlt("GitHub-Zeile kam nicht rechtzeitig") from None
+    if len(zeile) == 0:
+        zeile.release()
+        raise GithubZeileFehlt("GitHub-Zeile fehlt")
+    return github_zeile_pruefen(leser, zeile)
+
+
+def _einreichen_zeile_lesen() -> bytes:
+    """Erste stdin-Zeile von einreichen (höchstens MAX_EINREICHEN_ZEILE Bytes, kein Geheimnis)."""
+    return _als_bytes(_leser().zeile(MAX_EINREICHEN_ZEILE + 1, "Einreichen-Zeile"))
+
+
+def nicht_dumpbar() -> bool:
+    """Ist dieser Prozess nicht dumpable (PR_GET_DUMPABLE liefert 0)? speicher_begrenzen setzt es beim Start; vor dem Lesen eines GitHub-Tokens
+    wird es erneut gesetzt und geprüft (C.2.2). Ohne prctl (nicht Linux) False."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl(4, 0, 0, 0, 0)  # PR_SET_DUMPABLE=0
+        return libc.prctl(3, 0, 0, 0, 0) == 0  # PR_GET_DUMPABLE
+    except (OSError, AttributeError, ValueError, TypeError):
+        return False
 
 
 def kontingent_modul():
@@ -2808,14 +3171,17 @@ def schwaerzungen(env: dict[str, str]) -> list[tuple[bytes, bytes]]:
 
 
 def schwaerzen(daten: bytes, ersetzungen: list[tuple[bytes, bytes]]) -> bytes:
-    """Ersetzt die Werte dieses Laufs wörtlich und danach alles, was wie ein Anthropic-Schlüssel oder ein Auftragstoken für
-    Hausmodelle aussieht (das Token dieses Laufs steht als ANTHROPIC_API_KEY schon in den Ersetzungen)."""
+    """Ersetzt die Werte dieses Laufs wörtlich und danach alles, was wie ein Anthropic-Schlüssel, ein Auftragstoken für
+    Hausmodelle oder ein GitHub-Token aussieht (das Token dieses Laufs steht als ANTHROPIC_API_KEY schon in den Ersetzungen; ein Wert
+    darf auch ein memoryview sein, das exakte GitHub-Token des persönlichen Wegs wird nie zu bytes)."""
     for wert, ersatz in ersetzungen:
         daten = daten.replace(wert, ersatz)
     if b"sk-ant-" in daten:
         daten = SK_ANT_RE.sub(ZUGANG_ERSATZ, daten)
     if b"wh1-" in daten:
         daten = HAUS_TOKEN_RE.sub(ZUGANG_ERSATZ, daten)
+    if b"gh" in daten:
+        daten = GH_PAT_RE.sub(GH_PAT_ERSATZ, daten)
     return daten
 
 
@@ -2891,13 +3257,36 @@ def _baum_entfernen(pfad: Path) -> None:
 
     def frei(funktion, p, _exc):
         try:
-            os.chmod(os.path.dirname(p), 0o700)
-            os.chmod(p, 0o700)
+            eltern = os.path.dirname(p)
+            if not os.path.islink(eltern):
+                os.chmod(eltern, 0o700)
+            if not os.path.islink(p):  # chmod folgt Links: nie die Rechte einer fremden Datei ändern
+                os.chmod(p, 0o700)
             funktion(p)
         except OSError:
             pass
     if pfad.is_dir() and not pfad.is_symlink():
+        _ordner_freigeben(pfad)
         shutil.rmtree(pfad, onerror=frei)
+
+
+def _ordner_freigeben(pfad: Path) -> None:
+    """Setzt u+rwx auf jeden Ordner unter pfad, von oben nach unten und bevor os.walk hineingeht, ohne Links zu folgen (lstat): ein
+    Ordner mit Modus 000, den die Sandbox gepflanzt hat, hält das Löschen so nicht auf. Wirft nie."""
+    try:
+        if stat.S_ISDIR(os.lstat(pfad).st_mode):
+            os.chmod(pfad, stat.S_IMODE(os.lstat(pfad).st_mode) | 0o700)
+    except OSError:
+        return
+    for wurzel, ordner, _dateien in os.walk(pfad, followlinks=False):
+        for name in ordner:
+            p = os.path.join(wurzel, name)
+            try:
+                st = os.lstat(p)
+                if stat.S_ISDIR(st.st_mode):
+                    os.chmod(p, stat.S_IMODE(st.st_mode) | 0o700)
+            except OSError:
+                continue
 
 
 def zugang_aufraeumen(jobdir: Path, job: str, ersetzungen: list[tuple[bytes, bytes]]) -> None:
@@ -2993,8 +3382,11 @@ def kern_befehl_pruefen(name: str, args: list[str]) -> str | None:
         return None
     k = kern_modul()
     grund = k.pruefe_befehl(name, kern_zustand())
-    if grund is None and name in ("status", "pending", "approve", "cancel"):
-        grund = k.pruefe_eigener_auftrag(read_json(JOBS / args[0] / "auftrag.json", None))
+    if grund is None and name in ("status", "pending", "approve", "cancel", *BEFEHLE_PERSOENLICH):
+        meta = read_json(JOBS / args[0] / "auftrag.json", None)
+        grund = k.pruefe_eigener_auftrag(meta)
+        if grund is None and name in BEFEHLE_PERSOENLICH and meta.get("profil") != args[1]:
+            grund = "fremd"  # Regel 4 mit profil (C.2.3): der Auftrag gehört einem anderen Profil
     return grund
 
 
@@ -3034,7 +3426,8 @@ def kern_start_pruefen(job: str, projekt: str, art: str, kopf: Kopf, app_modus: 
         job=job, projekt=projekt, art=art, repo=kopf.repo, zugang=kopf.zugang, profil=kopf.profil,
         github=wk.github_stufe(art) is not None, dienste=tuple(sorted(set(wk.KARTEN[art].zugaenge) - {"github", "github_lesen"})),
         app_modus=app_modus, fremd=meta_pfad.exists() and k.pruefe_eigener_auftrag(read_json(meta_pfad, None)) is not None,
-        projekt_fremd=projekt_fremd, projekt_kollision=projekt_kollision, projekt_profil_fremd=projekt_profil_fremd)
+        projekt_fremd=projekt_fremd, projekt_kollision=projekt_kollision, projekt_profil_fremd=projekt_profil_fremd,
+        persoenlich=kopf.github == GITHUB_WEG)
     try:
         ereignisse = k.zaehler_lesen(pfade.zaehler)
     except OSError:
@@ -3071,6 +3464,7 @@ def kern_fork_grund(repo: str | None, token: str) -> str | None:
     return "fork" if status != 200 else kern_modul().fork_pruefen(obj, repo)
 
 
+KERN_SPERRE_FRIST_S = 10.0  # so lange wartet der Rückruf kanal (einreichen) höchstens auf die Sperre kernkanal
 KERN_SPERRE = "kernkanal"  # unter dieser Sperre prüft ein Start im Kern-Kanal und bucht Versuch bzw. Start (gleichzeitige Starts)
 
 
@@ -3106,7 +3500,1087 @@ def kern_buchung(job: str, profil: str | None = None, pruefung=None):
                 log(f"kernkanal: Ende von {job} nicht gebucht")
 
 
+# ---------------------------------------------------------------- Persönlicher GitHub-Weg (Plan C, Dispatcher 10): Einhängepunkte
+# Die GitHub-Logik (API, Klon, Bereinigung, Übernahme der Sandbox-Ausgaben, Pfadregeln, Commit aus Bytes, Einreichen, Pull Request) steht in
+# wamo_job_github.py (Paket D-b, in /opt/wamo/waechter). Hier steht, was der Dispatcher ihr hineinreicht (DispatcherWerkzeuge nach dem
+# Protokoll wamo_job_github.Werkzeuge: log, http, git, sandbox, sperre, pfad, uhr, geheimnis_in), wo er sie aufruft (GITHUB_EINSTIEGE), die
+# Sandbox-Schritte ohne Netz, die Befehle aenderung, einreichen und verwerfen, die Ereignisse (schreibt nur der Dispatcher) und das Aufräumen.
+# Ohne github=persoenlich in der Kopfzeile ändert nichts davon den Weg von Dispatcher 9.
+#
+# Einstiege der GitHub-Logik (Vertrag D-a zu D-b; Fehler: eine Ausnahme mit dem Attribut grund, ein Code aus GITHUB_GRUENDE, AENDERUNG_GRUENDE,
+# EINREICHEN_GRUENDE oder KANAL_GRUENDE; jede andere Ausnahme endet geschlossen mit dem Standardcode des Einstiegs):
+#   start(w, *, job, repo, art, profil, scopes_ausnahmen)   C.5 Start 2 bis 4: GitHub prüfen, basis.git klonen und bereinigen, github.json
+#                                                            schreiben. Den Sandbox-Schritt klon und die Entschärfung macht danach der
+#                                                            Dispatcher (ruft start ihn selbst, erkennt der Dispatcher das am Eigner).
+#   laufende(w, *, job, projekt, art, profil, auftrag, lauf) C.5 Laufende 1 bis 5 über w.sandbox("ausgabe") und w.sandbox("pruefung"):
+#                                                            aenderung.json, einreichen.json, aus.git. Ohne Token.
+#   einreichen(w, *, job, profil, eingabe, kanal)            C.5 Einreichen 2 bis 8; kanal(buchen) liefert None oder einen Code: vor dem
+#                                                            Push mit buchen=True (Notaus, Konfiguration, MAX_EINREICHEN_*, bucht einreichen),
+#                                                            vor dem Pull Request mit buchen=False. Ergebnis: dict mit zweig, pr, adresse.
+GITHUB_EINSTIEGE = ("start", "laufende", "einreichen")
+LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
+COMMIT_RE = re.compile(r"[0-9a-f]{40}")
+GRUND_RE = re.compile(r"[a-z][a-z_]{1,39}")
+SCOPE_RE = re.compile(r"[a-z_]{1,40}(?::[a-z_]{1,40})?")
+PERSOENLICH_VARIABLEN = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "WAMO_GITHUB", "WAMO_ZWEIG")
+GIT_NETZ_BEFEHLE = ("clone", "ls-remote", "push")  # nur diese gehen mit netz=True (über den Helfer, nur https zu github.com)
+# Unterbefehle, die die GitHub-Logik über Werkzeuge.git aufrufen darf (eigene Repos des Dispatchers, C.5); alles andere ist abgewiesen
+GIT_BEFEHLE = frozenset({*GIT_NETZ_BEFEHLE, "init", "read-tree", "hash-object", "update-index", "write-tree", "diff-tree", "commit-tree",
+                         "update-ref", "rev-parse", "cat-file", "ls-tree", "merge-base", "rev-list", "for-each-ref", "show-ref",
+                         "symbolic-ref", "fsck", "count-objects", "pack-refs", "prune", "verify-pack", "mktree", "ls-files"})
+# Optionen, die nie hinter dem Unterbefehl stehen dürfen: fremde Programme, Konfiguration, andere Repos oder Vorlagen, Untermodule
+GIT_OPTIONEN_GESPERRT = ("-c", "--config", "--config-env", "--git-dir", "--work-tree", "--exec-path", "--namespace", "--super-prefix",
+                         "--upload-pack", "--receive-pack", "--exec", "--reference", "--reference-if-able", "--separate-git-dir",
+                         "--recurse-submodules", "--shared", "--dissociate", "--server-option", "--filter", "--bundle-uri")
+GIT_KURZ_GESPERRT = {"clone": "uc", "ls-remote": "u", "push": "fdo"}  # Kurzoptionen je Unterbefehl (-u upload-pack, -f force, -d delete, -o)
+GIT_PUSH_GESPERRT = ("--force", "--force-with-lease", "--force-if-includes", "--mirror", "--delete", "--prune", "--all", "--tags",
+                     "--follow-tags", "--set-upstream", "--atomic", "--push-option", "--signed")
+# Gemeinsam für jeden git-Aufruf des Dispatchers (C.5): keine Hooks, kein fsmonitor, keine Wartung, nur https, keine Weiterleitung, fsck,
+# kein gespeicherter oder fremder Zugang, kein Proxy-, SSH- oder Askpass-Programm.
+GIT_GEMEINSAM = (("core.hooksPath", "/dev/null"), ("core.fsmonitor", "false"), ("gc.auto", "0"), ("maintenance.auto", "false"),
+                 ("protocol.allow", "never"), ("http.followRedirects", "false"),
+                 ("transfer.fsckObjects", "true"), ("fetch.fsckObjects", "true"), ("receive.fsckObjects", "true"),
+                 ("credential.helper", ""), ("credential.interactive", "false"), ("credential.useHttpPath", "false"),
+                 ("core.askPass", "/bin/false"), ("core.sshCommand", "/bin/false"), ("core.gitProxy", ""), ("push.followTags", "false"),
+                 ("push.recurseSubmodules", "no"), ("submodule.recurse", "false"), ("core.alternateRefsCommand", ""))
+GIT_STDERR_MAX = 2000
+SchrittErgebnis = namedtuple("SchrittErgebnis", ("rc", "ausgabe", "fehler"))  # intern; nach außen SandboxErgebnis der Schnittstelle
+SIEBEN_BIT =b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+GITHUB_ZEILE_KOPF = b'{"typ":"github","wert":"'  # die GitHub-Zeile (C.2.2) beginnt immer genau so und endet mit "}
+
+
+class GithubAbgelehnt(Exception):
+    """Der persönliche GitHub-Weg kann nicht starten, auswerten oder einreichen. args[0] ist genau ein Code (GITHUB_GRUENDE, AENDERUNG_GRUENDE,
+    EINREICHEN_GRUENDE oder KANAL_GRUENDE), nie ein Text mit Inhalt; das Ereignis nennt nur den Code."""
+
+    @property
+    def grund(self) -> str:
+        return str(self.args[0]) if self.args else "github_fehler"
+
+
+class GithubWechsel(Abgewiesen):
+    """Ein Folgelauf nennt ein anderes github als der Auftrag (auch ohne Feld): start_abgelehnt mit github_wechsel."""
+
+
+class KlonFehlgeschlagen(Exception):
+    """Der Sandbox-Schritt klon ist gescheitert: kein Lauf, Ereignis wie ein Selbsttestfehler (C.5.2)."""
+
+
+def github_modul():
+    """Die Schnittstelle und Logik des persönlichen Wegs (wamo_job_github.py): in /opt/wamo/waechter installiert, im Repo neben dieser
+    Datei. Fehlt sie oder ist sie defekt, wirft das Laden (der persönliche Weg scheitert dann geschlossen)."""
+    geladen = sys.modules.get("wamo_job_github")
+    if geladen is not None:
+        return geladen
+    if (WAECHTER / "wamo_job_github.py").is_file():
+        return _modul("wamo_job_github")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("wamo_job_github", Path(__file__).resolve().with_name("wamo_job_github.py"))
+    if spec is None or spec.loader is None:
+        raise ImportError("wamo_job_github fehlt")
+    modul = importlib.util.module_from_spec(spec)
+    sys.modules["wamo_job_github"] = modul
+    try:
+        spec.loader.exec_module(modul)
+    except BaseException:
+        sys.modules.pop("wamo_job_github", None)
+        raise
+    return modul
+
+
+def bekannte_gruende() -> frozenset[str]:
+    """Alle Codes, die ein Ereignis des persönlichen Wegs tragen darf (aus dem Modul des Kern-Kanals). Ohne Modul nur github_fehler."""
+    try:
+        k = kern_modul()
+        return frozenset((*k.KANAL_GRUENDE, *k.GITHUB_GRUENDE, *k.AENDERUNG_GRUENDE, *k.EINREICHEN_GRUENDE))
+    except Exception:  # noqa: BLE001
+        return frozenset({"github_fehler"})
+
+
+def _grund_pruefen(grund: object, standard: str) -> str:
+    grund = str(grund) if isinstance(grund, str) else ""
+    return grund if GRUND_RE.fullmatch(grund) and grund in bekannte_gruende() else standard
+
+
+def _github_aufruf(name: str, *args, fehler: str = "github_fehler", **kw):
+    """Ruft einen Einstieg der GitHub-Logik auf. Fehlt das Modul oder der Einstieg, oder wirft er etwas ohne gültigen Code (Attribut grund),
+    endet der Schritt geschlossen mit dem Code fehler; das Protokoll nennt nur den Typ der Ausnahme, nie ihren Text."""
+    try:
+        funktion = getattr(github_modul(), name)
+    except Exception as e:  # noqa: BLE001 (Modul oder Einstieg fehlt: fail closed)
+        log(f"github {name} nicht möglich ({type(e).__name__})")
+        raise GithubAbgelehnt(fehler) from None
+    try:
+        return funktion(*args, **kw)
+    except GithubAbgelehnt:
+        raise
+    except Exception as e:  # noqa: BLE001
+        grund = _grund_pruefen(getattr(e, "grund", None), "")
+        if grund:
+            raise GithubAbgelehnt(grund) from None
+        log(f"github {name} FEHLER {type(e).__name__}")
+        raise GithubAbgelehnt(fehler) from None
+
+
+def scopes_pruefen(wert: object) -> tuple[str, ...]:
+    """Feld scopes_ausnahmen (C.2.8): eine JSON-Liste von Texten, sortiert, ohne Doppel, jeder aus SCOPES_AUSNAHMEN der Schnittstelle. Sonst
+    Abgewiesen (fail closed), auch wenn die Schnittstelle fehlt."""
+    if not isinstance(wert, list) or len(wert) > 30 or not all(isinstance(s, str) and SCOPE_RE.fullmatch(s) for s in wert):
+        raise Abgewiesen("scopes_ausnahmen ungültig")
+    if wert != sorted(set(wert)):
+        raise Abgewiesen("scopes_ausnahmen ungültig (sortiert, ohne Doppel)")
+    try:
+        erlaubt = frozenset(github_modul().SCOPES_AUSNAHMEN)
+    except Exception:  # noqa: BLE001
+        raise Abgewiesen("scopes_ausnahmen nicht prüfbar (wamo_job_github fehlt)") from None
+    if not set(wert) <= erlaubt:
+        raise Abgewiesen("scopes_ausnahmen ungültig (nur Ausnahmen aus der festen Liste)")
+    return tuple(wert)
+
+
+@dataclass(frozen=True, slots=True)
+class PersoenlicherLauf:
+    """Was ein Lauf im persönlichen Weg in seiner Umgebung bekommt: Autor und Committer aus der Antwort von GitHub (github.json, nie
+    vom Kern), Repo, Basis und den Zweig des Auftrags. Kein Token."""
+
+    job: str
+    login: str
+    konto_id: int
+    repo: str
+    basis: str
+
+    def __post_init__(self):
+        if not isinstance(self.job, str) or not JOB_RE.fullmatch(self.job) or not isinstance(self.login, str) \
+                or not LOGIN_RE.fullmatch(self.login) or type(self.konto_id) is not int or not 0 < self.konto_id < 10 ** 12 \
+                or not isinstance(self.repo, str) or not REPO_RE.fullmatch(self.repo) or not isinstance(self.basis, str) \
+                or not COMMIT_RE.fullmatch(self.basis):
+            raise ValueError("github.json ungültig")
+
+    @classmethod
+    def aus_datei(cls, jobdir: Path, job: str, repo: str) -> "PersoenlicherLauf":
+        daten = read_no_follow(jobdir / "github.json", 64 * 1024)
+        try:
+            obj = json.loads(daten) if daten is not None else None
+        except (ValueError, RecursionError):
+            obj = None
+        if not isinstance(obj, dict) or obj.get("repo") != repo:
+            raise ValueError("github.json fehlt oder gehört zu einem anderen Repo")
+        return cls(job, obj.get("login"), obj.get("konto_id"), repo, obj.get("basis"))
+
+    def umgebung(self) -> dict[str, str]:
+        email = f"{self.konto_id}+{self.login}@users.noreply.github.com"
+        return {"GIT_AUTHOR_NAME": self.login, "GIT_COMMITTER_NAME": self.login, "GIT_AUTHOR_EMAIL": email,
+                "GIT_COMMITTER_EMAIL": email, "WAMO_GITHUB": GITHUB_WEG, "WAMO_ZWEIG": f"wamo/{self.job}"}
+
+
+def github_hinweis_persoenlich(job: str) -> str:
+    """Zusatz zum Systemtext im persönlichen Weg (C.5 Start 7)."""
+    return (f"- GitHub: Dieser Lauf hat keinen GitHub-Zugang. Committe nur lokal auf den Zweig wamo/{job} (er ist ausgecheckt) und setze "
+            f"in jede Commit-Nachricht den Trailer \"WAIS-Auftrag: {job}\". Nicht pushen, keine Remotes ändern, kein gh: das Einreichen "
+            "als Pull Request übernimmt W.A.I.S. nach der Freigabe durch die Person.")
+
+
+def _git_umgebung() -> dict[str, str]:
+    """Umgebung jedes git-Aufrufs des Dispatchers: keine System- und keine globale Konfiguration, keine Rückfrage, kein Repo über dem
+    Arbeitsordner, keine optionalen Sperren, keine replace-Objekte, nur https als Protokoll."""
+    return {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "LANG": "C", "LC_ALL": "C", "GIT_CEILING_DIRECTORIES": "/",
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false",
+            "SSH_ASKPASS": "/bin/false", "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_PROTOCOL_FROM_USER": "0"}
+
+
+def git_aufruf(args: list[str] | tuple[str, ...], *, git_dir: Path | None = None, eingabe: bytes | None = None,
+               zugang: "GithubGeheimnis | None" = None, netz: bool = False, zeitlimit_s: float = 60) -> tuple[int, bytes, bytes]:
+    """Ein git-Aufruf des Dispatchers (C.5 gemeinsam): --git-dir auf ein eigenes Repo (oder keins für clone), cwd="/", Umgebung
+    _git_umgebung, Einstellungen GIT_GEMEINSAM, Grenzen über prlimit (Speicher, Dateigröße, keine Core-Datei) und ein Zeitlimit. Jedes
+    Argument muss GIT_ARG_RE erfüllen. Ohne netz ist auch https gesperrt (kein Protokoll erlaubt). Mit netz und zugang meldet sich git
+    über den Credential-Helfer an, der das Token aus einer geerbten Pipe liest (nie Umgebung, argv oder Datei). Liefert (Code, stdout
+    höchstens MAX_GIT_AUSGABE Bytes, stderr geschwärzt mit dem exakten Token und gekürzt)."""
+    for a in args:
+        if not isinstance(a, str) or not GIT_ARG_RE.fullmatch(a):
+            raise ValueError("git: Argument ungültig")
+    lese_fd = zugang.in_pipe() if netz and zugang is not None else None
+    argv = [GIT_PROGRAMM]
+    # GIT_GEMEINSAM leert die Liste der Helfer (credential.helper=); erst danach kommt genau der feste Helfer mit der Nummer der Pipe
+    for schluessel, wert in (*GIT_GEMEINSAM, ("protocol.https.allow", "always" if netz else "never")):
+        argv += ["-c", f"{schluessel}={wert}"]
+    if lese_fd is not None:
+        argv += ["-c", f"credential.helper={HELFER} {lese_fd}"]
+    if git_dir is not None:
+        argv.append(f"--git-dir={git_dir}")
+    argv += list(args)
+    if os.name == "posix":  # Grenzen sind Pflicht (fail closed); nur Tests unter Windows laufen ohne prlimit
+        argv = [PRLIMIT, f"--as={GIT_SPEICHER}", f"--fsize={GIT_DATEI_MAX}", "--core=0", "--nofile=4096", "--", *argv]
+    umgebung = _git_umgebung()
+    umgebung["GIT_ALLOW_PROTOCOL"] = "https" if netz else "kein-protokoll"  # ohne Netz kein einziges Protokoll
+    try:
+        # eigene Prozessgruppe: am Zeitlimit endet auch git-remote-https, das den Zugang im Speicher hält (nicht nur das direkte Kind)
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=umgebung, cwd="/",
+                                pass_fds=(lese_fd,) if lese_fd is not None else (), start_new_session=True)
+    except OSError as e:
+        proc = None
+        code, stdout, stderr = 127, b"", f"git: nicht startbar ({type(e).__name__})".encode()
+    finally:
+        if lese_fd is not None:
+            os.close(lese_fd)
+    if proc is not None:
+        try:
+            stdout, stderr = proc.communicate(eingabe if eingabe is not None else b"", timeout=zeitlimit_s)
+            code, stdout, stderr = proc.returncode, stdout[:MAX_GIT_AUSGABE], stderr[-8192:]
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, getattr(signal, "SIGKILL", 9))
+            except (ProcessLookupError, PermissionError, AttributeError):
+                proc.kill()
+            proc.communicate()
+            code, stdout, stderr = EXIT_ZEITLIMIT, b"", b"git: Zeitlimit"
+    ansicht = zugang.ansicht() if zugang is not None and zugang.gueltig else None
+    try:
+        stderr = schwaerzen(stderr, [(ansicht, GH_PAT_ERSATZ)] if ansicht is not None else [])
+    finally:
+        if ansicht is not None:
+            ansicht.release()
+    return code, stdout, stderr
+
+
+PFAD_API_RE = re.compile(r"(/[A-Za-z0-9._~-]+)+/?(\?[A-Za-z0-9._~=&:/-]{1,500})?")  # kein %, kein #, kein Leerzeichen, kein //
+
+
+def _https_voll(methode: str, pfad: str, kopf: dict, koerper: bytes | None = None) -> tuple[int, dict[str, str], bytes]:
+    """Wie _https, dazu die Kopfzeilen der Antwort (Namen klein). Dieselben Regeln: Zertifikat geprüft, TLS 1.2, kein Proxy, keine
+    Weiterleitung, Antwort höchstens MAX_GITHUB_ANTWORT + 1 Bytes."""
+    kontext = ssl.create_default_context()
+    kontext.minimum_version = ssl.TLSVersion.TLSv1_2
+    verbindung = http.client.HTTPSConnection(GITHUB_API_HOST, 443, timeout=GITHUB_ZEITLIMIT_S, context=kontext)
+    try:
+        verbindung.request(methode, pfad, body=koerper, headers=kopf)
+        antwort = verbindung.getresponse()
+        kopfzeilen = {k.lower(): v for k, v in antwort.getheaders()[:100]}
+        return antwort.status, kopfzeilen, antwort.read(MAX_GITHUB_ANTWORT + 1)
+    finally:
+        verbindung.close()
+
+
+def _b64_in(quelle: bytes | bytearray | memoryview) -> bytearray:
+    """Base64 in ein eigenes bytearray (ohne Zeilenumbruch), ohne dass ein Ergebnis als bytes entsteht (für geheimnis_in: die Form, in der
+    git <benutzername>:<token> über HTTP schickt)."""
+    n = len(quelle)
+    aus = bytearray(4 * ((n + 2) // 3))
+    j = 0
+    for i in range(0, n, 3):
+        a = quelle[i]
+        b = quelle[i + 1] if i + 1 < n else 0
+        c = quelle[i + 2] if i + 2 < n else 0
+        aus[j] = SIEBEN_BIT[a >> 2]
+        aus[j + 1] = SIEBEN_BIT[((a & 3) << 4) | (b >> 4)]
+        aus[j + 2] = SIEBEN_BIT[((b & 15) << 2) | (c >> 6)] if i + 1 < n else 61
+        aus[j + 3] = SIEBEN_BIT[c & 63] if i + 2 < n else 61
+        j += 4
+    return aus
+
+
+class DispatcherWerkzeuge:
+    """Umsetzung des Protokolls wamo_job_github.Werkzeuge (C.9, Schnittstelle D-a zu D-b) für genau einen Aufruf (start, Laufende oder
+    einreichen). Das Token des Aufrufs (GithubGeheimnis, ein Ausschnitt des Lesepuffers) hält nur dieses Objekt; die GitHub-Logik sieht es
+    nie: http und git benutzen es, geheimnis_in sucht danach. werte sind die exakten Claude-Zugänge des Laufs (schwaerzungen), nie im
+    Protokoll. gehalten: Sperren, die der Dispatcher für diesen Aufruf schon hält (sperre meldet sie als gehalten, ein zweites flock im
+    selben Prozess wäre sonst belegt)."""
+
+    def __init__(self, job: str, projekt: str, jobdir: Path, platz: int | None = None, zugang: "GithubGeheimnis | None" = None,
+                 werte: tuple = (), gehalten: tuple[str, ...] = ()):
+        self.job, self.projekt, self.jobdir, self.platz = check_job(job), projekt, _no_symlink(jobdir), platz
+        self._zugang, self._werte, self._gehalten = zugang, tuple(werte), frozenset(gehalten)
+
+    def _g(self):
+        return github_modul()
+
+    def _ersetzungen(self) -> list:
+        ersetzungen = [(w, ZUGANG_ERSATZ) for w in self._werte if len(w) >= 8]
+        if self._zugang is not None and self._zugang.gueltig:
+            ersetzungen.insert(0, (self._zugang.ansicht(), GH_PAT_ERSATZ))
+        return ersetzungen
+
+    def log(self, text: str, *, pflicht: bool = False) -> None:
+        ersetzungen = self._ersetzungen()
+        try:
+            sauber = schwaerzen(str(text).encode("utf-8", "replace"), ersetzungen).decode("utf-8", "replace")
+        finally:
+            for wert, _ in ersetzungen:
+                if isinstance(wert, memoryview):
+                    wert.release()
+        log(f"github {self.job}: " + "".join(" " if not c.isprintable() else c for c in sauber)[:500], pflicht=pflicht)
+
+    def http(self, methode: str, pfad: str, daten=None):
+        """Wie Werkzeuge.http. Restrisiko (bewusst, wie beim Claude-Zugang): http.client und die TLS-Puffer legen kurzlebige Kopien der
+        Kopfzeile als bytes an, die sich nicht überschreiben lassen; der Prozess ist nicht dumpable (PR_SET_DUMPABLE=0), sein Speicher
+        für die Sandbox und andere Prozesse von wamo nicht lesbar. Das eigene bytearray wird nach dem Aufruf überschrieben."""
+        g = self._g()
+        if self._zugang is None or not self._zugang.gueltig:
+            raise g.KeinToken("kein Token in diesem Aufruf")
+        teile = pfad.split("?", 1)[0].split("/") if isinstance(pfad, str) else []
+        if methode not in ("GET", "POST") or not isinstance(pfad, str) or not PFAD_API_RE.fullmatch(pfad) or any(s in (".", "..") for s in teile):
+            raise ValueError("GitHub: Pfad oder Methode ungültig")
+        anmeldung = self._zugang.kopfzeile()
+        try:
+            kopf = {"Accept": "application/vnd.github+json", "Authorization": anmeldung, "X-GitHub-Api-Version": GITHUB_API_VERSION,
+                    "User-Agent": "wamo-job-dispatch"}
+            koerper = None
+            if daten is not None:
+                koerper = json.dumps(dict(daten)).encode("utf-8")
+                kopf["Content-Type"] = "application/json"
+            try:
+                status, kopfzeilen, roh = _https_voll(methode, pfad, kopf, koerper)
+            except (OSError, http.client.HTTPException, ValueError) as e:
+                raise g.NetzFehler(f"GitHub nicht erreichbar ({type(e).__name__})") from None
+        finally:
+            anmeldung[:] = bytes(len(anmeldung))
+        if len(roh) > MAX_GITHUB_ANTWORT:
+            raise g.NetzFehler("Antwort von GitHub zu groß")
+        try:
+            obj = json.loads(roh) if roh else None
+        except (ValueError, RecursionError):
+            obj = None
+        return g.HttpAntwort(status, MappingProxyType(kopfzeilen), obj)
+
+    def _git_regeln(self, args: tuple, git_dir, netz: bool) -> None:
+        """argv-Regeln für Werkzeuge.git (die Umsetzung ist die einzige Stelle, die sie durchsetzt): ein bekannter Unterbefehl zuerst, keine
+        gesperrte Option, eine Adresse nur mit netz und dann genau https://github.com/<Repo des Auftrags>.git nach "--", clone nur nach
+        basis.git, push genau <Commit>:refs/heads/wamo/<job> ohne Force, ls-remote genau refs/heads/wamo/<job>. ValueError sonst."""
+        befehl = args[0]
+        if befehl not in GIT_BEFEHLE:
+            raise ValueError("git: Unterbefehl nicht erlaubt")
+        for a in args[1:]:
+            if any(a == o or a.startswith(o + "=") for o in GIT_OPTIONEN_GESPERRT) or (a.startswith("--template") and a != "--template="):
+                raise ValueError("git: Option nicht erlaubt")
+            if len(a) > 1 and a[0] == "-" and a[1] != "-" and set(a[1:]) & set(GIT_KURZ_GESPERRT.get(befehl, "")):
+                raise ValueError("git: Option nicht erlaubt")
+            if befehl == "push" and (a.startswith("+") or any(a == o or a.startswith(o + "=") for o in GIT_PUSH_GESPERRT)):
+                raise ValueError("git: push nur ohne Force, Löschen und Tags")
+        adressen = [a for a in args if "://" in a or a.startswith("git@") or a.startswith("file:")]
+        if befehl in GIT_NETZ_BEFEHLE:
+            if not netz:
+                raise ValueError("git: clone, ls-remote und push nur mit netz")
+            repo = read_json(self.jobdir / "auftrag.json", {}).get("repo")
+            if not isinstance(repo, str) or not REPO_RE.fullmatch(repo) or "--" not in args:
+                raise ValueError("git: Repo des Auftrags unbekannt oder kein -- vor den Angaben")
+            rest = list(args[args.index("--") + 1:])
+            if adressen != [f"https://github.com/{repo}.git"] or not rest or rest[0] != adressen[0]:
+                raise ValueError("git: nur die Adresse des Repos dieses Auftrags")
+            erwartet = {"clone": [str(self.pfad("basis.git"))], "ls-remote": [f"refs/heads/wamo/{self.job}"]}.get(befehl)
+            if befehl == "push":
+                if len(rest) != 2 or not re.fullmatch(rf"[0-9a-f]{{40}}:refs/heads/wamo/{self.job}", rest[1]):
+                    raise ValueError("git: push nur <Commit>:refs/heads/wamo/<job>")
+            elif rest[1:] != erwartet:
+                raise ValueError("git: Ziel nicht erlaubt")
+        elif netz or adressen:
+            raise ValueError("git: Netz nur für clone, ls-remote und push")
+
+    def git(self, args, *, git_dir, eingabe=None, netz=False, zeitlimit_s=60.0):
+        g = self._g()
+        args = tuple(args)
+        if not args or not isinstance(args[0], str):
+            raise ValueError("git: Befehl fehlt")
+        if git_dir is None:
+            if args[0] != "clone":
+                raise ValueError("git: ohne git_dir nur clone")
+        elif Path(git_dir) not in (self.pfad("basis.git"), self.pfad("aus.git")) or Path(git_dir).is_symlink():
+            raise ValueError("git: git_dir ist kein eigenes Repo des Dispatchers")
+        self._git_regeln(args, git_dir, bool(netz))
+        if netz and (self._zugang is None or not self._zugang.gueltig):
+            raise g.KeinToken("kein Token in diesem Aufruf")
+        if not 0 < float(zeitlimit_s) <= GIT_ZEITLIMIT_S:
+            raise ValueError("git: Zeitlimit ungültig")
+        code, stdout, stderr = git_aufruf(args, git_dir=Path(git_dir) if git_dir is not None else None, eingabe=eingabe,
+                                          zugang=self._zugang if netz else None, netz=bool(netz), zeitlimit_s=float(zeitlimit_s))
+        ersetzungen = self._ersetzungen()
+        try:
+            text = schwaerzen(stderr, ersetzungen).decode("utf-8", "replace")
+        finally:
+            for wert, _ in ersetzungen:
+                if isinstance(wert, memoryview):
+                    wert.release()
+        text = " ".join(text.split())[-GIT_STDERR_MAX:]
+        return g.GitErgebnis(code, stdout, text)
+
+    def sandbox(self, modus, *, job, projekt, zeitlimit_s):
+        g = self._g()
+        if modus not in g.SANDBOX_MODI_NETZLOS:
+            raise ValueError("Sandbox: nur die netzlosen Schritte")
+        if job != self.job or projekt != self.projekt or self.platz is None:
+            raise ValueError("Sandbox: anderer Auftrag, anderes Projekt oder kein Platz")
+        if type(zeitlimit_s) is not int or not 0 < zeitlimit_s <= SCHRITT_ZEITLIMIT_S[modus]:
+            raise ValueError("Sandbox: Zeitlimit ungültig")
+        lauf = PersoenlicherLauf.aus_datei(self.jobdir, self.job, read_json(self.jobdir / "auftrag.json", {}).get("repo"))
+        argumente = schritt_argumente(modus, lauf, self.jobdir)
+        ergebnis = sandbox_schritt(modus, self.job, self.projekt, self.platz, argumente, zeitlimit_s)
+        return g.SandboxErgebnis(ergebnis.rc, ergebnis.rc == EXIT_ZEITLIMIT)
+
+    @contextmanager
+    def sperre(self, name):
+        if name not in self._g().SPERREN:
+            raise ValueError("Sperre unbekannt")
+        if name in self._gehalten:
+            yield True
+            return
+        sperre = Sperre(sperren_ordner() / KERN_SPERRE if name == KERN_SPERRE else self.jobdir / name)
+        try:
+            yield bool(sperre.versuchen())
+        finally:
+            _sperre_freigeben(sperre)
+
+    def pfad(self, name) -> Path:
+        if name not in self._g().AUFTRAG_DATEIEN:
+            raise ValueError("Eintrag im Auftragsordner unbekannt")
+        return _no_symlink(self.jobdir) / name
+
+    def uhr(self) -> float:
+        return time.time()
+
+    def geheimnis_in(self, daten) -> bool:
+        if isinstance(daten, memoryview):
+            daten = daten.tobytes()
+        if not isinstance(daten, (bytes, bytearray)):
+            raise TypeError("geheimnis_in braucht Bytes")
+        if any(len(w) >= 8 and w in daten for w in self._werte):
+            return True
+        if self._zugang is None or not self._zugang.gueltig:
+            return False
+        ansicht = self._zugang.ansicht()
+        quelle = bytearray(len(GIT_BENUTZER) + 1 + len(ansicht))
+        try:
+            if ansicht in daten:
+                return True
+            quelle[:len(GIT_BENUTZER) + 1] = GIT_BENUTZER + b":"
+            quelle[len(GIT_BENUTZER) + 1:] = ansicht
+            kodiert = _b64_in(quelle)
+            try:
+                return kodiert in daten
+            finally:
+                kodiert[:] = bytes(len(kodiert))
+        finally:
+            ansicht.release()
+            quelle[:] = bytes(len(quelle))
+
+
+def _ordner_leeren(pfad: Path) -> None:
+    """Ein Ordner im Auftragsordner, den die Sandbox beschreiben darf (ausgabe/, ergebnis/): alles darin weg (auch Links und FIFOs, ohne
+    ihnen zu folgen), danach leer mit 0700."""
+    try:
+        st = pfad.lstat()
+    except FileNotFoundError:
+        st = None
+    if st is not None:
+        if stat.S_ISDIR(st.st_mode):
+            _baum_entfernen(pfad)
+        else:
+            pfad.unlink()
+    pfad.mkdir(mode=0o700)
+
+
+def eigner_datei(projekt: str) -> Path:
+    return sperren_ordner() / f"{EIGNER_PRAEFIX}{check_project(projekt)}.json"
+
+
+def eigner_lesen(projekt: str) -> str | None:
+    """Der Auftrag, dessen Klon den Projektordner zuletzt gebaut hat (None: keiner, unlesbar oder ein Lauf ohne persönlichen Weg danach)."""
+    daten = read_no_follow(eigner_datei(projekt), 4096)
+    try:
+        obj = json.loads(daten) if daten else None
+    except (ValueError, RecursionError):
+        return None
+    job = obj.get("job") if isinstance(obj, dict) else None
+    return job if isinstance(job, str) and JOB_RE.fullmatch(job) else None
+
+
+def eigner_schreiben(projekt: str, job: str) -> None:
+    write_json_atomic(eigner_datei(projekt), {"job": check_job(job), "t": int(time.time())})
+
+
+def eigner_entfernen(projekt: str) -> None:
+    """Ein Lauf ohne persönlichen Weg im selben Projektordner: der Ordner stammt danach nicht mehr aus dem Klon eines Auftrags."""
+    try:
+        eigner_datei(projekt).unlink(missing_ok=True)
+    except (OSError, Abgewiesen):
+        pass
+
+
+def schritt_argumente(modus: str, lauf: PersoenlicherLauf, jobdir: Path) -> list[str]:
+    """Argumente der festen Programme (Werte aus github.json, geprüft in PersoenlicherLauf): klon bekommt Repo, Auftrag, Basis und, wenn es
+    ein letztes Bundle gibt, --bundle; ausgabe und pruefung Auftrag und Basis."""
+    if modus == "klon":
+        bundle = (jobdir / "bundle.ein").is_file() and not (jobdir / "bundle.ein").is_symlink()
+        return ["--repo", lauf.repo, "--auftrag", lauf.job, "--basis", lauf.basis, *(["--bundle"] if bundle else [])]
+    return ["--auftrag", lauf.job, "--basis", lauf.basis]
+
+
+def _schritt_umgebung() -> dict[str, str]:
+    env = basis_env()
+    env["GIT_CONFIG_COUNT"] = str(len(GIT_OHNE_HOOKS))
+    for i, (schluessel, wert) in enumerate(GIT_OHNE_HOOKS):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = schluessel, wert
+    return env
+
+
+def sandbox_schritt(modus: str, job: str, projekt: str, platz: int, argumente: tuple[str, ...] | list[str] = (),
+                    zeitlimit_s: int | None = None) -> SchrittErgebnis:
+    """Ein Sandbox-Schritt ohne Netz (wamo-job.sh --modus klon|ausgabe|pruefung, C.5.2) mit dem festen Programm des Modus. Vorher: bei
+    ausgabe das Projekt entschärfen und ausgabe/ leeren, bei pruefung ergebnis/ leeren. Nachher bei klon (Erfolg): das Projekt entschärfen
+    (C.5 Start 6) und den Eigner des Projektordners schreiben. Die Umgebung trägt nie ein Token (nur Basis und Git-Hooks aus)."""
+    if modus not in SCHRITT_PROGRAMME or type(platz) is not int:
+        raise ValueError("Sandbox-Schritt unbekannt")
+    check_job(job)
+    check_project(projekt)
+    for a in argumente:
+        if not isinstance(a, str) or not SCHRITT_ARG_RE.fullmatch(a):
+            raise ValueError("Sandbox-Schritt: Argument ungültig")
+    jobdir = _no_symlink(JOBS / job)
+    if modus == "ausgabe":
+        for entfernt in projekt_entschaerfen(PROJEKTE / projekt):
+            log(f"entschärft {job} {projekt}: {entfernt}")
+        _ordner_leeren(jobdir / "ausgabe")
+    elif modus == "pruefung":
+        _ordner_leeren(jobdir / "ergebnis")
+    zeit = min(zeitlimit_s or SCHRITT_ZEITLIMIT_S[modus], SCHRITT_ZEITLIMIT_S[modus])
+    argv = [str(RUNNER), "--auftrag", job, "--projekt", projekt, "--platz", str(platz), "--modus", modus, "--zeitlimit", str(zeit),
+            "--einheit-zusatz", modus, "--", *SCHRITT_PROGRAMME[modus], *argumente]
+    try:
+        p = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, env=_schritt_umgebung(), cwd="/", timeout=zeit + 90,
+                           start_new_session=True)
+        rc, ausgabe, fehler = p.returncode, p.stdout[:MAX_SCHRITT_AUSGABE], schwaerzen(p.stderr[-4096:], [])
+    except subprocess.TimeoutExpired:
+        stop_units(job)
+        rc, ausgabe, fehler = EXIT_ZEITLIMIT, b"", b"Zeitlimit"
+    except OSError as e:
+        rc, ausgabe, fehler = EXIT_INTERN, b"", f"nicht startbar ({type(e).__name__})".encode()
+    log(f"schritt {job} {modus} rc={rc}")
+    if modus == "klon" and rc == 0:
+        for entfernt in projekt_entschaerfen(PROJEKTE / projekt):
+            log(f"entschärft {job} {projekt}: {entfernt}")
+        eigner_schreiben(projekt, job)
+    return SchrittErgebnis(rc, ausgabe, fehler)
+
+
+def aenderung_lesen(jobdir: Path) -> dict:
+    """aenderung.json (geschrieben von der GitHub-Logik): nur die Felder aus AENDERUNG_FELDER und ein Zustand aus ZUSTAENDE, sonst keine."""
+    daten = read_no_follow(jobdir / "aenderung.json", MAX_AENDERUNG_BYTES)
+    try:
+        obj = json.loads(daten) if daten else None
+    except (ValueError, RecursionError):
+        obj = None
+    if not isinstance(obj, dict) or obj.get("status") not in ZUSTAENDE:
+        return {"status": "keine"}
+    return aenderung_felder_pruefen(obj, jobdir.name)
+
+
+AENDERUNG_ZAHLEN = ("dateien", "plus", "minus", "nicht_gelistet", "ungesichert", "pr")
+MAX_AENDERUNG_LISTE = 200
+
+
+def _text_sauber(wert: object, laenge: int) -> str | None:
+    """Ein Text aus der Auswertung für Kern und Oberfläche: nur str, ohne unsichtbare Zeichen, gekürzt, geschwärzt (ein Token im Pfadnamen
+    oder Titel käme sonst bis in die Karte)."""
+    if not isinstance(wert, str):
+        return None
+    text = "".join(c for c in wert if not _unsichtbar(c))[:laenge]
+    return schwaerzen(text.encode("utf-8"), []).decode("utf-8", "replace")
+
+
+def aenderung_felder_pruefen(obj: dict, job: str) -> dict:
+    """Die Felder von aenderung.json für das Ereignis (C.2.4), je mit Typ und Grenze; was nicht passt, fällt weg. Die Werte stammen aus Daten
+    der Sandbox (über die GitHub-Logik): Kern und Oberfläche bekommen nur geprüfte Formen."""
+    aus: dict = {"status": obj["status"]}
+    for name in ("commit_id", "tree_id", "basis"):
+        if isinstance(obj.get(name), str) and COMMIT_RE.fullmatch(obj[name]):
+            aus[name] = obj[name]
+    if JOB_RE.fullmatch(job) and obj.get("zweig") == f"wamo/{job}":
+        aus["zweig"] = obj["zweig"]
+    for name in AENDERUNG_ZAHLEN:
+        if type(obj.get(name)) is int and 0 <= obj[name] < 10 ** 9:
+            aus[name] = obj[name]
+    if obj.get("lauf") in ("fertig", "zeitlimit", "fehler"):
+        aus["lauf"] = obj["lauf"]
+    if isinstance(obj.get("gruende"), list):
+        bekannt = bekannte_gruende()
+        aus["gruende"] = [g for g in obj["gruende"][:20] if isinstance(g, str) and g in bekannt]
+    titel = _text_sauber(obj.get("titel"), 200)
+    if titel is not None:
+        aus["titel"] = titel
+    meta = read_json(JOBS / job / "auftrag.json", {}) if JOB_RE.fullmatch(job) else {}
+    repo = meta.get("repo") if isinstance(meta, dict) else None
+    if isinstance(obj.get("adresse"), str) and isinstance(repo, str) and type(obj.get("pr")) is int \
+            and obj["adresse"] == f"https://github.com/{repo}/pull/{obj['pr']}":
+        aus["adresse"] = obj["adresse"]
+    if isinstance(obj.get("liste"), list):
+        liste = []
+        for eintrag in obj["liste"][:MAX_AENDERUNG_LISTE]:
+            if not isinstance(eintrag, dict):
+                continue
+            pfad = _text_sauber(eintrag.get("pfad"), 4096)
+            if not pfad or eintrag.get("art") not in ("neu", "geaendert", "geloescht") or eintrag.get("klasse") not in ("normal", "sensibel"):
+                continue
+            liste.append({"pfad": pfad, "art": eintrag["art"], "klasse": eintrag["klasse"],
+                          **{k: eintrag[k] for k in ("plus", "minus") if type(eintrag.get(k)) is int and 0 <= eintrag[k] < 10 ** 9}})
+        aus["liste"] = liste
+    return aus
+
+
+def aenderung_ereignis(job: str) -> dict:
+    """Felder des Ereignisses aenderung aus der Datei, ohne neu zu rechnen (C.2.3)."""
+    return {**aenderung_lesen(JOBS / job), "job": job}
+
+
+def _persoenlicher_auftrag(job: str, profil: str) -> Path:
+    """Der Auftragsordner eines Auftrags mit github=persoenlich und genau diesem Profil (Regel 4 prüft im Kern-Kanal dasselbe vorher)."""
+    jobdir = _no_symlink(JOBS / job)
+    meta = read_json(jobdir / "auftrag.json", None)
+    if not isinstance(meta, dict) or meta.get("github") != GITHUB_WEG:
+        raise Abgewiesen("Auftrag ohne persönlichen GitHub-Weg")
+    if meta.get("profil") != profil:
+        raise Abgewiesen("Auftrag gehört zu einem anderen Profil")
+    return jobdir
+
+
+def _einreichen_fehler(job: str, grund: str) -> int:
+    grund = _grund_pruefen(grund, "github_fehler")
+    log(f"einreichen_fehler {job} grund={grund}")
+    wamo_event("einreichen_fehler", job=job, grund=grund)
+    return EXIT_ABGEWIESEN
+
+
+def cmd_aenderung(job: str, profil: str) -> int:
+    """aenderung <job> <profil>: das Ereignis aenderung aus aenderung.json (rechnet nie neu)."""
+    _persoenlicher_auftrag(job, profil)
+    wamo_event("aenderung", **aenderung_ereignis(job))
+    return EXIT_OK
+
+
+def einreichen_eingabe_pruefen(raw: bytes) -> dict:
+    """Erste Zeile von einreichen (EINREICHEN_FELDER): commit_id und tree_id je 40 Hex, bestaetigt eine Liste von Pfaden (höchstens 300),
+    optional scopes_ausnahmen wie in der Kopfzeile (scopes_pruefen). Die Pfade vergleicht die GitHub-Logik als Menge mit den sensiblen."""
+    if not raw.endswith(b"\n") or len(raw) > MAX_EINREICHEN_ZEILE:
+        raise GithubAbgelehnt("bestaetigung")
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise GithubAbgelehnt("bestaetigung") from None
+    if not isinstance(obj, dict) or not {"commit_id", "tree_id", "bestaetigt"} <= set(obj) \
+            or set(obj) - {"commit_id", "tree_id", "bestaetigt", "scopes_ausnahmen"}:
+        raise GithubAbgelehnt("bestaetigung")
+    commit, tree, pfade = obj["commit_id"], obj["tree_id"], obj["bestaetigt"]
+    if not isinstance(commit, str) or not COMMIT_RE.fullmatch(commit) or not isinstance(tree, str) or not COMMIT_RE.fullmatch(tree):
+        raise GithubAbgelehnt("veraltet")
+    if not isinstance(pfade, list) or len(pfade) > 300 or not all(isinstance(p, str) and 0 < len(p) <= 4096 for p in pfade):
+        raise GithubAbgelehnt("bestaetigung")
+    try:
+        scopes = scopes_pruefen(obj["scopes_ausnahmen"]) if "scopes_ausnahmen" in obj else ()
+    except Abgewiesen:
+        raise GithubAbgelehnt("token_rechte") from None
+    return {"commit_id": commit, "tree_id": tree, "bestaetigt": tuple(sorted(set(pfade))), "scopes_ausnahmen": scopes}
+
+
+def _kern_einreichen_pruefen(job: str, profil: str, buchen: bool = False, versuch: bool = False) -> str | None:
+    """Kern-Kanal, unter der Sperre kernkanal (pruefe_einreichen): versuch=True am Eingang von einreichen (Kanal, PERSOENLICH, Versuche je
+    Stunde und Profil; bucht den Versuch mit befehl=einreichen), buchen=True unmittelbar vor dem Push (dazu MAX_EINREICHEN_*; bucht
+    einreichen), sonst nur der Kanal (Notaus, Konfiguration, PERSOENLICH) vor dem Pull Request. Auf die Sperre wartet es höchstens
+    KERN_SPERRE_FRIST_S (hält die GitHub-Logik sie selbst, endet es geschlossen statt ohne Ende zu warten). In den anderen Kanälen None."""
+    if KANAL != "kern":
+        return None
+    k = kern_modul()
+    zaehler = (KERN_PFADE or k.PFADE).zaehler
+    gesperrt = "grenze_einreichen" if buchen else "grenze_profil"
+    try:
+        with exklusiv_mit_frist(sperren_ordner() / KERN_SPERRE, KERN_SPERRE_FRIST_S):
+            if buchen or versuch:
+                try:
+                    ereignisse = k.zaehler_lesen(zaehler)
+                except OSError:
+                    ereignisse = None
+            else:
+                ereignisse = []  # nur der Kanal: keine Grenze zählt
+            grund = k.pruefe_einreichen(kern_zustand(), ereignisse=ereignisse, jetzt=time.time(), profil=profil, buchen=buchen)
+            if grund is None and (buchen or versuch):
+                try:
+                    k.zaehler_schreiben(zaehler, job, "einreichen" if buchen else "versuch", time.time(), profil=profil,
+                                        **({} if buchen else {"befehl": "einreichen"}))
+                except (OSError, ValueError):
+                    grund = gesperrt
+            return grund
+    except TimeoutError:
+        return gesperrt
+
+
+def cmd_einreichen(job: str, profil: str) -> int:
+    """einreichen <job> <profil>: Zeile 1 mit Commit, Tree, Bestätigungen und Ausnahmen, Zeile 2 die GitHub-Zeile; dann unter den Sperren
+    .lauf und .einreichen die GitHub-Logik (Zustand, Bindung, Konto, Rechte, Geheimnissuche, Kanal und Zähler, ls-remote, Push, Pull Request).
+    Ereignis eingereicht oder einreichen_fehler. Das Token wird danach überschrieben, auch bei jedem Fehler."""
+    jobdir = _persoenlicher_auftrag(job, profil)
+    geheimnis = None
+    gehalten = [Sperre(jobdir / ".lauf"), Sperre(jobdir / ".einreichen")]
+    try:
+        try:
+            eingabe = einreichen_eingabe_pruefen(_einreichen_zeile_lesen())
+        except GithubAbgelehnt as e:
+            return _einreichen_fehler(job, e.grund)
+        except Abgewiesen:  # die Zeile kam nicht rechtzeitig oder war die GitHub-Zeile an falscher Stelle
+            return _einreichen_fehler(job, "bestaetigung")
+        try:
+            grund = _kern_einreichen_pruefen(job, profil, versuch=True)  # Kanal, PERSOENLICH, Versuche je Stunde (jeder Aufruf zählt)
+        except OSError:
+            grund = "github_fehler"
+        if grund is not None:
+            return _einreichen_fehler(job, grund)
+        if not nicht_dumpbar():
+            log(f"einreichen {job}: der Prozess ist dumpable, GitHub-Zeile nicht gelesen", pflicht=True)
+            return _einreichen_fehler(job, "github_fehler")
+        try:
+            geheimnis = _githubzeile_lesen()
+        except GithubZeileFehlt:
+            return _einreichen_fehler(job, "github_fehler")
+        if not all(s.versuchen() for s in gehalten):
+            return _einreichen_fehler(job, "zustand")  # ein Lauf dieses Auftrags oder ein anderes Einreichen ist aktiv
+        projekt = read_json(jobdir / "auftrag.json", {}).get("projekt", "")
+        werkzeuge = DispatcherWerkzeuge(job, projekt, jobdir, zugang=geheimnis, gehalten=(".lauf", ".einreichen"))
+        try:
+            ergebnis = _github_aufruf("einreichen", werkzeuge, job=job, profil=profil, eingabe=eingabe,
+                                      kanal=lambda buchen=False: _kern_einreichen_pruefen(job, profil, buchen))
+        except GithubAbgelehnt as e:
+            return _einreichen_fehler(job, e.grund)
+        felder = _eingereicht_felder(ergebnis, read_json(jobdir / "auftrag.json", {}).get("repo"), job)
+        if felder is None:
+            return _einreichen_fehler(job, "github_fehler")
+        if KANAL == "kern":
+            try:
+                k = kern_modul()
+                k.zaehler_schreiben((KERN_PFADE or k.PFADE).zaehler, job, "eingereicht", time.time(), profil=profil, pr=felder["pr"])
+            except (OSError, ValueError):
+                log(f"kernkanal: eingereicht von {job} nicht gebucht")
+        log(f"eingereicht {job} pr={felder['pr']}", pflicht=True)
+        wamo_event("eingereicht", job=job, **felder)
+        return EXIT_OK
+    finally:
+        if geheimnis is not None:
+            geheimnis.ueberschreiben()
+        if LESER is not None:
+            LESER.ueberschreiben(0, len(LESER.puffer))
+        for s in gehalten:
+            _sperre_freigeben(s)
+
+
+def _eingereicht_felder(ergebnis: object, repo: object, job: str) -> dict | None:
+    """Felder des Ereignisses eingereicht (C.2.4), geprüft: Zweig genau wamo/<job>, Nummer größer 0, Adresse genau die des Pull Requests."""
+    if not isinstance(ergebnis, dict) or not isinstance(repo, str):
+        return None
+    zweig, pr, adresse = ergebnis.get("zweig"), ergebnis.get("pr"), ergebnis.get("adresse")
+    if zweig != f"wamo/{job}" or type(pr) is not int or pr <= 0 or adresse != f"https://github.com/{repo}/pull/{pr}":
+        return None
+    return {"zweig": zweig, "pr": pr, "adresse": adresse}
+
+
+def github_dateien_entfernen(jobdir: Path) -> int:
+    """Löscht die Kopien des Repos im Auftragsordner (GITHUB_DATEIEN), nie den Projektordner, auch Ordner mit entzogenen Rechten, ohne Links zu
+    folgen. Liefert die Zahl der entfernten Einträge; bleibt einer stehen, OSError (der Aufrufer meldet das, statt Erfolg anzunehmen)."""
+    anzahl = 0
+    for name in GITHUB_DATEIEN:
+        pfad = jobdir / name
+        try:
+            st = pfad.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISDIR(st.st_mode):
+            _baum_entfernen(pfad)
+        else:
+            pfad.unlink(missing_ok=True)
+        if os.path.lexists(pfad):
+            raise OSError(f"{name} ließ sich nicht entfernen")
+        anzahl += 1
+    return anzahl
+
+
+def projekt_leeren_ganz(projektdir: Path) -> bool:
+    """Leert den Projektordner auch dann, wenn die Sandbox Rechte entzogen hat (u+rwx von oben nach unten, ohne Links zu folgen), und prüft
+    danach, dass er leer ist."""
+    if not projektdir.is_dir() or projektdir.is_symlink():
+        return False
+    _ordner_freigeben(projektdir)
+    projekt_leeren_sicher(projektdir)
+    try:
+        with os.scandir(projektdir) as it:
+            return next(it, None) is None
+    except OSError:
+        return False
+
+
+def _aenderung_setzen(jobdir: Path, job: str, status: str) -> None:
+    write_json_atomic(jobdir / "aenderung.json", {**aenderung_lesen(jobdir), "job": job, "status": status})
+
+
+def cmd_verwerfen(job: str, profil: str) -> int:
+    """verwerfen <job> <profil>: nur aus keine, gesperrt, nur_lesen und bereit, unter den Sperren .lauf und .einreichen; löscht aus.git,
+    ergebnis/, Bundle und basis.git, nie den Projektordner (C.2.3). Ereignis verworfen, sonst einreichen_fehler mit zustand."""
+    jobdir = _persoenlicher_auftrag(job, profil)
+    gehalten = [Sperre(jobdir / ".lauf"), Sperre(jobdir / ".einreichen")]
+    try:
+        if not all(s.versuchen() for s in gehalten):
+            return _einreichen_fehler(job, "zustand")
+        status = aenderung_lesen(jobdir).get("status", "keine")
+        if status not in VERWERFEN_AUS:
+            return _einreichen_fehler(job, "zustand")
+        entfernt = github_dateien_entfernen(jobdir)
+        _aenderung_setzen(jobdir, job, "verworfen")
+        log(f"verworfen {job} aus={status} entfernt={entfernt}", pflicht=True)
+        wamo_event("verworfen", job=job)
+        return EXIT_OK
+    finally:
+        for s in gehalten:
+            _sperre_freigeben(s)
+
+
+def _aufraeumen_faellig(jobdir: Path, jetzt: float) -> bool:
+    status = aenderung_lesen(jobdir).get("status", "keine")
+    grenze = AUFRAEUMEN_FERTIG_S if status in ("eingereicht", "verworfen") else AUFRAEUMEN_SONST_S
+    return _alter_s(jobdir, jetzt) > grenze
+
+
+def _alter_s(jobdir: Path, jetzt: float) -> float:
+    """Alter eines Auftrags für das Aufräumen: seit der letzten Änderung von aenderung.json, status.json oder auftrag.json."""
+    zeiten = []
+    for name in ("aenderung.json", "status.json", "auftrag.json"):
+        try:
+            zeiten.append((jobdir / name).lstat().st_mtime)
+        except OSError:
+            continue
+    return jetzt - max(zeiten) if zeiten else float("inf")
+
+
+def github_aufraeumen(alle: bool = False, jetzt: float | None = None, hoechstens: int = 500) -> dict:
+    """Aufräumen im persönlichen Weg (C.10.4): Kopien privater Repos in Auftragsordnern mit github=persoenlich löschen, eingereichte und
+    verworfene nach AUFRAEUMEN_FERTIG_S, alle anderen nach AUFRAEUMEN_SONST_S (mit alle sofort), und Projektordner leeren, deren
+    Eigner-Auftrag so aufgeräumt ist oder seinen Klon nicht mehr hat. Jeden Auftrag nur unter .lauf und .einreichen, jedes Projekt nur unter
+    seiner Sperre (nie warten: ein aktiver Auftrag bleibt bis zum nächsten Lauf). Ein Auftrag, der noch nicht fertig war, steht danach auf
+    verworfen (Nacharbeit ist ein neuer Auftrag)."""
+    jetzt = time.time() if jetzt is None else jetzt
+    aufgeraeumt: set[str] = set()
+    ergebnis = {"auftraege": 0, "projekte": 0, "uebersprungen": 0}
+    try:
+        jobs = sorted(e.name for e in os.scandir(JOBS) if JOB_RE.fullmatch(e.name) and e.is_dir(follow_symlinks=False))
+    except OSError:
+        jobs = []
+    for job in jobs[:hoechstens]:
+        jobdir = JOBS / job
+        meta = read_json(jobdir / "auftrag.json", None)
+        if not isinstance(meta, dict) or meta.get("github") != GITHUB_WEG:
+            continue
+        if not alle and not _aufraeumen_faellig(jobdir, jetzt):
+            continue
+        gehalten = [Sperre(jobdir / ".lauf"), Sperre(jobdir / ".einreichen")]
+        try:
+            if not all(s.versuchen() for s in gehalten):
+                ergebnis["uebersprungen"] += 1
+                continue
+            if not alle and not _aufraeumen_faellig(jobdir, jetzt):  # unter den Sperren neu: ein Einreichen kann dazwischen fertig sein
+                continue
+            status = aenderung_lesen(jobdir).get("status", "keine")
+            if github_dateien_entfernen(jobdir):
+                ergebnis["auftraege"] += 1
+            if status not in ("eingereicht", "verworfen"):
+                _aenderung_setzen(jobdir, job, "verworfen")
+            aufgeraeumt.add(job)
+        except Exception as e:  # noqa: BLE001 (ein Auftrag hält das Aufräumen der anderen nie auf)
+            log(f"aufraeumen {job}: nicht vollständig ({type(e).__name__})")
+            ergebnis["uebersprungen"] += 1
+        finally:
+            for s in gehalten:
+                _sperre_freigeben(s)
+    try:
+        eigner = sorted(e.name for e in os.scandir(sperren_ordner()) if e.name.startswith(EIGNER_PRAEFIX) and e.name.endswith(".json"))
+    except OSError:
+        eigner = []
+    for name in eigner[:hoechstens]:
+        projekt = name[len(EIGNER_PRAEFIX):-len(".json")]
+        if not PROJECT_RE.fullmatch(projekt) or "--" in projekt:
+            continue
+        job = eigner_lesen(projekt)
+        if job is not None and job not in aufgeraeumt and os.path.lexists(JOBS / job / "basis.git"):
+            continue  # der Eigner-Auftrag lebt noch und hat seinen Klon
+        sperre = Sperre(sperren_ordner() / f"projekt-{projekt}")
+        try:
+            if not sperre.versuchen():
+                ergebnis["uebersprungen"] += 1
+                continue
+            ordner = PROJEKTE / projekt
+            if not os.path.lexists(ordner) or projekt_leeren_ganz(ordner):
+                ergebnis["projekte"] += 1 if os.path.lexists(ordner) else 0
+                eigner_entfernen(projekt)  # nur nach Erfolg: sonst versucht es der nächste Lauf erneut
+            else:
+                log(f"aufraeumen: Projektordner {projekt} nicht leer, bleibt beim nächsten Lauf dran")
+                ergebnis["uebersprungen"] += 1
+        finally:
+            _sperre_freigeben(sperre)
+    return ergebnis
+
+
+def cmd_aufraeumen(alle: str | None = None) -> int:
+    """aufraeumen [alle]: nur im Kanal lokal (Timer wamo-job-aufraeumen.timer, wamo-job-rueckweg.sh). Antwort eine JSON-Zeile mit Zahlen."""
+    if KANAL != "lokal":
+        raise Abgewiesen("aufraeumen nur lokal")
+    ergebnis = github_aufraeumen(alle=alle == "alle")
+    log(f"aufraeumen {'alle' if alle else 'alt'}: {ergebnis['auftraege']} Aufträge, {ergebnis['projekte']} Projekte, "
+        f"{ergebnis['uebersprungen']} übersprungen")
+    emit({"ok": True, **ergebnis})
+    return EXIT_OK
+
+
+def _github_abgelehnt(jobdir: Path | None, job: str, projekt: str, art: str, grund: str) -> int:
+    """Der persönliche Weg startet nicht: Ereignis start_abgelehnt mit genau einem Code (GITHUB_GRUENDE, im Folgelauf auch schon_eingereicht
+    aus AENDERUNG_GRUENDE), Exit 8. Nie ein Rückfall auf den App-Weg, nie ein Wert im Text."""
+    grund = _grund_pruefen(grund, "klon_fehler")
+    log(f"github_abgelehnt {job} {projekt} {art}: {grund}", pflicht=True)
+    wamo_event("start_abgelehnt", grund=grund)
+    if jobdir is not None:
+        _status(jobdir, job, projekt, art, ergebnis="start_abgelehnt", code=EXIT_GITHUB)
+    return EXIT_GITHUB
+
+
+def _github_ereignis(lauf: PersoenlicherLauf, jobdir: Path) -> dict:
+    """Felder des Ereignisses github aus github.json (C.2.4): repo, konto, basis, standardzweig, privat, schreiben."""
+    obj = read_json(jobdir / "github.json", {})
+    obj = obj if isinstance(obj, dict) else {}
+    zweig = obj.get("standardzweig")
+    return {"repo": lauf.repo, "konto": lauf.login, "basis": lauf.basis,
+            "standardzweig": zweig if isinstance(zweig, str) and re.fullmatch(r"[A-Za-z0-9._/-]{1,100}", zweig) else None,
+            "privat": obj.get("privat") is True, "schreiben": obj.get("schreiben") is True}
+
+
+def klon_vorhanden(job: str, repo: str | None) -> bool:
+    """Gibt es den Klon dieses Auftrags vollständig (basis.git und ein gültiges github.json)? Sonst gilt der Start als erster Lauf."""
+    jobdir = JOBS / job
+    if not os.path.isdir(jobdir / "basis.git") or os.path.islink(jobdir / "basis.git") or not isinstance(repo, str):
+        return False
+    try:
+        PersoenlicherLauf.aus_datei(jobdir, job, repo)
+    except ValueError:
+        return False
+    return True
+
+
+def github_vorlauf(jobdir: Path, job: str, projekt: str, art: str, kopf: Kopf, platz: int,
+                   geheimnis: "GithubGeheimnis | None") -> PersoenlicherLauf:
+    """Vor dem Lauf im persönlichen Weg (C.5 Start 2 bis 6 und Folgelauf): beim ersten Lauf prüft und klont die GitHub-Logik mit dem Token
+    außerhalb der Sandbox (github.json, basis.git), danach wird das Token überschrieben und das Ereignis github gesendet. Dann baut der
+    Sandbox-Schritt klon die Arbeitskopie, wenn der Projektordner nicht aus dem Klon dieses Auftrags stammt: im Folgelauf aus basis.git und
+    dem letzten Bundle; ohne Bundle nur, wenn der Auftrag noch nie ausgewertet wurde (kein aenderung.json: es gibt nichts zu verlieren),
+    sonst projekt_gewechselt. Wirft GithubAbgelehnt mit einem Code oder KlonFehlgeschlagen."""
+    if aenderung_lesen(jobdir).get("status", "keine") not in LAUF_ERLAUBT:
+        raise GithubAbgelehnt("schon_eingereicht")  # eingereicht, verworfen oder im Einreichen: Nacharbeit ist ein neuer Auftrag
+    if geheimnis is not None:
+        werkzeuge = DispatcherWerkzeuge(job, projekt, jobdir, platz=platz, zugang=geheimnis, gehalten=(".lauf",))
+        max_klon_mb = klon_grenze_mb()
+        github_dateien_entfernen(jobdir)  # ein neuer Klon: keine Reste eines früheren Versuchs (Bundle, Kandidat, Ausgaben)
+        (jobdir / "github.json").unlink(missing_ok=True)
+        try:
+            _github_aufruf("start", werkzeuge, job=job, repo=kopf.repo, art=art, profil=kopf.profil,
+                           scopes_ausnahmen=kopf.scopes_ausnahmen, max_klon_mb=max_klon_mb, fehler="klon_fehler")
+            lauf = PersoenlicherLauf.aus_datei(jobdir, job, kopf.repo)
+            if baum_groesse_mb(jobdir / "basis.git", max_klon_mb + 1) > max_klon_mb:  # zweite Sicherung neben der Angabe von GitHub
+                raise GithubAbgelehnt("repo_zu_gross")
+        except (GithubAbgelehnt, ValueError) as e:
+            github_dateien_entfernen(jobdir)  # kein halber Klon bleibt liegen (der nächste Start wäre sonst ein Folgelauf)
+            (jobdir / "github.json").unlink(missing_ok=True)
+            raise GithubAbgelehnt(e.grund if isinstance(e, GithubAbgelehnt) else "klon_fehler") from None
+        finally:
+            geheimnis.ueberschreiben()
+        wamo_event("github", **_github_ereignis(lauf, jobdir))
+    else:
+        try:
+            lauf = PersoenlicherLauf.aus_datei(jobdir, job, kopf.repo)
+        except ValueError:
+            raise GithubAbgelehnt("klon_fehler") from None
+        bundle = (jobdir / "bundle.ein").is_file() and not (jobdir / "bundle.ein").is_symlink()
+        if eigner_lesen(projekt) != job and not bundle and os.path.lexists(jobdir / "aenderung.json"):
+            raise GithubAbgelehnt("projekt_gewechselt")
+    if eigner_lesen(projekt) == job:
+        return lauf  # der Ordner stammt aus dem Klon dieses Auftrags (auch wenn die GitHub-Logik den Schritt selbst gemacht hat)
+    schritt = sandbox_schritt("klon", job, projekt, platz, schritt_argumente("klon", lauf, jobdir))
+    if schritt.rc != 0:
+        raise KlonFehlgeschlagen(f"Sandbox-Schritt klon rc={schritt.rc}: "
+                                 + schritt.fehler.decode("utf-8", "replace").replace("\n", " ")[-200:])
+    return lauf
+
+
+def klon_grenze_mb() -> int:
+    """MAX_KLON_MB aus kernkanal.conf (Standard 2048); ohne lesbare Konfiguration der Standard."""
+    try:
+        wert = getattr(kern_zustand().konfig, "max_klon_mb", None)
+    except Exception:  # noqa: BLE001
+        wert = None
+    return wert if type(wert) is int and 100 <= wert <= 4096 else 2048
+
+
+def baum_groesse_mb(pfad: Path, hoechstens: int) -> int:
+    """Größe eines Ordners in MB (Summe der regulären Dateien, ohne Links zu folgen); hört ab hoechstens auf zu zählen."""
+    summe = 0
+    for wurzel, _ordner, dateien in os.walk(pfad, followlinks=False):
+        for name in dateien:
+            try:
+                st = os.lstat(os.path.join(wurzel, name))
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                summe += st.st_size
+                if summe > hoechstens * MIB:
+                    return hoechstens
+    return summe // MIB
+
+
+MIB = 1024 * 1024
+
+
+def _lauf_ergebnis(code: int) -> str:
+    return "fertig" if code == EXIT_OK else "zeitlimit" if code == EXIT_ZEITLIMIT else "fehler"
+
+
+def github_nachlauf(jobdir: Path, job: str, projekt: str, art: str, platz: int, code: int, kopf: Kopf, env: dict[str, str]) -> None:
+    """Am Laufende im persönlichen Weg (ohne Token im Prozess, C.5 Laufende): die GitHub-Logik entschärft über die Sandbox-Schritte ausgabe
+    und pruefung, prüft die Bytes, baut den Kandidaten in aus.git und schreibt aenderung.json. Danach sendet der Dispatcher das Ereignis
+    aenderung aus der Datei. Ein Fehler der Logik setzt den Zustand gesperrt mit dem Code (nie bereit). Wirft nie."""
+    try:
+        werte = tuple(w for w, _ in schwaerzungen(env))
+        werkzeuge = DispatcherWerkzeuge(job, projekt, jobdir, platz=platz, werte=werte, gehalten=(".lauf",))
+        _github_aufruf("laufende", werkzeuge, job=job, projekt=projekt, art=art, profil=kopf.profil, auftrag=kopf.auftrag,
+                       lauf=_lauf_ergebnis(code), fehler="pruefung_fehler")
+    except GithubAbgelehnt as e:
+        try:
+            write_json_atomic(jobdir / "aenderung.json", {"job": job, "status": "gesperrt", "gruende": [e.grund],
+                                                         "lauf": _lauf_ergebnis(code)})
+        except OSError:
+            log(f"aenderung {job}: aenderung.json nicht schreibbar")
+    except Exception as e:  # noqa: BLE001 (der Abschluss des Auftrags darf nie an der Auswertung scheitern)
+        log(f"aenderung {job} FEHLER {type(e).__name__}")
+    try:
+        wamo_event("aenderung", **aenderung_ereignis(job))
+    except Exception as e:  # noqa: BLE001
+        log(f"aenderung {job}: Ereignis nicht gesendet ({type(e).__name__})")
+
+
+def persoenlich_aktiv() -> bool:
+    """Für ping: gilt PERSOENLICH=an im Kern-Kanal (kernkanal.conf)? Wirft nie; ohne Modul oder Konfiguration False."""
+    try:
+        konfig = kern_zustand().konfig
+        return getattr(konfig, "persoenlich", False) is True
+    except Exception:  # noqa: BLE001 (ping muss immer antworten)
+        return False
+
+
 def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> int:
+    """start <job> <projekt> <art> [<session>]: siehe Kopf dieser Datei. Am Ende wird der Lesepuffer von stdin überschrieben (dort stand
+    im persönlichen Weg das GitHub-Token), auch bei jeder Abweisung, Ausnahme oder einem Signal."""
+    try:
+        return _start(job, projekt, art, session)
+    finally:
+        if LESER is not None:
+            LESER.ueberschreiben(0, len(LESER.puffer))
+
+
+def _start(job: str, projekt: str, art: str, session: str | None = None) -> int:
     kern = KANAL == "kern"
     try:
         kopf = parse_header(_kopfzeile_lesen())
@@ -3124,7 +4598,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
             return kanal_abweisen("grenze_start")
     elif KANAL == "pc" and projekt.startswith(KERN_PRAEFIX):
         raise Abgewiesen("Projektnamen mit kern- sind dem Kern-Kanal vorbehalten")
-    auftrag, system, wunsch, repo = kopf.auftrag, kopf.system, kopf.modell, kopf.repo
+    wunsch = kopf.modell
     haus = kopf.zugang == "haus"  # Hausmodell über den Proxy: kein Claude-Zugang, keine zweite Zeile, ein Auftragstoken je Lauf
     try:  # ein Wunsch außerhalb der Allowlist scheitert vor allem anderen (bei haus gilt nur die Liste der Hausmodelle)
         if haus:
@@ -3141,6 +4615,31 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
             log(f"zugang_ungueltig {job}: {e}", pflicht=True)
             wamo_event("zugang_ungueltig", grund=str(e)[:200])
             return EXIT_ABGEWIESEN
+    persoenlich = kopf.github == GITHUB_WEG  # persönlicher GitHub-Weg (Plan C): nur im Kern-Kanal, das Token nur über stdin
+    geheimnis = None
+    if persoenlich:
+        if not nicht_dumpbar():  # vor dem Lesen des Tokens: /proc dieses Prozesses gehört root (C.2.2)
+            log(f"github_abgelehnt {job}: der Prozess ist dumpable, GitHub-Zeile nicht gelesen", pflicht=True)
+            raise RuntimeError("PR_SET_DUMPABLE nicht wirksam")
+        if not klon_vorhanden(job, kopf.repo):  # erster Lauf (oder halber Klon nach einem Absturz): die GitHub-Zeile ist Pflicht
+            try:
+                geheimnis = _githubzeile_lesen()
+            except GithubZeileFehlt:
+                return _github_abgelehnt(None, job, projekt, art, "github_zeile")
+        elif LESER is not None:  # Folgelauf: eine mitgeschickte Zeile wird ungelesen verworfen
+            LESER.rest_verwerfen()
+    try:
+        return _start_mit(job, projekt, art, session, kopf, zugang, persoenlich, geheimnis)
+    finally:
+        if geheimnis is not None:
+            geheimnis.ueberschreiben()
+
+
+def _start_mit(job: str, projekt: str, art: str, session: str | None, kopf: Kopf, zugang: ClaudeZugang | None, persoenlich: bool,
+               geheimnis: GithubGeheimnis | None) -> int:
+    kern = KANAL == "kern"
+    auftrag, system, wunsch, repo = kopf.auftrag, kopf.system, kopf.modell, kopf.repo
+    haus = kopf.zugang == "haus"
     aufraeumen()  # N5: alte Caches als wamo entfernen
     sperren = sperren_ordner()
     jobdir = job_ordner(job)
@@ -3149,7 +4648,10 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
     if not gehalten[0].versuchen():
         belegt_melden("auftrag")
         return EXIT_BELEGT
-    vorbereiten(jobdir, job, projekt, art, repo, KANAL, kopf.profil)
+    try:
+        vorbereiten(jobdir, job, projekt, art, repo, KANAL, kopf.profil, kopf.github)
+    except GithubWechsel:
+        return _github_abgelehnt(jobdir, job, projekt, art, "github_wechsel")
     gehalten.append(Sperre(sperren / f"projekt-{projekt}"))
     if not gehalten[-1].versuchen():
         belegt_melden("projekt")
@@ -3164,6 +4666,22 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
     sessions = read_json(jobdir / "sessions.json", [])
     if session is not None and (not isinstance(sessions, list) or session not in sessions):
         raise Abgewiesen("Session gehört nicht zu diesem Auftrag")
+    lauf_persoenlich = None
+    if persoenlich:  # Prüfung bei GitHub und Klon (erster Lauf), dann der Sandbox-Schritt klon, erst danach die Entschärfung (C.5 Start 6)
+        try:
+            lauf_persoenlich = github_vorlauf(jobdir, job, projekt, art, kopf, platz, geheimnis)
+        except GithubAbgelehnt as e:
+            return _github_abgelehnt(jobdir, job, projekt, art, e.grund)
+        except KlonFehlgeschlagen as e:
+            log(f"selbsttest {job} FEHLER: {str(e)[:300]}", pflicht=True)
+            wamo_event("selbsttest_fehlgeschlagen", grund=str(e)[:300])
+            _status(jobdir, job, projekt, art, ergebnis="selbsttest_fehlgeschlagen", code=EXIT_SELBSTTEST)
+            return EXIT_SELBSTTEST
+        finally:
+            if geheimnis is not None:
+                geheimnis.ueberschreiben()
+    else:
+        eigner_entfernen(projekt)  # ein Lauf ohne persönlichen Weg: der Ordner stammt danach nicht mehr aus dem Klon eines Auftrags
     lauf_vorbereiten(jobdir, projekt)
 
     ok, grund = selbsttest(job, projekt, "lauf", platz)
@@ -3176,7 +4694,7 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
 
     geheim = lese_geheimnisse()
     try:
-        app = github_app_konfig(geheim)
+        app = None if persoenlich else github_app_konfig(geheim)  # der persönliche Weg nutzt die App nie
     except GithubAppFehler as e:
         return _start_abgelehnt(jobdir, job, projekt, art, str(e))
     if haus:  # Schalter und Ordner des Proxys vor allem anderen; nie ein Rückfall auf einen Claude-Zugang
@@ -3189,14 +4707,15 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
                    "ist abgeschaltet (WAMO_SERVERZUGANG=aus)")
         _status(jobdir, job, projekt, art, ergebnis="keine_zugangsdaten", code=EXIT_KEIN_ZUGANG)
         return EXIT_KEIN_ZUGANG
-    env = sandbox_env(art, geheim, app_modus=app is not None, zugang=zugang, modell=wunsch if haus else None)
+    env = sandbox_env(art, geheim, app_modus=app is not None, zugang=zugang, modell=wunsch if haus else None,
+                      persoenlich=lauf_persoenlich)
     if env is None:
         wamo_event("keine_zugangsdaten", grund="ANTHROPIC_API_KEY oder CLAUDE_CODE_OAUTH_TOKEN in /etc/wamo/geheim.env fehlt")
         _status(jobdir, job, projekt, art, ergebnis="keine_zugangsdaten", code=EXIT_KEIN_ZUGANG)
         return EXIT_KEIN_ZUGANG
     modell = modell_waehlen(art, wunsch, zugang_typ(env))
     quelle = "haus" if haus else f"persoenlich-{zugang.typ}" if zugang is not None else "server"
-    zugaenge = sorted(zugangs_quellen(art, geheim, app_modus=app is not None, repo=repo, zugang=zugang))
+    zugaenge = sorted(zugangs_quellen(art, geheim, app_modus=app is not None, repo=repo, zugang=zugang, persoenlich=persoenlich))
     snapshot = read_json(jobdir / "zustand" / "approvals.json", [])
     anfrage = zugang_pruefen(projekt, set(zugaenge), snapshot if isinstance(snapshot, list) else [])
     if anfrage is not None:
@@ -3205,9 +4724,11 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
         wamo_event("zugang_erweitert", **anfrage)
         _status(jobdir, job, projekt, art, ergebnis="zugang_erweitert", code=EXIT_ZUGANG_ERWEITERT)
         return EXIT_ZUGANG_ERWEITERT
-    github = "-" if werkzeugkarte().github_stufe(art) is None else "app" if app is not None else "token"
+    github = GITHUB_WEG if persoenlich else "-" if werkzeugkarte().github_stufe(art) is None else "app" if app is not None else "token"
     if github == "app":
         system = f"{system}\n{github_hinweis(repo)}"
+    elif persoenlich:
+        system = f"{system}\n{github_hinweis_persoenlich(job)}"
     system = f"{system}\n{port_hinweis(platz)}"
 
     def zweite_pruefung():  # unmittelbar vor der Token-Erzeugung: eine Notaus-Datei oder eine neue Konfiguration seit der ersten greift noch
@@ -3234,6 +4755,8 @@ def cmd_start(job: str, projekt: str, art: str, session: str | None = None) -> i
                     f"profil={kopf.profil or '-'}", pflicht=True)
                 with haus_lauf(job, zugang, geheim):  # nur bei haus: die Tokendatei für den Proxy, weg am Laufende
                     code = _ausfuehren(argv, env, auftrag, jobdir, job, projekt, art)
+                if persoenlich:  # Laufende ohne Token: Ausgabe, Prüfung und Kandidat, dann das Ereignis aenderung (C.5 Laufende)
+                    github_nachlauf(jobdir, job, projekt, art, platz, code, kopf, env)
         except GithubAppFehler as e:
             return _start_abgelehnt(jobdir, job, projekt, art, str(e))
         except HausNichtBereit as e:
@@ -3323,8 +4846,7 @@ def _ausfuehren(argv: list[str], env: dict, auftrag: str, jobdir: Path, job: str
     def lebenslinie() -> None:
         # stdin der SSH-Verbindung: EOF heißt, der Voice-Core ist weg (Auflegen, Abbruch, Netz)
         try:
-            while sys.stdin.buffer.read1(65536):
-                pass
+            _lebenslinie_warten()
         except (OSError, ValueError):
             pass
         if proc.poll() is None:
@@ -3710,7 +5232,8 @@ def cmd_pruefen(job: str) -> int:
 
 
 HANDLER = {"ping": cmd_ping, "start": cmd_start, "status": cmd_status, "pending": cmd_pending,
-           "approve": cmd_approve, "cancel": cmd_cancel, "pruefen": cmd_pruefen}
+           "approve": cmd_approve, "cancel": cmd_cancel, "pruefen": cmd_pruefen,
+           "aenderung": cmd_aenderung, "einreichen": cmd_einreichen, "verwerfen": cmd_verwerfen, "aufraeumen": cmd_aufraeumen}
 
 
 def speicher_begrenzen() -> None:
@@ -3738,7 +5261,7 @@ def speicher_begrenzen() -> None:
 def main(argv: list[str] | None = None) -> int:
     # Über SSH zählt NUR SSH_ORIGINAL_COMMAND (argv ist durch command="..." fest leer). Ohne SSH (Rauchtest
     # als wamo) gelten die Argumente, mit derselben Prüfung.
-    global KANAL
+    global KANAL, LESER
     if "SSH_CONNECTION" in os.environ or "SSH_ORIGINAL_COMMAND" in os.environ:
         raw = os.environ.get("SSH_ORIGINAL_COMMAND")
     else:
@@ -3748,6 +5271,8 @@ def main(argv: list[str] | None = None) -> int:
         if KANAL == "unklar":
             return kanal_abweisen("herkunft_unklar")
         name, args = parse_command(raw)
+        if (KANAL == "pc" and name in BEFEHLE_PERSOENLICH) or (KANAL != "lokal" and name in BEFEHLE_NUR_LOKAL):
+            return kanal_abweisen("befehl")  # der persönliche Weg gehört dem Kern-Kanal, das Aufräumen nur lokal
         gesperrt = kern_befehl_pruefen(name, args)
         if gesperrt is not None:
             return kanal_abweisen(gesperrt)
@@ -3769,6 +5294,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_INTERN
     finally:
         KANAL = "lokal"  # der Kanal gilt nur für diese Verbindung
+        if LESER is not None:
+            LESER.ueberschreiben(0, len(LESER.puffer))
+        LESER = None
 
 
 def beenden(code: int) -> None:

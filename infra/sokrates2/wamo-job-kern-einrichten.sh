@@ -17,11 +17,19 @@
 #       Ein Aufruf ersetzt Arten, Repos und Dienste vollständig (was fehlt, ist danach nicht mehr erlaubt); die Grenzen ohne Option bleiben.
 #       --max-parallel (1 bis 6, Standard 6) und --max-parallel-profil (1 bis 6, Standard 3, nie über --max-parallel): gleichzeitig laufende
 #       Aufträge gesamt und je Person (Dispatcher 9, Entscheidung von Niko 16.11.2026); 1 und 1 heißt ein Auftrag gleichzeitig wie früher.
+#   wamo-job-kern-einrichten.sh kanal --persoenlich an|aus|entfernen [--max-einreichen-tag N] [--max-einreichen-tag-profil N]
+#                               [--max-klon-mb N]
+#       Persönlicher GitHub-Weg (Plan C, docs/persoenliche-zugaenge.md C.2.7, Dispatcher 10): setzt PERSOENLICH und die Grenzen
+#       MAX_EINREICHEN_TAG (1 bis 50, Standard 10), MAX_EINREICHEN_TAG_PROFIL (1 bis 50, Standard 5, nie über dem Tageswert) und MAX_KLON_MB
+#       (100 bis 4096, Standard 2048). Ohne --arten bleibt der Rest der Datei, wie er ist (auch KANAL); mit --arten zusammen mit den übrigen
+#       Regeln. an und aus verlangen Dispatcher 10 mit einem Modul, das den Weg kennt (Dispatcher 9 schließt bei den neuen Schlüsseln den
+#       Kanal), an zusätzlich Ruhe; entfernen nimmt die vier Schlüssel heraus (vor dem Rückweg auf Dispatcher 9). Die Schlüssel stehen nur
+#       in der Datei, wenn dieser Befehl sie gesetzt hat.
 #   wamo-job-kern-einrichten.sh kanal zu
 #       Regeln des Kern-Kanals öffnen oder schließen. Öffnen und Ändern nur ohne laufenden Kern-Auftrag, GitHub-Arten nur, wenn
 #       Claude Code (als wamo) --max-turns und --max-budget-usd annimmt (Probe über die Optionsprüfung). kanal zu geht immer.
 #   wamo-job-kern-einrichten.sh schalter an|aus <release> [--profil <user_id>[,<user_id>]] [--kosten-auftrag X] [--kosten-tag X]
-#                               [--mitglieder an|aus] [--haus an|aus] [--trocken]
+#                               [--mitglieder an|aus] [--haus an|aus] [--github an|aus] [--trocken]
 #       Drop-in wamo-entwicklung-buero.conf der Slot-Vorlage schreiben (an) oder entfernen (aus), daemon-reload, dann
 #       wamo-core-slots.sh umschalten-kern <release>. Scheitert das vor dem Umschalten, kommt das vorige Drop-in zurück. Wurde schon
 #       umgeschaltet, bleibt es und das Skript endet mit Exit 4. Gleicher Stand ist ein No-op. --mitglieder an (Standard aus, jeder
@@ -32,6 +40,9 @@
 #       Hausmodellen für Profile ohne eigenen Zugang oder mit nur Hausmodellen. --haus an verlangt Dispatcher, Kern-Kanal und Release
 #       mit der Zugangsart haus; am Server zusätzlich WAMO_HAUS=an in geheim.env und den Proxy wamo-haus-proxy (sonst scheitern solche
 #       Aufträge geschlossen).
+#       --github an|aus (Plan C, Standard aus): WAMO_ENTWICKLUNG_GITHUB im Drop-in, der persönliche GitHub-Weg im Kern. Ohne die Option
+#       steht die Zeile nicht im Drop-in (heißt aus). --github an verlangt Dispatcher 10 und ein Release ab SCHRANKEN_VERSION 4
+#       (MIN_SCHRANKEN_GITHUB); wirksam erst mit kanal --persoenlich an.
 #   wamo-job-kern-einrichten.sh notaus-aufheben
 #       Sperrdatei entfernen. Der Kanal bleibt zu (der Notaus hat KANAL=zu gesetzt und das Schlüsselpaar beiseitegelegt): erst schluessel
 #       legt ein neues Paar an und setzt die Zeile neu, erst kanal öffnet. schluessel verweigert, solange die Sperrdatei besteht.
@@ -87,6 +98,13 @@ MIN_SCHRANKEN_MITGLIEDER=2   # erst ab dieser SCHRANKEN_VERSION kennt der Kern W
 # (sonst überschritten zwei gleichzeitige Starts die Tagesgrenze gemeinsam) und kennt die Sätze je Grenze im Ereignis belegt
 MIN_SCHRANKEN_PARALLEL=3
 MIN_DISPATCHER=9             # Dispatcher 8: Kennung des Profils und MAX_*_PROFIL; 9: MAX_PARALLEL und MAX_PARALLEL_PROFIL, Plätze mit Portbereich
+# Persönlicher GitHub-Weg (Plan C): Dispatcher 10 kennt PERSOENLICH, MAX_EINREICHEN_* und MAX_KLON_MB, ein Kern ab SCHRANKEN_VERSION 4 den Schalter
+MIN_DISPATCHER_PERSOENLICH=10
+MIN_SCHRANKEN_GITHUB=4
+STD_MAX_EINREICHEN_TAG=10
+STD_MAX_EINREICHEN_TAG_PROFIL=5
+STD_MAX_KLON_MB=2048
+PERSOENLICH_KANAL_RE='^def pruefe_einreichen\('   # daran erkennt das Skript ein Modul des Kern-Kanals, das den persönlichen Weg kennt
 MAX_PROFILE=20               # wie MAX_PROFILE in voice-core/entwicklung_betrieb.py
 
 KERN_IP=192.168.178.136
@@ -122,6 +140,8 @@ UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 KONFIG_SCHLUESSEL=(KANAL ABLAUF ARTEN REPOS DIENSTE MAX_TURNS MAX_BUDGET_USD MAX_START_STUNDE MAX_START_TAG MAX_LAUFZEIT_TAG_S MAX_FOLGEN
   MIN_ABSTAND_S MIN_PLATZ_MB MAX_VERSUCH_STUNDE MAX_NEU_STUNDE_PROFIL MAX_NEU_TAG_PROFIL MAX_VERSUCH_STUNDE_PROFIL
   MAX_LAUFZEIT_TAG_S_PROFIL MAX_PARALLEL MAX_PARALLEL_PROFIL)
+# Nur geschrieben, wenn kanal --persoenlich sie gesetzt hat (Dispatcher 9 schlösse den Kanal bei diesen Schlüsseln, siehe oben)
+KONFIG_SCHLUESSEL_PERSOENLICH=(PERSOENLICH MAX_EINREICHEN_TAG MAX_EINREICHEN_TAG_PROFIL MAX_KLON_MB)
 COREENV=/usr/local/sbin/wamo-core-env
 SLOTS=(bash "$HERE/wamo-core-slots.sh")
 PYTHON3=/usr/bin/python3
@@ -396,7 +416,7 @@ konfig_lesen() {   # liest die vorhandene Datei über die Standardwerte; unbekan
     if [[ -z "$zeile" || "$zeile" == \#* ]]; then continue; fi
     name="${zeile%%=*}"; wert="${zeile#*=}"
     bekannt=0
-    for k in "${KONFIG_SCHLUESSEL[@]}"; do if [ "$k" = "$name" ]; then bekannt=1; fi; done
+    for k in "${KONFIG_SCHLUESSEL[@]}" "${KONFIG_SCHLUESSEL_PERSOENLICH[@]}"; do if [ "$k" = "$name" ]; then bekannt=1; fi; done
     if [ "$bekannt" != 1 ]; then KONFIG_FEHLER="kernkanal.conf enthält den unbekannten Schlüssel $name (von Hand prüfen)"; return 1; fi
     K[$name]="$wert"
   done < "$KONFIG"
@@ -407,6 +427,9 @@ konfig_text() {
   local k
   echo "# Regeln des Kern-Kanals der Entwicklungsaufträge. Nur über wamo-job-kern-einrichten.sh ändern (root:wamo 0640)."
   for k in "${KONFIG_SCHLUESSEL[@]}"; do echo "$k=${K[$k]}"; done
+  if [ -n "${K[PERSOENLICH]:-}" ]; then   # nur, wenn kanal --persoenlich die Schlüssel gesetzt hat
+    for k in "${KONFIG_SCHLUESSEL_PERSOENLICH[@]}"; do echo "$k=${K[$k]}"; done
+  fi
 }
 
 konfig_schreiben() {   # sichert die alte Datei, schreibt atomar, nur wenn sich etwas ändert
@@ -423,8 +446,8 @@ KOMMANDO="${1:-}"
 [ -n "$KOMMANDO" ] || aufruf "Befehl fehlt"
 shift
 TROCKEN=0 ABLAUF="" HOSTFP="" ARTEN="" REPOS="" DIENSTE="" MAX_TURNS="" MAX_BUDGET="" PROFIL="" KOSTEN_AUFTRAG="" KOSTEN_TAG="" MITGLIEDER=""
-RELEASE="" SCHALTER="" ZU=0 GITHUB_ART=0 MAX_START_STUNDE="" MAX_START_TAG="" MAX_LAUFZEIT="" HAUS=""
-declare -A GRENZE=()
+RELEASE="" SCHALTER="" ZU=0 GITHUB_ART=0 MAX_START_STUNDE="" MAX_START_TAG="" MAX_LAUFZEIT="" HAUS="" GITHUB="" PERSOENLICH_OPT=""
+declare -A GRENZE=() P_GRENZE=()
 optionswert() { [ "$#" -ge 2 ] && [ -n "${2:-}" ] && [[ "$2" != --* ]] || aufruf "$1 braucht einen Wert"; }
 case "$KOMMANDO" in
   schluessel)
@@ -465,12 +488,25 @@ case "$KOMMANDO" in
           # gleichzeitige Aufträge (Dispatcher 9): gesamt und je Person, nie über PARALLEL_HART
           --max-parallel) optionswert "$@"; GRENZE[MAX_PARALLEL]="$2"; pruefe_zahl "$1" "$2" 1 "$PARALLEL_HART"; shift 2 ;;
           --max-parallel-profil) optionswert "$@"; GRENZE[MAX_PARALLEL_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 "$PARALLEL_HART"; shift 2 ;;
+          # persönlicher GitHub-Weg (Dispatcher 10, C.2.7)
+          --persoenlich) optionswert "$@"; PERSOENLICH_OPT="$2"; shift 2
+            case "$PERSOENLICH_OPT" in an|aus|entfernen) ;; *) aufruf "--persoenlich braucht an, aus oder entfernen" ;; esac ;;
+          --max-einreichen-tag) optionswert "$@"; P_GRENZE[MAX_EINREICHEN_TAG]="$2"; pruefe_zahl "$1" "$2" 1 50; shift 2 ;;
+          --max-einreichen-tag-profil) optionswert "$@"; P_GRENZE[MAX_EINREICHEN_TAG_PROFIL]="$2"; pruefe_zahl "$1" "$2" 1 50; shift 2 ;;
+          --max-klon-mb) optionswert "$@"; P_GRENZE[MAX_KLON_MB]="$2"; pruefe_zahl "$1" "$2" 100 4096; shift 2 ;;
           *) aufruf "unbekannte Option für kanal: $1" ;;
         esac
       done
-      [ -n "$ARTEN" ] || aufruf "kanal braucht --arten (oder kanal zu)"
-      pruefe_repos "$REPOS"
-      pruefe_dienste "$DIENSTE"
+      if [ "${#P_GRENZE[@]}" -gt 0 ] && [ -z "$PERSOENLICH_OPT" ]; then aufruf "die Grenzen des persönlichen Wegs brauchen --persoenlich an oder aus"; fi
+      if [ "$PERSOENLICH_OPT" = entfernen ] && [ "${#P_GRENZE[@]}" -gt 0 ]; then aufruf "--persoenlich entfernen kennt keine Grenzen"; fi
+      if [ -z "$ARTEN" ]; then
+        [ -n "$PERSOENLICH_OPT" ] || aufruf "kanal braucht --arten (oder kanal zu, oder kanal --persoenlich ...)"
+        [ -z "$REPOS$DIENSTE$MAX_TURNS$MAX_BUDGET$MAX_START_STUNDE$MAX_START_TAG$MAX_LAUFZEIT" ] && [ "${#GRENZE[@]}" = 0 ] \
+          || aufruf "ohne --arten ändert kanal nur den persönlichen Weg (--persoenlich und seine Grenzen)"
+      else
+        pruefe_repos "$REPOS"
+        pruefe_dienste "$DIENSTE"
+      fi
     fi ;;
   schalter)
     SCHALTER="${1:-}"; RELEASE="${2:-}"
@@ -483,6 +519,7 @@ case "$KOMMANDO" in
         --kosten-auftrag) optionswert "$@"; KOSTEN_AUFTRAG="$2"; pruefe_betrag --kosten-auftrag "$2" 0.01 100000; shift 2 ;;
         --kosten-tag) optionswert "$@"; KOSTEN_TAG="$2"; pruefe_betrag --kosten-tag "$2" 0.01 100000; shift 2 ;;
         --haus) optionswert "$@"; HAUS="$2"; case "$HAUS" in an|aus) ;; *) aufruf "--haus braucht an oder aus" ;; esac; shift 2 ;;
+        --github) optionswert "$@"; GITHUB="$2"; case "$GITHUB" in an|aus) ;; *) aufruf "--github braucht an oder aus" ;; esac; shift 2 ;;
         --mitglieder) optionswert "$@"; MITGLIEDER="$2"; shift 2
           case "$MITGLIEDER" in an|aus) ;; *) aufruf "--mitglieder braucht an oder aus" ;; esac ;;
         --trocken) TROCKEN=1; shift ;;
@@ -492,8 +529,8 @@ case "$KOMMANDO" in
     if [ "$SCHALTER" = an ]; then
       [ -n "$PROFIL" ] || aufruf "schalter an braucht --profil <user_id>"
       pruefe_profil "$PROFIL"
-    elif [ -n "$PROFIL$KOSTEN_AUFTRAG$KOSTEN_TAG$MITGLIEDER$HAUS" ]; then
-      aufruf "schalter aus kennt weder --profil noch --kosten-auftrag noch --kosten-tag noch --mitglieder noch --haus"
+    elif [ -n "$PROFIL$KOSTEN_AUFTRAG$KOSTEN_TAG$MITGLIEDER$HAUS$GITHUB" ]; then
+      aufruf "schalter aus kennt weder --profil noch --kosten-auftrag noch --kosten-tag noch --mitglieder noch --haus noch --github"
     fi ;;
   notaus-aufheben|status)
     [ "$#" -eq 0 ] || aufruf "$KOMMANDO kennt keine weiteren Angaben" ;;
@@ -661,9 +698,56 @@ claude_flags_pruefen() {   # nimmt die installierte Claude-Code-Version beide Fl
     || vorbedingung "Claude Code (als wamo) nimmt --max-turns oder --max-budget-usd nicht an: der Kern-Kanal bleibt für GitHub-Arten zu (Claude Code anheben)"
 }
 
+dispatcher_persoenlich_pruefen() {   # Dispatcher 10 und ein Modul, das den persönlichen Weg kennt (sonst schlösse der Kanal bei den Schlüsseln)
+  local v
+  v="$(dispatcher_version "$APP/bin/wamo-job-dispatch")"
+  [ -n "$v" ] && [ "$v" -ge "$MIN_DISPATCHER_PERSOENLICH" ] \
+    || vorbedingung "der Dispatcher ist älter als Version $MIN_DISPATCHER_PERSOENLICH (gefunden: ${v:-keine}; Dispatcher 9 schlösse bei PERSOENLICH den Kanal): erst wamo-job-einrichten.sh"
+  grep -Eq "$PERSOENLICH_KANAL_RE" "$WAECHTER/wamo_job_kernkanal.py" 2>/dev/null \
+    || vorbedingung "das installierte Modul wamo_job_kernkanal.py kennt den persönlichen GitHub-Weg nicht (wamo-job-einrichten.sh)"
+  local modul
+  for modul in wamo_job_github.py wamo_job_pfadregeln.py wamo_job_auszug.py; do   # Schnittstelle und GitHub-Logik (Paket D-b)
+    [ -f "$WAECHTER/$modul" ] || vorbedingung "$WAECHTER/$modul fehlt (wamo-job-einrichten.sh): ohne die GitHub-Logik endete jeder Start mit klon_fehler"
+  done
+}
+
+persoenlich_setzen() {   # setzt oder entfernt PERSOENLICH und die drei Grenzen in K (vor konfig_schreiben)
+  local g
+  case "$PERSOENLICH_OPT" in
+    "") return 0 ;;
+    entfernen)
+      for g in "${KONFIG_SCHLUESSEL_PERSOENLICH[@]}"; do unset "K[$g]"; done
+      return 0 ;;
+  esac
+  dispatcher_persoenlich_pruefen
+  K[PERSOENLICH]="$PERSOENLICH_OPT"
+  : "${K[MAX_EINREICHEN_TAG]:=$STD_MAX_EINREICHEN_TAG}" "${K[MAX_EINREICHEN_TAG_PROFIL]:=$STD_MAX_EINREICHEN_TAG_PROFIL}" "${K[MAX_KLON_MB]:=$STD_MAX_KLON_MB}"
+  for g in "${!P_GRENZE[@]}"; do K[$g]="${P_GRENZE[$g]}"; done
+  [ "${K[MAX_EINREICHEN_TAG_PROFIL]}" -le "${K[MAX_EINREICHEN_TAG]}" ] \
+    || vorbedingung "MAX_EINREICHEN_TAG_PROFIL ${K[MAX_EINREICHEN_TAG_PROFIL]} liegt über MAX_EINREICHEN_TAG ${K[MAX_EINREICHEN_TAG]} (je Person nie mehr als gesamt)"
+}
+
+cmd_kanal_persoenlich() {   # kanal --persoenlich ohne --arten: nur der persönliche Weg, der Rest der Datei bleibt (auch KANAL)
+  AKTION=kanal
+  konfig_lesen_hart
+  if [ "$PERSOENLICH_OPT" = an ]; then
+    [ -f "$KERN_DATEI" ] || vorbedingung "${KERN_DATEI#"$WURZEL"} fehlt (erst schluessel)"
+    [ ! -e "$NOTAUS" ] || vorbedingung "die Sperrdatei ${NOTAUS#"$WURZEL"} besteht (erst notaus-aufheben, dann schluessel)"
+    ruhe_pruefen
+  fi
+  persoenlich_setzen
+  konfig_schreiben
+  case "$PERSOENLICH_OPT" in
+    an) echo "Persönlicher GitHub-Weg im Kanal an (Einreichen je Tag ${K[MAX_EINREICHEN_TAG]}, je Person ${K[MAX_EINREICHEN_TAG_PROFIL]}, Klon bis ${K[MAX_KLON_MB]} MB). Kanal: ${K[KANAL]}." ;;
+    aus) echo "Persönlicher GitHub-Weg im Kanal aus (Starts mit github=persoenlich enden mit persoenlich_aus)." ;;
+    entfernen) echo "Schlüssel des persönlichen Wegs entfernt (der Weg ist aus; danach ist der Rückweg auf Dispatcher 9 möglich)." ;;
+  esac
+}
+
 cmd_kanal() {
   AKTION=kanal
   local tage
+  if [ "$ZU" = 0 ] && [ -z "$ARTEN" ]; then cmd_kanal_persoenlich; return 0; fi
   if [ "$ZU" = 1 ]; then
     konfig_lesen_hart
     K[KANAL]=zu
@@ -695,6 +779,7 @@ cmd_kanal() {
   for g in "${!GRENZE[@]}"; do K[$g]="${GRENZE[$g]}"; done
   [ "${K[MAX_PARALLEL_PROFIL]}" -le "${K[MAX_PARALLEL]}" ] \
     || vorbedingung "MAX_PARALLEL_PROFIL ${K[MAX_PARALLEL_PROFIL]} liegt über MAX_PARALLEL ${K[MAX_PARALLEL]} (je Person nie mehr als gesamt)"
+  persoenlich_setzen
   K[KANAL]=offen
   konfig_schreiben
   echo "Kanal offen für: ${K[ARTEN]}${K[REPOS]:+ mit Repos ${K[REPOS]}}. Ablauf ${K[ABLAUF]} ($tage Tage)."
@@ -726,6 +811,10 @@ drop_in_text() {
   echo "Environment=WAMO_ENTWICKLUNG_KOSTEN_TAG_USD=${KOSTEN_TAG:-$STD_KOSTEN_TAG_USD}"
   echo "Environment=WAMO_ENTWICKLUNG_MITGLIEDER=${MITGLIEDER:-$STD_MITGLIEDER}"
   echo "Environment=WAMO_ENTWICKLUNG_HAUS=${HAUS:-aus}"
+}
+
+drop_in_github() {   # die Zeile des persönlichen GitHub-Wegs, nur mit --github (ohne die Option fehlt sie: aus)
+  case "$GITHUB" in an|aus) echo "Environment=WAMO_ENTWICKLUNG_GITHUB=$GITHUB" ;; esac
 }
 
 schranken_version() {   # die Zahl aus der Zeile SCHRANKEN_VERSION des Zielrelease (leer, wenn sie fehlt)
@@ -766,6 +855,18 @@ schalter_vorabpruefung() {   # Vorabprüfungen nach E2, alle lesend
     grep -Eq "$HAUS_KERN_RE" "$ziel" 2>/dev/null \
       || vorbedingung "das Release $RELEASE kennt den Schalter für Hausmodelle nicht (ENV_HAUS in voice-core/entwicklung_betrieb.py fehlt)"
   fi
+  if [ "$GITHUB" = an ]; then   # persönlicher GitHub-Weg: Dispatcher 10 und ein Kern, der den Schalter kennt
+    local gv dv2
+    dv2="$(dispatcher_version "$APP/bin/wamo-job-dispatch")"
+    [ -n "$dv2" ] && [ "$dv2" -ge "$MIN_DISPATCHER_PERSOENLICH" ] \
+      || vorbedingung "--github an verlangt Dispatcher $MIN_DISPATCHER_PERSOENLICH (gefunden: ${dv2:-keine}): erst wamo-job-einrichten.sh"
+    gv="$(schranken_version "$ziel")"
+    [ -n "$gv" ] && [ "$gv" -ge "$MIN_SCHRANKEN_GITHUB" ] \
+      || vorbedingung "das Release $RELEASE kennt den persönlichen GitHub-Weg nicht (SCHRANKEN_VERSION ${gv:-?}, nötig ab $MIN_SCHRANKEN_GITHUB)"
+    if ! grep -qx 'PERSOENLICH=an' "$KONFIG" 2>/dev/null; then
+      echo "Hinweis: im Kanal steht PERSOENLICH nicht auf an; Aufträge mit github=persoenlich enden bis kanal --persoenlich an mit persoenlich_aus."
+    fi
+  fi
   ruhe_pruefen
 }
 
@@ -776,16 +877,19 @@ cmd_schalter() {
   if [ "$SCHALTER" = an ] && [ "$(mitglieder_im_dropin)" = an ] && [ "${MITGLIEDER:-$STD_MITGLIEDER}" != an ]; then
     echo "Hinweis: Mitglieder sind danach aus (ohne --mitglieder an schreibt das Skript WAMO_ENTWICKLUNG_MITGLIEDER=aus)."
   fi
+  if [ "$SCHALTER" = an ] && [ -f "$DROPIN" ] && grep -qx 'Environment=WAMO_ENTWICKLUNG_GITHUB=an' "$DROPIN" && [ "$GITHUB" != an ]; then
+    echo "Hinweis: der persönliche GitHub-Weg ist danach aus (ohne --github an fehlt die Zeile im Drop-in)."
+  fi
   if [ "$TROCKEN" = 1 ]; then
     if [ "$SCHALTER" = an ]; then
       echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde so lauten (user_id nur als Kurzkennung):"
-      drop_in_text | sed -E 's/([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\1/g; s/^/  /'
+      { drop_in_text; drop_in_github; } | sed -E 's/([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\1/g; s/^/  /'
     else echo "[trocken] Drop-in ${DROPIN#"$WURZEL"} würde entfernt"; fi
     echo "[trocken] danach: systemctl daemon-reload, wamo-core-slots.sh umschalten-kern $RELEASE. Nichts geschrieben, nichts umgeschaltet."
     return 0
   fi
   if [ "$SCHALTER" = an ]; then
-    neu="$(drop_in_text)"
+    neu="$(drop_in_text; drop_in_github)"
     if gleich_wie "$DROPIN" "$neu" && release_laeuft "$RELEASE"; then echo "Schalter steht schon auf an, Release $RELEASE läuft: nichts zu tun."; return 0; fi
   else
     if [ ! -e "$DROPIN" ] && release_laeuft "$RELEASE"; then echo "Schalter steht schon auf aus, Release $RELEASE läuft: nichts zu tun."; return 0; fi
@@ -855,7 +959,7 @@ cmd_status() {
   if [ -f "$NOTAUS" ]; then echo "Notaus: Sperrdatei besteht"; abw+=("die Sperrdatei kernkanal.notaus besteht (der Kern-Kanal ist gesperrt)"); else echo "Notaus: nein"; fi
   if [ -f "$KONFIG" ]; then
     konfig_lesen || abw+=("$KONFIG_FEHLER")
-    echo "Kanal: ${K[KANAL]} (Arten: ${K[ARTEN]:--}, Repos: ${K[REPOS]:--}, Dienste: ${K[DIENSTE]:--})"
+    echo "Kanal: ${K[KANAL]} (Arten: ${K[ARTEN]:--}, Repos: ${K[REPOS]:--}, Dienste: ${K[DIENSTE]:--}, persönlicher GitHub-Weg: ${K[PERSOENLICH]:-aus})"
     if [[ "${K[ABLAUF]}" =~ ^[0-9]{8}$ ]]; then
       tage="$(tage_bis "${K[ABLAUF]}")"
       echo "Ablauf: ${K[ABLAUF]} (noch $tage Tage)"

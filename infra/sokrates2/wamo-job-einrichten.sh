@@ -4,7 +4,7 @@
 # wamo-einrichten.sh lief (Benutzer wamo, Claude Code, Node, ECC, REA). Wiederholbar, richtet keine Geheimnisse ein.
 #
 # Vom PC aus (Repo-Wurzel, Git Bash). Der Ordner liegt im Home von wamocon, nie in /tmp:
-#   cd infra/sokrates2 && scp -r wamo-job.sh wamo-job-einrichten.sh wamo-job-ecc.py wamo_job_dispatch.py wamo_job_kernkanal.py wamo_job_pruefen.py #     wamo_job_rauchtest.py wamo_pruefen_rauchtest.py wamo-job-rueckweg.sh abschottung.py wamo-egress.nft wamo-egress.service wamo-egress-rueckweg.sh claude-code #     wamo-sokrates2:wamo-infra/ && cd ../..
+#   cd infra/sokrates2 && scp -r wamo-job.sh wamo-job-einrichten.sh wamo-job-ecc.py wamo_job_dispatch.py wamo_job_kernkanal.py wamo_job_pruefen.py #     wamo_job_rauchtest.py wamo_pruefen_rauchtest.py wamo-job-rueckweg.sh abschottung.py wamo-egress.nft wamo-egress.service wamo-egress-rueckweg.sh claude-code #     wamo_job_github.py wamo-git-zugang wamo-job-klon.sh wamo-job-ausgabe.sh wamo-job-aufraeumen.service wamo-job-aufraeumen.timer #     [wamo_job_pfadregeln.py wamo_job_auszug.py] wamo-sokrates2:wamo-infra/ && cd ../..
 #   scp voice-core/dev_guard.py voice-core/werkzeugkarte.py voice-core/kontingent.py voice-core/abnahme_befehl.py ~/.ssh/id_ed25519_wamo_jobs.pub wamo-sokrates2:wamo-infra/
 #   (~/wamo-infra teilen sich mehrere Einrichtungsskripte: nur die eigenen Dateien ersetzen, den Ordner nicht leeren; der öffentliche
 #   Schlüssel des Kerns (wamo-kern-jobs) liegt nie dort, er entsteht allein auf dem Server durch wamo-job-kern-einrichten.sh)
@@ -36,6 +36,10 @@
 #     claude-code/{managed-settings.json,managed-mcp.json},
 #     claude-plugins/ (Kopie des ECC-Plugins von wamo ohne Hooks, lokaler Marketplace "ecc", wamo-job-ecc.py)
 #   /etc/wamo/egress.nft, /etc/systemd/system/wamo-egress.service   Ausgangsfilter (nft inet wamo_egress)
+#   Persönlicher GitHub-Weg (Plan C, Dispatcher 10, standardmäßig aus über PERSOENLICH in kernkanal.conf): bin/wamo-git-zugang (Credential-
+#     Helfer, liest das Token nur aus einer Pipe), waechter/{wamo_job_github.py,wamo-job-klon.sh,wamo-job-ausgabe.sh} und, wenn im Ordner,
+#     waechter/{wamo_job_pfadregeln.py,wamo_job_auszug.py} (GitHub-Logik); /etc/systemd/system/wamo-job-aufraeumen.{service,timer} (täglich als
+#     wamo: Kopien privater Repos nach einem bzw. sieben Tagen löschen)
 #   Aufräumen der Auftrags-Caches erledigt der Dispatcher als wamo (frühere /etc/tmpfiles.d/wamo-jobs.conf wird entfernt)
 #   /etc/ssh/authorized_keys.d/wamo      root, Zeile restrict,from=...,command="/opt/wamo/bin/wamo-job-dispatch"
 #   /etc/ssh/sshd_config.d/wamo.conf     Match User wamo: nur Public Key, ForceCommand wamo-job-dispatch, keine
@@ -106,7 +110,8 @@ pruefe_herkunft
 for datei in wamo-job.sh wamo_job_dispatch.py wamo_job_kernkanal.py wamo_job_rauchtest.py abschottung.py claude-code/managed-settings.json \
   claude-code/managed-mcp.json wamo-job-ecc.py \
   dev_guard.py werkzeugkarte.py kontingent.py abnahme_befehl.py wamo_job_pruefen.py wamo_pruefen_rauchtest.py \
-  wamo-egress.nft wamo-egress.service; do
+  wamo-egress.nft wamo-egress.service \
+  wamo_job_github.py wamo-git-zugang wamo-job-klon.sh wamo-job-ausgabe.sh wamo-job-aufraeumen.service wamo-job-aufraeumen.timer; do
   [ -f "$HERE/$datei" ] || { echo "Fehlt: $HERE/$datei" >&2; exit 1; }
 done
 [[ $REA_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "REA_VERSION ungültig" >&2; exit 1; }
@@ -188,7 +193,16 @@ DATEIEN=(
   "waechter/wamo_job_pruefen.py:wamo_job_pruefen.py"
   "claude-code/managed-settings.json:claude-code/managed-settings.json"
   "claude-code/managed-mcp.json:claude-code/managed-mcp.json"
+  "bin/wamo-git-zugang:wamo-git-zugang"
+  "waechter/wamo_job_github.py:wamo_job_github.py"
+  "waechter/wamo-job-klon.sh:wamo-job-klon.sh"
+  "waechter/wamo-job-ausgabe.sh:wamo-job-ausgabe.sh"
 )
+# Die GitHub-Logik von Paket D-b, sobald sie im Ordner liegt (ohne sie scheitert der persönliche Weg geschlossen mit klon_fehler)
+GITHUB_LOGIK=()
+for datei in wamo_job_pfadregeln.py wamo_job_auszug.py; do
+  if [ -f "$HERE/$datei" ]; then GITHUB_LOGIK+=("$datei"); DATEIEN+=("waechter/$datei:$datei"); fi
+done
 SICHERUNG="$APP/vorher/$(date -u +%Y%m%dT%H%M%SZ)"
 neu_dateien=()
 geaendert=0
@@ -228,6 +242,15 @@ install -o root -g "$WAMO_USER" -m 0640 "$HERE/claude-code/managed-settings.json
 install -o root -g "$WAMO_USER" -m 0640 "$HERE/claude-code/managed-mcp.json" "$APP/claude-code/managed-mcp.json"
 sed -i 's/\r$//' "$APP/bin/wamo-job.sh" "$APP/bin/wamo-job-dispatch" "$APP/bin/wamo-job-rauchtest" "$APP/bin/wamo-pruefen-rauchtest"
 sed -i 's/\r$//' "$APP/waechter/abnahme_befehl.py" "$APP/waechter/wamo_job_pruefen.py" "$APP/waechter/wamo_job_kernkanal.py"  # ping meldet die Summe der Datei, sie soll zu voice-core passen
+# Persönlicher GitHub-Weg (Plan C): der Helfer (git führt ihn als wamo aus), die festen Programme der Sandbox-Schritte (in der Sandbox unter
+# /opt/wamo/waechter sichtbar) und die Schnittstelle samt Logik. Alles root-eigen, für wamo nur lesbar bzw. ausführbar.
+install -o root -g "$WAMO_USER" -m 0750 "$HERE/wamo-git-zugang" "$APP/bin/wamo-git-zugang"
+install -o root -g "$WAMO_USER" -m 0750 "$HERE/wamo-job-klon.sh" "$HERE/wamo-job-ausgabe.sh" "$APP/waechter/"
+install -o root -g "$WAMO_USER" -m 0640 "$HERE/wamo_job_github.py" "$APP/waechter/"
+for datei in "${GITHUB_LOGIK[@]}"; do install -o root -g "$WAMO_USER" -m 0640 "$HERE/$datei" "$APP/waechter/"; done
+sed -i 's/\r$//' "$APP/bin/wamo-git-zugang" "$APP/waechter/wamo-job-klon.sh" "$APP/waechter/wamo-job-ausgabe.sh" "$APP/waechter/wamo_job_github.py"
+for datei in "${GITHUB_LOGIK[@]}"; do sed -i 's/\r$//' "$APP/waechter/$datei"; done
+[ "${#GITHUB_LOGIK[@]}" = 2 ] || echo "Hinweis: wamo_job_pfadregeln.py oder wamo_job_auszug.py fehlt im Ordner: der persönliche GitHub-Weg bleibt geschlossen." >&2
 bpf=$(mktemp)
 /usr/bin/python3 -I "$APP/waechter/abschottung.py" --seccomp-bpf > "$bpf"
 [ -s "$bpf" ] || { echo "seccomp-Filter leer" >&2; exit 1; }
@@ -300,6 +323,13 @@ systemctl restart wamo-egress.service
 echo "== 6. Aufräumen (der Dispatcher räumt als wamo auf; die frühere root-tmpfiles-Regel wird entfernt, N5)"
 rm -f /etc/tmpfiles.d/wamo-jobs.conf
 echo "  Caches der Aufträge (npm, cache, plugin-daten) nach 7 Tagen, claude/ nach 30 Tagen: aufraeumen() im Dispatcher"
+# Persönlicher GitHub-Weg: täglich als wamo die Kopien privater Repos löschen (wamo-job-dispatch aufraeumen, C.10)
+install -o root -g root -m 0644 "$HERE/wamo-job-aufraeumen.service" /etc/systemd/system/wamo-job-aufraeumen.service
+install -o root -g root -m 0644 "$HERE/wamo-job-aufraeumen.timer" /etc/systemd/system/wamo-job-aufraeumen.timer
+sed -i 's/\r$//' /etc/systemd/system/wamo-job-aufraeumen.service /etc/systemd/system/wamo-job-aufraeumen.timer
+systemctl daemon-reload
+systemctl enable --now wamo-job-aufraeumen.timer >/dev/null 2>&1
+echo "  Kopien privater Repos (persönlicher GitHub-Weg): wamo-job-aufraeumen.timer, täglich"
 
 echo "== 7. SSH: Schlüssel nur für Aufträge (Forced Command, from=, kein Shell-Zugang), Login-Shell /bin/sh"
 # N7: der Auftragsschlüssel heißt *wamo_jobs*.pub; höchstens einer davon im Quellordner (andere .pub-Dateien, etwa
@@ -400,6 +430,9 @@ if sudo -u "$WAMO_USER" -H /usr/bin/bwrap --unshare-user --ro-bind /usr /usr --s
 else
   echo "System-bwrap bleibt gesperrt (wie gewollt)."
 fi
+# Persönlicher GitHub-Weg (C.11 RC2): git-Kinder des Dispatchers sind dumpable, Schutz gegen andere Prozesse von wamo ist Yama
+ptrace_scope=$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo 0)
+[ "${ptrace_scope:-0}" -ge 1 ] || echo "Hinweis: kernel.yama.ptrace_scope ist 0; für den persönlichen GitHub-Weg mindestens 1 setzen (sysctl)." >&2
 sshd -T -C user=wamo,host=pc,addr=192.168.178.2 | grep -E '^(authorizedkeysfile|permittty|allowtcpforwarding|clientaliveinterval|passwordauthentication) '
 /usr/sbin/nft list chain inet wamo_egress ausgang | grep -E 'skuid|counter' || true
 echo "Fertig. Rauchtest: sudo -u $WAMO_USER -H $APP/bin/wamo-job-rauchtest --mcp --attrappe" \

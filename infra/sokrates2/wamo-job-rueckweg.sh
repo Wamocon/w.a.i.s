@@ -16,6 +16,11 @@
 #   ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-job-kern-rueckweg.sh notaus"        (schließt den Kanal sofort)
 #   ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-job-kern-rueckweg.sh --entfernen"   (entfernt die Datei, nur ohne Schalter im Kern)
 #
+# Persönlicher GitHub-Weg (Plan C, C.10): Entfällt er mit diesem Schritt (die Sicherung bringt einen Dispatcher vor Version 10 zurück oder
+# NEU.txt nennt bin/wamo-git-zugang), dann verweigert der Rückweg (Exit 3), solange kernkanal.conf noch PERSOENLICH, MAX_EINREICHEN_* oder
+# MAX_KLON_MB enthält (erst wamo-job-kern-einrichten.sh kanal --persoenlich entfernen), löscht vorher mit dem noch installierten Dispatcher
+# als wamo alle Kopien privater Repos (wamo-job-dispatch aufraeumen alle) und nimmt den Timer wamo-job-aufraeumen heraus.
+#
 # Der Rückweg berührt nur die Dateien dieser Liste unter /opt/wamo (bin, waechter, claude-code). Nicht berührt werden: die Geheimnisse
 # (/etc/wamo/geheim.env, dort bleibt eine Zeile WAMO_PRUEFEN=an stehen, sie wirkt beim alten Dispatcher nicht), wamo-job.conf,
 # die Aufträge und Projekte, der Ausgangsfilter, die SSH-Einrichtung und die Sicherungen selbst. Nach dem Rückweg meldet ping
@@ -106,6 +111,41 @@ if [ -z "$NEUESTE" ]; then
   exit 0
 fi
 echo "  $NEUESTE ($OFFEN von $ANZAHL Sicherungen noch nicht zurückgespielt)"
+
+echo "== 1b. Persönlicher GitHub-Weg (entfällt er mit diesem Schritt?)"
+version_in() {   # die Zahl aus VERSION = "<n>" einer Dispatcher-Datei (leer, wenn sie fehlt)
+  sed -n 's/^VERSION = "\([1-9][0-9]*\)"[[:space:]]*\(#.*\)\{0,1\}$/\1/p' "$1" 2>/dev/null | head -n1
+}
+WEG_ENTFAELLT=0
+if [ -f "$NEUESTE/NEU.txt" ] && grep -qx 'bin/wamo-git-zugang' "$NEUESTE/NEU.txt"; then WEG_ENTFAELLT=1; fi
+if [ -f "$NEUESTE/bin/wamo-job-dispatch" ]; then
+  v_alt="$(version_in "$NEUESTE/bin/wamo-job-dispatch")"
+  if [ -z "$v_alt" ] || [ "$v_alt" -lt 10 ]; then WEG_ENTFAELLT=1; fi
+fi
+KONFIG_KERN="$WURZEL/etc/wamo/kernkanal.conf"
+if [ "$WEG_ENTFAELLT" = 1 ]; then
+  if [ -f "$KONFIG_KERN" ] && grep -Eq '^(PERSOENLICH|MAX_EINREICHEN_TAG|MAX_EINREICHEN_TAG_PROFIL|MAX_KLON_MB)=' "$KONFIG_KERN"; then
+    echo "Rückweg verweigert: $KONFIG_KERN enthält noch die Schlüssel des persönlichen GitHub-Wegs; ein älterer Dispatcher schlösse daran" \
+      "den Kern-Kanal. Erst: sudo bash ~/wamo-infra/wamo-job-kern-einrichten.sh kanal --persoenlich entfernen. Nichts geändert." >&2
+    exit 3
+  fi
+  v_jetzt="$(version_in "$APP/bin/wamo-job-dispatch")"
+  if [ -z "$WURZEL" ] && [ -n "$v_jetzt" ] && [ "$v_jetzt" -ge 10 ]; then
+    tu "löscht alle Kopien privater Repos (wamo-job-dispatch aufraeumen alle, als wamo)" \
+      runuser -u wamo -- env -i HOME=/srv/wamo PATH=/usr/bin:/bin "$APP/bin/wamo-job-dispatch" aufraeumen alle
+  else
+    echo "  Kopien privater Repos: ${WURZEL:+Probelauf, }übersprungen (Dispatcher ${v_jetzt:-?})"
+  fi
+  EINHEITEN="$WURZEL/etc/systemd/system"
+  if [ -e "$EINHEITEN/wamo-job-aufraeumen.timer" ] || [ -e "$EINHEITEN/wamo-job-aufraeumen.service" ]; then
+    if [ -z "$WURZEL" ]; then tu "schaltet wamo-job-aufraeumen.timer ab" systemctl disable --now wamo-job-aufraeumen.timer; fi
+    tu "entfernt wamo-job-aufraeumen.timer und .service" rm -f -- "$EINHEITEN/wamo-job-aufraeumen.timer" "$EINHEITEN/wamo-job-aufraeumen.service"
+    if [ -z "$WURZEL" ]; then tu "lädt systemd neu" systemctl daemon-reload; fi
+  fi
+  echo "  der persönliche GitHub-Weg entfällt mit diesem Schritt"
+else
+  echo "  bleibt (Dispatcher 10 oder neuer, oder nicht betroffen)"
+fi
 
 echo "== 2. Gesicherte Dateien wiederherstellen"
 anzahl=0

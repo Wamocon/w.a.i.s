@@ -47,7 +47,7 @@ HOSTSCHLUESSEL_PUB = Path("/etc/ssh/ssh_host_ed25519_key.pub")
 RAUCHTEST = Path("/opt/wamo-core/bin/wamo-job-kern-rauchtest")
 JOB_FREMD = "0123456789abcdef"  # eine Auftrags-ID, die es nicht gibt
 ABWEISUNG = "WAMO-Auftrag abgewiesen: "  # Anfang der Meldung des Dispatchers auf stderr bei einer Abweisung ohne Kanal-Ereignis
-BEFEHLE_GESCHLOSSEN = ("ping", "status", "pending", "cancel")  # wie wamo_job_kernkanal.py: Befehle bei geschlossenem Kanal
+BEFEHLE_GESCHLOSSEN = ("ping", "status", "pending", "cancel", "aenderung", "verwerfen")  # wie wamo_job_kernkanal.py: Befehle bei geschlossenem Kanal
 BEFEHLE_NOTAUS = ("ping", "status")  # und bei gesetzter Notaus-Datei (ein Test vergleicht beide Listen mit dem Modul)
 ART_RE = re.compile(r"[a-z][a-z_]{1,29}")
 KOPF_START = {"auftrag": "Rauchtest, darf nie laufen", "system": "", "zugang": "folgt", "profil": "00000000"}
@@ -109,9 +109,12 @@ class Probe:
     Bei geschlossenem Kanal oder gesetzter Notaus-Datei greift vor der Regel der Probe schon der Zustand: siehe erlaubte_gruende."""
 
     def __init__(self, name: str, remote: str, *, ja: bool = False, kopf: dict | None = None, extra: tuple[str, ...] = (), tty: bool = False,
-                 nur_geschlossen: bool = False, erwartet: tuple[tuple, ...] = ()):
+                 nur_geschlossen: bool = False, erwartet: tuple[tuple, ...] = (), ab_version: int = 7, nur_ohne_persoenlich: bool = False):
         self.name, self.remote, self.ja, self.kopf, self.extra, self.tty, self.nur_geschlossen = name, remote, ja, kopf, extra, tty, nur_geschlossen
         self.erwartet = erwartet
+        # ab_version: die Probe gilt erst ab dieser Version des Dispatchers (ping); nur_ohne_persoenlich: nur, solange ping persoenlich false
+        # meldet (sonst erreichte der Start Regeln, die nie probiert werden dürfen)
+        self.ab_version, self.nur_ohne_persoenlich = ab_version, nur_ohne_persoenlich
 
 
 def proben() -> list[Probe]:
@@ -152,6 +155,18 @@ def proben() -> list[Probe]:
         Probe("fremde Auftrags-ID (status)", f"status {JOB_FREMD}", erwartet=(("kanal", "fremd"),)),
         Probe("fremde Auftrags-ID (cancel)", f"cancel {JOB_FREMD}", erwartet=(("kanal", "fremd"),)),
         Probe("Start bei geschlossenem Kanal", f"{start} {PROJEKT_RAUCH} {{art}}", kopf=KOPF_START, nur_geschlossen=True, erwartet=(("zustand",),)),
+        # Persönlicher GitHub-Weg (Dispatcher 10, Plan C): die neuen Befehle nur für eigene Aufträge des Profils, das Kopffeld nur mit Repo,
+        # nie das eigene Repo, und ohne PERSOENLICH=an persoenlich_aus. Keine dieser Proben kann einen Klon oder Lauf auslösen.
+        Probe("fremde Auftrags-ID (aenderung)", f"aenderung {JOB_FREMD} {KOPF_START['profil']}", ab_version=10, erwartet=(("kanal", "fremd"),)),
+        Probe("fremde Auftrags-ID (verwerfen)", f"verwerfen {JOB_FREMD} {KOPF_START['profil']}", ab_version=10, erwartet=(("kanal", "fremd"),)),
+        Probe("fremde Auftrags-ID (einreichen)", f"einreichen {JOB_FREMD} {KOPF_START['profil']}", ab_version=10, erwartet=(("kanal", "fremd"),)),
+        Probe("Start persönlich ohne Repo", f"{start} {PROJEKT_RAUCH} {{art}}", kopf={**KOPF_START, "github": "persoenlich"}, ab_version=10,
+              erwartet=(("abgewiesen", "Kopfzeile: github braucht repo und profil"),)),
+        Probe("Start persönlich mit dem eigenen Repo", f"{start} {PROJEKT_RAUCH} {{art}}",
+              kopf={**KOPF_START, "github": "persoenlich", "repo": "wamocon/w.a.i.s"}, ab_version=10, erwartet=(("kanal", "repo"),)),
+        Probe("Start persönlich, Weg aus", f"{start} {PROJEKT_RAUCH} {{art}}",
+              kopf={**KOPF_START, "github": "persoenlich", "repo": "wamocon/rauchtest-gibt-es-nicht"}, ab_version=10, nur_ohne_persoenlich=True,
+              erwartet=(("kanal", "persoenlich_aus"),)),
     ]
 
 
@@ -320,12 +335,39 @@ def ping_zustand(stdout: str) -> dict | None:
     return zustand if isinstance(zustand, dict) else None
 
 
+PING: dict = {}  # die ganze Antwort der Ja-Probe (version, persoenlich), für die Auswahl der Nein-Proben
+
+
+def ping_antwort(stdout: str) -> dict:
+    try:
+        antwort = json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError, AttributeError):
+        return {}
+    return antwort if isinstance(antwort, dict) else {}
+
+
+def ping_version(antwort: dict) -> int:
+    try:
+        return int(str(antwort.get("version")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def probe_gilt(probe: Probe, antwort: dict) -> bool:
+    """Gilt die Probe für den Dispatcher, der auf ping geantwortet hat? (Version, persönlicher Weg)"""
+    if ping_version(antwort) < probe.ab_version:
+        return False
+    return not (probe.nur_ohne_persoenlich and antwort.get("persoenlich") is not False)
+
+
 def ja_probe(slot: str) -> dict | None:
     """Die Ja-Probe: ein ping über ssh. Liefert das Objekt kernkanal der Antwort (für die Nein-Proben) oder None."""
     erste = proben()[0]
     r = ssh_probe(slot, erste)
     ok, text = urteil(erste, r.returncode, r.stdout)
     pruefe(ok, f"ping über ssh als wamo-core: Antwort ok, Version 7 oder höher, kanal=kern ({text})")
+    PING.clear()
+    PING.update(ping_antwort(r.stdout) if ok else {})
     return ping_zustand(r.stdout) if ok else None
 
 
@@ -339,6 +381,9 @@ def nein_proben(slot: str, zustand: dict | None) -> None:
     for probe in proben()[1:]:
         if probe.nur_geschlossen and not zu:
             print(f"  übersprungen {probe.name} (der Kanal ist offen: ein gültiger Start darf nie probiert werden)", flush=True)
+            continue
+        if not probe_gilt(probe, PING):
+            print(f"  übersprungen {probe.name} (gilt erst ab Dispatcher {probe.ab_version} oder nur ohne persönlichen Weg)", flush=True)
             continue
         r = ssh_probe(slot, probe, art=art)
         ok, text = urteil(probe, r.returncode, r.stdout, r.stderr, zustand)

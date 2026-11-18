@@ -87,7 +87,7 @@ class CommandValidationTests(unittest.TestCase):
                 self.assertEqual(D.main([]), D.EXIT_ABGEWIESEN)
 
     def test_header(self):
-        auftrag, system, modell, repo, zugang, profil = D.parse_header(
+        auftrag, system, modell, repo, zugang, profil, github, scopes = D.parse_header(
             json.dumps({"auftrag": "Baue\u0007 eine App\nmit Login", "system": "x"}).encode() + b"\n")
         self.assertEqual(auftrag, "Baue eine App\nmit Login")
         self.assertEqual(system, "x")
@@ -1651,7 +1651,8 @@ class ConsistencyTests(unittest.TestCase):
             self.assertIn(name, erlaubt)
         for name in ("SONIOX_API_KEY", "LITELLM_API_KEY", "GH_TOKEN_LESEN", *D.GH_APP_VARIABLEN):
             self.assertNotIn(name, erlaubt)
-        self.assertFalse(any(n.startswith("WAMO_") for n in erlaubt))  # App-Konfiguration nie in der Sandbox
+        # App-Konfiguration nie in der Sandbox; einzige Ausnahme der persönliche GitHub-Weg (Dispatcher 10): Weg und Zweig, kein Wert
+        self.assertEqual({n for n in erlaubt if n.startswith("WAMO_")}, {"WAMO_GITHUB", "WAMO_ZWEIG"})
 
     def test_namen_der_zugangsart_haus_in_der_erlaubnisliste_des_laeufers(self):
         """ERLAUBT_RE in wamo-job.sh erweitert Paket P6a um die Namen der Zugangsart haus: entweder alle (nach P6a) oder noch keinen,
@@ -1793,8 +1794,8 @@ class PersoenlicherZugangTests(unittest.TestCase):
     def test_kopfzeile_zugang_und_profil(self):
         def kopf(**extra):
             return json.dumps({"auftrag": "x", **extra}).encode() + b"\n"
-        self.assertEqual(D.parse_header(kopf(zugang="folgt", profil="1a2b3c4d"))[4:], ("folgt", "1a2b3c4d"))
-        self.assertEqual(D.parse_header(kopf(zugang="server"))[4:], ("server", None))
+        self.assertEqual(D.parse_header(kopf(zugang="folgt", profil="1a2b3c4d"))[4:6], ("folgt", "1a2b3c4d"))
+        self.assertEqual(D.parse_header(kopf(zugang="server"))[4:6], ("server", None))
         with self.assertRaises(D.Abgewiesen):  # ohne Kennung teilten sich alle persönlichen Zugänge eine Buchführung
             D.parse_header(kopf(zugang="folgt"))
         for schlecht in ({"zugang": "ja"}, {"zugang": 1}, {"zugang": ["folgt"]}, {"profil": "xyz"}, {"profil": "1A2B3C4D"},
@@ -2127,7 +2128,8 @@ class PersoenlicherZugangStartTests(unittest.TestCase):
         ping = self.ereignisse[-1]
         self.assertIs(ping["serverzugang"], False)
         self.assertIs(ping["kontingent"], True)
-        self.assertEqual(ping["version"], "9")  # 9: gleichzeitige Aufträge (8: Trennung je Profil, 7: Kern-Kanal, 6: Befehl pruefen)
+        self.assertEqual(ping["version"], "10")  # 10: persönlicher GitHub-Weg (9: gleichzeitige Aufträge, 8: Trennung je Profil, 7: Kern-Kanal)
+        self.assertIs(ping["persoenlich"], False)  # ohne PERSOENLICH=an in kernkanal.conf
         self.assertIs(ping["pruefen"], False)  # ohne WAMO_PRUEFEN=an
         self.assertEqual(ping["kanal"], "lokal")  # I7: kanal und kernkanal, nie ein Wert aus geheim.env
         self.assertEqual(set(ping["kernkanal"]), {"strikt", "offen", "grund", "arten", "repos", "ablauf", "tage_rest"})
@@ -2262,7 +2264,7 @@ class HausZugangTests(unittest.TestCase):
     def test_kopfzeile_haus_braucht_ein_profil_und_traegt_nie_einen_wert(self):
         def kopf(**extra):
             return json.dumps({"auftrag": "x", **extra}).encode() + b"\n"
-        self.assertEqual(D.parse_header(kopf(zugang="haus", profil="1a2b3c4d"))[4:], ("haus", "1a2b3c4d"))
+        self.assertEqual(D.parse_header(kopf(zugang="haus", profil="1a2b3c4d"))[4:6], ("haus", "1a2b3c4d"))
         with self.assertRaises(D.Abgewiesen):  # ohne Kennung gäbe es keine Buchführung je Profil
             D.parse_header(kopf(zugang="haus"))
         for schlecht in ({"zugang": "Haus", "profil": "1a2b3c4d"}, {"zugang": "haus", "profil": "1A2B3C4D"},
@@ -2869,7 +2871,7 @@ class KernKanalDispatchTests(unittest.TestCase):
         with mock.patch.object(D, "github_status", return_value="token"), mock.patch.object(D, "KANAL", "kern"):
             D.cmd_ping()
         ping = self.ereignisse[-1]
-        self.assertEqual(ping["version"], "9")
+        self.assertEqual(ping["version"], "10")
         self.assertEqual(ping["kanal"], "kern")
         self.assertEqual(ping["parallel"], {"gesamt": 1, "profil": 1, "hart": 6})  # Datei ohne die Schlüssel MAX_PARALLEL*: einer (Review)
         kk = ping["kernkanal"]
@@ -3371,12 +3373,13 @@ class KernKanalDispatchTests(unittest.TestCase):
         self.assertEqual(D.SELF_REPOS, ("wamo", "w.a.i.s"))
         self.assertEqual(D.SELF_REPO, "wamo")  # nur noch Alias
         self.assertEqual(D.PARALLEL_MAX, 6)  # harte Obergrenze (Dispatcher 9); kernkanal.conf senkt sie, ohne die Datei gilt einer
-        self.assertEqual(D.VERSION, "9")
+        self.assertEqual(D.VERSION, "10")
         import ast
         baum = ast.parse((INFRA / "wamo_job_dispatch.py").read_text(encoding="utf-8"))
         oben = {a.name for n in baum.body if isinstance(n, ast.Import) for a in n.names}
         oben |= {n.module for n in baum.body if isinstance(n, ast.ImportFrom) and n.module}
         self.assertNotIn("wamo_job_kernkanal", oben)
+        self.assertNotIn("wamo_job_github", oben)  # die Schnittstelle des persönlichen Wegs ebenso erst bei Bedarf
 
 
 if __name__ == "__main__":

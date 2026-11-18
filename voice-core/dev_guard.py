@@ -620,9 +620,45 @@ def decide_mcp_service(service: str, name: str) -> tuple[str, str]:
     return "approval", f"{service.capitalize()} {name} (schreibend oder unbekannt)"
 
 
+# ---------- Persönlicher GitHub-Weg (Plan C, WAMO_GITHUB=persoenlich in der Sandbox) ----------
+# Der Lauf hat keinen GitHub-Zugang: er committet nur lokal auf wamo/<job>, das Einreichen übernimmt W.A.I.S. nach der Freigabe der Person.
+# Gesperrt sind dann git push, git send-pack, jedes gh und git remote set-url (auch add und set-head nicht: Remotes bleiben, wie der Klon sie
+# gesetzt hat). Ohne die Variable gilt alles wie bisher.
+PERSOENLICH_GRUND = ("Persönlicher GitHub-Weg: dieser Lauf hat keinen GitHub-Zugang. Nur lokal auf den Zweig wamo/<job> committen "
+                     "(Trailer WAIS-Auftrag: <job>), nicht pushen; das Einreichen übernimmt W.A.I.S. nach der Freigabe")
+GIT_REMOTE_AENDERN = {"set-url", "add", "rename", "remove", "rm", "set-head", "set-branches"}
+
+
+def persoenlich_aktiv() -> bool:
+    return os.environ.get("WAMO_GITHUB") == "persoenlich"
+
+
+def decide_persoenlich(cmd: str) -> tuple[str, str] | None:
+    """Sperre im persönlichen Weg oder None. Auch in verschachteltem Shell-Code (bash -c, eval) über die Zerlegung von git und gh."""
+    for sub, args, configs in git_invocations(cmd):
+        if sub in ("push", "send-pack"):
+            return "block", PERSOENLICH_GRUND
+        if sub == "remote" and args and args[0].lower() in GIT_REMOTE_AENDERN:
+            return "block", PERSOENLICH_GRUND
+        if sub == "config" and any(a.lower().startswith(("remote.", "url.", "branch.", "pushurl")) for a in args):
+            return "block", PERSOENLICH_GRUND  # Remotes und Push-Ziele auch nicht über git config
+        if any(c.lower().startswith(("remote.", "url.", "alias.")) for c in configs):
+            return "block", PERSOENLICH_GRUND
+    if GIT_PUSH_RE.search(cmd) or any(True for _ in gh_invocations(cmd)):
+        return "block", PERSOENLICH_GRUND
+    for segment in _SEGMENTS.split(cmd):
+        if any(_program(tok) == "gh" for tok in _tokens(segment)):
+            return "block", PERSOENLICH_GRUND
+    return None
+
+
 def decide_shell(cmd: str, project_dir: Path | None = None) -> tuple[str, str]:
     if len(cmd) > MAX_COMMAND_CHARS:
         return "approval", "Befehl ist zu lang für die automatische Prüfung"
+    if persoenlich_aktiv():
+        gesperrt = decide_persoenlich(cmd)
+        if gesperrt is not None:
+            return gesperrt
     for pattern, why in SHELL_BLOCKED:
         if re.search(pattern, cmd, re.IGNORECASE):
             return "block", why
@@ -701,6 +737,8 @@ def decide(tool_name: str, tool_input: dict, project_dir: Path | None) -> tuple[
 
     if _is_rea(server):
         return decide_rea(name, tool_input)
+    if persoenlich_aktiv() and "github" in server:
+        return "block", PERSOENLICH_GRUND  # persönlicher Weg: auch kein GitHub über MCP
     for service in ("supabase", "vercel", "github", "jira"):
         if service in server:
             return decide_mcp_service(service, name)
