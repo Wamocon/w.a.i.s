@@ -419,6 +419,43 @@ async def test_die_frist_je_aufruf_ist_fuenf_sekunden_und_die_gueltigkeit_fuenf_
     assert abnahme_remote.PING_GUELTIG_S == 300.0
 
 
+@pytest.mark.parametrize("antwort, erwartet", [
+    (ping_antwort(kernkanal={"arten": ["recherche", "planung", "umsetzung"]}), ("recherche", "planung", "umsetzung")),
+    (ping_antwort(kernkanal={"arten": ["umsetzung", "umsetzung"]}), ("umsetzung",)),
+    (ping_antwort(kernkanal={"arten": ["reverse_engineering"]}), ("reverse_engineering",)),
+    (ping_antwort(kernkanal={"arten": []}), ()),
+    (ping_antwort(), None),
+    (ping_antwort(kernkanal=None), None),
+    (ping_antwort(kernkanal={"arten": "umsetzung"}), None),
+    (ping_antwort(kernkanal={"arten": ["Umsetzung"]}), None),
+    (ping_antwort(kernkanal={"arten": ["um setzung"]}), None),
+    (ping_antwort(kernkanal={"arten": ["prüfung"]}), None),
+    (ping_antwort(kernkanal={"arten": ["x"]}), None),
+    (ping_antwort(kernkanal={"arten": ["_planung"]}), None),
+    (ping_antwort(kernkanal={"arten": [1]}), None),
+    (ping_antwort(kernkanal={"arten": ["a" * 31]}), None),
+    (ping_antwort(kernkanal={"arten": ["recherche"] * 41}), None),
+    (ping_antwort(ok=False, kernkanal={"arten": ["umsetzung"]}), None),
+])
+def test_kanal_arten_nur_aus_einer_sauberen_liste(antwort, erwartet):
+    zeile = (json.dumps(antwort) + "\n").encode()
+    assert abnahme_remote.ping_kanal_arten(zeile, 0) == erwartet
+    assert abnahme_remote.ping_kanal_arten(zeile, 2) is None  # nur bei Exit 0
+    assert abnahme_remote.ping_kanal_arten(zeile.rstrip(b"\n"), 0) is None  # genau eine ganze Zeile
+
+
+async def test_kanal_arten_gelten_nur_nach_einer_frischen_antwort():
+    env, uhr, ping = ping_umgebung(FakeProc([ping_antwort(kernkanal={"arten": ["planung", "umsetzung"]})]),
+                                   FakeProc([], returncode=255))
+    assert ping.kanal_arten() is None  # noch nie gefragt
+    await holen(env, ping)
+    assert ping.kanal_arten() == ("planung", "umsetzung")
+    uhr.t += 301
+    assert ping.kanal_arten() is None  # abgelaufen heißt unbekannt
+    await holen(env, ping)  # ein Fehler beim nächsten Mal löscht die alte Liste
+    assert ping.kanal_arten() is None
+
+
 async def test_ping_ist_fuenf_minuten_gueltig_danach_wird_neu_gefragt():
     env, uhr, ping = ping_umgebung(FakeProc([ping_antwort()]), FakeProc([ping_antwort(pruefen=False)]))
     assert await holen(env, ping) is None

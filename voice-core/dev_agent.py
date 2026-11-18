@@ -634,6 +634,25 @@ class DevAgent(GithubWeg):
         except Exception as e:  # noqa: BLE001 (auffrischen wirft selbst nie; ein Abbruch ist keine Exception)
             logger.warning("Abnahme: ping an den Dispatcher nicht möglich ({})", type(e).__name__)
 
+    async def _art_im_kanal(self, art: str) -> dict | None:
+        """Im Büro: erlaubt der Kern-Kanal diese Art (kernkanal.arten aus dem ping, Cache 5 Minuten)? Sonst ein Fehler mit den erlaubten
+        Arten, damit das Modell gleich eine passende wählt statt einer Karte, die der Server beim Start abweist (Befund 18.11.2026: die Art
+        dokumentation für eine neue Datei, der Kanal erlaubte recherche, planung und umsetzung). Ohne lesbare Antwort entscheidet wie bisher
+        allein der Dispatcher beim Start. Wirft nie."""
+        try:
+            await self._ping.auffrischen()
+        except Exception as e:  # noqa: BLE001 (auffrischen wirft selbst nie; ein Fehler heißt: der Dispatcher entscheidet beim Start)
+            logger.warning("Auftragsart: ping nicht möglich ({})", type(e).__name__)
+            return None
+        arten = self._ping.kanal_arten()
+        if not arten or art in arten:
+            return None
+        namen = ", ".join(KARTEN[a].titel if a in KARTEN else a for a in arten)
+        return {"ok": False, "fehler": f"Die Auftragsart {KARTEN[art].titel} ist im Büro nicht freigegeben. Erlaubt: {namen}.",
+                "hinweis": ("Bereite den Auftrag gleich noch einmal mit einer der erlaubten Arten vor, die zum Auftrag passt, ohne "
+                            f"Rückfrage an {self._auftraggeber}: Dateien anlegen oder ändern ist eine Umsetzung, nur lesen und "
+                            "verstehen ist eine Recherche oder Planung.")}
+
     # ---------- Vorgänge (vorgaenge.py): reine Anzeige, ein Fehler darin hält den Auftrag nie auf ----------
     def _vorgang_anlegen(self, job: Job) -> None:
         if self._vorgaenge is None:
@@ -831,6 +850,8 @@ class DevAgent(GithubWeg):
             return {"ok": False, "fehler": "Auftrag ist leer"}
         if art not in KARTEN:
             return {"ok": False, "fehler": f"Unbekannte Auftragsart, erlaubt: {', '.join(AUFTRAGSARTEN)}"}
+        if im_buero and (abgewiesen := await self._art_im_kanal(art)) is not None:
+            return abgewiesen
         repo_arg = args.get("repo")
         try:  # ausdrücklich genannt (Werkzeugaufruf) oder eindeutig als GitHub-Adresse im Auftrag
             repo = repo_pruefen(repo_arg) if isinstance(repo_arg, str) and repo_arg.strip() else repo_aus_auftrag(auftrag)
