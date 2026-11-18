@@ -19,7 +19,8 @@ und nennt die neue Anmeldung. Ohne Abdruck (nie einer da gewesen) braucht es kei
 Ohne Datenbank oder im Modus aus ist die Stimmprüfung aus (Status aus); ohne Abdruck wird nie geprüft oder gesperrt.
 
 Schattenbetrieb (stimme_schatten.py): Mit WAMO_STIMME_SCHATTEN=an bekommt die Sitzung das Schattenmodell des Prozesses (schatten), liest beim
-Laden den Schatten-Abdruck mit (nur mit Abdruck) und wärmt das Modell im Hintergrund vor. Laborprofile bekommen weiterhin keine Sitzung.
+Laden den Schatten-Abdruck mit (nur mit Abdruck und Einwilligung stimme-2) und wärmt das Modell im Hintergrund vor. Gezeigt und verlangt
+wird dann die Einwilligung stimme-2 (zwei Abdrücke), ohne Schalter weiter stimme-1 (stimme_einwilligung.py). Laborprofile bekommen weiterhin keine Sitzung.
 """
 
 from __future__ import annotations
@@ -185,7 +186,7 @@ class StimmSitzung:
         """Die Oberfläche ist verbunden: Stand der Stimmprüfung und der Text der Einwilligung."""
         await self.status_melden()
         if self.gate.modus != "aus":
-            await self._senden(einwilligung_nachricht())
+            await self._senden(einwilligung_nachricht(schatten=self.schatten is not None))
 
     def anmeldung_frisch(self) -> bool:
         """Ist die Anmeldung mit zweitem Faktor jünger als ANMELDUNG_FRISCH_SECS? Der Zeitpunkt kommt aus dem Token (auth_gate.anmeldezeit,
@@ -222,7 +223,7 @@ class StimmSitzung:
     async def _start(self, einwilligung: object) -> None:
         if self.gate.modus == "aus":
             await self._fehler(ABGESCHALTET)
-        elif not einwilligung_gilt(einwilligung):
+        elif not einwilligung_gilt(einwilligung, schatten=self.schatten is not None):  # im Schattenbetrieb nur stimme-2
             await self._fehler(EINWILLIGUNG_FEHLT)
         elif self.gate.zustand in ("laedt", "kaputt"):
             await self._fehler(STAND_UNKLAR)  # nicht blind einen vielleicht vorhandenen Abdruck ersetzen

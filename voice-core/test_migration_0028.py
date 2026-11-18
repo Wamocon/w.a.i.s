@@ -8,6 +8,7 @@ import re
 import sys
 from pathlib import Path
 
+import stimme_einwilligung
 import stimme_schatten
 import stimme_speicher
 
@@ -42,13 +43,22 @@ def test_spalten_ohne_vorgabe_wiederholbar_und_mit_regeln():
     vor_kommentar = code.split("comment on")[0]
     assert "not null" not in vor_kommentar.replace("is not null", "")  # NULL heißt: kein Schatten, keine Zeile muss nachgefüllt werden
     assert "default" not in vor_kommentar
-    for regel in ("speakers_shadow_pair_chk", "speakers_shadow_voiceprint_chk", "speakers_shadow_dims_chk", "speakers_shadow_model_chk"):
+    for regel in ("speakers_shadow_pair_chk", "speakers_shadow_voiceprint_chk", "speakers_shadow_consent_chk", "speakers_shadow_dims_chk",
+                  "speakers_shadow_model_chk"):
         assert f"drop constraint if exists {regel}" in code and f"add constraint {regel}" in code
     assert "check ((voiceprint_shadow is null) = (shadow_model is null))" in code
     assert "check (voiceprint_shadow is null or voiceprint is not null)" in code
     assert "extensions.vector_dims(voiceprint_shadow) between 64 and 1024" in code
     assert "set local lock_timeout" in code
     assert "on conflict do nothing" in code and "'0028_stimme_schatten'" in code
+
+
+def test_schatten_nur_mit_der_fassung_stimme_2():
+    """Die Datenbank erzwingt, was stimme_einwilligung.schatten_erlaubt im Kern prüft (Entscheidung vom 18.11.2026)."""
+    version = stimme_einwilligung.EINWILLIGUNG_VERSION_SCHATTEN
+    assert f"check (voiceprint_shadow is null or consent_text_version = '{version}')" in _ohne_kommentare(SQL)
+    assert "drop constraint if exists speakers_shadow_consent_chk" in _ohne_kommentare(DOWN)
+    assert "set consent_text_version = 'stimme-1'" in TEST  # zurück auf stimme-1 scheitert, solange ein Schatten da ist
 
 
 def test_regeln_passen_zum_kern():

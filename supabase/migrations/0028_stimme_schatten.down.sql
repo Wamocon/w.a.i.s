@@ -19,6 +19,7 @@ drop function if exists __SCHEMA__.speakers_schatten_verwerfen();
 alter table if exists __SCHEMA__.speakers
   drop constraint if exists speakers_shadow_pair_chk,
   drop constraint if exists speakers_shadow_voiceprint_chk,
+  drop constraint if exists speakers_shadow_consent_chk,
   drop constraint if exists speakers_shadow_dims_chk,
   drop constraint if exists speakers_shadow_model_chk,
   drop column if exists voiceprint_shadow,

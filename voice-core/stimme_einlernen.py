@@ -20,7 +20,7 @@ Segmente ebenso zu, ohne stillen Vor- und Nachlauf (stimme_modell.pruefsegment).
 Schwelle.
 
 Schattenbetrieb (stimme_schatten.py, WAMO_STIMME_SCHATTEN, seit 18.11.2026): Mit einem Schattenmodell entsteht aus denselben Stücken ein
-zweiter Abdruck (Mittelwert wie bei TitaNet), gespeichert mit dem ersten. Er entscheidet nichts: Ist das Schattenmodell noch nicht geladen
+zweiter Abdruck (Mittelwert wie bei TitaNet), gespeichert mit dem ersten, aber nur mit der Einwilligung stimme-2 (stimme_einwilligung.py). Er entscheidet nichts: Ist das Schattenmodell noch nicht geladen
 oder scheitert er, wird der Abdruck von TitaNet trotzdem gespeichert, nur ohne Schatten (Hinweis im Log, das Modell wird nachgeladen).
 
 Meldungen an die Oberfläche (über senden): {"type": "stimmabdruck", "status": start | aufnahme | rechnet | fertig | fehler | abgebrochen,
@@ -42,6 +42,7 @@ from loguru import logger
 
 from stimme_gate import EIGEN, StimmGate
 from stimme_modell import MIN_STUECKE, SPRACHE_DBFS, ModellQuelle, dbfs, einlern_stuecke, mittelpunkt, ohne_pausen, schwelle_einlernen
+from stimme_einwilligung import schatten_erlaubt
 from stimme_schatten import vorwaermen
 
 ZIEL_SECS = 20.0  # so viel reine Sprache für den Abdruck
@@ -269,7 +270,7 @@ class Einlernen:
         if streuung < MIN_STREUUNG:
             await self._fehler(ZU_UNRUHIG)
             return
-        schatten = await self._schatten_abdruck(stuecke, rate)
+        schatten = await self._schatten_abdruck(stuecke, rate) if schatten_erlaubt(version) else None  # nur mit stimme-2
         if gen != self._gen:  # direkt vor dem Speichern: abgebrochen oder gelöscht, dann wird nichts gespeichert
             logger.info("Stimmabdruck: abgebrochen, nichts gespeichert")
             return

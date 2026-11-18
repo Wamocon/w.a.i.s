@@ -1101,7 +1101,7 @@ Jede Person kann W.A.I.S. ihre Stimme einlernen, damit W.A.I.S. nur noch diese S
 und nur im Büro, nie im Testlabor (Laborprofile bekommen weder Einlernen noch Prüfung, die Nachricht `stimmabdruck` wird für sie von der
 Laborsperre abgewiesen). Code: `voice-core/stimme_*.py`, Tests: `voice-core/test_stimme_*.py`.
 
-**Bedienung.** Der Kern schickt beim Verbinden den Text der Einwilligung (Version `stimme-1`). In den Einstellungen der Oberfläche liest die
+**Bedienung.** Der Kern schickt beim Verbinden den Text der Einwilligung (Version `stimme-1`, mit `WAMO_STIMME_SCHATTEN=an` die Fassung `stimme-2`). In den Einstellungen der Oberfläche liest die
 Person ihn, bestätigt ihn und startet das Einlernen (Klick, nie per Sprache). W.A.I.S. sagt kurz, worum es geht, dann liest die Person den Text
 vor oder erzählt frei, bis der Balken voll ist (20 Sekunden reine Sprache). Währenddessen hört die Spracherkennung nur Stille, W.A.I.S. antwortet
 also nicht auf den Vorlesetext. Danach steht der Abdruck im Profil. **Löschen** in den Einstellungen entfernt den Abdruck
@@ -1243,11 +1243,12 @@ eingelernten Stimme zu) gilt in der Oberfläche zusätzlich:
 - `{"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert": 0.78, "modus": "..."}` je Äußerung (vom Prüfer, auch im Modus `beobachten`).
 - `{"type": "stimme", "ergebnis": "eigen"|"fremd"|"unklar", "wert": 0.78 oder null, "modus": "streng", "ignoriert": true|false, "zeit": "..."}` vom Wächter nach jedem Urteil zu einem endgültigen Transkript (Modus `streng` mit Abdruck), auch bei Annahme (`ignoriert: false`, zu jedem Transkript) und bei Verwerfen (`ignoriert: true`, einmal je Äußerung). `zeit` ist genau der `timestamp`, den dasselbe Transkript in `user-transcription` trägt (Pipecat gibt `TranscriptionFrame.timestamp` unverändert aus), höchstens 64 Zeichen, sonst `null`. Kurz und keine Antwort in der Frist heißen `unklar` (ohne Wert: `null`).
 - `{"type": "stimmabdruck", "status": "start"|"aufnahme"|"rechnet"|"fertig"|"fehler"|"abgebrochen"|"geloescht", "sekunden": 8.4, "ziel": 20, "text": "..."}` beim Einlernen und Löschen.
-- `{"type": "stimmabdruck_einwilligung", "version": "stimme-1", "text": "..."}` beim Verbinden (nicht im Modus aus, nie im Labor; im Labor kommt nur `{"type": "stimme", "status": "aus", "modus": "aus"}`).
+- `{"type": "stimmabdruck_einwilligung", "version": "stimme-1", "text": "..."}` (im Schattenbetrieb `stimme-2`) beim Verbinden (nicht im Modus aus, nie im Labor; im Labor kommt nur `{"type": "stimme", "status": "aus", "modus": "aus"}`).
 - Von der Oberfläche: Client-Nachricht `stimmabdruck` mit `{"aktion": "start", "einwilligung": "stimme-1"}`, `{"aktion": "abbrechen"}` oder `{"aktion": "loeschen"}`. Der Start gilt nur mit genau der aktuellen Version der Einwilligung.
 
 **Datenschutz.** Gespeichert werden nur der Abdruck (192 Zahlen) sowie Zeitpunkt und Version der Einwilligung in `speakers` (Spalte
-`voiceprint`, Migration `0001`, Rolle `wamo_core`, für die Oberfläche nicht lesbar), nie eine Aufnahme. Berechnung und Vergleich laufen im
+`voiceprint`, Migration `0001`, Rolle `wamo_core`, für die Oberfläche nicht lesbar), im Schattenbetrieb mit der Einwilligung `stimme-2`
+dazu der zweite Abdruck (256 Zahlen, Spalte `voiceprint_shadow`, Migration `0028`), nie eine Aufnahme. Berechnung und Vergleich laufen im
 Kern auf dem eigenen Server, nichts davon geht an Soniox oder Anthropic. Zweck, Rechtsgrundlage (ausdrückliche Einwilligung, Art. 9 Abs. 2
 lit. a DSGVO), Löschung und den Wortlaut der Einwilligung nennt der Abschnitt 4 in `docs/labor-datenschutz-entwurf.md` (Entwurf, eine
 verantwortliche Person prüft ihn). Offen vor dem Echtbetrieb: die Datenschutz-Folgenabschätzung nach Art. 35 DSGVO und die Aufbewahrung der
@@ -1301,9 +1302,10 @@ Auswerten: `sudo journalctl -u 'wamo-core@*' --since today -o cat | python3 scri
 (unter 1 s, 1 bis 2 s, ab 2 s) und Urteil die Verteilung beider Werte und die Trennung (AUC, EER, d'); die Gruppen sind dort an TitaNet
 geschnitten. Für die Entscheidung zählen Läufe mit bekannter Stimme: `--eigen eigen.log --fremd fremd.log` (eine Sitzung nur mit der
 eigenen Stimme, eine mit einer anderen Person am selben Profil im Modus `beobachten`). Die Datei des Releases kann wie TitaNet vorab in
-`/var/cache/wamo-core/wamo/sprecher/` liegen (`sha256sum` gegen die Summe oben), die abgeleitete schreibt der Kern selbst. Offen vor dem
-Einschalten: Der Text der Einwilligung (`stimme-1`) nennt einen Abdruck aus 192 Zahlen; ob der zweite Abdruck davon gedeckt ist oder eine
-neue Fassung (`stimme-2`) nötig ist, entscheidet die verantwortliche Person.
+`/var/cache/wamo-core/wamo/sprecher/` liegen (`sha256sum` gegen die Summe oben), die abgeleitete schreibt der Kern selbst. Einwilligung (Entscheidung von Niko vom 18.11.2026): Mit dem Schalter zeigt der Kern die Fassung `stimme-2` (zwei
+Abdrücke, 192 Zahlen für die Prüfung und 256 Zahlen für den Vergleich, Löschen nimmt beide mit) und lernt nur damit ein; ohne Schalter bleibt
+`stimme-1`. Ein Abdruck mit `stimme-1` bekommt keinen Schatten, bis die Person neu einlernt; das erzwingt auch die Datenbank
+(`speakers_shadow_consent_chk`). Text und Fassungen stehen in `docs/labor-datenschutz-entwurf.md`, Abschnitt 4.
 
 **Grenzen.** Die Stimmprüfung ersetzt keine Freigabe: Aktionen mit Risiko brauchen weiter die Freigabe per Klick. Sie schützt nicht gegen
 Aufnahmen oder geklonte Stimmen. Sie kann sich irren (Erkältung, Lärm, Mikrofon): Eine eigene Äußerung mit einem Wert unter der Schwelle für

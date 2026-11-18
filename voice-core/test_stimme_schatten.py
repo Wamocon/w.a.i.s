@@ -20,6 +20,7 @@ import asyncpg
 import numpy as np
 
 import memory as m
+import stimme_einwilligung as se
 import stimme_modell as sm
 import stimme_schatten as sch
 import stimme_sitzung
@@ -142,6 +143,39 @@ class AbleitenTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 sch.ableiten(roh, fertig, "0" * 64)
             self.assertEqual([p.name for p in Path(tmp).iterdir()], ["roh.onnx"])
+
+
+class EinwilligungTests(unittest.TestCase):
+    """Fassung stimme-2 (Entscheidung von Niko vom 18.11.2026): zwei Abdrücke, Zweck, Löschen beider, keine Aufnahme."""
+
+    def test_text_nennt_beide_abdruecke_zweck_und_loeschen(self):
+        text = se.EINWILLIGUNG_TEXT_SCHATTEN
+        for teil in ("zwei Stimmabdrücke", "192 Zahlen", "256 Zahlen", "Prüfung meiner Stimme", "Vergleich mit einem zweiten Modell",
+                     "keine Aufnahme", "nie einen Ton oder einen Text", "beide Stimmabdrücke gelöscht", "freiwillig", "Widerruf", "Artikel 9"):
+            self.assertIn(teil, text)
+        self.assertNotIn("\u2013", text)
+        self.assertNotIn("\u2014", text)
+        self.assertNotIn(" - ", text)
+
+    def test_text_passt_in_die_grenze_der_oberflaeche(self):
+        quelle = (Path(__file__).resolve().parent.parent / "ui" / "src" / "lib" / "nachrichten.ts").read_text(encoding="utf-8")
+        grenze = int(re.search(r"export const EINWILLIGUNG_MAX = (\d+);", quelle).group(1))
+        for text in se.TEXTE.values():
+            self.assertLessEqual(len(text), grenze)
+
+    def test_welche_fassung_gilt(self):
+        self.assertEqual((se.aktuelle_version(False), se.aktuelle_version(True)), ("stimme-1", "stimme-2"))
+        self.assertTrue(se.einwilligung_gilt("stimme-1") and se.einwilligung_gilt("stimme-2", schatten=True))
+        self.assertFalse(se.einwilligung_gilt("stimme-2") or se.einwilligung_gilt("stimme-1", schatten=True))
+        for falsch in ("stimme-3", "Stimme-2", " stimme-2", "", None, 2, True, ["stimme-2"]):
+            self.assertFalse(se.einwilligung_gilt(falsch, schatten=True), falsch)
+            self.assertFalse(se.einwilligung_bekannt(falsch), falsch)
+        self.assertTrue(se.einwilligung_bekannt("stimme-1") and se.einwilligung_bekannt("stimme-2"))
+        self.assertEqual([v for v in ("stimme-1", "stimme-2", None) if se.schatten_erlaubt(v)], ["stimme-2"])
+
+    def test_nachricht_je_betrieb(self):
+        self.assertEqual(se.einwilligung_nachricht(), {"type": "stimmabdruck_einwilligung", "version": "stimme-1", "text": se.EINWILLIGUNG_TEXT})
+        self.assertEqual(se.einwilligung_nachricht(schatten=True)["text"], se.EINWILLIGUNG_TEXT_SCHATTEN)
 
 
 # ---------------------------------------------------------------------------------------------------------- Laden
@@ -429,8 +463,8 @@ class EinlernenTests(unittest.IsolatedAsyncioTestCase):
         return Einlernen(self.gate, Modell(Rechner(EIGENER)), senden=mock.AsyncMock(), sagen=mock.AsyncMock(), speichern=self.speichern,
                          uhr=self.uhr, schatten=schatten)
 
-    async def durchlaufen(self, e: Einlernen):
-        await e.starten("stimme-1", datetime(2026, 11, 18, 9, 0, tzinfo=timezone.utc))
+    async def durchlaufen(self, e: Einlernen, version: str = "stimme-2"):
+        await e.starten(version, datetime(2026, 11, 18, 9, 0, tzinfo=timezone.utc))
         e.bot_spricht(True)
         e.bot_spricht(False)
         for _ in range(int((ZIEL_SECS + 1) / 0.02)):
@@ -449,6 +483,14 @@ class EinlernenTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(self.schatten_rechner.aufrufe, 8)  # je Stück einmal, wie TitaNet
         self.assertIs(self.gate.schatten_abdruck, schatten)
         self.assertTrue(any("Stücke" in c.args[0] for c in info.call_args_list))
+
+    async def test_mit_einwilligung_stimme_1_kein_schatten(self):
+        """Nur stimme-2 nennt den zweiten Abdruck: mit stimme-1 rechnet der Schatten nicht, auch wenn das Modell bereit ist."""
+        await self.durchlaufen(self.einlernen(Modell(self.schatten_rechner)), version="stimme-1")
+        self.assertIsNone(self.speichern.call_args.kwargs["schatten"])
+        self.assertEqual(self.schatten_rechner.aufrufe, 0)
+        self.assertIsNone(self.gate.schatten_abdruck)
+        self.assertIsNotNone(self.gate.abdruck)
 
     async def test_ohne_schattenmodell_kein_schatten(self):
         await self.durchlaufen(self.einlernen(None))
@@ -528,9 +570,10 @@ class SpeicherTests(unittest.IsolatedAsyncioTestCase):
         schatten = await ss.schatten_laden(speicher(db), sch.SCHATTEN_MODELL, sch.SCHATTEN_DIM)
         self.assertAlmostEqual(kosinus(schatten, SCHATTEN), 1.0, places=5)
         _, sql, args = db.calls[0]
-        for teil in ("voiceprint_shadow", "shadow_model", "wamo_test.speakers", "is_owner", "voiceprint is not null"):
+        for teil in ("voiceprint_shadow", "shadow_model", "wamo_test.speakers", "is_owner", "voiceprint is not null",
+                     "consent_text_version = $2"):
             self.assertIn(teil, sql)
-        self.assertEqual(args, (USER_A,))
+        self.assertEqual(args, (USER_A, "stimme-2"))  # ein Abdruck mit stimme-1 hat keinen Schatten
 
     async def test_anderes_modell_falsche_laenge_oder_keiner_ergibt_keinen(self):
         for zeile in ({"schatten": als_vektor(SCHATTEN), "modell": "anderes-modell"}, {"schatten": als_vektor(EIGENER), "modell": sch.SCHATTEN_MODELL},
@@ -552,15 +595,30 @@ class SpeicherTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_speichert_den_schatten_nach_dem_abdruck(self):
         db = SchattenDb()
-        ok = await ss.abdruck_speichern(speicher(db), EIGENER, version="stimme-1", name="E", einwilligung_am=self.am, schwelle=0.33,
+        ok = await ss.abdruck_speichern(speicher(db), EIGENER, version="stimme-2", name="E", einwilligung_am=self.am, schwelle=0.33,
                                         schatten=SCHATTEN, schatten_modell=sch.SCHATTEN_MODELL)
         self.assertTrue(ok)
+        self.assertEqual(db.calls[0][2][3], "stimme-2")
         self.assertEqual(len(db.calls), 2)
         _, sql, args = db.calls[1]
         self.assertTrue(sql.startswith("update wamo_test.speakers set voiceprint_shadow"))
         for teil in ("shadow_model", "is_owner", "voiceprint is not null", "extensions.vector"):
             self.assertIn(teil, sql)
-        self.assertEqual(args, (USER_A, als_vektor(SCHATTEN), sch.SCHATTEN_MODELL))
+        self.assertEqual(args, (USER_A, als_vektor(SCHATTEN), sch.SCHATTEN_MODELL, "stimme-2"))
+        self.assertIn("consent_text_version = $4", sql)
+
+    async def test_mit_einwilligung_stimme_1_nur_der_abdruck(self):
+        db = SchattenDb()
+        self.assertTrue(await ss.abdruck_speichern(speicher(db), EIGENER, version="stimme-1", name="E", einwilligung_am=self.am,
+                                                   schatten=SCHATTEN, schatten_modell=sch.SCHATTEN_MODELL))
+        self.assertEqual(len(db.calls), 1)
+
+    async def test_unbekannte_fassung_speichert_nichts(self):
+        db = SchattenDb()
+        for version in ("stimme-3", "stimme-0", "", None):
+            self.assertFalse(await ss.abdruck_speichern(speicher(db), EIGENER, version=version, name="E", einwilligung_am=self.am,
+                                                        schatten=SCHATTEN, schatten_modell=sch.SCHATTEN_MODELL))
+        self.assertEqual(db.calls, [])
 
     async def test_ohne_schatten_nur_der_abdruck(self):
         """Den alten Schatten eines früheren Abdrucks verwirft die Datenbank selbst (Trigger in Migration 0028)."""
@@ -572,14 +630,14 @@ class SpeicherTests(unittest.IsolatedAsyncioTestCase):
     async def test_ohne_migration_0028_bleibt_der_abdruck_gespeichert(self):
         db = SchattenDb(ohne_0028=True)
         with mock.patch.object(ss.logger, "warning") as warnung:
-            ok = await ss.abdruck_speichern(speicher(db), EIGENER, version="stimme-1", name="E", einwilligung_am=self.am,
+            ok = await ss.abdruck_speichern(speicher(db), EIGENER, version="stimme-2", name="E", einwilligung_am=self.am,
                                             schatten=SCHATTEN, schatten_modell=sch.SCHATTEN_MODELL)
         self.assertTrue(ok)
         self.assertEqual(warnung.call_count, 1)
 
     async def test_misslungener_abdruck_speichert_keinen_schatten(self):
         db = SchattenDb(fehler=asyncpg.PostgresError("x"))
-        self.assertFalse(await ss.abdruck_speichern(speicher(db), EIGENER, version="stimme-1", name="E", einwilligung_am=self.am,
+        self.assertFalse(await ss.abdruck_speichern(speicher(db), EIGENER, version="stimme-2", name="E", einwilligung_am=self.am,
                                                     schatten=SCHATTEN, schatten_modell=sch.SCHATTEN_MODELL))
         self.assertEqual(len(db.calls), 1)
 
@@ -644,6 +702,42 @@ class SitzungTests(unittest.IsolatedAsyncioTestCase):
             await s.vorbereiten()
         laden.assert_not_awaited()
         self.assertIsNone(s.gate.schatten_abdruck)
+
+    async def test_im_schattenbetrieb_zeigt_und_verlangt_die_sitzung_stimme_2(self):
+        gesendet: list[dict] = []
+
+        async def senden(d):
+            gesendet.append(d)
+
+        s = stimme_sitzung.StimmSitzung.fuer(self.identity(), speicher(SchattenDb()), senden=senden, sagen=mock.AsyncMock(),
+                                             modell=Modell(Rechner(EIGENER)), gate=StimmGate(modus="streng"), schatten=Modell(Rechner(SCHATTEN)))
+        s.gate.setze_abdruck(None)
+        await s.client_bereit()
+        (einwilligung,) = [d for d in gesendet if d.get("type") == "stimmabdruck_einwilligung"]
+        self.assertEqual(einwilligung, {"type": "stimmabdruck_einwilligung", "version": "stimme-2", "text": se.EINWILLIGUNG_TEXT_SCHATTEN})
+        with mock.patch.object(s.pruefer, "einlernen_starten", mock.AsyncMock()) as starten:
+            await s.nachricht({"aktion": "start", "einwilligung": "stimme-1"})
+            starten.assert_not_awaited()
+            self.assertEqual(gesendet[-1]["status"], "fehler")
+            await s.nachricht({"aktion": "start", "einwilligung": "stimme-2"})
+            self.assertEqual(starten.await_args.args[0], "stimme-2")
+
+    async def test_ohne_schalter_bleibt_stimme_1(self):
+        gesendet: list[dict] = []
+
+        async def senden(d):
+            gesendet.append(d)
+
+        s = stimme_sitzung.StimmSitzung.fuer(self.identity(), speicher(SchattenDb()), senden=senden, sagen=mock.AsyncMock(),
+                                             modell=Modell(Rechner(EIGENER)), gate=StimmGate(modus="streng"))
+        s.gate.setze_abdruck(None)
+        await s.client_bereit()
+        self.assertEqual([d["version"] for d in gesendet if d.get("type") == "stimmabdruck_einwilligung"], ["stimme-1"])
+        with mock.patch.object(s.pruefer, "einlernen_starten", mock.AsyncMock()) as starten:
+            await s.nachricht({"aktion": "start", "einwilligung": "stimme-2"})
+            starten.assert_not_awaited()
+            await s.nachricht({"aktion": "start", "einwilligung": "stimme-1"})
+            starten.assert_awaited_once()
 
     async def test_speichern_der_sitzung_gibt_den_schatten_weiter(self):
         s = stimme_sitzung.StimmSitzung.fuer(self.identity(), speicher(SchattenDb()), senden=mock.AsyncMock(), sagen=mock.AsyncMock(),

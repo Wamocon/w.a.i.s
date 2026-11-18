@@ -14,7 +14,9 @@
 --   voiceprint_shadow  extensions.vector ohne feste Länge (das Modell im Schatten kann wechseln, heute 256 Werte), 64 bis 1024 Werte
 --   shadow_model       Name des Modells, von dem der Schatten stammt (heute wespeaker-resnet34-cmn); der Kern nimmt nur seinen eigenen
 -- Regeln in der Tabelle: beide zusammen oder keiner, ein Schatten nur zu einem Abdruck (der selbst Einwilligung und Profilinhaber verlangt,
--- 0001), Name aus a-z, 0-9 und ._+- mit höchstens 60 Zeichen. Der Schatten ist biometrisch wie der Abdruck (DSGVO Art. 9) und verschwindet mit
+-- 0001) und nur mit der Einwilligung stimme-2 (Entscheidung vom 18.11.2026: nur sie nennt den zweiten Abdruck aus 256 Zahlen; ein Abdruck
+-- mit stimme-1 bekommt keinen Schatten, bis die Person neu einlernt; voice-core/stimme_einwilligung.py), Name aus a-z, 0-9 und ._+- mit
+-- höchstens 60 Zeichen. Der Schatten ist biometrisch wie der Abdruck (DSGVO Art. 9) und verschwindet mit
 -- der Zeile (Löschen des Abdrucks, DSGVO Art. 17; für Laborprofile über die Löschliste, voice-core/labor_loeschliste.py, Eintrag speakers).
 --
 -- Trigger speakers_schatten_verwerfen: Wird voiceprint ersetzt (neu einlernen) und setzt dieselbe Anweisung keinen neuen Schatten, setzt die
@@ -50,6 +52,8 @@ alter table __SCHEMA__.speakers
   add constraint speakers_shadow_pair_chk check ((voiceprint_shadow is null) = (shadow_model is null)),
   drop constraint if exists speakers_shadow_voiceprint_chk,
   add constraint speakers_shadow_voiceprint_chk check (voiceprint_shadow is null or voiceprint is not null),
+  drop constraint if exists speakers_shadow_consent_chk,
+  add constraint speakers_shadow_consent_chk check (voiceprint_shadow is null or consent_text_version = 'stimme-2'),
   drop constraint if exists speakers_shadow_dims_chk,
   add constraint speakers_shadow_dims_chk
     check (voiceprint_shadow is null or extensions.vector_dims(voiceprint_shadow) between 64 and 1024),
@@ -129,8 +133,8 @@ begin
   end if;
   -- die Regeln hängen an der Tabelle und sind geprüft (nicht NOT VALID), der Trigger ist aktiv
   if (select count(*) from pg_constraint where conrelid = '__SCHEMA__.speakers'::regclass and contype = 'c' and convalidated
-        and conname in ('speakers_shadow_pair_chk', 'speakers_shadow_voiceprint_chk', 'speakers_shadow_dims_chk',
-                        'speakers_shadow_model_chk')) <> 4 then
+        and conname in ('speakers_shadow_pair_chk', 'speakers_shadow_voiceprint_chk', 'speakers_shadow_consent_chk',
+                        'speakers_shadow_dims_chk', 'speakers_shadow_model_chk')) <> 5 then
     raise exception 'speakers (0028): Regeln für den Schatten fehlen' using errcode = '23514';
   end if;
   if not exists (select 1 from pg_trigger where tgrelid = '__SCHEMA__.speakers'::regclass and tgname = 'speakers_schatten_verwerfen'

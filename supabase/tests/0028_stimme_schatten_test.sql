@@ -69,7 +69,7 @@ set role wamo_core;
 do $$ begin
   insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint, consent_at, consent_text_version, enrolled_at, voice_threshold)
     values ('00000000-0000-4000-8000-0000000028a1', 'Schatten Eins', true, wamo_testhilfe.vektor(192, 0.072)::extensions.vector, now(),
-            'stimme-1', now(), 0.33::real)
+            'stimme-2', now(), 0.33::real)
     on conflict (user_id) where is_owner do update set name = excluded.name, voiceprint = excluded.voiceprint,
       consent_at = excluded.consent_at, consent_text_version = excluded.consent_text_version, enrolled_at = excluded.enrolled_at,
       voice_threshold = excluded.voice_threshold;
@@ -87,7 +87,7 @@ do $$ begin
   -- neu einlernen ohne Schatten: der Trigger verwirft den alten
   insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint, consent_at, consent_text_version, enrolled_at, voice_threshold)
     values ('00000000-0000-4000-8000-0000000028a1', 'Schatten Eins', true, wamo_testhilfe.vektor(192, 0.05)::extensions.vector, now(),
-            'stimme-1', now(), null)
+            'stimme-2', now(), null)
     on conflict (user_id) where is_owner do update set voiceprint = excluded.voiceprint, voice_threshold = excluded.voice_threshold;
   perform wamo_testhilfe.gleich((select coalesce(voiceprint_shadow::text, '') || coalesce(shadow_model, '') from __SCHEMA__.speakers
                                   where user_id = '00000000-0000-4000-8000-0000000028a1'), '', 'alter Schatten verworfen');
@@ -110,6 +110,9 @@ do $$ begin
     where user_id = '00000000-0000-4000-8000-0000000028a1'$s$, '23514');
   perform wamo_testhilfe.fehler($s$update __SCHEMA__.speakers set shadow_model = repeat('a', 61)
     where user_id = '00000000-0000-4000-8000-0000000028a1'$s$, '23514');
+  -- der Schatten braucht die Einwilligung stimme-2: zurück auf stimme-1 geht nicht, solange er da ist
+  perform wamo_testhilfe.fehler($s$update __SCHEMA__.speakers set consent_text_version = 'stimme-1'
+    where user_id = '00000000-0000-4000-8000-0000000028a1'$s$, '23514');
   -- beide auf NULL ist erlaubt (kein Schatten)
   update __SCHEMA__.speakers set voiceprint_shadow = null, shadow_model = null where user_id = '00000000-0000-4000-8000-0000000028a1';
   -- Löschen des Abdrucks nimmt den Schatten mit (DSGVO Art. 17, wie stimme_speicher.abdruck_loeschen)
@@ -121,10 +124,14 @@ do $$ begin
 end $$;
 reset role;
 
--- 2a. Ein Schatten ohne Abdruck ist auch für postgres unmöglich; ein Abdruck auf NULL nimmt den Schatten mit
+-- 2a. Ein Schatten ohne Abdruck oder zu einem Abdruck mit stimme-1 ist auch für postgres unmöglich; ein Abdruck auf NULL nimmt den
+-- Schatten mit
 select wamo_testhilfe.fehler($s$insert into __SCHEMA__.speakers (user_id, name, is_owner, voiceprint_shadow, shadow_model)
   values ('00000000-0000-4000-8000-0000000028a1', 'Ohne Abdruck', true, wamo_testhilfe.vektor(256, 0.05)::extensions.vector,
           'wespeaker-resnet34-cmn')$s$, '23514');
+select wamo_testhilfe.fehler($s$update __SCHEMA__.speakers set voiceprint_shadow = wamo_testhilfe.vektor(256, 0.05)::extensions.vector,
+  shadow_model = 'wespeaker-resnet34-cmn' where user_id = '00000000-0000-4000-8000-0000000028a2'$s$, '23514');
+update __SCHEMA__.speakers set consent_text_version = 'stimme-2' where user_id = '00000000-0000-4000-8000-0000000028a2';
 update __SCHEMA__.speakers set voiceprint_shadow = wamo_testhilfe.vektor(256, 0.05)::extensions.vector, shadow_model = 'wespeaker-resnet34-cmn'
   where user_id = '00000000-0000-4000-8000-0000000028a2';
 update __SCHEMA__.speakers set voiceprint = null where user_id = '00000000-0000-4000-8000-0000000028a2';
