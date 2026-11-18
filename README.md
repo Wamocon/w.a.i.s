@@ -1159,9 +1159,10 @@ mehrere Einlernstücke helfen deutlich. Daraus:
 - Schwelle nach Länge (`StimmGate.schwelle_fuer`): bis 1,5 s Sprache 0,35, ab 3 s 0,45, dazwischen linear; fremd bis 0,3 für alle Längen.
 - Einlernen wie Prüfen: keine 20-ms-Blöcke mehr, nur Pausen über 0,3 s entfernen, Stücke von 1,5 s.
 - Persönliche Schwelle (`stimme_modell.schwelle_einlernen`): je Stück der Kosinus gegen den Mittelpunkt der übrigen Stücke, davon das
-  10-%-Quantil minus 0,03, begrenzt auf 0,30 bis 0,50, gespeichert in `speakers.voice_threshold` (Migration `0025_stimme_schwelle`, nur
-  `wamo_core` liest und schreibt die Spalte). Sie ersetzt die kurze Schwelle; die lange kommt aus der Umgebung und liegt nie darunter. Fehlt
-  die Spalte (Migration nicht angewandt), läuft alles wie mit der Schwelle nach Länge, auch in der Sitzung des Einlernens.
+  10-%-Quantil minus 0,15, begrenzt auf 0,30 bis 0,35 (bis 18.11.2026 minus 0,03 und bis 0,50, siehe unten), gespeichert in
+  `speakers.voice_threshold` (Migration `0025_stimme_schwelle`, nur `wamo_core` liest und schreibt die Spalte). Sie ersetzt die kurze Schwelle,
+  aber nur nach unten (das Gate nimmt nie mehr als `WAMO_STIMME_EIGEN_MIN_KURZ`); die lange kommt aus der Umgebung und liegt nie darunter.
+  Fehlt die Spalte (Migration nicht angewandt), läuft alles wie mit der Schwelle nach Länge, auch in der Sitzung des Einlernens.
 
 Versuch mit dem echten Modell (TitaNet-Large, `sherpa-onnx`), nur mit sieben synthetischen Hausstimmen der Sprachausgabe im Haus (Einlernen
 aus 6,6 bis 10,1 s statt 20 s, Prüfen mit einem anderen Text, jede Äußerung wie beim Prüfer mit 0,25 s Vorlauf und 0,1 s Nachlauf und
@@ -1186,6 +1187,25 @@ Menschen; ob echte Aufnahmen niedrigere persönliche Schwellen ergeben, zeigt er
 Schritten: erst der Kern (Schwelle nach Länge und neues Einlernen, Migration 0025 noch nicht angewandt, `WAMO_STIMME_EIGEN_MIN` am Server
 entfernen), Abdruck neu einlernen und die Logzeilen `Stimme: ... (Schwelle ...)` ansehen; dann Migration 0025 anwenden und noch einmal
 einlernen, die persönliche Schwelle steht im Log.
+
+**Mikrofon und Zuschnitt (18.11.2026).** Befund aus 154 Urteilen: Die eigene Stimme galt oft als fremd, Hauptursache war ein Gerätewechsel
+(eingelernt mit einem Bluetooth-Headset, geprüft mit dem eingebauten Mikrofon, Pegelspitze im Median −27 statt −8 dBFS). Neu einlernen am
+selben Gerät hob die Werte um 0,15 bis 0,25. Zweitursache: Das Einlernen entfernt Pausen über 0,3 s, die Prüfung nahm das Segment mit 0,25 s
+Vorlauf und 0,1 s Nachlauf ungekürzt, bei 0,3 s Sprache war die Hälfte Stille. Daraus:
+
+- Mikrofontest in den Einstellungen (Sprache und Ton, Block Eingabe, `ui/src/lib/mikrofonTest.ts`, `ui/src/components/einstellungen/MikrofonTest.tsx`):
+  3 s Ruhe, 5 s sprechen, gemessen im Browser (Grundrauschen, Sprachpegel, Abstand, Übersteuerung), Ergebnis als Ampel mit einem Satz und dem
+  Gerätenamen. Kein Ton verlässt den Browser; gespeichert wird nur das letzte Ergebnis je Gerät im Speicher des Browsers.
+- Hinweis bei Gerätewechsel (`ui/src/lib/stimmMikrofon.ts`): Die Oberfläche merkt sich beim Einlernen den Namen des Mikrofons (nur im Browser
+  oder in der App, nie in der Datenbank). Läuft im Gespräch ein anderes, fragt sie einmal je Gespräch und Gerät, ob neu eingelernt werden soll.
+- Prüfsegment wie beim Einlernen (`stimme_modell.pruefsegment`): stiller Vor- und Nachlauf und Pausen über 0,3 s fallen weg, nie kürzer als die
+  Sprache, die die Sprachpausenerkennung gemessen hat; ohne laute Stelle (sehr leises Mikrofon) bleibt das Segment ungekürzt.
+- Evidenz über den Zug (`stimme_pruefer.py`): Die Segmente eines Zugs werden wie bisher zusammen geprüft, jetzt ohne Stille und jeder Ton nur
+  einmal, also nach Sprachdauer gewichtet. Zusammengeführt wird nur, solange W.A.I.S. nicht spricht; ein Segment, in dem W.A.I.S. spricht,
+  zählt für sich und beendet den Zug. Satzende, Zugende und lange Stille trennen wie bisher.
+- Persönliche Schwelle entschärft: minus 0,15 statt minus 0,03, höchstens 0,35 statt 0,50, und das Gate nimmt nie mehr als die kurze Schwelle
+  aus der Umgebung. Für eine saubere Aufnahme (10-%-Quantil ab 0,50, bei den Hausstimmen 0,51 bis 0,75) ergibt das 0,35, also die
+  Standardschwelle; lockerer wird es nur bei einer unruhigen Aufnahme (Quantil unter 0,50), nie unter 0,30.
 
 **Antwortzeit.** Die Prüfung beginnt beim Sprechende und läuft parallel zur Spracherkennung. Der Wächter hält nur das **endgültige** Transkript
 einer Äußerung an, bis das Urteil da ist, höchstens 1 Sekunde; die Zwischenstände laufen ungebremst durch. Die Antwort für die eigene Stimme

@@ -10,6 +10,8 @@ import {
   modusText,
   stimmeStatusText,
 } from "@/lib/stimme";
+import { anderesMikrofon, stimmMikrofonLesen, stimmSpeicher } from "@/lib/stimmMikrofon";
+import { useNutzer } from "@/lib/nutzer";
 import { useSelect } from "@/lib/store";
 import type { StimmabdruckAktionen } from "@/lib/useWamo";
 import { abdruckAnsichtOeffnen, istOnline, wamo } from "@/lib/wamo";
@@ -138,17 +140,28 @@ export const StimmeAbschnitt = memo(function StimmeAbschnitt({ aktionen }: { akt
 /**
  * Die Stimmprüfung hängt am Mikrofon (Befund 17.11.2026: im Browser lief ein anderes, leises Gerät, der Besitzer galt als fremd). Deshalb
  * steht hier, welches Mikrofon läuft, mit dem Weg zur Wahl im Abschnitt "Sprache und Ton". Die Wahl selbst gibt es nur dort (auch in der
- * Laborsicht, die diesen Abschnitt nicht hat).
+ * Laborsicht, die diesen Abschnitt nicht hat). Seit 18.11.2026 dazu das Mikrofon beim Einlernen (lib/stimmMikrofon.ts) und ein Satz, wenn
+ * gerade ein anderes läuft (Hauptursache der Fehlurteile im Befund dieses Tages).
  */
 function MikrofonFuerStimme() {
   const online = useSelect(wamo, istOnline);
   const mikrofon = useSelect(wamo, (s) => s.mikrofon);
+  const { id: userId } = useNutzer();
+  // Mikrofon beim Einlernen (lib/stimmMikrofon.ts, nur im Speicher dieses Browsers oder dieser App)
+  const eingelernt = stimmMikrofonLesen(stimmSpeicher(), userId);
+  const zeilen = [
+    ...(online && mikrofon ? [{ name: "In Benutzung", wert: mikrofon }] : []),
+    ...(eingelernt ? [{ name: "Eingelernt mit", wert: eingelernt }] : []),
+  ];
   return (
     <Block titel="Mikrofon">
-      {online && mikrofon ? (
-        <Daten zeilen={[{ name: "In Benutzung", wert: mikrofon }]} />
-      ) : (
-        <p className="ez-klein">Welches Mikrofon läuft, steht hier während eines Gesprächs.</p>
+      {zeilen.length > 0 && <Daten zeilen={zeilen} />}
+      {!(online && mikrofon) && <p className="ez-klein">Welches Mikrofon läuft, steht hier während eines Gesprächs.</p>}
+      {online && anderesMikrofon(eingelernt, mikrofon) && (
+        <p className="ez-klein" data-rueckfall>
+          Gerade läuft ein anderes Mikrofon als beim Einlernen. Lerne die Stimme mit diesem Mikrofon neu ein, dann erkennt W.A.I.S. dich
+          sicherer.
+        </p>
       )}
       <p className="ez-text">
         Die Stimmerkennung vergleicht mit dem Abdruck, den du eingelernt hast. Ein anderes oder sehr leises Mikrofon senkt die Übereinstimmung.

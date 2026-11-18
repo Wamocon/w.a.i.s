@@ -10,6 +10,7 @@ Vergleich: Kosinus-Ähnlichkeit zweier normierter Abdrücke (1 = gleiche Stimme,
 sherpa-onnx: gleiche Sprecher 0,67 bis 0,80, fremde höchstens 0,34. Rechenzeit für 8 s Sprache rund 250 ms mit 2 Threads. Kurze
 Äußerungen liegen deutlich tiefer (Befund vom 17.11.2026 und Versuch mit Hausstimmen in der README, Abschnitt Stimmabdruck); deshalb
 schneidet das Einlernen den Ton wie der Prüfer (ohne_pausen, Stücke von 1,5 s) und misst eine persönliche Schwelle (schwelle_einlernen).
+Seit dem 18.11.2026 schneidet auch der Prüfer jede Äußerung wie das Einlernen zu, ohne stillen Vor- und Nachlauf (pruefsegment).
 
 Ein Prozess hält das Modell genau einmal (MODELL am Ende der Datei), alle Sitzungen und Profile benutzen dieselbe Instanz. Der Rechner
 ist nicht an ein Profil gebunden: Abdrücke und Prüfzustand gehören je Sitzung zum Gate (stimme_gate.py). Gerechnet wird nacheinander
@@ -51,10 +52,14 @@ SPRACHE_DBFS = -45.0
 BLOCK_SECS = 0.02
 PAUSE_SECS = 0.3
 # Persönliche Schwelle (schwelle_einlernen): je Stück der Kosinus gegen den Mittelpunkt der übrigen Stücke, davon dieses Quantil minus
-# den Abstand, begrenzt auf SCHWELLE_MIN bis SCHWELLE_MAX
+# den Abstand, begrenzt auf SCHWELLE_MIN bis SCHWELLE_MAX. Entschärft am 18.11.2026 (vorher minus 0,03, bis 0,50): Die Stücke einer
+# Aufnahme ähneln sich mehr als spätere Äußerungen im Gespräch. Eine saubere Aufnahme ergab ein 10-%-Quantil ab 0,53 und damit 0,50, die
+# eigenen kurzen Äußerungen lagen im Gespräch aber bei 0,35 bis 0,60 (am anderen Gerät 0,15 bis 0,25 tiefer). Der Abstand 0,15 bleibt
+# unter dieser Lücke, und die Obergrenze ist die Standardschwelle für kurze Äußerungen (stimme_gate.Schwellen.eigen_min_kurz, 0,35):
+# Die persönliche Schwelle kann eine unruhige Aufnahme lockerer machen, aber nie strenger als der Standard (das sichert auch das Gate).
 SCHWELLE_QUANTIL = 0.10
-SCHWELLE_ABSTAND = 0.03
-SCHWELLE_MIN, SCHWELLE_MAX = 0.30, 0.50
+SCHWELLE_ABSTAND = 0.15
+SCHWELLE_MIN, SCHWELLE_MAX = 0.30, 0.35
 VERBINDUNG_SECS = 10.0
 LESEN_SECS = 60.0
 
@@ -275,6 +280,59 @@ def ohne_pausen(pcm: bytes, sample_rate: int, schwelle_dbfs: float = SPRACHE_DBF
             behalten.extend(lauf)
         i = j
     return np.concatenate(behalten).tobytes()
+
+
+def _block_dbfs(samples: np.ndarray, groesse: int) -> np.ndarray:
+    """Pegel je Block von groesse Abtastwerten (der letzte darf kürzer sein) wie dbfs, nur auf einmal für alle Blöcke."""
+    voll = len(samples) // groesse
+    werte = samples.astype(np.float64)
+    rms = np.sqrt(np.mean(werte[: voll * groesse].reshape(voll, groesse) ** 2, axis=1)) if voll else np.zeros(0)
+    if len(samples) % groesse:
+        rms = np.append(rms, np.sqrt(np.mean(werte[voll * groesse :] ** 2)))
+    return np.where(rms > 0, 20 * np.log10(np.maximum(rms, 1e-12) / 32768), -120.0)
+
+
+def pruefsegment(
+    pcm: bytes, sample_rate: int, sprache_secs: float, schwelle_dbfs: float = SPRACHE_DBFS, pause_secs: float = PAUSE_SECS
+) -> bytes:
+    """Eine Äußerung so zugeschnitten, wie das Einlernen den Ton schneidet (18.11.2026): Der Prüfer schneidet das Segment mit Vorlauf (0,25 s)
+    und Nachlauf (0,1 s) aus, bei 0,3 s Sprache ist die Hälfte Stille. Hier fallen weg: die stillen Blöcke vor der ersten und nach der
+    letzten lauten Stelle und, wie in ohne_pausen, Pausen über pause_secs dazwischen. Laut heißt wie beim Einlernen: ein 20-ms-Block über
+    schwelle_dbfs.
+
+    Nie kürzer als sprache_secs (die Sprache, die die Sprachpausenerkennung gemessen hat; höchstens so viel, wie Ton da ist): Reicht der
+    Schnitt dafür nicht, bleiben erst die Pausen innen, dann kommen Blöcke am Rand dazu, jeweils der lautere der beiden Nachbarn (leise
+    Sprache vor Stille). Ohne einen lauten Block (sehr leises Mikrofon) bleibt der Ton, wie er ist."""
+    samples = np.frombuffer(pcm[: len(pcm) - len(pcm) % 2], dtype=np.int16)
+    groesse = max(1, int(sample_rate * BLOCK_SECS))
+    pegel = _block_dbfs(samples, groesse)
+    laut = pegel > schwelle_dbfs
+    if not laut.any():
+        return samples.tobytes()
+    n = len(pegel)
+    laenge = np.full(n, groesse)
+    laenge[-1] = len(samples) - (n - 1) * groesse
+    mindest = min(len(samples), int(round(max(0.0, sprache_secs) * sample_rate)))
+    a, b = int(np.flatnonzero(laut)[0]), int(np.flatnonzero(laut)[-1]) + 1
+    behalten = np.zeros(n, dtype=bool)
+    i = a
+    while i < b:  # wie ohne_pausen: laute Läufe und kurze Pausen bleiben
+        j = i + 1
+        while j < b and laut[j] == laut[i]:
+            j += 1
+        behalten[i:j] = bool(laut[i]) or int(laenge[i:j].sum()) <= pause_secs * sample_rate
+        i = j
+    if int(laenge[behalten].sum()) < mindest:
+        behalten[a:b] = True  # zu kurz: die Pausen innen waren wohl leise Sprache
+    vor, nach = a - 1, b
+    while int(laenge[behalten].sum()) < mindest and (vor >= 0 or nach < n):
+        if nach >= n or (vor >= 0 and pegel[vor] >= pegel[nach]):
+            behalten[vor] = True
+            vor -= 1
+        else:
+            behalten[nach] = True
+            nach += 1
+    return b"".join(samples[k * groesse : k * groesse + int(laenge[k])].tobytes() for k in np.flatnonzero(behalten))
 
 
 def einlern_stuecke(pcm: bytes, sample_rate: int, stueck_secs: float = STUECK_SECS) -> list[bytes]:

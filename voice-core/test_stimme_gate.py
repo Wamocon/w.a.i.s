@@ -187,22 +187,29 @@ class SchwelleNachLaengeTests(unittest.TestCase):
 
     def test_persoenliche_schwelle_ersetzt_die_kurze(self):
         gate = bereites_gate()
-        gate.setze_abdruck(ABDRUCK, schwelle=0.42)
-        self.assertEqual(gate.schwelle_kurz, 0.42)
-        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.42)
+        gate.setze_abdruck(ABDRUCK, schwelle=0.32)
+        self.assertEqual(gate.schwelle_kurz, 0.32)
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.32)
         self.assertAlmostEqual(gate.schwelle_fuer(3.0), 0.45)  # die lange bleibt aus der Umgebung
-        self.assertEqual(gate.einstufen(0.41, 1.2, False), UNKLAR)
-        self.assertEqual(gate.einstufen(0.42, 1.2, False), EIGEN)
+        self.assertEqual(gate.einstufen(0.31, 1.2, False), UNKLAR)
+        self.assertEqual(gate.einstufen(0.32, 1.2, False), EIGEN)
         gate.setze_abdruck(ABDRUCK, schwelle=0.31)
         self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.31)
         self.assertAlmostEqual(gate.schwelle_fuer(2.25), 0.38)
         self.assertEqual(gate.einstufen(0.32, 0.8, False), KURZ)
 
-    def test_die_lange_schwelle_liegt_nie_unter_der_persoenlichen(self):
+    def test_persoenliche_schwelle_nie_strenger_als_die_kurze_aus_der_umgebung(self):
+        """Entschärft am 18.11.2026: Eine persönliche Schwelle senkt die kurze nur. Ein älterer Wert über 0,35 (bis 17.11. rechnete das
+        Einlernen bis 0,50) gilt als 0,35, denn die eigenen Werte im Gespräch lagen bei 0,35 bis 0,60."""
         gate = bereites_gate()
         gate.setze_abdruck(ABDRUCK, schwelle=0.48)
-        for secs in (1.0, 2.25, 3.0, 6.0):
-            self.assertAlmostEqual(gate.schwelle_fuer(secs), 0.48, msg=secs)
+        self.assertEqual(gate.schwelle_kurz, 0.48)  # gelesen wie gespeichert
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.35)
+        self.assertAlmostEqual(gate.schwelle_fuer(2.25), 0.40)
+        self.assertAlmostEqual(gate.schwelle_fuer(3.0), 0.45)
+        self.assertEqual(gate.einstufen(0.36, 1.2, False), EIGEN)
+        gate.schwellen = Schwellen(eigen_min_kurz=0.4, eigen_min_lang=0.5)  # die Grenze ist die kurze Schwelle aus der Umgebung
+        self.assertAlmostEqual(gate.schwelle_fuer(1.0), 0.40)
 
     def test_persoenliche_schwelle_nie_unter_fremd_max(self):
         gate = StimmGate(schwellen=Schwellen(fremd_max=0.33))

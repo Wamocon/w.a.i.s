@@ -1,0 +1,40 @@
+/* Mikrofontest im Block Eingabe (components/einstellungen/MikrofonTest.tsx). Die Ampel ist ein Licht neben dem Wort (Grün, Gelb, Rot):
+   die Farbe ist nie die einzige Auskunft. Grün gibt es sonst in der Oberfläche nicht, deshalb hier ein eigener, gedämpfter Ton mit
+   Fassung für den Hellmodus; Gelb und Rot sind die Töne für Warnung und Marke. */
+.mt {
+  --mt-gruen: #3ecf7a;
+  --mt-gelb: var(--warn);
+  --mt-rot: var(--core);
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+:root[data-theme="light"] .mt { --mt-gruen: #1f8a4c; }
+
+.mt-lauf { display: grid; gap: 4px; }
+.mt-anleitung { margin: 0; font-size: 16px; line-height: 1.45; }
+.mt-lauf[data-phase="sprechen"] .mt-anleitung { font-weight: 600; }
+
+.mt-ergebnis {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--kante);
+  border-left: 4px solid var(--mt-licht, var(--kante));
+  border-radius: 10px;
+  background: var(--glas-leicht);
+}
+.mt-ergebnis[data-ampel="gruen"] { --mt-licht: var(--mt-gruen); }
+.mt-ergebnis[data-ampel="gelb"] { --mt-licht: var(--mt-gelb); }
+.mt-ergebnis[data-ampel="rot"] { --mt-licht: var(--mt-rot); }
+
+.mt-satz { margin: 0; font-size: 16px; line-height: 1.45; }
+.mt-ampel { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; white-space: nowrap; }
+.mt-licht {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--mt-licht, var(--kante));
+  box-shadow: 0 0 8px var(--mt-licht, transparent);
+}

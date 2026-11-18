@@ -41,7 +41,7 @@ def test_spalte_ohne_vorgabe_wiederholbar_und_mit_bereich():
 
 
 def test_bereich_passt_zu_kern_und_einlernen():
-    """Die Datenbank nimmt alles, was das Einlernen speichert (0,30 bis 0,50), und das Gate nimmt beim Laden genau ihren Bereich an."""
+    """Die Datenbank nimmt alles, was das Einlernen speichert (0,30 bis 0,35), und das Gate nimmt beim Laden genau ihren Bereich an."""
     assert (stimme_gate.PERSOENLICH_MIN, stimme_gate.PERSOENLICH_MAX) == (0.2, 0.8)
     assert stimme_gate.PERSOENLICH_MIN <= stimme_modell.SCHWELLE_MIN < stimme_modell.SCHWELLE_MAX <= stimme_gate.PERSOENLICH_MAX
 

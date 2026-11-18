@@ -14,8 +14,10 @@ Passend zum Prüfen (seit 17.11.2026): Der Prüfer vergleicht ganze Äußerungen
 Pausen und leisen Stellen, meist 0,4 bis 2 s). Früher entstand der Abdruck aus Stücken von 3 s, aus denen jeder leise 20-ms-Block entfernt
 war; das passte schlecht zu kurzen Äußerungen. Jetzt fallen nur Pausen über 0,3 s weg (stimme_modell.ohne_pausen), und die Stücke sind 1,5 s
 lang (stimme_modell.STUECK_SECS). Die persönliche Schwelle (stimme_modell.schwelle_einlernen) misst, wie ähnlich ein Stück dieser Person
-ihrem Abdruck ist (je Stück gegen den Mittelpunkt der übrigen, 10-%-Quantil minus 0,03, 0,30 bis 0,50); das Gate nimmt sie als Schwelle
-für kurze Äußerungen (stimme_gate.StimmGate.schwelle_fuer). Ins Log gehen nur Zahl der Stücke, Streuung, Quantil und Schwelle.
+ihrem Abdruck ist (je Stück gegen den Mittelpunkt der übrigen, 10-%-Quantil minus 0,15, 0,30 bis 0,35, seit 18.11.2026); das Gate nimmt
+sie als Schwelle für kurze Äußerungen, nur nach unten (stimme_gate.StimmGate.schwelle_fuer). Seit dem 18.11.2026 schneidet der Prüfer seine
+Segmente ebenso zu, ohne stillen Vor- und Nachlauf (stimme_modell.pruefsegment). Ins Log gehen nur Zahl der Stücke, Streuung, Quantil und
+Schwelle.
 
 Meldungen an die Oberfläche (über senden): {"type": "stimmabdruck", "status": start | aufnahme | rechnet | fertig | fehler | abgebrochen,
 "sekunden", "ziel", "text"} und den Stand (StimmGate.stand) beim Laden des Modells und nach dem Einlernen.

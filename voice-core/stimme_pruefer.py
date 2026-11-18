@@ -8,6 +8,14 @@ parallel zur Spracherkennung. Jede Äußerung (VAD-Beginn bis VAD-Ende) hat eine
 Frist auf genau deren Urteil; spätere Äußerungen halten nicht auf. Ein Ablauf der Frist gilt als unklar (kein Urteil). Rohton wird nie
 gespeichert, der Ringpuffer lebt nur im Arbeitsspeicher.
 
+Zuschnitt und Evidenz über den Zug (18.11.2026): Jedes Segment wird wie beim Einlernen zugeschnitten (stimme_modell.pruefsegment: ohne
+stillen Vor- und Nachlauf, Pausen über 0,3 s fallen weg, nie kürzer als die gemessene Sprache). Die Segmente eines Zugs werden zusammen
+geprüft, ihr Ton hintereinander und jeder Ton nur einmal; so zählt jedes mit seiner Sprachdauer. Das ist bewusst der Ton und kein Mittel der
+Einzelwerte: Der Wert eines längeren Stücks ist verlässlicher als das Mittel der Werte kurzer Stücke (die Werte kurzer Stücke liegen tiefer,
+und die Schwellen nach Länge sind an ganzen Stücken gemessen). Zusammengeführt wird nur, solange W.A.I.S. nicht spricht: Ein Segment, in dem
+W.A.I.S. spricht oder einsetzt, zählt für sich und beendet den Zug. Satzende (satz_ende), Zugende, Rede von W.A.I.S. und mehr als
+ZUG_PAUSE_SECS Stille beginnen einen neuen Zug, damit ein fremder Einwurf nach einem fertigen Satz nichts erbt.
+
 Das Modell ist je Prozess einmal vorhanden (stimme_modell.MODELL), der Prüfzustand und der Abdruck gehören je Sitzung zum Gate: zwei Profile
 im selben Prozess teilen nur den Rechner. Gerechnet wird nur für ein Profil mit Abdruck und nur, wenn der Modus nicht aus ist.
 
@@ -59,7 +67,7 @@ from pipecat.processors.frameworks.rtvi import RTVIServerMessageFrame
 from soft_interrupt import StimmUrteilFrame
 from stimme_einlernen import Einlernen, Speichern
 from stimme_gate import EIGEN, KURZ, UNKLAR, StimmGate
-from stimme_modell import ModellQuelle, kosinus
+from stimme_modell import ModellQuelle, kosinus, pruefsegment
 
 RING_SECS = 10.0
 MAX_PRUEF_SECS = 8.0
@@ -107,7 +115,8 @@ class Stimmpruefer(FrameProcessor):
         self._modell = modell
         self._uhr = uhr  # Wanduhr wie VADUser...SpeakingFrame.timestamp
         self._einlernen = Einlernen(gate, modell, senden=self._senden, sagen=sagen, speichern=speichern, uhr=uhr, nachweis=nachweis)
-        self._ring: deque[tuple[float, bytes]] = deque()
+        self._ring: deque[tuple[float, int, bytes]] = deque()  # (Ende des Pakets auf der Uhr, laufende Nummer, Ton)
+        self._paket = 0  # Nummer des letzten Pakets im Ring (zählt nur hoch, auch wenn die Uhr springt)
         self._ring_secs = 0.0
         self._rate = 16000
         self._segment_start: float | None = None  # mit Luft davor (zum Ausschneiden)
@@ -117,6 +126,7 @@ class Stimmpruefer(FrameProcessor):
         self._zug_secs = 0.0
         self._zug_ueberlappung = False
         self._zug_zu = True
+        self._zug_bis = 0  # Nummer des letzten Pakets, das schon im Zug liegt: jeder Ton zählt nur einmal
         self._letztes_ende = -math.inf
         self._bot_spricht = False
         self._sprechend = False  # laut VAD läuft eine Äußerung (die Prüfung beginnt erst mit ihrem Ende)
@@ -176,15 +186,18 @@ class Stimmpruefer(FrameProcessor):
     def on_bot_speaking(self, spricht: bool) -> None:
         self._bot_spricht = spricht
         self._zug_zu = True  # was vor oder nach der Rede von WAMO kommt, ist eine neue Äußerung
+        if spricht and self._sprechend:
+            self._segment_ueberlappung = True  # W.A.I.S. setzt mitten im Segment ein: es zählt für sich (siehe on_speech_stop)
         self._einlernen.bot_spricht(spricht)
 
     async def on_audio(self, frame: InputAudioRawFrame) -> None:
         pcm = frame.audio
         self._rate = frame.sample_rate
-        self._ring.append((self._uhr(), pcm))
+        self._paket += 1
+        self._ring.append((self._uhr(), self._paket, pcm))
         self._ring_secs += _secs(pcm, self._rate)
         while self._ring_secs > RING_SECS and len(self._ring) > 1:
-            self._ring_secs -= _secs(self._ring.popleft()[1], self._rate)
+            self._ring_secs -= _secs(self._ring.popleft()[2], self._rate)
         if await self._einlernen.sammeln(pcm, self._rate):
             frame.audio = bytes(len(pcm))  # Spracherkennung und VAD hören Stille
         elif self._frueh_faellig():
@@ -196,8 +209,8 @@ class Stimmpruefer(FrameProcessor):
         self._sprechend = True
         self._begonnen += 1
         self._sprache_beginn = zeit - start_secs
-        if self._zug_zu or self._sprache_beginn - self._letztes_ende > ZUG_PAUSE_SECS:
-            self._zug, self._zug_secs, self._zug_ueberlappung, self._zug_zu = b"", 0.0, False, False
+        if self._zug_zu or self._bot_spricht or self._sprache_beginn - self._letztes_ende > ZUG_PAUSE_SECS:
+            self._zug_neu()
         self._segment_start = self._sprache_beginn - VORLAUF_SECS
         self._segment_ueberlappung = self._bot_spricht
         self._frueh_ab = FRUEH_AB_SECS
@@ -205,19 +218,30 @@ class Stimmpruefer(FrameProcessor):
     def on_speech_stop(self, zeit: float, stop_secs: float) -> None:
         self._sprechend = False
         if self._einlernen.aktiv or self._segment_start is None:
+            self._segment_start = None  # ein späteres Ende ohne neuen Beginn schneidet nie ab einem alten Beginn
             if self._begonnen > self._beendet:  # die laufende Äußerung endet ungeprüft (Einlernen begann): zu ihr gibt es kein Urteil
                 self._beendet = self._fertig = self._begonnen
                 self._melden()
             return
         nr = self._beendet = self._begonnen
         sprache_ende = zeit - stop_secs
-        segment = self._ausschneiden(self._segment_start, sprache_ende + NACHLAUF_SECS)
-        self._zug_ueberlappung = self._zug_ueberlappung or self._segment_ueberlappung or self._bot_spricht
+        sprache_secs = sprache_ende - self._sprache_beginn
+        sprache_secs = sprache_secs if math.isfinite(sprache_secs) and sprache_secs > 0 else 0.0
+        ueberlappt = self._segment_ueberlappung or self._bot_spricht
+        if ueberlappt:
+            # Evidenz über den Zug nur, solange W.A.I.S. nicht spricht: dieses Segment zählt für sich, der Zug endet mit ihm
+            self._zug_neu()
+            self._zug_zu = True
+        # Jeder Ton zählt nur einmal: reicht der Vorlauf in das Segment davor, beginnt der Schnitt nach dem letzten Paket des Zugs
+        roh, bis = self._ausschneiden(self._segment_start, sprache_ende + NACHLAUF_SECS, nach=self._zug_bis)
+        segment = _zuschneiden(roh, self._rate, sprache_secs)
+        self._zug_ueberlappung = ueberlappt
+        self._zug_bis = max(self._zug_bis, bis)
         self._segment_start = None
         self._letztes_ende = sprache_ende
         # Nur die letzten MAX_PRUEF_SECS behalten; gemessen wird die reine Sprache ohne die Luft drumherum
         self._zug = (self._zug + segment)[-int(MAX_PRUEF_SECS * self._rate) * 2 :]
-        self._zug_secs = min(self._zug_secs + max(0.0, sprache_ende - self._sprache_beginn), MAX_PRUEF_SECS)
+        self._zug_secs = min(self._zug_secs + sprache_secs, MAX_PRUEF_SECS)
         vorherige = self._task
         self._task = self._starten(
             self._pruefen(self._zug, self._rate, self._zug_secs, self._zug_ueberlappung, self._gate.uhr(), vorherige, nr), nr
@@ -225,13 +249,21 @@ class Stimmpruefer(FrameProcessor):
         self._gate.verfolgen(self._task)
         self._gate.gesprochen()  # für die Pflichtstufe der Mitglieder: seit dem Tippen wurde gesprochen (stimme_gate.pflicht_grund)
 
-    def _ausschneiden(self, start: float, ende: float) -> bytes:
+    def _zug_neu(self) -> None:
+        """Die nächste Äußerung wird für sich geprüft."""
+        self._zug, self._zug_secs, self._zug_ueberlappung, self._zug_zu, self._zug_bis = b"", 0.0, False, False, 0
+
+    def _ausschneiden(self, start: float, ende: float, nach: int = 0) -> tuple[bytes, int]:
+        """Der Ton der Pakete, die in start bis ende hineinreichen und nach dem Paket nach kamen, und die Nummer des letzten davon
+        (nach, wenn keines passt)."""
         teile = []
-        for t_ende, pcm in self._ring:
+        bis = nach
+        for t_ende, paket, pcm in self._ring:
             t_start = t_ende - _secs(pcm, self._rate)
-            if t_ende > start and t_start < ende:
+            if paket > nach and t_ende > start and t_start < ende:
                 teile.append(pcm)
-        return b"".join(teile)
+                bis = paket
+        return b"".join(teile), bis
 
     # ---------- Frühes Urteil fürs Unterbrechen ----------
 
@@ -251,7 +283,7 @@ class Stimmpruefer(FrameProcessor):
         jetzt = self._uhr()
         dauer = jetzt - self._sprache_beginn
         self._frueh_ab = dauer + FRUEH_TAKT_SECS
-        pcm = self._ausschneiden(max(self._segment_start, jetzt - FRUEH_FENSTER_SECS), jetzt)  # die letzten Sekunden der Äußerung
+        pcm, _ = self._ausschneiden(max(self._segment_start, jetzt - FRUEH_FENSTER_SECS), jetzt)  # die letzten Sekunden der Äußerung
         task = asyncio.create_task(self._frueh_pruefen(pcm, self._rate, min(dauer, FRUEH_FENSTER_SECS), self._begonnen))
         self._frueh_task = task
         self._tasks.add(task)
@@ -263,14 +295,15 @@ class Stimmpruefer(FrameProcessor):
             logger.warning("Stimmprüfung früh: Aufgabe mit Fehler beendet ({})", type(fehler).__name__)
 
     async def _frueh_pruefen(self, pcm: bytes, rate: int, secs: float, nr: int) -> None:
-        """Prüft ein Stück der laufenden Äußerung nr (W.A.I.S. spricht). Nur ein Urteil eigen zählt, und nur, solange nr noch läuft."""
+        """Prüft ein Stück der laufenden Äußerung nr (W.A.I.S. spricht). Nur ein Urteil eigen zählt, und nur, solange nr noch läuft. Das Stück
+        wird wie am Sprechende zugeschnitten (stiller Vorlauf weg), im Thread des Rechners."""
         gate = self._gate
         abdruck = gate.abdruck
         rechner = await self._modell.get()
         if abdruck is None or rechner is None or not pcm:
             return
         try:
-            wert = kosinus(await asyncio.to_thread(rechner.embed, pcm, rate), abdruck)
+            wert = kosinus(await asyncio.to_thread(lambda: rechner.embed(_zuschneiden(pcm, rate, secs), rate)), abdruck)
         except Exception as e:  # ein früher Fehler entscheidet nichts, es zählt das Urteil am Sprechende
             logger.debug("Stimmprüfung früh fehlgeschlagen ({})", type(e).__name__)
             return
@@ -404,3 +437,13 @@ class Stimmpruefer(FrameProcessor):
 
 def _secs(pcm: bytes, rate: int) -> float:
     return len(pcm) / 2 / rate if rate else 0.0
+
+
+def _zuschneiden(pcm: bytes, rate: int, sprache_secs: float) -> bytes:
+    """stimme_modell.pruefsegment (ohne stillen Vor- und Nachlauf, wie beim Einlernen), das nie wirft: Es läuft beim Ende einer Äußerung
+    mitten in der Behandlung des Frames der Sprachpausenerkennung, ein Fehler darf diesen Frame nie aufhalten. Dann bleibt der Ton ungekürzt."""
+    try:
+        return pruefsegment(pcm, rate, sprache_secs)
+    except Exception as e:
+        logger.warning("Stimmprüfung: Zuschnitt fehlgeschlagen ({}), Segment ungekürzt", type(e).__name__)
+        return pcm[: len(pcm) - len(pcm) % 2]

@@ -36,6 +36,14 @@ import { StillMedienManager } from "@/lib/stillMedien";
 import { GeraeteMedienManager } from "@/lib/geraeteMedien";
 import { LEISE_TEXT, leiseNeuMessen, neueLeise, PEGEL_TAKT_MS, pruefeLeise } from "@/lib/pegelWarnung";
 import {
+  ANDERES_MIKROFON_TEXT,
+  geraetHinweisFaellig,
+  stimmMikrofonLesen,
+  stimmMikrofonMerken,
+  stimmMikrofonVergessen,
+  stimmSpeicher,
+} from "@/lib/stimmMikrofon";
+import {
   HINWEIS_RUHE,
   istLaborKonto,
   istUebernommen,
@@ -468,6 +476,9 @@ export function useWamo(): WamoAktionen {
   const stille = useRef(neueStille());
   // Pegelwarnung (lib/pegelWarnung.ts): sehr leises Mikrofon beim Sprechen, einmal je Gespräch
   const leise = useRef(neueLeise());
+  // Hinweis bei Gerätewechsel (lib/stimmMikrofon.ts): Mikrofon beim Einlernen (gelesen bei jedem Start) und die Geräte, zu denen in
+  // diesem Gespräch schon gefragt wurde
+  const stimmMikrofon = useRef<{ gemerkt: string | null; gezeigt: Set<string> }>({ gemerkt: null, gezeigt: new Set() });
   // Medienmanager der laufenden Verbindung: meldet, ob statt des gewählten Mikrofons das Standardgerät läuft (lib/geraeteMedien.ts)
   const medien = useRef<{ readonly mikrofonErsatz: boolean } | null>(null);
   const ersatzGemeldet = useRef(false); // den Hinweis dazu gibt es einmal je Verbindung
@@ -729,6 +740,31 @@ export function useWamo(): WamoAktionen {
     return () => clearInterval(id);
   }, []);
 
+  // Hinweis bei Gerätewechsel (lib/stimmMikrofon.ts): Läuft mit bereitem Abdruck ein anderes Mikrofon als beim Einlernen, fragt die
+  // Oberfläche einmal je Gespräch und Gerät, ob neu eingelernt werden soll; nie während W.A.I.S. spricht, nie über einer anderen Meldung.
+  useEffect(() => {
+    const pruefe = () => {
+      const s = wamo.get();
+      const z = stimmMikrofon.current;
+      const geraet = geraetHinweisFaellig(
+        {
+          gemerkt: z.gemerkt,
+          aktuell: s.mikrofon,
+          stimmeBereit: istOnline(s) && s.stimme.status === "bereit",
+          frei: s.error === null,
+          wamoSpricht: s.presence === "speaking",
+          einlernen: s.abdruck !== null,
+        },
+        z.gezeigt,
+      );
+      if (!geraet) return;
+      z.gezeigt.add(geraet);
+      console.info("[WAMO] Anderes Mikrofon als beim Einlernen:", s.mikrofon);
+      setFehler({ art: "hinweis", text: ANDERES_MIKROFON_TEXT, aktion: "neu_einlernen" });
+    };
+    return wamo.subscribe(pruefe);
+  }, []);
+
   // Screen Wake Lock im Browser-Modus während eines Gesprächs (Electron hat powerSaveBlocker)
   useEffect(() => {
     if (window.wamoDesktop || !("wakeLock" in navigator)) return;
@@ -830,6 +866,7 @@ export function useWamo(): WamoAktionen {
       const gen = genRef.current;
       const aktuell = () => genRef.current === gen;
       seen.current = { botOutput: false, userInput: false };
+      stimmMikrofon.current = { gemerkt: stimmMikrofonLesen(stimmSpeicher(), nutzerLesen().id), gezeigt: new Set() };
       wamo.set((s) => ({
         ...s,
         error: null,
@@ -1100,6 +1137,15 @@ export function useWamo(): WamoAktionen {
               }
             } else {
               if (msg.type === "sitzung_beendet") kernEnde.current = msg.grund;
+              // Hinweis bei Gerätewechsel (lib/stimmMikrofon.ts): das Mikrofon beim Einlernen merken, beim Löschen des Abdrucks vergessen.
+              // Vor applyServerMessage, damit die Prüfung im Abo schon den neuen Stand sieht. Ohne Namen der Spur ist das Gerät
+              // unbekannt: dann gilt auch der alte Name nicht mehr.
+              if (msg.type === "stimmabdruck" && (msg.status === "fertig" || msg.status === "geloescht")) {
+                const id = nutzerLesen().id;
+                const gemerkt = msg.status === "fertig" && stimmMikrofonMerken(stimmSpeicher(), id, wamo.get().mikrofon);
+                if (!gemerkt) stimmMikrofonVergessen(stimmSpeicher(), id);
+                stimmMikrofon.current.gemerkt = gemerkt ? stimmMikrofonLesen(stimmSpeicher(), id) : null;
+              }
               applyServerMessage(msg);
               // Testlabor: Durchlauf vom Betreuer beendet, die Seite lädt sich neu (Untertitel und Canvas dürfen nicht bleiben)
               if (msg.type === "labor_durchlauf_ende") neuladenPlanen({ neuladen: () => window.location.reload() });

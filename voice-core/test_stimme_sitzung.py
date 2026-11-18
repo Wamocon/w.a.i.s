@@ -193,12 +193,12 @@ class VorbereitenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s.gate.status, "kaputt")
 
     async def test_persoenliche_schwelle_wird_mit_dem_abdruck_geladen(self):
-        db = FakeDb({USER_A: als_vektor(EIGENER), USER_B: als_vektor(EIGENER)}, schwellen={USER_A: 0.42})
+        db = FakeDb({USER_A: als_vektor(EIGENER), USER_B: als_vektor(EIGENER)}, schwellen={USER_A: 0.32})
         a, _, _, _ = neu(db, user=USER_A)
         b, _, _, _ = neu(db, user=USER_B)
         await asyncio.gather(a.vorbereiten(), b.vorbereiten())
-        self.assertAlmostEqual(a.gate.schwelle_kurz, 0.42)
-        self.assertAlmostEqual(a.gate.schwelle_fuer(1.0), 0.42)
+        self.assertAlmostEqual(a.gate.schwelle_kurz, 0.32)
+        self.assertAlmostEqual(a.gate.schwelle_fuer(1.0), 0.32)
         self.assertIsNone(b.gate.schwelle_kurz)  # je Profil, nie geteilt
         self.assertAlmostEqual(b.gate.schwelle_fuer(1.0), 0.35)
 
@@ -372,9 +372,9 @@ class NachrichtTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(vorher <= zeile[4] <= nachher)  # der Zeitpunkt der Einwilligung (beim Klick), mit Zeitzone
         self.assertIsNotNone(zeile[4].tzinfo)
         self.assertEqual(s.gate.status, "bereit")
-        self.assertEqual(zeile[5], 0.5)  # persönliche Schwelle (gleiche Stücke: die Obergrenze)
-        self.assertEqual(db.schwellen[USER_A], 0.5)
-        self.assertEqual(s.gate.schwelle_kurz, 0.5)
+        self.assertEqual(zeile[5], 0.35)  # persönliche Schwelle (gleiche Stücke: die Obergrenze, nie strenger als die Standardschwelle)
+        self.assertEqual(db.schwellen[USER_A], 0.35)
+        self.assertEqual(s.gate.schwelle_kurz, 0.35)
 
     async def test_einlernen_ohne_migration_0025_speichert_den_abdruck_trotzdem(self):
         ss_speicher._schwelle_spalte(True)

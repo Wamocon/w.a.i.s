@@ -227,6 +227,20 @@ function standardIndex(liste: readonly (Mikrofon & { gruppe?: string })[], alias
   return gleich.length === 1 ? gleich[0] : -1;
 }
 
+/** Vorsatz, den Chrome den Aliasen voranstellt ("Standard - Headset", "Kommunikation - Headset"), in Deutsch und Englisch. */
+const ALIAS_VORSATZ = /^(standard|default|kommunikation|communications)\s*[-–]\s*/i;
+
+/**
+ * Name eines Mikrofons zum Wiedererkennen (Mikrofontest, Hinweis bei Gerätewechsel): Eine Spur des Standardgeräts heißt in Chrome oft
+ * "Standard - <Name>", dasselbe Gerät mit Kennung geöffnet nur "<Name>". Ohne diesen Vorsatz, getrimmt, höchstens 120 Zeichen; null ohne
+ * Namen. Ein Strich im Namen selbst ("Headset - Jabra") bleibt.
+ */
+export function geraeteName(label: string | null | undefined): string | null {
+  if (typeof label !== "string") return null;
+  const name = label.trim().replace(ALIAS_VORSATZ, "").trim().slice(0, 120);
+  return name || null;
+}
+
 /** Gewähltes Gerät, wenn es noch angeschlossen ist; sonst null (dann gilt das Standardgerät). */
 export function startGeraet(liste: Mikrofon[], gewuenscht: string | null): string | null {
   return gewuenscht && liste.some((m) => m.id === gewuenscht) ? gewuenscht : null;

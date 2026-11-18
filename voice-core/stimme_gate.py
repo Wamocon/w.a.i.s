@@ -22,7 +22,8 @@ Kalibrierung vom 17.11.2026 von ihrer Länge ab (schwelle_fuer): bis KURZ_BIS_SE
 LANG_AB_SECS (3 s) WAMO_STIMME_EIGEN_MIN_LANG (0,45), dazwischen linear. Befund dazu: Im Modus streng wurden über 70 % der eigenen Äußerungen
 verworfen, ihre Werte lagen bei 0,4 bis 1,8 s meist bei 0,35 bis 0,60, eine zweite Person bei 0,10 bis 0,30; TitaNet streut unter 2 s stark
 (Literatur: EER 2,4 % bei 3 s, 18,4 % bei 1 s, Schwelle des EER unter 1 s bei etwa 0,30). Hat das Profil eine persönliche Schwelle vom
-Einlernen (speakers.voice_threshold, Migration 0025, stimme_modell.schwelle_einlernen), ersetzt sie die kurze; die lange liegt nie darunter.
+Einlernen (speakers.voice_threshold, Migration 0025, stimme_modell.schwelle_einlernen), ersetzt sie die kurze, aber nur nach unten (seit
+18.11.2026 nie über WAMO_STIMME_EIGEN_MIN_KURZ); die lange liegt nie darunter.
 Das alte WAMO_STIMME_EIGEN_MIN gilt nur noch, wo KURZ oder LANG leer sind (ist nur es gesetzt, also für beide Längen wie bisher).
 WAMO_STIMME_FREMD_MAX (bis hier fremd, 0,3, für alle Längen), WAMO_STIMME_MIN_SECS (kürzere Äußerungen reichen nicht für "eigen", 1 s; sie
 werden mit der kurzen Schwelle bewertet),
@@ -251,10 +252,12 @@ class StimmGate:
 
     def schwelle_fuer(self, secs: float) -> float:
         """Ab diesem Wert gilt eine Äußerung mit secs Sekunden Sprache als die eigene Stimme. Kurz ist die persönliche Schwelle (wenn es
-        eine gibt, nie unter fremd_max) oder eigen_min_kurz, lang eigen_min_lang (nie unter der kurzen); bis KURZ_BIS_SECS gilt die kurze,
-        ab LANG_AB_SECS die lange, dazwischen linear. Unter min_secs (Urteil kurz) gilt immer die kurze."""
+        eine gibt, nie unter fremd_max und nie über eigen_min_kurz) oder eigen_min_kurz, lang eigen_min_lang (nie unter der kurzen); bis
+        KURZ_BIS_SECS gilt die kurze, ab LANG_AB_SECS die lange, dazwischen linear. Unter min_secs (Urteil kurz) gilt immer die kurze.
+        Die persönliche Schwelle senkt die kurze nur (18.11.2026): Bis zum 17.11. rechnete das Einlernen bis 0,50, die eigenen Werte im
+        Gespräch lagen aber bei 0,35 bis 0,60; ein so gespeicherter Wert soll nie strenger wirken als die Schwelle aus der Umgebung."""
         s = self.schwellen
-        kurz = s.eigen_min_kurz if self.schwelle_kurz is None else max(self.schwelle_kurz, s.fremd_max)
+        kurz = s.eigen_min_kurz if self.schwelle_kurz is None else min(max(self.schwelle_kurz, s.fremd_max), s.eigen_min_kurz)
         lang = max(s.eigen_min_lang, kurz)
         if secs < s.min_secs or secs <= KURZ_BIS_SECS:
             return kurz

@@ -290,17 +290,155 @@ class KalibrierungsLogTests(PrueferBasis):
         self.assertAlmostEqual(self.zeilen(info)[0][-1], 0.45)
 
     async def test_persoenliche_schwelle_steht_in_der_zeile(self):
-        self.gate.setze_abdruck(EIGENER, schwelle=0.42)
-        self.modell.rechner.festes_ergebnis = mit_kosinus(0.41)
+        self.gate.setze_abdruck(EIGENER, schwelle=0.32)
+        self.modell.rechner.festes_ergebnis = mit_kosinus(0.31)
         with mock.patch.object(stimme_pruefer.logger, "info") as info:
             urteil = await self.sprechen(8000, 1.2)
-        self.assertEqual((urteil.urteil, urteil.schwelle), (UNKLAR, 0.42))
-        self.assertAlmostEqual(self.zeilen(info)[0][-1], 0.42)
+        self.assertEqual((urteil.urteil, urteil.schwelle), (UNKLAR, 0.32))
+        self.assertAlmostEqual(self.zeilen(info)[0][-1], 0.32)
 
     async def test_fehlgeschlagene_pruefung_hat_keine_schwelle(self):
         self.modell.rechner.embed = mock.Mock(side_effect=RuntimeError("kaputt"))
         urteil = await self.sprechen(8000, 1.2)
         self.assertEqual((urteil.urteil, urteil.wert, urteil.schwelle), (UNKLAR, None, None))
+
+
+class ZuschnittTests(PrueferBasis):
+    """Prüfsegment wie beim Einlernen (18.11.2026, stimme_modell.pruefsegment): Das VAD-Segment hat 0,25 s Vorlauf und 0,1 s Nachlauf, bei
+    0,3 s Sprache war die Hälfte Stille. Geprüft wird jetzt nur der Ton ab der ersten bis zur letzten lauten Stelle, nie weniger als die
+    gemessene Sprache."""
+
+    def setUp(self):
+        super().setUp()
+        self.laengen: list[float] = []
+        rechnen = self.modell.rechner.embed
+
+        def embed(pcm, rate):
+            self.laengen.append(len(pcm) / 2 / rate)
+            return rechnen(pcm, rate)
+
+        self.modell.rechner.embed = embed
+
+    async def stille(self, secs: float):
+        for _ in range(round(secs / 0.02)):
+            self.uhr.t += 0.02
+            await self.v.on_audio(audio(0))
+
+    async def test_vor_und_nachlauf_aus_der_stille_fallen_weg(self):
+        await self.stille(0.5)
+        urteil = await self.sprechen(8000, 0.3)
+        self.assertAlmostEqual(self.laengen[-1], 0.3, delta=0.021)  # vorher 0,3 s Sprache und rund 0,35 s Stille
+        self.assertEqual(urteil.urteil, KURZ)
+
+    async def test_ein_sehr_leises_mikrofon_bleibt_ungekuerzt(self):
+        await self.stille(0.5)
+        await self.sprechen(50, 0.3)  # unter -45 dBFS: nichts ist sicher Sprache, also wird nichts geschnitten
+        self.assertGreater(self.laengen[-1], 0.6)
+
+    async def test_scheitert_der_zuschnitt_wird_ungekuerzt_geprueft(self):
+        """Der Zuschnitt läuft mitten in der Behandlung des VAD-Frames: ein Fehler darf weder ihn noch das Urteil aufhalten."""
+        await self.stille(0.5)
+        with mock.patch.object(stimme_pruefer, "pruefsegment", side_effect=OverflowError("kaputt")):
+            urteil = await self.sprechen(8000, 1.2)
+        self.assertEqual(urteil.urteil, EIGEN)
+        self.assertGreater(self.laengen[-1], 1.4)  # mit Vor- und Nachlauf
+
+    async def test_das_fruehe_urteil_prueft_ebenfalls_ohne_stillen_vorlauf(self):
+        self.v.on_bot_speaking(True)
+        await self.stille(0.5)
+        self.v.on_speech_start(self.uhr.t + 0.2, 0.2)
+        for _ in range(55):
+            self.uhr.t += 0.02
+            await self.v.on_audio(audio(8000))
+            if self.v._frueh_task is not None:
+                await self.v._frueh_task
+        self.assertAlmostEqual(self.laengen[0], 1.0, delta=0.021)  # das Fenster nach einer Sekunde, ohne die 0,25 s Vorlauf
+        self.v.on_speech_stop(self.uhr.t, 0.2)
+        await self.v.urteil_abwarten(5.0)
+
+
+class ZugTests(PrueferBasis):
+    """Evidenz über einen Zug (18.11.2026): Die Segmente eines Zugs werden zusammen geprüft, jedes zählt mit seiner Sprache (ohne Stille,
+    jeder Ton nur einmal). Zusammengeführt wird nur, solange W.A.I.S. nicht spricht, und nur im selben Zug (Satzende, Zugende, Rede von
+    W.A.I.S. und lange Stille trennen)."""
+
+    async def test_die_saetze_eines_zugs_zaehlen_zusammen(self):
+        """Ein Ersatz, dessen Wert mit der Sprache wächst: allein reichen 0,6 s nicht, zusammen mit dem Satz davor schon."""
+
+        class Wachsend(Rechner):
+            def embed(self, pcm, rate):
+                self.aufrufe += 1
+                laut = int((np.frombuffer(pcm, dtype=np.int16) > 0).sum())
+                return mit_kosinus(min(0.9, 0.35 * laut / rate))
+
+        self.modell.rechner = Wachsend()
+        erstes = await self.sprechen(8000, 0.6)
+        self.assertEqual(erstes.urteil, FREMD)  # 0,21: allein klingt es nicht nach der Person
+        zweites = await self.sprechen(8000, 0.6)
+        self.assertEqual((zweites.urteil, round(zweites.secs, 1)), (EIGEN, 1.2))
+        self.v.satz_ende()
+        drittes = await self.sprechen(8000, 0.6)
+        self.assertEqual(drittes.urteil, KURZ)  # neuer Zug: für sich geprüft (erbt eigen vom Satz davor)
+
+    async def test_waehrend_wamo_spricht_wird_nicht_zusammengefuehrt(self):
+        self.v.on_bot_speaking(True)
+        await self.sprechen(8000, 2.0)
+        urteil = await self.sprechen(-8000, 0.5)  # W.A.I.S. spricht noch: der Einwurf zählt für sich
+        self.assertEqual(urteil.urteil, UNKLAR)  # fremd, wegen möglichem Echo nur unklar; vorher erbte er die 2 s davor
+        self.assertEqual(self.gate.grund_der_stimme(), "Stimme nicht sicher erkannt")
+
+    async def test_setzt_wamo_mitten_im_segment_ein_zaehlt_es_fuer_sich(self):
+        await self.sprechen(8000, 2.0)
+        self.v.on_speech_start(self.uhr.t + 0.2, 0.2)
+        for i in range(25):
+            self.uhr.t += 0.02
+            if i == 5:
+                self.v.on_bot_speaking(True)  # W.A.I.S. beginnt zu sprechen, während das Segment läuft
+            await self.v.on_audio(audio(-8000))
+        self.v.on_speech_stop(self.uhr.t, 0.0)
+        urteil = await self.v.urteil_abwarten(5.0)
+        self.assertEqual((urteil.urteil, urteil.ueberlappung), (UNKLAR, True))
+
+    async def test_jeder_ton_zaehlt_im_zug_nur_einmal(self):
+        """Folgt ein Segment sehr knapp, reicht sein Vorlauf in das Segment davor: dieser Ton gehört schon zum Zug."""
+        laengen: list[float] = []
+        rechnen = self.modell.rechner.embed
+
+        def embed(pcm, rate):
+            laengen.append(len(pcm) / 2 / rate)
+            return rechnen(pcm, rate)
+
+        self.modell.rechner.embed = embed
+        self.v.on_speech_start(self.uhr.t + 0.2, 0.2)
+        for _ in range(50):
+            self.uhr.t += 0.02
+            await self.v.on_audio(audio(8000))
+        self.v.on_speech_stop(self.uhr.t, 0.0)
+        await self.v.urteil_abwarten(5.0)
+        self.v.on_speech_start(self.uhr.t + 0.1, 0.1)  # beginnt, wo das erste aufhört: der Vorlauf läge im ersten
+        for _ in range(50):
+            self.uhr.t += 0.02
+            await self.v.on_audio(audio(8000))
+        self.v.on_speech_stop(self.uhr.t, 0.0)
+        urteil = await self.v.urteil_abwarten(5.0)
+        self.assertEqual(urteil.urteil, EIGEN)
+        self.assertAlmostEqual(laengen[-1], 2.0, delta=0.021)  # vorher 2,25 s: 0,25 s doppelt
+
+    async def test_springt_die_uhr_zurueck_geht_kein_ton_verloren(self):
+        """Welcher Ton schon im Zug liegt, zählt die Nummer des Pakets, nicht die Uhr: auch nach einem Sprung zurück kommt Ton an."""
+        laengen: list[float] = []
+        rechnen = self.modell.rechner.embed
+
+        def embed(pcm, rate):
+            laengen.append(len(pcm) / 2 / rate)
+            return rechnen(pcm, rate)
+
+        self.modell.rechner.embed = embed
+        await self.sprechen(8000, 1.0)
+        self.uhr.t -= 5.0  # die Wanduhr wird zurückgestellt
+        urteil = await self.sprechen(8000, 1.0)
+        self.assertEqual(urteil.urteil, EIGEN)
+        self.assertAlmostEqual(laengen[-1], 2.0, delta=0.021)  # beide Segmente; mit der Uhr als Marke fehlte das zweite
 
 
 class UrteilAbwartenTests(PrueferBasis):
