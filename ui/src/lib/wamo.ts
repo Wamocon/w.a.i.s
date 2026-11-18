@@ -1,3 +1,4 @@
+import type { Einreichen } from "./einreichen.ts";
 import type { BotOutputData } from "@pipecat-ai/client-js";
 import type { CanvasItem } from "@/components/Canvas";
 import type { Betriebsart } from "@/lib/betriebsart";
@@ -79,6 +80,8 @@ export type Approval = {
   /** Warnung des Kerns (Mail mit Fremdinhalt im Zug) */
   warnung?: string;
   ablauf?: number;
+  /** Karte "Einreichen" (eigenes GitHub-Token, lib/einreichen.ts) */
+  einreichen?: Einreichen;
 };
 
 /** Ein endgültiger Teil des Nutzerbeitrags aus der Spracherkennung, mit deren Zeitstempel (siehe nutzerTranskript). frist: mit

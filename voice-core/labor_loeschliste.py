@@ -86,6 +86,13 @@ AUSNAHMEN: dict[str, str] = {
     "auftrag_entwuerfe": "Gespeicherte Entwicklungsaufträge (Migration 0026). Für Laborprofile gesperrt: Speichern gibt es nur mit "
                          "DevAgent und Zulassung im Büro, nie im Labor, es entsteht dort keine Zeile. Eine vorhandene Zeile fällt mit "
                          "dem Profil weg (on delete cascade).",
+    "github_zugang": "Persönliches GitHub-Token als Chiffrat (Migration 0027, Plan C). Für Laborprofile gesperrt: labor.py nennt weder die "
+                     "Client-Nachricht github_zugang noch den Pfad /wamo/api/github-zugang in der Erlaubnisliste, github_zugang.py lehnt "
+                     "Laborprofile ab und der Trigger github_zugang_guard lässt für ein Profil mit labor_art keine Zeile zu. Eine vorhandene "
+                     "Zeile fällt mit dem Profil weg (on delete cascade).",
+    "github_rechte": "Vom Admin erlaubte Rechte klassischer GitHub-Tokens je Person (Migration 0027), Konfiguration ohne Gesprächstext. Für "
+                     "Laborprofile gesperrt: die Admin-Route lehnt sie ab, der Trigger github_rechte_guard ebenso. Fällt mit dem Profil weg "
+                     "(on delete cascade); geaendert_von wird beim Löschen des Admin-Profils null.",
 }
 
 #: Spuren außerhalb des Schemas von WAMO (GoTrue, Schema auth): Die Funktion labor_loeschen kann und soll sie nicht anfassen. Sie

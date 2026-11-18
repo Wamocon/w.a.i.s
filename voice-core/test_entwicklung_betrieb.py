@@ -41,14 +41,16 @@ class SchrankenVersionTests(unittest.TestCase):
     def test_genau_eine_zeile_im_muster_des_server_skripts(self):
         quelle = (Path(__file__).parent / "entwicklung_betrieb.py").read_text(encoding="utf-8")
         treffer = [z for z in quelle.splitlines() if re.fullmatch(r"SCHRANKEN_VERSION = [1-9][0-9]*", z)]
-        self.assertEqual(treffer, ["SCHRANKEN_VERSION = 3"])  # 2: Mitglieder und Trennung je Profil (P5), 3: gleichzeitige Aufträge
-        self.assertEqual(eb.SCHRANKEN_VERSION, 3)
+        # 2: Mitglieder und Trennung je Profil (P5), 3: gleichzeitige Aufträge, 4: persönliche GitHub-Zugänge (Plan C)
+        self.assertEqual(treffer, ["SCHRANKEN_VERSION = 4"])
+        self.assertEqual(eb.SCHRANKEN_VERSION, 4)
 
 
 class KonftestTests(unittest.TestCase):
     def test_conftest_neutralisiert_alle_neuen_variablen(self):
         """Eine Variable aus der Umgebung des Entwicklers oder einer .env darf nie in einen Test hineinwirken."""
-        self.assertEqual(len(eb.ALLE_VARIABLEN), 7)
+        self.assertEqual(len(eb.ALLE_VARIABLEN), 8)
+        self.assertIn(eb.ENV_GITHUB, eb.ALLE_VARIABLEN)
         self.assertIn(eb.ENV_HAUS, eb.ALLE_VARIABLEN)
         for name in eb.ALLE_VARIABLEN:
             with self.subTest(name=name):

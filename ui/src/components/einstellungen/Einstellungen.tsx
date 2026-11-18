@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type MouseEvent, type ReactNode } from "react";
 import { GeteiltBereich } from "@/components/Geteilt";
+import { GithubZugang } from "@/components/GithubZugang";
 import { ModellZugang } from "@/components/ModellZugang";
 import { offeneEntscheidungen } from "@/components/kommando/ansicht";
 import {
@@ -33,6 +34,7 @@ import { VerbrauchAbschnitt } from "./Verbrauch";
 import { AenderungenAbschnitt } from "./Aenderungen";
 import { GedaechtnisAbschnitt } from "./Gedaechtnis";
 import { NeueMitglieder } from "./NeueMitglieder";
+import { GithubRechte } from "./GithubRechte";
 import { ErsteSchritteAbschnitt } from "./ErsteSchritte";
 
 /**
@@ -224,6 +226,7 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
                 {wirksam === "konto" && <KontoAbschnitt email={email} onAbmelden={onAbmelden} />}
                 {wirksam === "start" && <ErsteSchritteAbschnitt />}
                 {wirksam === "modellzugang" && <ModellZugang onAnfrage={aktionen.modellzugang} />}
+                {wirksam === "github" && <GithubZugang />}
                 {wirksam === "verbrauch" && <VerbrauchAbschnitt />}
                 {wirksam === "sprache" && (
                   <SpracheAbschnitt
@@ -235,7 +238,12 @@ export function Einstellungen({ aktionen, email, onAbmelden, meldungen }: Props)
                 )}
                 {wirksam === "stimme" && <StimmeAbschnitt aktionen={aktionen.stimmabdruck} />}
                 {wirksam === "gedaechtnis" && <GedaechtnisAbschnitt />}
-                {wirksam === "mitglieder" && <NeueMitglieder />}
+                {wirksam === "mitglieder" && (
+                  <>
+                    <NeueMitglieder />
+                    <GithubRechte />
+                  </>
+                )}
                 {wirksam === "darstellung" && <DarstellungAbschnitt />}
                 {wirksam === "geraete" && <GeraeteAbschnitt onPcSteuerung={aktionen.pcSteuerung} />}
                 {wirksam === "fernzugriff" && (

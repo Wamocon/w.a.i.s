@@ -29,7 +29,7 @@ test("Admin sieht alle Abschnitte, Mitglied und unbekannte Rolle nicht den Verbr
   assert.ok(ids("admin").includes("verbrauch"));
   for (const rolle of ["mitglied", null] as const) {
     assert.ok(!ids(rolle).includes("verbrauch"), `Rolle ${rolle}`);
-    assert.deepEqual(ids(rolle), ["konto", "start", "modellzugang", "sprache", "stimme", "darstellung", "geraete", "teilen", "info"]);
+    assert.deepEqual(ids(rolle), ["konto", "start", "modellzugang", "github", "sprache", "stimme", "darstellung", "geraete", "teilen", "info"]);
   }
 });
 

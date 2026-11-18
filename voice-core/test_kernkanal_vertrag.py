@@ -306,8 +306,9 @@ def _zeilen_im_muster(muster: str, quelle: str) -> list[str]:
 def test_i3_genau_eine_zeile_passt_zum_muster_von_schalter():
     muster = _muster_von_schalter()
     assert muster == "^SCHRANKEN_VERSION = [1-9][0-9]*$"
-    assert _zeilen_im_muster(muster, EB_QUELLE) == ["SCHRANKEN_VERSION = 3"]  # 3: gleichzeitige Aufträge (Dispatcher 9)
-    assert eb.SCHRANKEN_VERSION == 3
+    # 3: gleichzeitige Aufträge (Dispatcher 9), 4: persönliche GitHub-Zugänge (Plan C, Paket K; schalter --github an verlangt sie)
+    assert _zeilen_im_muster(muster, EB_QUELLE) == ["SCHRANKEN_VERSION = 4"]
+    assert eb.SCHRANKEN_VERSION == 4
     assert "\r" not in (VOICE_CORE / "entwicklung_betrieb.py").read_bytes().decode("utf-8"), "ein Zeilenende mit CR bricht das $ im grep"
 
 
@@ -474,7 +475,9 @@ def test_das_dropin_setzt_genau_die_variablen_die_der_kern_liest():
     assert set(namen) == {eb.ENV_SCHALTER, eb.ENV_ORT, eb.ENV_PROFILE, eb.ENV_KOSTEN_AUFTRAG, eb.ENV_KOSTEN_TAG, eb.ENV_MITGLIEDER, eb.ENV_HAUS}
     assert len(namen) == len(set(namen))
     assert "WAMO_ENTWICKLUNG" not in namen and eb.ENV_BEFEHLE not in namen  # Standard aus, nie nebenbei an
-    assert set(eb.ALLE_VARIABLEN) - set(namen) == {eb.ENV_BEFEHLE}
+    # WAMO_ENTWICKLUNG_GITHUB schreibt erst das Skript aus Paket D-a (schalter --github an|aus, C.2.7); bis dahin fehlt die Zeile, der Kern
+    # liest dann aus (Standard). D-a nimmt ENV_GITHUB in die Menge oben auf und streicht ihn hier.
+    assert set(eb.ALLE_VARIABLEN) - set(namen) <= {eb.ENV_BEFEHLE, eb.ENV_GITHUB} and eb.ENV_BEFEHLE not in namen
 
 
 def test_das_dropin_schreibt_den_schalter_fuer_hausmodelle_immer_und_standardmaessig_aus():
@@ -760,6 +763,8 @@ NAMEN_DER_UMSETZUNG = (
 )
 # Variablen, die es schon vor dem Vorhaben gab (stehen in der README und in den .env.example, nicht im Namensvertrag)
 VORHANDENE_VARIABLEN = {"WAMO_BETRIEB", "WAMO_ENTWICKLUNG", "WAMO_ABNAHME_BEFEHLE", "WAMO_CLAUDE_SCHLUESSEL_PROFIL"}
+# Neu mit Plan C (Paket K); die Zeile im Namensvertrag von CLAUDE.md schreibt Paket R (C.9), danach fällt dieser Eintrag weg
+VARIABLEN_BIS_PAKET_R = {"WAMO_ENTWICKLUNG_GITHUB"}
 
 
 # Zugangsart haus (P6b, docs/ausrollen-neue-nutzer.md, Abschnitt 4.7)
@@ -777,7 +782,7 @@ def test_jede_variable_der_neuen_dateien_steht_im_namensvertrag():
                     INFRA / "wamo_job_kern_rauchtest.py", INFRA / "wamo_job_kernkanal.py")
     gefunden = {n for datei in neue_dateien for n in re.findall(r"\bWAMO_[A-Z0-9]+(?:_[A-Z0-9]+)*\b", _text(datei))}
     assert len(gefunden) >= 8
-    fehlen = sorted(n for n in gefunden - VORHANDENE_VARIABLEN if n not in NAMENSVERTRAG)
+    fehlen = sorted(n for n in gefunden - VORHANDENE_VARIABLEN - VARIABLEN_BIS_PAKET_R if n not in NAMENSVERTRAG)
     assert not fehlen, f"nicht im Namensvertrag: {fehlen}"
 
 
@@ -1241,6 +1246,42 @@ def test_c9_das_modul_ist_ohne_nebenwirkung_und_nur_mit_der_standardbibliothek()
             assert isinstance(knoten, (ast.Assign, ast.AnnAssign, ast.ClassDef, ast.FunctionDef)), ast.dump(knoten)
     namen = {n.id for n in ast.walk(baum) if isinstance(n, ast.Name)} | {n.attr for n in ast.walk(baum) if isinstance(n, ast.Attribute)}
     assert not namen & {"subprocess", "socket", "environ", "system", "urlopen", "HTTPSConnection", "popen", "Popen", "exec", "eval"}
+
+
+# ---------------------------------------------------------------- Paket K: die Seite des Kerns gegen die Schnittstelle
+def test_k_der_kern_baut_die_zeilen_die_der_dispatcher_annimmt():
+    import github_auftrag as ga
+
+    for art in ("klassisch", "fein"):
+        zeile = ga.github_zeile(_token(art))
+        assert zeile == _zeile_des_kerns(_token(art)) and len(zeile) <= G.GITHUB_ZEILE_MAX_BYTES
+        assert G.GITHUB_ZEILE_RE.fullmatch(memoryview(zeile)[:-1]) is not None
+    einreichen = json.loads(ga.einreichen_zeile("a" * 40, "b" * 40, ["x"], ["gist", "workflow"]))
+    assert tuple(einreichen) == G.EINREICHEN_FELDER
+    assert einreichen[G.FELD_SCOPES_AUSNAHMEN] == sorted(einreichen[G.FELD_SCOPES_AUSNAHMEN])
+    kopf = ga.kopffelder(("workflow", "gist", "gist", "delete_repo"))
+    assert kopf == {G.FELD_GITHUB: G.GITHUB_PERSOENLICH, G.FELD_SCOPES_AUSNAHMEN: ["gist", "workflow"]}
+    assert ga.EINREICHEN_ZEILE_MAX_BYTES == G.EINREICHEN_ZEILE_MAX_BYTES and ga.GITHUB_ZEILE_MAX_BYTES == G.GITHUB_ZEILE_MAX_BYTES
+
+
+def test_k_ereignisse_zustaende_und_saetze_des_kerns():
+    import github_auftrag as ga
+
+    assert ga.EREIGNISSE_GITHUB == G.EREIGNISSE_GITHUB and ga.AENDERUNG_STATUS == G.AENDERUNG_STATUS
+    assert set(ga.STATUS_KARTE) | set(ga.STATUS_EINREICHEN) | set(ga.STATUS_VERWERFEN) <= set(G.AENDERUNG_STATUS)
+    for befehl in G.BEFEHLE_GITHUB:
+        assert dev_agent.ssh_argv([befehl, "0" * 16, KENNUNG])[-1] == f"{befehl} {'0' * 16} {KENNUNG}"
+    for code in K.EINREICHEN_GRUENDE:
+        assert ga.fehler_satz({"grund": code}) == eb.EINREICHEN_SAETZE[code]
+    for code in K.GITHUB_GRUENDE:
+        assert ga.start_abgelehnt_satz(code) == eb.GITHUB_SAETZE[code]
+
+
+@pytest.mark.parametrize("scopes, ausnahmen, erwartet", SCOPE_FAELLE)
+def test_k_die_pruefung_beim_speichern_folgt_der_wertetabelle(scopes, ausnahmen, erwartet):
+    import github_zugang as gz
+
+    assert (gz.scopes_problem(scopes, ausnahmen) is None) == (erwartet is None)
 
 
 @pytest.mark.parametrize("scopes, ausnahmen, erwartet", SCOPE_FAELLE)

@@ -208,6 +208,20 @@ def ping_auswerten(zeile: bytes, prozess_exit: int, lokal: str | None) -> tuple[
     return None, True
 
 
+GITHUB_MIN_VERSION = 10  # Dispatcher mit dem persönlichen GitHub-Weg (Plan C, C.2.1)
+
+
+def ping_github(zeile: bytes, prozess_exit: int) -> bool:
+    """Meldet der Dispatcher den persönlichen GitHub-Weg (Plan C, C.2.1)? Nur bei ok, einer Version ab GITHUB_MIN_VERSION und
+    "persoenlich": true; jede andere Antwort heißt nein (fail closed)."""
+    daten = _objekt(zeile, PING_MAX_BYTES) if prozess_exit == 0 else None
+    if daten is None or daten.get("ok") is not True or daten.get("persoenlich") is not True:
+        return False
+    version = daten.get("version")
+    return (isinstance(version, str) and version.isascii() and version.isdigit() and len(version) <= 4
+            and int(version) >= GITHUB_MIN_VERSION)
+
+
 @cache
 def lokale_pruefsumme() -> str | None:
     """sha256 der lokalen Datei abnahme_befehl.py (so rechnet auch der Dispatcher: Bytes der Kopie in /opt/wamo/waechter)."""
@@ -313,6 +327,8 @@ class DispatcherPing:
         self._schluessel: str | None = "nicht_erreichbar"
         self._bis = float("-inf")
         self._zuletzt_moeglich = False
+        self._github = False  # die letzte eindeutige Antwort meldete den persönlichen GitHub-Weg (Plan C)
+        self._github_holen = False
         self._sperre = asyncio.Lock()
 
     def _frisch(self) -> bool:
@@ -327,6 +343,11 @@ class DispatcherPing:
     def angeboten(self) -> bool:
         return self._zuletzt_moeglich
 
+    def github_persoenlich(self) -> bool:
+        """Bietet der Dispatcher nach einer frischen Antwort den persönlichen GitHub-Weg (Version 10, persoenlich true)? Ohne frische
+        Antwort nein: Dann schickt der Kern nie das Kopffeld github."""
+        return self._frisch() and self._github
+
     async def auffrischen(self) -> None:
         if self._frisch():
             return
@@ -336,6 +357,7 @@ class DispatcherPing:
             schluessel, eindeutig = await self._holen()
             self._schluessel = schluessel
             self._bis = self._uhr() + (self._gueltig_s if eindeutig else self._fehler_gueltig_s)
+            self._github = eindeutig and self._github_holen
             if eindeutig:
                 self._zuletzt_moeglich = schluessel is None
             logger.info("Abnahme auf Sokrates-2: ping, {}", "pruefen möglich" if schluessel is None else PING_GRUENDE[schluessel])
@@ -350,9 +372,11 @@ class DispatcherPing:
             ende = loop.time() + self._frist_s
             roh = await asyncio.wait_for(proc.stdout.readline(), self._frist_s)
             code = await asyncio.wait_for(proc.wait(), max(0.001, ende - loop.time()))
+            self._github_holen = ping_github(roh, code)
             return ping_auswerten(roh, code, self._lokal())
         except Exception as e:  # noqa: BLE001 (Zeitüberschreitung, ssh fehlt, Zeile zu lang: nicht möglich, nie eine Ausnahme)
             logger.warning("Abnahme auf Sokrates-2: ping gescheitert ({})", type(e).__name__)
+            self._github_holen = False
             return "nicht_erreichbar", False
         finally:
             if proc is not None:

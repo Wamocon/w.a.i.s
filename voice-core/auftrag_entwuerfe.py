@@ -83,6 +83,8 @@ MARKE = "[entfernt]"
 _TOKEN_RE = re.compile(
     r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}"
     r"|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})")
+# schluessel.schwaerzen kürzt GitHub-Tokens schon auf ihr Präfix (ghp_…); auch dieser Rest wird zur MARKE
+_GESCHWAERZT_RE = re.compile("(?<![A-Za-z0-9_])(?:gh[pousr]_|github_pat_)\u2026")
 _URL_ZUGANG_RE = re.compile(r"(://[^/\s:@]+:)[^/\s@]+(@)")
 _BEARER_RE = re.compile(r"(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}", re.IGNORECASE)
 
@@ -90,7 +92,7 @@ _BEARER_RE = re.compile(r"(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}", re.IGNORECASE)
 def geheimnisse_entfernen(text: str) -> str:
     """Text ohne Zugangswerte (siehe oben) und ohne NUL-Zeichen (die Datenbank nimmt sie nicht an)."""
     text = schwaerzen(str(text or "")).replace("\x00", "")
-    text = _TOKEN_RE.sub(MARKE, text)
+    text = _GESCHWAERZT_RE.sub(MARKE, _TOKEN_RE.sub(MARKE, text))
     text = _URL_ZUGANG_RE.sub(lambda m: f"{m.group(1)}{MARKE}{m.group(2)}", text)
     return _BEARER_RE.sub(lambda m: f"{m.group(1)}{MARKE}", text)
 

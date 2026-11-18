@@ -1,4 +1,4 @@
-"""Verschlüsselung der eigenen Claude-Schlüssel je Profil (AES-256-GCM) und Schwärzen in Logs.
+"""Verschlüsselung der eigenen Claude-Schlüssel und GitHub-Tokens je Profil (AES-256-GCM) und Schwärzen in Logs.
 
 Der Hauptschlüssel WAMO_SCHLUESSEL_KEK (32 Byte, Base64url) liegt nur in der Umgebung des Kerns (core.env bzw.
 .env des Kerns), nie in der Datenbank. Ein Chiffrat sieht so aus:
@@ -7,7 +7,8 @@ Der Hauptschlüssel WAMO_SCHLUESSEL_KEK (32 Byte, Base64url) liegt nur in der Um
 
 Zusätzliche Daten (AAD) sind die Profil-ID und der Zweck (API-Schlüssel oder Claude-Code-Token): ein Chiffrat aus
 der Zeile eines anderen Profils oder aus der Spalte des anderen Zwecks lässt sich nicht entschlüsseln, auch nicht von
-jemandem mit Schreibrecht auf die Tabelle. Für einen Wechsel des Hauptschlüssels
+jemandem mit Schreibrecht auf die Tabelle. Der persönliche GitHub-Zugang (Plan C, Migration 0027, github_zugang.py) hat
+einen eigenen Zweck mit der AAD wamo-github-token:<user_id>. Für einen Wechsel des Hauptschlüssels
 liest WAMO_SCHLUESSEL_KEK_ALT (kommagetrennt) die alten Chiffrate weiter; neue entstehen immer mit dem aktuellen.
 
 Kein Text dieses Moduls (Fehler, Logs) enthält je einen Schlüssel; Fehler nennen nur die Art des Problems.
@@ -36,11 +37,15 @@ _AAD_PRAEFIX = b"wamo-claude-schluessel:"
 # als das des anderen entschlüsseln (auch nicht, wenn jemand mit Schreibrecht die Spalten vertauscht).
 SCHLUESSEL = "schluessel"  # Anthropic-API-Schlüssel (Gespräch, bezahlt nach Verbrauch)
 CODE_TOKEN = "codetoken"  # Claude-Code-Token aus `claude setup-token` (nur Entwicklungsaufträge)
-_AAD_ZWECK = {SCHLUESSEL: _AAD_PRAEFIX, CODE_TOKEN: b"wamo-claude-code-token:"}
+GITHUB = "github"  # persönliches GitHub-Token (Plan C, Tabelle github_zugang), nie in der Sandbox
+_AAD_ZWECK = {SCHLUESSEL: _AAD_PRAEFIX, CODE_TOKEN: b"wamo-claude-code-token:", GITHUB: b"wamo-github-token:"}
 _FORMAT = re.compile(r"sk-ant-[A-Za-z0-9_-]{20,250}")
 _TOKEN_FORMAT = re.compile(r"sk-ant-oat\d{2}-[A-Za-z0-9_-]{20,400}")
 # Alles, was wie ein Anthropic-Schlüssel aussieht, in jeder Log-Zeile schwärzen (auch Teile ab 8 Zeichen)
 _IM_TEXT = re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}")
+# Dasselbe für GitHub-Tokens (klassisch ghp_, OAuth gho_, Benutzer ghu_, Server ghs_, Erneuerung ghr_, fein-granular github_pat_), ab 8
+# Zeichen nach dem Präfix und nur am Wortanfang (ghost_writer bleibt stehen)
+_GITHUB_IM_TEXT = re.compile(r"(?<![A-Za-z0-9_])(gh[pousr]_|github_pat_)[A-Za-z0-9_]{8,}")
 
 
 class SchluesselFehler(Exception):
@@ -145,5 +150,11 @@ def ende(schluessel: str) -> str:
 
 
 def schwaerzen(text: str) -> str:
-    """Ersetzt alles, was wie ein Anthropic-Schlüssel aussieht (für Logs und Fehlertexte)."""
-    return _IM_TEXT.sub("sk-ant-…", text) if text and "sk-ant-" in text else text
+    """Ersetzt alles, was wie ein Anthropic-Schlüssel oder ein GitHub-Token aussieht (für Logs und Fehlertexte)."""
+    if not text:
+        return text
+    if "sk-ant-" in text:
+        text = _IM_TEXT.sub("sk-ant-…", text)
+    if "gh" in text or "github_pat_" in text:  # "github" selbst enthält kein "gh"
+        text = _GITHUB_IM_TEXT.sub(lambda m: m.group(1) + "…", text)
+    return text
