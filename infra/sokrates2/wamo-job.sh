@@ -510,6 +510,8 @@ SETENV_SCHRITT=(
   --setenv GIT_CONFIG_NOSYSTEM 1 --setenv GIT_CONFIG_GLOBAL /dev/null --setenv GIT_TERMINAL_PROMPT 0 --setenv GIT_OPTIONAL_LOCKS 0
   --setenv GIT_CEILING_DIRECTORIES /srv/wamo/projekte --setenv WAMO_MODUS "$MODUS"
   --unsetenv XDG_RUNTIME_DIR
+  # INVOCATION_ID setzt systemd-run für jede Einheit; kein Geheimnis, aber die Schritte bekommen nur die Namen oben (Rauchtest, Befund 18.11.2026)
+  --unsetenv INVOCATION_ID
 )
 case "$MODUS" in
   lauf) ARGS+=("${SETENV_LAUF[@]}") ;;
