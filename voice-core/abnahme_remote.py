@@ -222,6 +222,24 @@ def ping_github(zeile: bytes, prozess_exit: int) -> bool:
             and int(version) >= GITHUB_MIN_VERSION)
 
 
+KANAL_ARTEN_MAX = 40  # höchstens so viele Arten aus kernkanal.arten (der Dispatcher kennt weniger)
+
+
+def ping_kanal_arten(zeile: bytes, prozess_exit: int) -> tuple[str, ...] | None:
+    """Die Arten, die der Kern-Kanal erlaubt (kernkanal.arten der ping-Antwort, I7), in der gemeldeten Reihenfolge ohne Doppelte. None heißt
+    unbekannt (kein ok, kein Objekt kernkanal, keine Liste aus gültigen Namen). Nur ein Hinweis für das Sprachmodell vor der Karte
+    (Befund 18.11.2026: eine Karte mit einer Art, die der Kanal abweist); entscheiden tut beim Start weiter der Dispatcher."""
+    daten = _objekt(zeile, PING_MAX_BYTES) if prozess_exit == 0 else None
+    kanal = daten.get("kernkanal") if daten is not None and daten.get("ok") is True else None
+    arten = kanal.get("arten") if isinstance(kanal, dict) else None
+    if not isinstance(arten, list) or len(arten) > KANAL_ARTEN_MAX:
+        return None
+    if not all(isinstance(a, str) and a.isascii() and 2 <= len(a) <= 30 and a[0].isalpha() and a.islower()
+               and a.replace("_", "").isalpha() for a in arten):
+        return None
+    return tuple(dict.fromkeys(arten))
+
+
 @cache
 def lokale_pruefsumme() -> str | None:
     """sha256 der lokalen Datei abnahme_befehl.py (so rechnet auch der Dispatcher: Bytes der Kopie in /opt/wamo/waechter)."""
@@ -329,6 +347,8 @@ class DispatcherPing:
         self._zuletzt_moeglich = False
         self._github = False  # die letzte eindeutige Antwort meldete den persönlichen GitHub-Weg (Plan C)
         self._github_holen = False
+        self._arten: tuple[str, ...] | None = None  # kernkanal.arten der letzten eindeutigen Antwort
+        self._arten_holen: tuple[str, ...] | None = None
         self._sperre = asyncio.Lock()
 
     def _frisch(self) -> bool:
@@ -348,6 +368,11 @@ class DispatcherPing:
         Antwort nein: Dann schickt der Kern nie das Kopffeld github."""
         return self._frisch() and self._github
 
+    def kanal_arten(self) -> tuple[str, ...] | None:
+        """Die Arten, die der Kern-Kanal nach einer frischen Antwort erlaubt; ohne frische oder lesbare Antwort None (dann entscheidet
+        allein der Dispatcher beim Start)."""
+        return self._arten if self._frisch() else None
+
     async def auffrischen(self) -> None:
         if self._frisch():
             return
@@ -358,6 +383,7 @@ class DispatcherPing:
             self._schluessel = schluessel
             self._bis = self._uhr() + (self._gueltig_s if eindeutig else self._fehler_gueltig_s)
             self._github = eindeutig and self._github_holen
+            self._arten = self._arten_holen if eindeutig else None
             if eindeutig:
                 self._zuletzt_moeglich = schluessel is None
             logger.info("Abnahme auf Sokrates-2: ping, {}", "pruefen möglich" if schluessel is None else PING_GRUENDE[schluessel])
@@ -373,10 +399,12 @@ class DispatcherPing:
             roh = await asyncio.wait_for(proc.stdout.readline(), self._frist_s)
             code = await asyncio.wait_for(proc.wait(), max(0.001, ende - loop.time()))
             self._github_holen = ping_github(roh, code)
+            self._arten_holen = ping_kanal_arten(roh, code)
             return ping_auswerten(roh, code, self._lokal())
         except Exception as e:  # noqa: BLE001 (Zeitüberschreitung, ssh fehlt, Zeile zu lang: nicht möglich, nie eine Ausnahme)
             logger.warning("Abnahme auf Sokrates-2: ping gescheitert ({})", type(e).__name__)
             self._github_holen = False
+            self._arten_holen = None
             return "nicht_erreichbar", False
         finally:
             if proc is not None:
