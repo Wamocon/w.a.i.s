@@ -99,7 +99,8 @@ def test_die_schritte_verlangen_keine_approvals_json_der_lauf_schon():
 def test_der_rauchtest_spielt_den_echten_ablauf_ohne_approvals_json_durch():
     rauchtest = lies("wamo_job_rauchtest.py")
     teil = rauchtest[rauchtest.index("def persoenlicher_durchlauf"):rauchtest.index("def helfer_probe")]
-    assert "D.vorbereiten(jobdir, job, PROJEKT, \"umsetzung\")" in teil and "neuer_auftrag(" not in teil
+    assert 'D.vorbereiten(jobdir, job, PROJEKT, "umsetzung", DURCHLAUF_REPO, "kern", DURCHLAUF_PROFIL, D.GITHUB_WEG)' in teil
+    assert "neuer_auftrag(" not in teil
     # Reihenfolge wie github_vorlauf und github_nachlauf: klon vor lauf_vorbereiten, laufende danach
     assert teil.index('D.sandbox_schritt("klon"') < teil.index("D.lauf_vorbereiten(") < teil.index("G.laufende(")
     assert "persoenlicher_weg()\n            persoenlicher_durchlauf()" in rauchtest

@@ -1370,6 +1370,7 @@ def persoenlicher_weg() -> None:
 
 
 DURCHLAUF_REPO = "rauchtest-wamo/durchlauf"
+DURCHLAUF_PROFIL = "0000abcd"  # Kurzkennung eines Profils (8 Hexzeichen), kein echtes Profil
 
 
 def _git_lokal(*argumente: str, cwd: Path | None = None) -> str:
@@ -1394,7 +1395,7 @@ def persoenlicher_durchlauf() -> None:
     jobdir = D.job_ordner(job)
     quelle = Path(tempfile.mkdtemp(prefix="wamo-durchlauf-", dir=str(D.HEIM)))
     try:
-        D.vorbereiten(jobdir, job, PROJEKT, "umsetzung")
+        D.vorbereiten(jobdir, job, PROJEKT, "umsetzung", DURCHLAUF_REPO, "kern", DURCHLAUF_PROFIL, D.GITHUB_WEG)  # wie cmd_start
         pruefe("Durchlauf: vor dem Klon gibt es keine approvals.json (wie im echten Start)",
                not os.path.lexists(jobdir / "zustand" / "approvals.json"))
         _git_lokal("init", "-q", "-b", "main", str(quelle))
@@ -1426,7 +1427,7 @@ def persoenlicher_durchlauf() -> None:
         _git_lokal("commit", "-q", "-m", "HALLO.md anlegen", cwd=PROJ)
         for entfernt in D.projekt_entschaerfen(PROJ):  # wie github_nachlauf vor der Logik
             D.log(f"entschärft {job} {PROJEKT}: {entfernt}")
-        daten = G.laufende(w, job=job, projekt=PROJEKT, art="umsetzung", profil="0000abcd", auftrag="Rauchtest Durchlauf", lauf="fertig")
+        daten = G.laufende(w, job=job, projekt=PROJEKT, art="umsetzung", profil=DURCHLAUF_PROFIL, auftrag="Rauchtest Durchlauf", lauf="fertig")
         pfade = [e.get("pfad") for e in daten.get("liste") or [] if isinstance(e, dict)]
         pruefe("Durchlauf: ausgabe, pruefung und Regeln ergeben einen Kandidaten (bereit, genau HALLO.md)",
                daten.get("status") == "bereit" and daten.get("dateien") == 1 and pfade == ["HALLO.md"],
