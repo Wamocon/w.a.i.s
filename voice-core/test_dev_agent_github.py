@@ -53,6 +53,8 @@ class GithubFlow(tb.BueroFlow):
         self.ausnahmen = ("workflow", "gist")
         self.konto = "person-eins"
         self.zugang_wert = TOKEN
+        self.einreichen_tor: asyncio.Event | None = None  # gesetzt: der Aufruf einreichen wartet, bis der Test ihn freigibt
+        self.zeichen_beim_ersten_await: list[bool] = []
 
         class MitEingabe(sk.FakeProc):
             def __init__(self, test, befehl, *a, **kw):
@@ -61,6 +63,8 @@ class GithubFlow(tb.BueroFlow):
 
             async def communicate(self, input=None):
                 self._test.eingaben[self._befehl] = input or b""
+                if self._test.einreichen_tor is not None:
+                    await self._test.einreichen_tor.wait()
                 return await super().communicate(input)
 
         async def fake_exec(*argv, **kwargs):
@@ -83,6 +87,7 @@ class GithubFlow(tb.BueroFlow):
         self.patches[2].start()
 
         async def konto_bereit(uid):
+            self.zeichen_beim_ersten_await.extend(j.einreichen_laeuft for j in self.agent._jobs.values() if j.aenderung is not None)
             return self.konto
 
         async def zugang_fuer(uid):
@@ -311,15 +316,37 @@ class EinreichenTests(GithubFlow):
         self.assertEqual(self.remote("einreichen"), [])
 
     async def test_zwei_schnelle_klicks_reichen_nur_einmal_ein(self):
+        """Deterministisch, ohne Wettlauf der Ereignisschleife: der erste Klick hängt im Aufruf einreichen fest (Tor), während zweiter Klick
+        und Verwerfen kommen. Beide bekommen den Satz "läuft schon", erst nach dem Tor endet der erste."""
         job = await self.bereit()
         self.einreichen_ausgabe = [ereignis("eingereicht", job=job.id, zweig=f"wamo/{job.id}", pr=7,
                                             adresse="https://github.com/acme/testrepo/pull/7")]
         daten = {"job": job.id, "commit_id": COMMIT, "tree_id": TREE, "bestaetigt": ["package.json"]}
-        await asyncio.gather(self.agent.on_client_message("einreichen", daten), self.agent.on_client_message("einreichen", dict(daten)),
-                             self.agent.on_client_message("verwerfen", {"job": job.id}))
+        self.einreichen_tor = asyncio.Event()
+        erster = asyncio.create_task(self.agent.on_client_message("einreichen", daten))
+        await self.warte_auf(lambda: "einreichen" in self.eingaben, "erster Klick am Dispatcher")
+        self.assertTrue(job.einreichen_laeuft)
+        vorher = len(self.nachrichten("freigaben"))
+        await self.agent.on_client_message("einreichen", dict(daten))
+        await self.agent.on_client_message("verwerfen", {"job": job.id})
+        neu = [m["items"][0]["einreichen"].get("fehler") for m in self.nachrichten("freigaben")[vorher:]]
+        self.assertEqual(neu, [ga.SATZ_LAEUFT, ga.SATZ_LAEUFT])
+        self.einreichen_tor.set()
+        await erster
         self.assertEqual(len(self.remote("einreichen")), 1)
         self.assertEqual(self.remote("verwerfen"), [])
-        self.assertIn(ga.SATZ_LAEUFT, [m["items"][0]["einreichen"].get("fehler") for m in self.nachrichten("freigaben")])
+        self.assertEqual(job.aenderung.status, "eingereicht")
+        self.assertFalse(job.einreichen_laeuft)
+
+    async def test_das_zeichen_steht_vor_dem_ersten_await(self):
+        """Die Sperre ist dicht, auch wenn die Ereignisschleife nie zwischen zwei Klicks wechselt: einreichen_laeuft ist schon gesetzt, wenn
+        das erste await (Abgleich des Kontos) läuft, und nach dem Ende wieder frei."""
+        job = await self.bereit()
+        self.einreichen_ausgabe = [ereignis("eingereicht", job=job.id, zweig=f"wamo/{job.id}", pr=7,
+                                            adresse="https://github.com/acme/testrepo/pull/7")]
+        await self.agent.on_client_message("einreichen", {"job": job.id, "commit_id": COMMIT, "tree_id": TREE,
+                                                          "bestaetigt": ["package.json"]})
+        self.assertEqual(self.zeichen_beim_ersten_await, [True])
         self.assertFalse(job.einreichen_laeuft)
 
     async def test_token_eines_anderen_kontos_reicht_nicht_ein(self):
