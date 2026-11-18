@@ -79,7 +79,9 @@ do $$ begin
                                   where user_id = '00000000-0000-4000-8000-0000000025a1'), null::real, 'ersetzt durch NULL');
   -- die Grenzen 0,2 und 0,8 gelten mit, alles außerhalb lehnt die Datenbank ab
   update __SCHEMA__.speakers set voice_threshold = 0.2 where user_id = '00000000-0000-4000-8000-0000000025a1';
-  update __SCHEMA__.speakers set voice_threshold = 0.8 where user_id = '00000000-0000-4000-8000-0000000025a1';
+  -- Knapp unter dem Rand: real 0.8 ist als Gleitkommazahl 0,800000012 und liegt damit über der Grenze 0.8 der Prüfregel (Befund 18.11.2026,
+  -- erster Lauf am Server). Der Kern rechnet die Schwelle ohnehin nur zwischen 0,30 und 0,35.
+  update __SCHEMA__.speakers set voice_threshold = 0.79 where user_id = '00000000-0000-4000-8000-0000000025a1';
   update __SCHEMA__.speakers set voice_threshold = 0.35 where user_id = '00000000-0000-4000-8000-0000000025a2';
   perform wamo_testhilfe.gleich((select voice_threshold from __SCHEMA__.speakers
                                   where user_id = '00000000-0000-4000-8000-0000000025a2'), 0.35::real, 'Bestand nachgetragen');
