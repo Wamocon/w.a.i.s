@@ -83,6 +83,9 @@ AUSNAHMEN: dict[str, str] = {
     "release_freigaben": "Protokoll der Selbständerung, nur für Admins, nur anfügbar (Trigger). Gleiche Begründung.",
     "release_ereignisse": "Hash-Kette des Release-Protokolls, nur anfügbar. Gleiche Begründung.",
     "rd_sitzungen": "Protokoll des Remote Desktop, für Laborprofile gesperrt; on delete restrict stoppt laut.",
+    "auftrag_entwuerfe": "Gespeicherte Entwicklungsaufträge (Migration 0026). Für Laborprofile gesperrt: Speichern gibt es nur mit "
+                         "DevAgent und Zulassung im Büro, nie im Labor, es entsteht dort keine Zeile. Eine vorhandene Zeile fällt mit "
+                         "dem Profil weg (on delete cascade).",
 }
 
 #: Spuren außerhalb des Schemas von WAMO (GoTrue, Schema auth): Die Funktion labor_loeschen kann und soll sie nicht anfassen. Sie
