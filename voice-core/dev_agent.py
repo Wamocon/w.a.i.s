@@ -90,9 +90,11 @@ import entwicklung_betrieb
 import github_auftrag
 import kontingent as kt
 import pc_host
+import selbstauftraege as sa
 from dev_agent_github import GithubWeg
 from dev_agent_regeln import (  # noqa: F401 (alle Namen bleiben über dev_agent erreichbar: bot.py, Tests)
     DENY_RULES, JOB_ENV_NAMES, JOB_ENV_PREFIXES, REMOTE_RULES, RULES_TEMPLATE, job_env, rules_for)
+from dev_agent_selbst import SelbstWeg
 from dev_agent_weg import (  # noqa: F401 (wie oben)
     HAUS_NICHT_BEREIT_STATUS, REMOTE_ARG_RE, REMOTE_ENDE_STATUS, REMOTE_EREIGNIS_STATUS, REMOTE_EXIT_STATUS, SSH_KNOWN_HOSTS_STANDARD, SSH_ZIEL_RE,
     SSH_ZIEL_STANDARD, _lesbar, remote_status, ssh_argv, ssh_known_hosts, ssh_problem, ssh_schluessel, ssh_ziel)
@@ -285,7 +287,7 @@ def repo_pruefen(value: object) -> str:
     if len(repo) > 140 or not REPO_RE.fullmatch(repo) or repo.count("/") != 1 or name in (".", ".."):
         raise ValueError("Repo: Form owner/name, nur A-Z, a-z, 0-9, Punkt, Unterstrich und Bindestrich")
     if ist_eigenes_repo(name):  # jeder Name des eigenen Repos (wamo, w.a.i.s), in jeder Schreibweise
-        raise ValueError("Das WAMO-Repo selbst ist für Aufträge gesperrt")
+        raise ValueError("Das WAMO-Repo selbst ist für Aufträge gesperrt." + sa.HINWEIS_EIGENES_REPO)
     return repo
 
 
@@ -301,7 +303,7 @@ def repo_aus_auftrag(auftrag: str) -> str | None:
             name = name[:-4]
         if ist_eigenes_repo(name):  # nie stillschweigend übergehen: sonst bekäme der Auftrag ein Token ohne Repo
             raise ValueError("Der Auftrag nennt das WAMO-Repo, das für Aufträge gesperrt ist; bitte das Repo, "
-                             "an dem gearbeitet wird, ausdrücklich im Feld repo angeben")
+                             "an dem gearbeitet wird, ausdrücklich im Feld repo angeben." + sa.HINWEIS_EIGENES_REPO)
         try:
             repo = repo_pruefen(f"{owner}/{name}")
         except ValueError:
@@ -336,7 +338,7 @@ def project_slug(name: object) -> str:
     if not PROJECT_NAME.fullmatch(slug) or "--" in slug:
         raise ValueError("Projektname: 3 bis 50 Zeichen, nur a-z, 0-9 und Bindestrich")
     if ist_eigenes_repo(slug):
-        raise ValueError("Das WAMO-Repo selbst ist für Aufträge gesperrt")
+        raise ValueError("Das WAMO-Repo selbst ist für Aufträge gesperrt." + sa.HINWEIS_EIGENES_REPO)
     return slug
 
 
@@ -514,7 +516,7 @@ class Job:
         self.dir = JOBS_DIR / self.id
 
 
-class DevAgent(GithubWeg):
+class DevAgent(GithubWeg, SelbstWeg):
     """Ein Objekt pro Gespräch. Braucht den PipelineTask, um Karten, Canvas und Meldungen zu senden.
     vorgaenge: Registry der Sitzung (vorgaenge.py); jeder Auftrag erscheint dort als Vorgang.
     beurteiler: beurteilt Aussagekriterien der Abnahme (abnahme.llm_beurteiler); ohne ihn gibt es nur Befehlskriterien.
@@ -528,12 +530,14 @@ class DevAgent(GithubWeg):
     Identität). Im Büro (pc_host.buero) wirft der Konstruktor ohne gültige Zulassung, _vorbereiten, _auftrag_start und _freigabe
     prüfen sie erneut. Außerhalb des Büros hat der Wert keine Wirkung.
     entwuerfe: Speicher der für später gespeicherten Aufträge (auftrag_entwuerfe.py); Standard aus dem Gedächtnis der Sitzung, ohne
-    Datenbank keiner (dann fehlen Knopf, Liste und die beiden Werkzeuge)."""
+    Datenbank keiner (dann fehlen Knopf, Liste und die beiden Werkzeuge).
+    selbst: Speicher des Rückstands an Aufträgen an W.A.I.S. selbst (selbstauftraege.py, nur für Admins, dev_agent_selbst.py); Standard aus
+    dem Gedächtnis der Sitzung, ohne Datenbank keiner. ist_fremd (nach dem Anlegen vom Bot gesetzt): war in diesem Zug Fremdinhalt?"""
 
     def __init__(self, memory, auftraggeber: str, ort: str | None = None, vorgaenge: Vorgaenge | None = None,
                  beurteiler: abnahme.Beurteiler | None = None, befehl_ausfuehrer: abnahme.Ausfuehrer | None = None,
                  dispatcher_ping: abnahme_remote.DispatcherPing | None = None, zulassung: BueroZulassung | None = None,
-                 haus: bool = False, entwuerfe: ae.EntwurfSpeicher | None = None):
+                 haus: bool = False, entwuerfe: ae.EntwurfSpeicher | None = None, selbst: sa.SelbstSpeicher | None = None):
         # Hausmodelle für diese Sitzung (bot.py entscheidet einmal: Quelle haus); nur ein echtes True, nie ein Wert
         self._haus = haus is True
         if pc_host.buero():
@@ -579,6 +583,8 @@ class DevAgent(GithubWeg):
         self._entwuerfe = entwuerfe if entwuerfe is not None else ae.fuer(memory)  # für später gespeicherte Aufträge, je Profil
         self._speichert: set[str] = set()  # Karten, die gerade gespeichert werden (gesperrt für Start und zweites Speichern)
         self._geladen: dict[str, str] = {}  # Entwurf -> Karte dieser Sitzung (Laden legt keine zweite offene Karte an)
+        self._selbst = selbst if selbst is not None else sa.fuer(memory)  # Rückstand an Aufträgen an W.A.I.S. selbst (nur Admins)
+        self.ist_fremd = lambda: False  # optional: der Bot setzt hier "war in diesem Zug Fremdinhalt" (turn.tainted)
 
     def _kanal_sperre_satz(self) -> str | None:
         """Büro: Hat der Kanal vor weniger als KANAL_SPERRE_SECS einen Auftrag aus einem dauerhaften Grund abgewiesen (geschlossen,
@@ -724,6 +730,8 @@ class DevAgent(GithubWeg):
             ),
             # Für später speichern und auflisten (auftrag_entwuerfe.py), nur mit Speicher; Laden geht nur in der Oberfläche
             *((ae.SCHEMA_SPEICHERN, ae.SCHEMA_GESPEICHERT) if self._entwuerfe is not None else ()),
+            # Aufträge an W.A.I.S. selbst (selbstauftraege.py): nur Admins mit Speicher, nichts davon führt der Kern aus
+            *((sa.SCHEMA_SPEICHERN, sa.SCHEMA_ZEIGEN, sa.SCHEMA_VERWERFEN) if self.selbst_aktiv() else ()),
         ]
 
     def _befehle_moeglich(self) -> bool:
@@ -791,6 +799,10 @@ class DevAgent(GithubWeg):
         if self._entwuerfe is not None:  # beide laufen wie jedes Werkzeug durch das Stimm-Gate (stimme_gate.werkzeuge_absichern)
             llm.register_function(ae.SCHEMA_SPEICHERN.name, self._werkzeug_speichern)
             llm.register_function(ae.SCHEMA_GESPEICHERT.name, self._werkzeug_gespeichert)
+        if self.selbst_aktiv():  # wie jedes Werkzeug durch das Stimm-Gate
+            llm.register_function(sa.SCHEMA_SPEICHERN.name, self._werkzeug_selbst_speichern)
+            llm.register_function(sa.SCHEMA_ZEIGEN.name, self._werkzeug_selbst_zeigen)
+            llm.register_function(sa.SCHEMA_VERWERFEN.name, self._werkzeug_selbst_verwerfen)
 
     async def _send(self, data: dict) -> None:
         if self._task:
@@ -922,6 +934,8 @@ class DevAgent(GithubWeg):
             await self._kontingent_senden()
         elif msg_type == ae.NACHRICHT:  # für später gespeicherte Aufträge: Liste, Speichern, Laden, Löschen
             await self._entwurf_nachricht(data)
+        elif msg_type == sa.NACHRICHT:  # Rückstand an Aufträgen an W.A.I.S. selbst: Liste, Speichern, Verwerfen, Wieder öffnen
+            await self.selbst_nachricht(data)
         elif msg_type == "einreichen":  # Karte "Einreichen" (Plan C, C.6): nur per Klick, nie als Werkzeug des Sprachmodells
             await self.einreichen(data)
         elif msg_type == "verwerfen":

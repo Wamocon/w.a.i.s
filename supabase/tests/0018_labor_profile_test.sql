@@ -292,7 +292,7 @@ declare
   r record;
   def text := pg_get_functiondef('__SCHEMA__.labor_loeschen(uuid, timestamptz, timestamptz)'::regprocedure);
   ausnahmen text[] := array['profiles', 'model_access', 'release_anfragen', 'release_freigaben', 'release_ereignisse', 'rd_sitzungen', 'auftrag_entwuerfe',
-                         'github_zugang', 'github_rechte'];
+                         'github_zugang', 'github_rechte', 'selbstauftraege'];
   fremde text[] := array['memories.reviewed_by', 'canvas_items.bearbeitet_von', 'dateien.hochgeladen_von', 'devices.freigegeben_von',
                          'devices.geaendert_von', 'teilungen.widerrufen_von'];
 begin
@@ -447,7 +447,7 @@ declare
   z jsonb := wamo_testhilfe.zeilen('00000000-0000-4000-8000-0000000018a1');
   k text;
   ausnahmen text[] := array['profiles', 'model_access', 'release_anfragen', 'release_freigaben', 'release_ereignisse', 'rd_sitzungen', 'auftrag_entwuerfe',
-                         'github_zugang', 'github_rechte'];
+                         'github_zugang', 'github_rechte', 'selbstauftraege'];
 begin
   -- jede Besitzerspalte jeder Tabelle: null Zeilen, außer in der Ausnahmeliste (hier nur das Profil selbst)
   for k in select jsonb_object_keys(z) loop

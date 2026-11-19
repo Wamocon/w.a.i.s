@@ -90,6 +90,10 @@ AUSNAHMEN: dict[str, str] = {
                      "Client-Nachricht github_zugang noch den Pfad /wamo/api/github-zugang in der Erlaubnisliste, github_zugang.py lehnt "
                      "Laborprofile ab und der Trigger github_zugang_guard lässt für ein Profil mit labor_art keine Zeile zu. Eine vorhandene "
                      "Zeile fällt mit dem Profil weg (on delete cascade).",
+    "selbstauftraege": "Rückstand an Aufträgen an W.A.I.S. selbst (Migration 0030), gemeinsam für Admins, nur Text und Vorschläge. Für "
+                       "Laborprofile gesperrt: der DevAgent mit den Werkzeugen und der Client-Nachricht selbstauftrag entsteht nur für Admins "
+                       "im Büro, nie im Labor, es entsteht dort keine Zeile. erstellt_von wird beim Löschen des Profils null "
+                       "(on delete set null), der Eintrag bleibt.",
     "github_rechte": "Vom Admin erlaubte Rechte klassischer GitHub-Tokens je Person (Migration 0027), Konfiguration ohne Gesprächstext. Für "
                      "Laborprofile gesperrt: die Admin-Route lehnt sie ab, der Trigger github_rechte_guard ebenso. Fällt mit dem Profil weg "
                      "(on delete cascade); geaendert_von wird beim Löschen des Admin-Profils null.",

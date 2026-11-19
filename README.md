@@ -90,6 +90,9 @@ Offen:
   Stack mit 12 von 12 Prüfungen bestanden.
 - Gedächtnis je Profil (persönlich) plus gemeinsames Firmengedächtnis mit Freigabe durch Admins.
 - Werkzeugkarte: Entwicklungsaufträge wählen je Auftragsart passende ECC-Skills, Agenten und REA-Werkzeuge.
+- Aufträge an W.A.I.S. selbst (seit 19.11.2026): Ein gemeinsamer Rückstand für Admins, den W.A.I.S. per Sprache und die Oberfläche füllt und
+  den Claude Code mit `scripts/wamo_selbstauftraege.py` abarbeitet. Einträge sind Vorschläge und werden nur nach dem Ja eines Admins
+  umgesetzt; dass W.A.I.S. sie selbst umsetzt, ist eine Ausbaustufe (`docs/selbstauftraege.md`).
 - Persönlicher GitHub-Zugang für Entwicklungsaufträge (Plan C, live seit 18.11.2026): eigenes Token je Person in den Einstellungen,
   Arbeit nur auf dem Zweig `wamo/<auftrag>`, Push und Pull Request erst nach dem Klick auf „Einreichen“, Betrieb in
   `infra/sokrates2/README.md` Abschnitt 18.3.
