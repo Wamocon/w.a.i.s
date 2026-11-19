@@ -10,7 +10,7 @@
 
 **Hinweis.** Dieses Dokument ist keine Rechtsberatung und behauptet nicht, dass eine Verarbeitung rechtmäßig ist. Es nennt, was das Repo belegt. Alles, was rechtlich zu bewerten oder vertraglich zu klären ist, steht als "mit der oder dem Datenschutzbeauftragten zu klären". Das Repo nennt im Labor-Hinweis (Stand 17.11.2026) "Ein Datenschutzbeauftragter ist nicht bestellt". Wo hier steht "Datenschutzbeauftragte", ist dann die verantwortliche Person der WAMOCON GmbH gemeint.
 
-Das Sicherheitsmodell in Kurzform steht auch im Kapitel [Sicherheitsmodell der README](../../../README.md#sicherheitsmodell).
+Das Sicherheitsmodell in Kurzform steht auch im Kapitel [Sicherheitsmodell der README](../../README.md#sicherheitsmodell).
 
 ## 1. Sicherheitsmodell in Schichten
 
@@ -257,12 +257,12 @@ Mit der oder dem Datenschutzbeauftragten zu klären: Ob und wie die Pflichten na
 
 ## Weiterführend
 
-- Labor-Hinweis und Einwilligung (Entwurf): [../../labor-datenschutz-entwurf.md](../../labor-datenschutz-entwurf.md)
-- Sicherheitsmodell der README: [../../../README.md](../../../README.md#sicherheitsmodell)
-- Rollen und Rechte: [../fachlich/rollen-und-rechte.md](../fachlich/rollen-und-rechte.md)
-- Betrieb, Logs und Sicherungen: [../betrieb/betriebshandbuch.md](../betrieb/betriebshandbuch.md)
-- Administration: [../betrieb/administrationshandbuch.md](../betrieb/administrationshandbuch.md)
-- Datenmodell: [../technik/datenmodell.md](../technik/datenmodell.md)
-- Architektur: [../architektur/arc42.md](../architektur/arc42.md)
-- Entscheidungen: [../architektur/entscheidungen.md](../architektur/entscheidungen.md)
-- Begriffe: [../glossar.md](../glossar.md)
+- Labor-Hinweis und Einwilligung (Entwurf): [../labor-datenschutz-entwurf.md](../labor-datenschutz-entwurf.md)
+- Sicherheitsmodell der README: [../../README.md](../../README.md#sicherheitsmodell)
+- Rollen und Rechte: [Rollen und Rechte](fachkonzept.md#rollen-und-rechte)
+- Betrieb, Logs und Sicherungen: [Betriebshandbuch](betrieb.md#betriebshandbuch)
+- Administration: [Administrationshandbuch](betrieb.md#administrationshandbuch)
+- Datenmodell: [Datenmodell: Datenbank, Rollen und Migrationen](technik.md#datenmodell-datenbank-rollen-und-migrationen)
+- Architektur: [Architekturdokumentation nach arc42](architektur.md#architekturdokumentation-nach-arc42)
+- Entscheidungen: [Entscheidungsregister](architektur.md#entscheidungsregister)
+- Begriffe: [glossar.md](glossar.md)

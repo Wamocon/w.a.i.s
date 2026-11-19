@@ -14,7 +14,7 @@ Einträge stehen alphabetisch. Wo ein Begriff ein Modul oder einen Dienst bezeic
 |---|---|
 | aal2 | Anmeldestufe mit zweitem Faktor (Authenticator-App). Zugang zu W.A.I.S. gibt es nur mit aktivem Profil und aal2. |
 | Abnahme (Entwicklungsaufträge) | Prüfung eines Entwicklungsauftrags gegen ein prüfbares Ziel in mehreren Runden (`README.md`, Abschnitt "Abnahme: prüfbares Ziel mit Runden"). |
-| Admin | Rolle `admin`: darf zusätzlich zu den Rechten eines Mitglieds Nutzer verwalten, PC-Werkzeuge und Entwicklungsaufträge nutzen (nach Schaltern und Freigaben). Details in `fachlich/rollen-und-rechte.md`. |
+| Admin | Rolle `admin`: darf zusätzlich zu den Rechten eines Mitglieds Nutzer verwalten, PC-Werkzeuge und Entwicklungsaufträge nutzen (nach Schaltern und Freigaben). Details in `fachkonzept.md`, Kapitel "Rollen und Rechte". |
 | Notanker (Anker) | Dienst `wamo-anker` auf dem Server, läuft als root, nur über einen Unix-Socket erreichbar, Code außerhalb von `/opt/wamo*`. Er kann nur zurückführen (Rückweg), sperren und prüfen. Teil der Selbstüberarbeitung, deren Betriebszustand laut README nicht belegt ist. |
 | Anzeigename | `W.A.I.S.` mit Schlusspunkt. Gesprochen "Wais" wie englisch "ways". Die Langform ist "WAMOCON's Artificial Intelligence System". |
 | Audit | Protokoll sicherheitsrelevanter Aktionen. Der PC-Host schreibt `host/wamo_audit.jsonl`, der Kern führt Aktionen in der Tabelle `actions`. |
@@ -77,5 +77,5 @@ Einträge stehen alphabetisch. Wo ein Begriff ein Modul oder einen Dienst bezeic
 ## Weiterführend
 
 - [Dokumentenlandkarte](README.md)
-- [Rollen und Rechte](fachlich/rollen-und-rechte.md)
-- [Architektur (arc42)](architektur/arc42.md)
+- [Rollen und Rechte](fachkonzept.md#rollen-und-rechte)
+- [Architektur (arc42)](architektur.md#architekturdokumentation-nach-arc42)

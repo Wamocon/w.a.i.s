@@ -10,53 +10,53 @@
 
 ## Was W.A.I.S. ist
 
-W.A.I.S. (WAMOCON's Artificial Intelligence System) ist der Sprachassistent der WAMOCON GmbH. Mitglieder sprechen mit ihm, er merkt sich Wissen, zeigt Ergebnisse in einer Arbeitsfläche (Canvas), bedient auf Wunsch und nach Freigabe den PC, erstellt Office-Dateien und führt Entwicklungsaufträge aus. Das Produkt besteht aus einer Web-Oberfläche, einer Desktop-App, einem PC-Host, dem Voice-Core (Kern) und einer Datenbank auf eigenen Servern. Kennungen im Code heißen `wamo`, der Anzeigename ist `W.A.I.S.`. Einen Überblick mit Leistungsumfang und Stand gibt [Produktübersicht](fachlich/produktuebersicht.md).
+W.A.I.S. (WAMOCON's Artificial Intelligence System) ist der Sprachassistent der WAMOCON GmbH. Mitglieder sprechen mit ihm, er merkt sich Wissen, zeigt Ergebnisse in einer Arbeitsfläche (Canvas), bedient auf Wunsch und nach Freigabe den PC, erstellt Office-Dateien und führt Entwicklungsaufträge aus. Das Produkt besteht aus einer Web-Oberfläche, einer Desktop-App, einem PC-Host, dem Voice-Core (Kern) und einer Datenbank auf eigenen Servern. Kennungen im Code heißen `wamo`, der Anzeigename ist `W.A.I.S.`. Einen Überblick mit Leistungsumfang und Stand gibt das Kapitel [Produktübersicht](fachkonzept.md#produktübersicht-wais).
 
 ## Wähle deinen Weg
 
 | Ich bin ... | Ich lese zuerst | Danach |
 |---|---|---|
-| Mitglied und will W.A.I.S. nutzen | [Benutzerhandbuch](nutzung/benutzerhandbuch.md) | [Glossar](glossar.md) |
-| in Fachbereich oder Produktverantwortung | [Produktübersicht](fachlich/produktuebersicht.md) | [Funktionskatalog](fachlich/funktionskatalog.md), [Rollen und Rechte](fachlich/rollen-und-rechte.md) |
-| Architekt oder Architektin | [Architektur nach arc42](architektur/arc42.md) | [C4-Diagramme](architektur/c4-diagramme.md), [Entscheidungsregister](architektur/entscheidungen.md) |
-| Entwickler oder Entwicklerin | [Entwicklerhandbuch](entwicklung/entwicklerhandbuch.md) | [Voice-Core](technik/voice-core.md), [Oberfläche](technik/oberflaeche.md), [Host und Desktop](technik/host-und-desktop.md), [Datenmodell](technik/datenmodell.md), [Schnittstellen](technik/schnittstellen.md), [Konfiguration](technik/konfiguration.md) und [Betriebsvariablen](technik/konfiguration-betrieb.md), [Qualität und Tests](entwicklung/qualitaet-und-tests.md) |
-| in Administration oder Betrieb | [Administrationshandbuch](betrieb/administrationshandbuch.md) | [Betriebshandbuch](betrieb/betriebshandbuch.md), [Release und Ausrollen](betrieb/release-und-ausrollen.md) |
-| in Sicherheit oder Datenschutz | [Sicherheit und Datenschutz](sicherheit/sicherheit-und-datenschutz.md) | [Rollen und Rechte](fachlich/rollen-und-rechte.md), [Befunde der ausgelieferten App](technik/desktop-auslieferung-rea.md) |
-| verantwortlich für Releases | [Release und Ausrollen](betrieb/release-und-ausrollen.md) | [Befunde der ausgelieferten App](technik/desktop-auslieferung-rea.md), [Qualität und Tests](entwicklung/qualitaet-und-tests.md) |
-
-## Fertige Dokumente (PDF)
-
-Alle Dokumente liegen zusätzlich als fertig gesetzte PDF-Dateien im WAMOCON-Design im Ordner [final/](final/README.md): das [Gesamtdokument](final/00-W.A.I.S.-Produktdokumentation-Gesamt.pdf) und je ein PDF pro Dokument. Die Markdown-Dateien in den Unterordnern sind die Quellen und bleiben maßgeblich.
+| Mitglied und will W.A.I.S. nutzen | [Benutzerhandbuch](benutzerhandbuch.md) | [Glossar](glossar.md) |
+| in Fachbereich oder Produktverantwortung | [Produktübersicht](fachkonzept.md#produktübersicht-wais) | [Funktionskatalog](fachkonzept.md#funktionskatalog-wais), [Rollen und Rechte](fachkonzept.md#rollen-und-rechte) |
+| Architekt oder Architektin | [Architektur nach arc42](architektur.md#architekturdokumentation-nach-arc42) | [C4-Diagramme](architektur.md#c4-diagramme-von-wais), [Entscheidungsregister](architektur.md#entscheidungsregister) |
+| Entwickler oder Entwicklerin | [Entwicklerhandbuch](entwicklung.md#entwicklerhandbuch) | [Voice-Core](technik.md#voice-core-aufbau-des-python-kerns), [Oberfläche](technik.md#oberfläche-aufbau-der-nextjs-anwendung), [Host und Desktop](technik.md#pc-host-und-desktop-app), [Datenmodell](technik.md#datenmodell-datenbank-rollen-und-migrationen), [Schnittstellen](technik.md#schnittstellen-von-wais), [Konfiguration](technik.md#konfiguration-umgebungsvariablen-und-schalter) und [Betriebsvariablen](technik.md#konfiguration-betriebsskripte-und-einrichtungsvariablen), [Qualität und Tests](entwicklung.md#qualität-und-tests) |
+| in Administration oder Betrieb | [Administrationshandbuch](betrieb.md#administrationshandbuch) | [Betriebshandbuch](betrieb.md#betriebshandbuch), [Release und Ausrollen](betrieb.md#release-und-ausrollen) |
+| in Sicherheit oder Datenschutz | [Sicherheit und Datenschutz](sicherheit-und-datenschutz.md) | [Rollen und Rechte](fachkonzept.md#rollen-und-rechte), [Befunde der ausgelieferten App](technik.md#befunde-der-ausgelieferten-desktop-app-rea) |
+| verantwortlich für Releases | [Release und Ausrollen](betrieb.md#release-und-ausrollen) | [Befunde der ausgelieferten App](technik.md#befunde-der-ausgelieferten-desktop-app-rea), [Qualität und Tests](entwicklung.md#qualität-und-tests) |
 
 ## Dokumentenlandkarte
 
-Die Dokumentart folgt Diátaxis (Erklärung, Referenz, Anleitung, Lernpfad). Begründung und Pflegeregeln stehen im [Dokumentationskonzept](dokumentationskonzept.md).
+Ein Thema, eine Datei. Die Dokumentart folgt Diátaxis (Erklärung, Referenz, Anleitung, Lernpfad). Begründung und Pflegeregeln stehen im [Dokumentationskonzept](dokumentationskonzept.md). Jede Datei beginnt mit einem Inhaltsverzeichnis, und jedes Kapitel nennt in seiner Kopftabelle Zweck, Zielgruppe, Dokumentart und Quellen.
 
-| Dokument | Inhalt | Art |
+| Datei | Inhalt | Art |
 |---|---|---|
-| [fachlich/produktuebersicht.md](fachlich/produktuebersicht.md) | Zweck, Zielgruppen, Leistungsumfang, Abgrenzung, Produktstand | Erklärung |
-| [fachlich/funktionskatalog.md](fachlich/funktionskatalog.md) | Funktionen je Fachgebiet mit stabilen IDs | Referenz |
-| [fachlich/rollen-und-rechte.md](fachlich/rollen-und-rechte.md) | Rollen, Rechtematrix, Freigabestufen | Referenz, Erklärung |
-| [nutzung/benutzerhandbuch.md](nutzung/benutzerhandbuch.md) | Erste Schritte, Alltag, Fehlerbehebung | Anleitung, Lernpfad |
-| [architektur/arc42.md](architektur/arc42.md) | Architektur in zwölf Abschnitten | Erklärung |
-| [architektur/c4-diagramme.md](architektur/c4-diagramme.md) | Kontext, Container, Komponenten, Deployment, Abläufe | Erklärung |
-| [architektur/entscheidungen.md](architektur/entscheidungen.md) | Register der Architekturentscheidungen | Referenz |
-| [technik/voice-core.md](technik/voice-core.md) | Aufbau des Python-Kerns | Erklärung, Referenz |
-| [technik/oberflaeche.md](technik/oberflaeche.md) | Aufbau der Web-Oberfläche | Erklärung, Referenz |
-| [technik/host-und-desktop.md](technik/host-und-desktop.md) | PC-Host und Desktop-App | Erklärung, Referenz |
-| [technik/desktop-auslieferung-rea.md](technik/desktop-auslieferung-rea.md) | Befunde am ausgelieferten Artefakt | Referenz |
-| [technik/datenmodell.md](technik/datenmodell.md) | Datenbank, Rollen, Migrationen | Referenz |
-| [technik/schnittstellen.md](technik/schnittstellen.md) | HTTP-Routen, Nachrichten, Werkzeuge, Kanäle | Referenz |
-| [technik/konfiguration.md](technik/konfiguration.md) | Umgebungsvariablen und Schalter des Kerns, der Oberfläche und des Hosts | Referenz |
-| [technik/konfiguration-betrieb.md](technik/konfiguration-betrieb.md) | Betriebsvariablen aus Infrastruktur und Skripten | Referenz |
-| [betrieb/betriebshandbuch.md](betrieb/betriebshandbuch.md) | Topologie, Dienste, Störungen, Rückwege | Referenz, Anleitung |
-| [betrieb/release-und-ausrollen.md](betrieb/release-und-ausrollen.md) | Weg von der Änderung zur Produktion | Erklärung, Anleitung |
-| [betrieb/administrationshandbuch.md](betrieb/administrationshandbuch.md) | Aufgaben der Administration | Anleitung |
-| [sicherheit/sicherheit-und-datenschutz.md](sicherheit/sicherheit-und-datenschutz.md) | Sicherheitsmodell, Daten, Datenschutz | Erklärung, Referenz |
-| [entwicklung/entwicklerhandbuch.md](entwicklung/entwicklerhandbuch.md) | Einrichtung, Konventionen, Arbeitsablauf | Anleitung |
-| [entwicklung/qualitaet-und-tests.md](entwicklung/qualitaet-und-tests.md) | Teststrategie, Prüfungen, Lücken | Referenz |
+| [fachkonzept.md](fachkonzept.md) | Produktübersicht, Funktionskatalog mit stabilen IDs, Rollen und Rechte | Erklärung, Referenz |
+| [benutzerhandbuch.md](benutzerhandbuch.md) | Erste Schritte, Alltag, Fehlerbehebung | Anleitung, Lernpfad |
+| [architektur.md](architektur.md) | arc42 in zwölf Abschnitten, C4-Diagramme, Entscheidungsregister | Erklärung, Referenz |
+| [technik.md](technik.md) | Voice-Core, Oberfläche, Host und Desktop-App, Befunde der ausgelieferten App (REA), Datenmodell, Schnittstellen, Konfiguration | Erklärung, Referenz |
+| [betrieb.md](betrieb.md) | Betriebshandbuch, Release und Ausrollen, Administrationshandbuch | Referenz, Anleitung |
+| [sicherheit-und-datenschutz.md](sicherheit-und-datenschutz.md) | Sicherheitsmodell, Datenarten und Fristen, Zulieferung für das Datenschutzmanagement | Erklärung, Referenz |
+| [entwicklung.md](entwicklung.md) | Entwicklerhandbuch, Qualität und Tests | Anleitung, Referenz |
 | [glossar.md](glossar.md) | Begriffe | Referenz |
 | [dokumentationskonzept.md](dokumentationskonzept.md) | Recherche, Struktur, Pflege der Dokumentation | Erklärung |
+
+## Fertige Dokumente (PDF)
+
+Alle Dokumente liegen zusätzlich als fertig gesetzte PDF-Dateien im WAMOCON-Design im Ordner `final/`: Kopfzeile mit Anschrift und Logo, Seitenzahl auf jeder Seite, Lesezeichen nach Überschriften. Die Markdown-Dateien sind die Quellen und bleiben maßgeblich. Nach inhaltlichen Änderungen werden die PDFs neu erzeugt.
+
+| PDF | Inhalt |
+|---|---|
+| [00-W.A.I.S.-Produktdokumentation-Gesamt.pdf](final/00-W.A.I.S.-Produktdokumentation-Gesamt.pdf) | alle Dokumente mit Titelseite und Inhaltsverzeichnis |
+| [01-Einstieg-und-Dokumentenlandkarte.pdf](final/01-Einstieg-und-Dokumentenlandkarte.pdf) | dieser Einstieg |
+| [02-Dokumentationskonzept.pdf](final/02-Dokumentationskonzept.pdf) | Dokumentationskonzept |
+| [03-Fachkonzept.pdf](final/03-Fachkonzept.pdf) | Fachkonzept |
+| [04-Benutzerhandbuch.pdf](final/04-Benutzerhandbuch.pdf) | Benutzerhandbuch |
+| [05-Architektur.pdf](final/05-Architektur.pdf) | Architektur |
+| [06-Technik.pdf](final/06-Technik.pdf) | Technik |
+| [07-Betrieb.pdf](final/07-Betrieb.pdf) | Betrieb |
+| [08-Sicherheit-und-Datenschutz.pdf](final/08-Sicherheit-und-Datenschutz.pdf) | Sicherheit und Datenschutz |
+| [09-Entwicklung.pdf](final/09-Entwicklung.pdf) | Entwicklung |
+| [10-Glossar.pdf](final/10-Glossar.pdf) | Glossar |
 
 ## Bestehende Unterlagen in docs/
 
@@ -80,5 +80,5 @@ Diese Planpapiere, Anleitungen und Berichte bleiben unverändert und sind die Qu
 ## Hinweise zum Gebrauch
 
 - Jedes Dokument nennt im Kopf Zweck, Zielgruppe, Dokumentart, geprüften Commit und seine Quellen. Widersprechen sich Dokument und Code, gilt der Code.
-- Das Repository ist öffentlich. Die Dokumentation enthält deshalb keine Zugangsdaten und beschreibt Betrieb und Sicherheit nur so weit, wie `README.md`, `CLAUDE.md` und `docs/` es ohnehin tun.
+- Die Dokumentation enthält keine Zugangsdaten und beschreibt Betrieb und Sicherheit nur so weit, wie `README.md`, `CLAUDE.md` und `docs/` es ohnehin tun.
 - Zahlen mit Datum sind Momentaufnahmen. Der Zustand der Server ist, wo nicht anders vermerkt, "laut README, Stand" mit Datum angegeben und wurde in diesem Dokumentationsstand nicht am Server geprüft.
