@@ -641,5 +641,52 @@ class MikrofonSitzungTests(unittest.IsolatedAsyncioTestCase):
         unterbrechen.assert_awaited_once()
 
 
+class MikrofonInfoTests(unittest.IsolatedAsyncioTestCase):
+    """Mikrofonkette im Protokoll (19.11.2026, mikrofon_kette.py): Die Sitzung merkt sich die gemeldete Kette, schreibt eine Zeile und gibt die
+    Klasse an die Urteilszeilen des Prüfers weiter. Nichts geht an die Oberfläche, nichts in die Datenbank."""
+
+    VOLL = {"echo": True, "rauschen": False, "verstaerkung": True, "rate": 48000, "kanaele": 1, "klasse": "bluetooth"}
+
+    async def test_meldung_wird_gemerkt_und_geht_an_den_pruefer(self):
+        s, gesendet, _, _ = neu(FakeDb())
+        self.assertEqual(s.kette.kurz(), "")
+        self.assertEqual(s.pruefer._kette_text(), "")  # vor der ersten Meldung steht nichts in den Urteilszeilen
+        await s.mikrofon_info(self.VOLL)
+        self.assertEqual(s.kette.stand.klasse, "bluetooth")
+        self.assertEqual(s.pruefer._kette_text(), ", Kette bluetooth")
+        self.assertEqual(gesendet, [])  # keine Antwort an die Oberfläche
+
+    async def test_eine_zeile_je_aenderung(self):
+        s, _, _, _ = neu(FakeDb())
+        zeilen: list[str] = []
+        kennung = ss.logger.add(lambda m: zeilen.append(str(m).strip()), format="{message}", level="INFO")
+        try:
+            await s.mikrofon_info(self.VOLL)
+            await s.mikrofon_info(dict(self.VOLL))
+            await s.mikrofon_info({**self.VOLL, "klasse": "eingebaut", "rate": 44100})
+        finally:
+            ss.logger.remove(kennung)
+        self.assertEqual(
+            [z for z in zeilen if z.startswith("Mikrofonkette:")],
+            [
+                "Mikrofonkette: klasse=bluetooth echo=an rauschen=aus verstaerkung=an rate=48000 kanaele=1",
+                "Mikrofonkette: klasse=eingebaut echo=an rauschen=aus verstaerkung=an rate=44100 kanaele=1",
+            ],
+        )
+
+    async def test_unsinn_wirft_nie_und_aendert_nichts(self):
+        s, gesendet, _, _ = neu(FakeDb())
+        await s.mikrofon_info(self.VOLL)
+        for unsinn in (None, "bluetooth", 7, [], [self.VOLL], b"x", object()):
+            await s.mikrofon_info(unsinn)
+        self.assertEqual(s.kette.stand.klasse, "bluetooth")
+        self.assertEqual(gesendet, [])
+
+    async def test_ein_fehler_in_der_auswertung_stoert_nie(self):
+        s, _, _, _ = neu(FakeDb())
+        with mock.patch.object(s.kette, "aufnehmen", side_effect=RuntimeError("kaputt")):
+            await s.mikrofon_info(self.VOLL)  # darf nicht werfen
+
+
 if __name__ == "__main__":
     unittest.main()

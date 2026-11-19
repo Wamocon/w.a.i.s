@@ -1216,6 +1216,21 @@ Vorlauf und 0,1 s Nachlauf ungekürzt, bei 0,3 s Sprache war die Hälfte Stille.
   aus der Umgebung. Für eine saubere Aufnahme (10-%-Quantil ab 0,50, bei den Hausstimmen 0,51 bis 0,75) ergibt das 0,35, also die
   Standardschwelle; lockerer wird es nur bei einer unruhigen Aufnahme (Quantil unter 0,50), nie unter 0,30.
 
+**Mikrofonkette im Protokoll (19.11.2026).** Befund: Mit Bluetooth-Kopfhörer lagen eigene Sätze mit dem Abdruck vom Laptop bei 0,2 bis 0,3,
+mit eigenem Abdruck bei etwa 0,8. Die Aufnahme im Browser startet ohne eigene Vorgaben für Echounterdrückung, Rauschunterdrückung und
+Verstärkung (`getUserMedia({audio: true})`), der Browser wählt seine Standardwerte, und das stand nirgends im Protokoll. Jetzt liest die
+Oberfläche nach jedem Spurwechsel (Start, Gerätewechsel, neue Verbindung) `track.getSettings()` und schickt eine Client-Nachricht
+`mikrofon_info` mit genau sechs Feldern: `echo`, `rauschen`, `verstaerkung` (`true`, `false` oder `null`), `rate` (Hz), `kanaele` (1 bis 8)
+und `klasse` (`eingebaut`, `headset`, `bluetooth` oder `unbekannt`, im Browser grob aus dem Gerätenamen abgeleitet,
+`ui/src/lib/mikrofonKette.ts`). Der Kern (`voice-core/mikrofon_kette.py`) prüft streng noch einmal (andere Felder fallen weg, falscher Typ
+oder Wert außerhalb der Grenzen heißt unbekannt), merkt sich den letzten Stand und schreibt je Änderung eine Zeile:
+`Mikrofonkette: klasse=bluetooth echo=an rauschen=an verstaerkung=an rate=48000 kanaele=1` (unbekannt erscheint als `?`). Jede Urteilszeile des
+Prüfers trägt am Ende die Klasse, damit jedes Urteil seine Kette zeigt: `Stimme: 0.82 bei 3.1 s -> eigen (Schwelle 0.45), Kette bluetooth`
+(auch `Stimme früh:`; ohne Meldung der Oberfläche steht nichts). Eine Meldung je Wechsel, dieselbe Kette sendet die Oberfläche nicht noch einmal,
+und der Kern schreibt höchstens 50 Zeilen je Sitzung (der Stand bleibt auch danach aktuell). Eine Nachricht ohne ein gültiges Feld ändert nichts. Protokolliert werden nur Zahlen und die grobe Klasse: nie der Name oder die Kennung
+des Geräts, nie Audio, nichts in der Datenbank, nichts am Modell, nichts in der Laborsitzung (sie hat keine Stimmsitzung und darf die
+Nachricht nicht senden). Mit den Zeilen lässt sich bei einem Einbruch der Werte ablesen, ob sich die Kette geändert hat.
+
 **Antwortzeit.** Die Prüfung beginnt beim Sprechende und läuft parallel zur Spracherkennung. Der Wächter hält nur das **endgültige** Transkript
 einer Äußerung an, bis das Urteil da ist, höchstens 1 Sekunde; die Zwischenstände laufen ungebremst durch. Die Antwort für die eigene Stimme
 wird also höchstens um den Teil der Prüfzeit später, der über die Wartezeit der Spracherkennung hinausgeht (rund 250 ms für 8 Sekunden Sprache
@@ -1253,8 +1268,10 @@ eingelernten Stimme zu) gilt in der Oberfläche zusätzlich:
 - `{"type": "stimmabdruck", "status": "start"|"aufnahme"|"rechnet"|"fertig"|"fehler"|"abgebrochen"|"geloescht", "sekunden": 8.4, "ziel": 20, "text": "..."}` beim Einlernen und Löschen.
 - `{"type": "stimmabdruck_einwilligung", "version": "stimme-1", "text": "..."}` (im Schattenbetrieb `stimme-2`) beim Verbinden (nicht im Modus aus, nie im Labor; im Labor kommt nur `{"type": "stimme", "status": "aus", "modus": "aus"}`).
 - Von der Oberfläche: Client-Nachricht `stimmabdruck` mit `{"aktion": "start", "einwilligung": "stimme-1"}`, `{"aktion": "abbrechen"}` oder `{"aktion": "loeschen"}`. Der Start gilt nur mit genau der aktuellen Version der Einwilligung.
+- Von der Oberfläche: Client-Nachricht `mikrofon_info` mit `{"echo", "rauschen", "verstaerkung", "rate", "kanaele", "klasse"}` (Signalkette der Aufnahme, nur Zahlen und eine grobe Klasse, siehe oben). Keine Antwort; der Kern schreibt nur eine Logzeile.
 
-**Datenschutz.** Gespeichert werden nur der Abdruck (192 Zahlen) sowie Zeitpunkt und Version der Einwilligung in `speakers` (Spalte
+**Datenschutz.** Die Mikrofonkette (siehe oben) bleibt im Arbeitsspeicher der Sitzung und im Log: Zahlen und eine von vier Klassen, nie ein Gerätename.
+Gespeichert werden nur der Abdruck (192 Zahlen) sowie Zeitpunkt und Version der Einwilligung in `speakers` (Spalte
 `voiceprint`, Migration `0001`, Rolle `wamo_core`, für die Oberfläche nicht lesbar), im Schattenbetrieb mit der Einwilligung `stimme-2`
 dazu der zweite Abdruck (256 Zahlen, Spalte `voiceprint_shadow`, Migration `0028`), nie eine Aufnahme. Berechnung und Vergleich laufen im
 Kern auf dem eigenen Server, nichts davon geht an Soniox oder Anthropic. Zweck, Rechtsgrundlage (ausdrückliche Einwilligung, Art. 9 Abs. 2

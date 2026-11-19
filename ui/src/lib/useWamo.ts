@@ -44,6 +44,7 @@ import {
 } from "@/lib/pcSchalter";
 import { StillMedienManager } from "@/lib/stillMedien";
 import { GeraeteMedienManager } from "@/lib/geraeteMedien";
+import { KettenMelder, mikrofonInfo, type MikrofonInfo } from "@/lib/mikrofonKette";
 import { LEISE_TEXT, leiseNeuMessen, neueLeise, PEGEL_TAKT_MS, pruefeLeise } from "@/lib/pegelWarnung";
 import {
   ANDERES_MIKROFON_TEXT,
@@ -324,6 +325,7 @@ type ClientMessage =
       data: { aktion: "start"; einwilligung: string; mikrofon?: string } | { aktion: "abbrechen" } | { aktion: "loeschen"; mikrofon?: string };
     }
   | { type: "mikrofontest"; data: { aktion: "start" } }
+  | { type: "mikrofon_info"; data: MikrofonInfo }
   | { type: "kontingent"; data: Record<string, never> }
   | { type: "jira_story"; data: { canvas_id: string } }
   | { type: "canvas_export"; data: { canvas_id: string; format: OfficeFormat } }
@@ -350,6 +352,24 @@ type ClientMessage =
 
 function senden(client: PipecatClient, msg: ClientMessage) {
   client.sendClientMessage(msg.type, msg.data);
+}
+
+/**
+ * Die Kette der Mikrofonspur an den Kern melden (lib/mikrofonKette.ts): erst nach der Betriebsmeldung (der Kern sendet sie, sobald der Client
+ * bereit ist, davor ginge die Nachricht verloren), höchstens einmal je Änderung (der Melder). Ein Fehler beim Senden stört nie: die Meldung ist
+ * eine Zugabe fürs Protokoll, es folgt keine zweite und keine Schleife.
+ */
+function ketteMelden(melder: KettenMelder | null, client: PipecatClient | null) {
+  if (!melder || !client) return;
+  const s = wamo.get();
+  if (!istOnline(s) || !s.betrieb) return;
+  const info = melder.abholen();
+  if (!info) return;
+  try {
+    senden(client, { type: "mikrofon_info", data: info });
+  } catch {
+    // Verbindung weg: dann gibt es auch kein Gespräch, das ein Protokoll braucht
+  }
 }
 
 /** Zählt die Lautstärkeverläufe: ein neuer macht den laufenden ungültig (Dämpfen, Entdämpfen, Ausblenden). */
@@ -545,6 +565,8 @@ export function useWamo(): WamoAktionen {
   // Medienmanager der laufenden Verbindung: meldet, ob statt des gewählten Mikrofons das Standardgerät läuft (lib/geraeteMedien.ts)
   const medien = useRef<{ readonly mikrofonErsatz: boolean } | null>(null);
   const ersatzGemeldet = useRef(false); // den Hinweis dazu gibt es einmal je Verbindung
+  // Kette der Mikrofonspur für das Protokoll des Kerns (lib/mikrofonKette.ts): ein Melder je Verbindung, nie im Labor
+  const kette = useRef<KettenMelder | null>(null);
   // Fehler beim Öffnen des Mikrofons (onDeviceError): Name wie NotAllowedError, für eine passende Meldung
   const geraetFehler = useRef<string | null>(null);
   // Kern meldet nur Stille (Servernachricht "mikrofon")
@@ -607,6 +629,7 @@ export function useWamo(): WamoAktionen {
     stille.current = neueStille();
     leise.current = neueLeise();
     medien.current = null;
+    kette.current = null;
     ersatzGemeldet.current = false;
     geraetFehler.current = null;
     kernStille.current = false;
@@ -990,6 +1013,10 @@ export function useWamo(): WamoAktionen {
         if (!bekannt) {
           console.info("[WAMO] Mikrofon geöffnet:", track.label || "unbekanntes Gerät");
           leiseNeuMessen(leise.current); // neues Gerät: die Pegelwarnung misst von vorn
+          // Kette für das Protokoll des Kerns (Klasse, Echo, Rauschen, Verstärkung, Rate; nie der Name): einmal je neue Spur; im Labor gibt es
+          // keinen Melder (kette.current ist dort null)
+          kette.current?.merken(mikrofonInfo(track));
+          ketteMelden(kette.current, clientRef.current);
           // Das gewählte Mikrofon fehlte beim Öffnen, es läuft das Standardgerät: einmal kurz sagen (lib/geraeteMedien.ts)
           if (medien.current?.mikrofonErsatz && !ersatzGemeldet.current) {
             ersatzGemeldet.current = true;
@@ -1024,6 +1051,9 @@ export function useWamo(): WamoAktionen {
       // Still (Start beim Tippen): StillMedienManager öffnet das Mikrofon erst bei "Sprechen" (lib/stillMedien.ts)
       const medienManager = still ? new StillMedienManager(wunsch) : new GeraeteMedienManager(wunsch);
       medien.current = medienManager;
+      // Der Kern fängt je Sitzung neu an, also auch die Meldung. Ein Laborkonto bekommt keinen Melder und sendet nie (der Kern lässt die Nachricht dort
+      // ohnehin nicht zu)
+      kette.current = istLaborKonto(nutzerLesen().email) ? null : new KettenMelder();
       ersatzGemeldet.current = false;
       leise.current = neueLeise();
       const client = new PipecatClient({
@@ -1820,6 +1850,13 @@ export function useWamo(): WamoAktionen {
       }
     };
     pruefe();
+    return wamo.subscribe(pruefe);
+  }, []);
+
+  // Kette der Mikrofonspur (lib/mikrofonKette.ts): kam die Spur vor der Betriebsmeldung des Kerns (Normalfall beim Verbinden), wartet die
+  // Meldung im Melder und geht jetzt hinaus, höchstens einmal je Änderung
+  useEffect(() => {
+    const pruefe = () => ketteMelden(kette.current, clientRef.current);
     return wamo.subscribe(pruefe);
   }, []);
 

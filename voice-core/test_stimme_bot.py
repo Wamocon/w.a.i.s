@@ -24,6 +24,7 @@ import memory as m
 import test_smoke_bot as smoke
 from audio_monitor import AudioInputMonitor
 from labor_attrappe import Attrappe
+from labor_sitzung import LaborSitzung
 from ja_waechter import JaWaechter
 from stimme_gate import EIGEN, FREMD, MARKE, UNKLAR
 from stimme_modell import DIM
@@ -253,6 +254,80 @@ async def test_laborprofil_mikrofontest_wirkt_nicht():
         test.assert_not_awaited()
     await session.cleanup()
     await b.client.aclose()
+
+
+async def test_client_nachricht_mikrofon_info_geht_an_die_stimmsitzung():
+    """Mikrofonkette im Protokoll (19.11.2026, mikrofon_kette.py): die Sitzung nimmt die Meldung der Oberfläche entgegen."""
+    session, _stufen, _llm = await bauen(Identity(USER, "Erika", "mitglied", "sie"))
+    daten = {"echo": True, "rauschen": True, "verstaerkung": True, "rate": 48000, "kanaele": 1, "klasse": "bluetooth"}
+    with mock.patch.object(StimmSitzung, "mikrofon_info", mock.AsyncMock()) as info:
+        await nachricht(session, "mikrofon_info", daten)
+        info.assert_awaited_once_with(daten)
+    await session.cleanup()
+
+
+async def test_mikrofon_info_schreibt_die_zeile_und_die_urteile_tragen_die_klasse():
+    session, _stufen, _llm = await bauen(Identity(USER, "Erika", "mitglied", "sie"))
+    zeilen: list[str] = []
+    kennung = bot.logger.add(lambda m: zeilen.append(str(m).strip()), format="{message}", level="INFO")
+    try:
+        await nachricht(session, "mikrofon_info", {"echo": False, "rauschen": True, "verstaerkung": None, "rate": 16000, "kanaele": 2, "klasse": "headset"})
+    finally:
+        bot.logger.remove(kennung)
+    assert "Mikrofonkette: klasse=headset echo=aus rauschen=an verstaerkung=? rate=16000 kanaele=2" in zeilen
+    assert session.stimme.pruefer._kette_text() == ", Kette headset"
+    await session.cleanup()
+
+
+async def test_laborprofil_mikrofon_info_wirkt_nicht():
+    b = Beobachter()
+    with labor_testhilfe.dienst(b.app), mock.patch.object(labor_werkzeuge, "labor_sitzung", b):
+        session = await bot.build_session(smoke.FakeTransport(), laborprofil())
+    assert session.stimme is None
+    zeilen: list[str] = []
+    kennung = bot.logger.add(lambda m: zeilen.append(str(m).strip()), format="{message}", level="INFO")
+    try:
+        # die Laborsperre (Schicht a) nimmt die Nachricht entgegen und lässt nichts außer der Labor-Freigabe wirken
+        original = LaborSitzung.client_nachricht
+        aufrufe: list[tuple] = []
+
+        async def beobachten(self, typ, data):
+            aufrufe.append((typ, data, await original(self, typ, data)))
+            return aufrufe[-1][2]
+
+        with mock.patch.object(StimmSitzung, "mikrofon_info", mock.AsyncMock()) as info, \
+                mock.patch.object(LaborSitzung, "client_nachricht", beobachten):
+            await nachricht(session, "mikrofon_info", {"klasse": "bluetooth", "echo": True})
+            info.assert_not_awaited()
+        assert aufrufe == [("mikrofon_info", {"klasse": "bluetooth", "echo": True}, False)]  # angekommen und von der Laborsperre abgewiesen
+    finally:
+        bot.logger.remove(kennung)
+    assert not [z for z in zeilen if z.startswith("Mikrofonkette")]
+    await session.cleanup()
+    await b.client.aclose()
+
+
+@pytest.mark.parametrize("roh", [None, "bluetooth", 7, [], ["klasse"], True])
+async def test_mikrofon_info_mit_einem_wert_der_kein_objekt_ist_aendert_nichts(roh):
+    """bot.py reicht msg.data roh weiter (nicht das für andere Nachrichten geglättete data): ein Nicht-Objekt gilt dort nicht."""
+    session, _stufen, _llm = await bauen(Identity(USER, "Erika", "mitglied", "sie"))
+    await nachricht(session, "mikrofon_info", {"klasse": "headset", "echo": True})
+    await nachricht(session, "mikrofon_info", roh)
+    assert session.stimme.kette.kurz() == ", Kette headset"
+    await session.cleanup()
+
+
+def test_mikrofon_info_steht_nur_mit_stimmsitzung_in_bot_py_und_nie_in_der_laborliste():
+    """Verdrahtung wie bei mikrofontest: der Zweig gilt nur mit stimme is not None; die Laborsperre lässt die Nachricht ohnehin nicht durch."""
+    assert 'elif msg.type == "mikrofon_info" and stimme is not None:' in BOT_QUELLE
+    assert "await stimme.mikrofon_info(msg.data)" in BOT_QUELLE
+    import labor
+
+    for art in ("platz", "schaufenster"):
+        assert labor.client_nachricht_erlaubt(art, "mikrofon_info", {"klasse": "bluetooth"}) is False
+        assert labor.client_nachricht_erlaubt(art, "mikrofon_info", {"job": "labor", "klasse": "bluetooth"}) is False
+        nachricht_rtvi = {"label": "rtvi-ai", "type": "client-message", "data": {"t": "mikrofon_info", "d": {"klasse": "bluetooth"}}}
+        assert labor.rtvi_nachricht_erlaubt(art, nachricht_rtvi) is False
 
 
 async def test_oberflaeche_bekommt_stand_und_einwilligungstext_beim_verbinden():

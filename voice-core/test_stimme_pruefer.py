@@ -25,7 +25,8 @@ from pipecat.tests.utils import run_test
 
 import stimme_pruefer
 from soft_interrupt import StimmUrteilFrame
-from stimme_gate import EIGEN, FREMD, KURZ, UNKLAR, Schwellen, StimmGate
+from mikrofon_kette import KettenProtokoll
+from stimme_gate import EIGEN, FREMD, KURZ, UNKLAR, Abdruck, Schwellen, StimmGate
 from stimme_modell import DIM
 from stimme_pruefer import MAX_PRUEF_SECS, URTEIL_MAX_ALTER_SECS, Stimmpruefer
 
@@ -778,6 +779,115 @@ class MikrofontestTests(PrueferBasis):
         self.v.on_bot_speaking(True)
         self.assertTrue(await self.v.ausgabe_unterbrechen())
         self.assertEqual([type(f) for f in frames], [InterruptionFrame])
+
+
+class KetteInDerZeileTests(PrueferBasis):
+    """Mikrofonkette im Protokoll (19.11.2026, mikrofon_kette.py): Jede Urteilszeile des Prüfers trägt am Ende die Klasse der Kette
+    (", Kette bluetooth"), sobald die Oberfläche sie gemeldet hat; vorher steht nichts. Nie ein Name, nie ein Fehler durch diese Auswertung."""
+
+    def mit_kette(self, kette):
+        self.v = Stimmpruefer(self.gate, self.modell, speichern=self.speichern, sagen=self.sagen, uhr=self.uhr, kette=kette)
+        self.v.push_frame = mock.AsyncMock(side_effect=lambda f, *a: self.gesendet.append(getattr(f, "data", None)))
+
+    def zeilen(self, info, anfang="Stimme:"):
+        return [c.args[0].format(*c.args[1:]) for c in info.call_args_list if c.args and str(c.args[0]).startswith(anfang)]
+
+    async def test_ohne_meldung_der_oberflaeche_steht_nichts_am_ende(self):
+        protokoll = KettenProtokoll()
+        self.mit_kette(protokoll.kurz)
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            await self.sprechen(8000, 2.0)
+        (zeile,) = self.zeilen(info)
+        self.assertTrue(zeile.endswith("-> eigen (Schwelle 0.38)"), zeile)
+        self.assertNotIn("Kette", zeile)
+
+    async def test_ohne_die_funktion_bleibt_alles_wie_vorher(self):
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            await self.sprechen(8000, 2.0)
+        (zeile,) = self.zeilen(info)
+        self.assertTrue(zeile.endswith("-> eigen (Schwelle 0.38)"), zeile)
+
+    async def test_mit_meldung_traegt_die_zeile_die_klasse(self):
+        protokoll = KettenProtokoll()
+        self.mit_kette(protokoll.kurz)
+        protokoll.aufnehmen({"klasse": "bluetooth", "echo": True, "rate": 48000})
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            await self.sprechen(8000, 2.0)
+        (zeile,) = self.zeilen(info)
+        self.assertRegex(zeile, r"^Stimme: 1\.00 bei 2\.\d s -> eigen \(Schwelle 0\.38\), Kette bluetooth$")
+
+    async def test_die_klasse_folgt_einem_wechsel_der_kette(self):
+        protokoll = KettenProtokoll()
+        self.mit_kette(protokoll.kurz)
+        protokoll.aufnehmen({"klasse": "bluetooth"})
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            await self.sprechen(8000, 2.0)
+            protokoll.aufnehmen({"klasse": "eingebaut"})
+            self.v.on_turn_end()
+            await self.sprechen(8000, 2.0)
+        ersteres, zweites = self.zeilen(info)
+        self.assertTrue(ersteres.endswith(", Kette bluetooth"), ersteres)
+        self.assertTrue(zweites.endswith(", Kette eingebaut"), zweites)
+
+    async def test_mit_mehreren_abdruecken_steht_die_kette_nach_der_quelle(self):
+        self.gate.setze_abdruecke([Abdruck(FREMDER), Abdruck(EIGENER)])
+        protokoll = KettenProtokoll()
+        self.mit_kette(protokoll.kurz)
+        protokoll.aufnehmen({"klasse": "headset"})
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            await self.sprechen(8000, 2.0)
+        (zeile,) = self.zeilen(info)
+        self.assertTrue(zeile.endswith("(Schwelle 0.38, Abdruck 2 von 2), Kette headset"), zeile)
+
+    async def test_auch_das_fruehe_urteil_traegt_die_kette(self):
+        protokoll = KettenProtokoll()
+        self.mit_kette(protokoll.kurz)
+        protokoll.aufnehmen({"klasse": "bluetooth"})
+        self.v.on_bot_speaking(True)
+        self.v.on_speech_start(self.uhr.t + 0.2, 0.2)
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            for _ in range(55):
+                self.uhr.t += 0.02
+                await self.v.on_audio(audio(8000))
+                if self.v._frueh_task is not None:
+                    await self.v._frueh_task
+        (zeile,) = self.zeilen(info, "Stimme früh")
+        self.assertTrue(zeile.endswith("(Schwelle 0.35), Kette bluetooth"), zeile)
+
+    async def test_eine_kaputte_funktion_stoert_weder_zeile_noch_urteil(self):
+        self.mit_kette(mock.Mock(side_effect=RuntimeError("kaputt")))
+        with mock.patch.object(stimme_pruefer.logger, "info") as info:
+            urteil = await self.sprechen(8000, 2.0)
+        self.assertEqual(urteil.urteil, EIGEN)
+        (zeile,) = self.zeilen(info)
+        self.assertTrue(zeile.endswith("-> eigen (Schwelle 0.38)"), zeile)
+
+    async def test_platzhalter_im_anhang_gehen_als_argument_ins_log_nie_als_format(self):
+        """Echter loguru-Sink statt Mock: ein Anhang mit {} und {0} darf weder werfen noch das Format verändern."""
+        self.mit_kette(lambda: ", Kette {0} {} {x}")
+        zeilen: list[str] = []
+        kennung = stimme_pruefer.logger.add(lambda m: zeilen.append(str(m).strip()), format="{message}", level="INFO")
+        try:
+            urteil = await self.sprechen(8000, 2.0)
+        finally:
+            stimme_pruefer.logger.remove(kennung)
+        self.assertEqual(urteil.urteil, EIGEN)
+        (zeile,) = [z for z in zeilen if z.startswith("Stimme:")]
+        self.assertTrue(zeile.endswith("-> eigen (Schwelle 0.38), Kette {0} {} {x}"), zeile)
+
+    async def test_ein_fehler_beim_schreiben_der_zeile_stoert_das_urteil_nicht(self):
+        with mock.patch.object(stimme_pruefer.logger, "info", side_effect=ValueError("Format")):
+            urteil = await self.sprechen(8000, 2.0)
+        self.assertEqual(urteil.urteil, EIGEN)
+
+    async def test_ein_unsinniger_rueckgabewert_wird_zu_nichts(self):
+        for unsinn in (None, 5, ["Kette"], b"x"):
+            self.mit_kette(lambda u=unsinn: u)
+            with mock.patch.object(stimme_pruefer.logger, "info") as info:
+                self.v.on_turn_end()
+                await self.sprechen(8000, 2.0)
+            (zeile,) = self.zeilen(info)
+            self.assertNotIn("Kette", zeile, repr(unsinn))
 
 
 if __name__ == "__main__":

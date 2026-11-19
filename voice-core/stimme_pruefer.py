@@ -47,6 +47,12 @@ Ein Abdruck je Mikrofon (seit 18.11.2026, stimme_mikrofon.py): Der Prüfer vergl
 (StimmGate.vergleichen) mit der persönlichen Schwelle dieses Abdrucks; im Log steht mit mehreren Abdrücken, welcher es war (Nummer, nie Name
 oder Kennung). Der Schatten nimmt ebenso den besten Wert über seine eigenen Abdrücke. Für den Mikrofontest der Oberfläche unterbricht
 ausgabe_unterbrechen eine laufende Antwort von W.A.I.S.
+
+Mikrofonkette im Protokoll (19.11.2026, mikrofon_kette.py): Die Stimmerkennung bricht ein, wenn sich die Signalkette ändert (Mikrofon, Aufbereitung,
+Pegel). Deshalb trägt jede Urteilszeile im Log ("Stimme: ..." und "Stimme früh: ...") am Ende die Klasse der Kette, die die Oberfläche für die laufende
+Aufnahme gemeldet hat (", Kette bluetooth"; ohne Meldung steht nichts). Protokolliert werden nur Zahlen und diese grobe Klasse (eingebaut, headset,
+bluetooth, unbekannt), nie der Name oder die Kennung des Geräts, nie Audio. Der Anhang kommt über die Funktion kette, die die Stimmsitzung übergibt; sie
+darf nichts werfen, und tut sie es doch, bleibt die Zeile ohne Anhang und das Urteil unberührt.
 """
 
 from __future__ import annotations
@@ -121,10 +127,13 @@ class Stimmpruefer(FrameProcessor):
         uhr: Callable[[], float] = time.time,
         nachweis: Callable[[], bool] | None = None,
         schatten: ModellQuelle | None = None,
+        kette: Callable[[], str] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._gate = gate
+        # Anhang für die Urteilszeilen im Log (mikrofon_kette.KettenProtokoll.kurz): ", Kette bluetooth" oder leer; nur die Klasse, nie ein Name
+        self._kette = kette
         self._modell = modell
         self._uhr = uhr  # Wanduhr wie VADUser...SpeakingFrame.timestamp
         self._einlernen = Einlernen(gate, modell, senden=self._senden, sagen=sagen, speichern=speichern, uhr=uhr, nachweis=nachweis,
@@ -337,8 +346,8 @@ class Stimmpruefer(FrameProcessor):
             return
         wert, treffer = vergleich
         urteil = gate.einstufen(wert, secs, True, treffer)
-        logger.info("Stimme früh: {:.2f} bei {:.1f} s (WAMO spricht) -> {} (Schwelle {:.2f})", wert, secs, urteil,
-                    gate.schwelle_fuer(secs, treffer))
+        self._urteil_loggen("Stimme früh: {:.2f} bei {:.1f} s (WAMO spricht) -> {} (Schwelle {:.2f}",
+                            [wert, secs, urteil, gate.schwelle_fuer(secs, treffer)])
         if urteil not in (EIGEN, KURZ) or not self._laeuft(nr) or not gate.nur_eigen_unterbricht():
             return
         self._frueh_eigen_nr = nr
@@ -436,10 +445,7 @@ class Stimmpruefer(FrameProcessor):
         if wert is not None:
             # für die Kalibrierung: Wert, Länge, Urteil und die angewandte Schwelle, nie ein Inhalt
             sprach = " (WAMO sprach)" if ueberlappung else ""
-            if quelle is None:
-                logger.info("Stimme: {:.2f} bei {:.1f} s{} -> {} (Schwelle {:.2f})", wert, secs, sprach, urteil, schwelle)
-            else:
-                logger.info("Stimme: {:.2f} bei {:.1f} s{} -> {} (Schwelle {:.2f}, {})", wert, secs, sprach, urteil, schwelle, quelle)
+            self._urteil_loggen("Stimme: {:.2f} bei {:.1f} s{} -> {} (Schwelle {:.2f}", [wert, secs, sprach, urteil, schwelle], quelle)
         if self._gate.nur_eigen_unterbricht() and nr == self._begonnen:
             # fürs Unterbrechen (Start-Strategie und Gate, soft_interrupt.py); hat schon die nächste Äußerung begonnen, gälte es für sie
             await self.push_frame(StimmUrteilFrame(nr=nr, eigen=urteil in (EIGEN, KURZ)))
@@ -450,6 +456,30 @@ class Stimmpruefer(FrameProcessor):
         # Erst jetzt wecken: die Meldung des Wächters (mit ignoriert und zeit) kommt so immer nach dieser und bleibt in der Oberfläche
         # stehen. Beide sind Systemframes in einer Warteschlange, das Transkript wartet darauf nicht spürbar.
         self._melden()
+
+    def _urteil_loggen(self, anfang: str, werte: list[object], quelle: str | None = None) -> None:
+        """Die Urteilszeile ins Log. anfang endet vor der schließenden Klammer; quelle (Abdruck n von m) und die Kette der Aufnahme
+        (mikrofon_kette.py, nur die Klasse) hängen sich an. Ohne Meldung der Oberfläche bleibt die Zeile wie sie war."""
+        if quelle is not None:
+            anfang, werte = anfang + ", {}", [*werte, quelle]
+        anfang += ")"
+        kette = self._kette_text()
+        if kette:
+            anfang, werte = anfang + "{}", [*werte, kette]
+        try:
+            logger.info(anfang, *werte)
+        except Exception as e:  # eine Logzeile darf nie ein Urteil oder das Gespräch stören
+            logger.warning("Stimmprüfung: Urteilszeile nicht geschrieben ({})", type(e).__name__)
+
+    def _kette_text(self) -> str:
+        """", Kette bluetooth" oder leer. Eine fehlerhafte Auswertung darf das Urteil und das Gespräch nie stören."""
+        if self._kette is None:
+            return ""
+        try:
+            text = self._kette()
+        except Exception:
+            return ""
+        return text if isinstance(text, str) else ""
 
     # ---------- Aufräumen ----------
 
