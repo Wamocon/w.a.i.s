@@ -29,7 +29,7 @@ def _eine_zeile(text: str) -> str:
 
 def test_nummer_frei_hoechste_und_beide_dateien():
     nummern = [int(p.name[:4]) for p in MIGRATIONEN.glob("[0-9][0-9][0-9][0-9]_*.sql") if not p.name.endswith(".down.sql")]
-    assert nummern.count(29) == 1 and max(nummern) == 29
+    assert nummern.count(29) == 1 and 29 in nummern  # spätere Nummern dürfen folgen (0030 und weitere)
     assert (MIGRATIONEN / "0028_stimme_schatten.sql").is_file()  # 0029 ändert die Regel des Schattens aus 0028
 
 

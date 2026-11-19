@@ -880,6 +880,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
                        zulassung=entwicklung_betrieb.zulassung_fuer(identity) if im_buero else None,
                        haus=dev_quelle == "haus")
         dev.on_result = turn.taint
+        # Aufträge an W.A.I.S. selbst nach Fremdinhalt gelten als unsicher (selbstauftraege.py): auch im Zug danach (nach "Soll ich das
+        # speichern?" kommt das Ja der Person in einem neuen Zug), bis zum Ende der Sitzung wie die Karten der Mitglieder (nachwirkung None)
+        dev.ist_fremd = lambda: turn.fremd_fuer_karte(None)
         dev.register(llm)
         standard_tools += dev.schemas()
     context = LLMContext(tools=ToolsSchema(standard_tools=standard_tools))
