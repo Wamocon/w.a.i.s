@@ -28,7 +28,6 @@ import { useSelect } from "@/lib/store";
 import { usePcSchalter } from "@/lib/usePcSchalter";
 import { istOnline, wamo, zeigeToast } from "@/lib/wamo";
 import { Block } from "./Block";
-import { Fernzugriff } from "./Fernzugriff";
 import { GeraeteVerwaltung } from "./GeraeteVerwaltung";
 
 /**
@@ -229,9 +228,9 @@ const EinrichtungStand = memo(function EinrichtungStand() {
 });
 
 /**
- * Abschnitt "Geräte und PC": Status der Verbindungen (jeder), Geräteverwaltung, PC-Steuerung samt Autostart und Fernzugriff (nur Admin), Betriebsart
+ * Abschnitt "Geräte und PC-Steuerung": Status der Verbindungen (jeder), Geräteverwaltung und PC-Steuerung samt Autostart (nur Admin), Betriebsart
  * (wo es etwas zu wählen gibt) und der Stand der Geräteeinrichtung (nur Desktop-App). Welche Blöcke es gibt, entscheidet
- * geraeteBloecke (lib/einstellungenAbschnitte.ts).
+ * geraeteBloecke (lib/einstellungenAbschnitte.ts). Den Fernzugriff zeigt der eigene Abschnitt "Fernzugriff" derselben Gruppe.
  */
 export const GeraeteAbschnitt = memo(function GeraeteAbschnitt({ onPcSteuerung }: { onPcSteuerung: (an: boolean) => boolean }) {
   const rolle = useSelect(wamo, (s) => s.profil?.rolle ?? null);
@@ -254,11 +253,6 @@ export const GeraeteAbschnitt = memo(function GeraeteAbschnitt({ onPcSteuerung }
       {bloecke.includes("pc") && (
         <Block titel="PC-Steuerung">
           <PcSteuerungSchalter onSchalten={onPcSteuerung} />
-        </Block>
-      )}
-      {bloecke.includes("fernzugriff") && (
-        <Block titel="Fernzugriff">
-          <Fernzugriff />
         </Block>
       )}
       {bloecke.includes("betriebsart") && (

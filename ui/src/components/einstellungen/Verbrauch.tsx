@@ -6,6 +6,7 @@ import { useSelect } from "@/lib/store";
 import { VERBRAUCH_FORMAT_HINWEIS, VERBRAUCH_LEER, verbrauchAnzeige, type VerbrauchZeile } from "@/lib/verbrauch";
 import { wamo } from "@/lib/wamo";
 import { Block } from "./Block";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /**
  * Abschnitt "Verbrauch": Kontingent des Max-Abos aus der Servernachricht "kontingent" (lib/nachrichten.ts, im Store als
@@ -26,7 +27,9 @@ function Limit({ z }: { z: VerbrauchZeile }) {
       data-veraltet={z.veraltet || undefined}
     >
       <div className="ez-limit-kopf">
-        <h5 className="ez-limit-titel">{z.titel}</h5>
+        <Ueberschrift ebene={5} className="ez-limit-titel">
+          {z.titel}
+        </Ueberschrift>
         <span className="ez-limit-art">{z.erklaerung}</span>
       </div>
       <div className="ez-bahn" aria-hidden="true">
@@ -70,7 +73,7 @@ export const VerbrauchAbschnitt = memo(function VerbrauchAbschnitt() {
   const anzeige = useMemo(() => verbrauchAnzeige(kontingent, jetzt), [kontingent, jetzt]);
 
   return (
-    <Block titel="Kontingent des Claude-Abos">
+    <Block titel="Kontingent">
       <p className="ez-text">
         So viel von deinem Abo haben Entwicklungsaufträge mit deinem Claude-Code-Token schon verbraucht. W.A.I.S. liest die Werte
         aus den Antworten von Claude Code und fragt dafür nichts zusätzlich an.

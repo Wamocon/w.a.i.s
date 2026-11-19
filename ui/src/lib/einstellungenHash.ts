@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
-import { GERAETEVERWALTUNG_ID, hashFuer, parseHash, PC_STEUERUNG_ID, type AbschnittId, type HashZiel } from "@/lib/einstellungenAbschnitte";
+import {
+  GERAETEVERWALTUNG_ID,
+  hashFuer,
+  parseHash,
+  PC_STEUERUNG_ID,
+  type AbschnittId,
+  type GruppeId,
+  type HashZiel,
+} from "@/lib/einstellungenAbschnitte";
 import {
   basisNachErsetzen,
   nachRueckschrittNochOffen,
@@ -12,7 +20,7 @@ import {
 } from "@/lib/einstellungenVerlauf";
 
 /**
- * Die Adresse (Hash) als Zustand der Einstellungsseite. Der Hash ist die einzige Quelle: Öffnen, Abschnitt wählen und
+ * Die Adresse (Hash) als Zustand der Einstellungsseite. Der Hash ist die einzige Quelle: Öffnen, Gruppe oder Abschnitt wählen und
  * Schließen schreiben ihn, die Oberfläche liest ihn. So gehen Links, "Zurück" des Browsers und ein Neuladen ohne
  * zweiten Zustand. Geschrieben wird über die History-API (Next.js hält die Adresse damit in Takt, die Seite lädt nicht
  * neu und ein laufendes Gespräch bleibt unberührt). Der Eintrag im Verlauf trägt bewusst keinen eigenen State (null):
@@ -107,10 +115,14 @@ export function useEinstellungenZiel(): HashZiel {
   return useMemo(() => parseHash(hash), [hash]);
 }
 
-/** Seite öffnen. Aus dem Gespräch: neuer Eintrag im Verlauf, damit "Zurück" zum Gespräch führt. Schon offen: nur wechseln. */
-export function einstellungenOeffnen(abschnitt: AbschnittId | null = null) {
+/**
+ * Seite öffnen, wahlweise gleich bei einer Gruppe oder einem Abschnitt (die Abschnittskennungen vor der Gruppierung gelten weiter:
+ * sie öffnen die Gruppe des Abschnitts und springen zu ihm). Aus dem Gespräch: neuer Eintrag im Verlauf, damit "Zurück" zum
+ * Gespräch führt. Schon offen: nur wechseln.
+ */
+export function einstellungenOeffnen(ziel: AbschnittId | GruppeId | null = null) {
   starte();
-  const hash = hashFuer(abschnitt);
+  const hash = hashFuer(ziel);
   if (parseHash(lesen()).offen) {
     if (lesen() !== hash) {
       ersetzeOffen(hash);
@@ -121,12 +133,16 @@ export function einstellungenOeffnen(abschnitt: AbschnittId | null = null) {
   const a = typeof document === "undefined" ? null : document.activeElement;
   oeffner = a instanceof HTMLElement && a !== document.body ? a : null;
   basis = 0;
-  window.history.pushState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
+  const adresse = (h: string) => `${window.location.pathname}${window.location.search}${h}`;
+  // Am Handy führt die Liste in die Gruppe: ohne Listeneintrag darunter ginge "Alle Einstellungen" zum Gespräch statt zur Liste, und
+  // "Zum Gespräch" ginge einen Schritt zu weit zurück (zwei Schritte für einen angelegten Eintrag)
+  if (tiefe(parseHash(hash), zweispaltigJetzt()) === 2) window.history.pushState(null, "", adresse(hashFuer(null)));
+  window.history.pushState(null, "", adresse(hash));
   melden();
 }
 
 /**
- * Abschnitt "Geräte und PC" öffnen, dann ein Element darin in Sicht bringen und fokussieren. Es entsteht erst mit dem Abschnitt;
+ * Abschnitt "Geräte und PC-Steuerung" öffnen, dann ein Element darin in Sicht bringen und fokussieren. Es entsteht erst mit dem Abschnitt;
  * deshalb wird nach dem Zeichnen gesucht (kurz wiederholt, falls der Abschnitt noch lädt), nach dem Fokus der Überschrift, den die
  * Einstellungsseite beim Öffnen setzt.
  */
@@ -159,15 +175,24 @@ export function zurPcSteuerung() {
 }
 
 /**
- * Abschnitt wählen. Am Handy führt die Liste mit einem neuen Eintrag in den Abschnitt, damit "Zurück" zur Liste geht;
- * zweispaltig und beim Wechsel zwischen Abschnitten ersetzt der Wechsel den Eintrag, damit "Zurück" nicht durch alle
- * besuchten Abschnitte läuft.
+ * Abschnitt wählen (auch aus der Sprungleiste einer Gruppe): öffnet dessen Gruppe und springt zu ihm. Am Handy führt die Liste
+ * mit einem neuen Eintrag in die Gruppe, damit "Zurück" zur Liste geht; zweispaltig, beim Wechsel zwischen Gruppen und bei einem
+ * Sprung innerhalb einer Gruppe ersetzt der Wechsel den Eintrag, damit "Zurück" nicht durch alle besuchten Stellen läuft.
  */
 export function abschnittWaehlen(abschnitt: AbschnittId) {
+  zielWaehlen(abschnitt);
+}
+
+/** Gruppe wählen (Gliederung): wie abschnittWaehlen, nur dass die Gruppe am Anfang erscheint. */
+export function gruppeWaehlen(gruppe: GruppeId) {
+  zielWaehlen(gruppe);
+}
+
+function zielWaehlen(wahl: AbschnittId | GruppeId) {
   starte();
-  const ziel = hashFuer(abschnitt);
+  const ziel = hashFuer(wahl);
   const aktuell = lesen();
-  const vonListe = parseHash(aktuell).abschnitt === null;
+  const vonListe = parseHash(aktuell).gruppe === null;
   const art = waehlenSchritt({ zweispaltig: zweispaltigJetzt(), aktuell, ziel, vonListe });
   if (art === "nichts") return;
   if (art === "neu") window.history.pushState(null, "", `${window.location.pathname}${window.location.search}${ziel}`);
@@ -175,7 +200,7 @@ export function abschnittWaehlen(abschnitt: AbschnittId) {
   melden();
 }
 
-/** Am Handy aus einem Abschnitt zurück zur Liste: ein Schritt zurück, wenn die Liste davor von der Seite stammt. */
+/** Am Handy aus einer Gruppe zurück zur Liste: ein Schritt zurück, wenn die Liste davor von der Seite stammt. */
 export function zurListe() {
   starte();
   const schritt = zurListeSchritt(tiefe(parseHash(lesen()), zweispaltigJetzt()), basis ?? 0);

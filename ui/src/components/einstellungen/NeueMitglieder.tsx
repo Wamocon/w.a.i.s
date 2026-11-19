@@ -73,7 +73,7 @@ export const NeueMitglieder = memo(function NeueMitglieder() {
   }, [neu]);
 
   return (
-    <Block titel="Wie weit sind die neuen Mitglieder?">
+    <Block titel="Stand der Einrichtung">
       {stand.art === "laedt" && (
         <p className="ez-leer" role="status">
           Lade die Übersicht ...

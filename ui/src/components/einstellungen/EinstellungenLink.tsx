@@ -1,26 +1,26 @@
 "use client";
 
 import type { MouseEvent, ReactNode } from "react";
-import { hashFuer, type AbschnittId } from "@/lib/einstellungenAbschnitte";
+import { hashFuer, type AbschnittId, type GruppeId } from "@/lib/einstellungenAbschnitte";
 import { einstellungenOeffnen, useEinstellungenZiel } from "@/lib/einstellungenHash";
 
 /** Kennung des Zahnrads in der Kopfzeile: beim Schließen der Einstellungen kehrt der Fokus dorthin zurück. */
 export const EINSTELLUNGEN_KNOPF_ID = "ez-knopf";
 
 /** Normaler Klick öffnet die Seite ohne Neuladen; Strg, Umschalt, Mittelklick und "Link kopieren" nutzen die Adresse. */
-function beiKlick(e: MouseEvent<HTMLAnchorElement>, abschnitt: AbschnittId | null) {
+function beiKlick(e: MouseEvent<HTMLAnchorElement>, ziel: AbschnittId | GruppeId | null) {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
-  einstellungenOeffnen(abschnitt);
+  einstellungenOeffnen(ziel);
 }
 
-/** Link zur Einstellungsseite (optional zu einem Abschnitt), zum Beispiel "Einstellungen öffnen" in der Seitenleiste. */
+/** Link zur Einstellungsseite (optional zu einem Abschnitt oder einer Gruppe), zum Beispiel "Einstellungen öffnen" in der Seitenleiste. */
 export function EinstellungenLink({
   abschnitt = null,
   className,
   children,
 }: {
-  abschnitt?: AbschnittId | null;
+  abschnitt?: AbschnittId | GruppeId | null;
   className?: string;
   children: ReactNode;
 }) {

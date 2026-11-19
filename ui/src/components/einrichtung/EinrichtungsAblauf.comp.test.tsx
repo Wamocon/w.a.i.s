@@ -2,7 +2,7 @@
 // der API-Schlüssel, beide überspringbar, danach die Zusammenfassung je Fall; dazu der Installer-Download mit Prüfsumme und Befehl.
 // Der Kern ist eine Attrappe (lib/kernApi.ts), es geht nichts ins Netz. Ausführen im Ordner ui/:  npm run test:komponenten
 import { createHash } from "node:crypto";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EinrichtungsAblauf } from "@/components/einrichtung/EinrichtungsAblauf";
@@ -10,7 +10,7 @@ import { EinrichtungZusammenfassung } from "@/components/einrichtung/Einrichtung
 import { InstallerDownload } from "@/components/einrichtung/InstallerDownload";
 import { EINRICHTUNG_SCHRITTE } from "@/components/einrichtung/schritte";
 import { KernFehler } from "@/lib/kernApi";
-import { resetWamo } from "@/lib/wamo";
+import { resetWamo, wamo } from "@/lib/wamo";
 
 const kern = vi.hoisted(() => ({ kernJson: vi.fn(), kernDateiStrom: vi.fn() }));
 vi.mock("@/lib/kernApi", async (original) => ({
@@ -93,6 +93,22 @@ describe("EinrichtungsAblauf: Modellzugang nach D2", () => {
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "API-Schlüssel" }));
     await user.click(screen.getByRole("button", { name: "Zurück" }));
     expect(screen.getByRole("heading", { name: "Claude-Code-Token" })).toBeTruthy();
+  });
+
+  it("ändert der Stand des Kerns später die Schritte, springt der Fokus nicht von selbst (der Ablauf steht neben anderen Abschnitten)", async () => {
+    render(
+      <>
+        <button type="button">davor</button>
+        <EinrichtungsAblauf schritte={MODELL} />
+      </>,
+    );
+    const davor = screen.getByRole("button", { name: "davor" });
+    davor.focus();
+    act(() => {
+      wamo.set((s) => ({ ...s, modellzugang: { aktion: "status", art: "haus", hinterlegt: false, festgelegt: true, codeHinterlegt: false } }));
+    });
+    expect(await screen.findByRole("heading", { name: "So arbeitet W.A.I.S. für dich" })).toBeTruthy();
+    expect(document.activeElement).toBe(davor);
   });
 
   it("beide Schritte übersprungen: Zusammenfassung mit Hausmodellen für alles und Soniox, nichts gespeichert", async () => {

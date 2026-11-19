@@ -11,6 +11,7 @@ import {
 import { useSelect } from "@/lib/store";
 import { wamo } from "@/lib/wamo";
 import { EINRICHTUNG_SCHRITTE, type EinrichtungsSchritt } from "./schritte";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /**
  * Führt durch die Schritte beim Ausrollen (D2): oben "Schritt x von n" mit einer Leiste, darunter der Titel und der Schritt
@@ -36,22 +37,26 @@ export function EinrichtungsAblauf({
   const aktuellId = gewaehlt ? wirksamerSchritt(alle, ids, gewaehlt) : null;
   const aktuell = sichtbar.find((s) => s.id === aktuellId) ?? null;
 
-  // Fokus auf den Titel bei jedem Wechsel, nicht beim ersten Zeigen (das würde die Seite unerwartet springen lassen)
-  const erstesMal = useRef(true);
+  // Fokus auf den Titel, wenn die Person den Schritt gewechselt hat (Weiter, Zurück, "Noch einmal durchgehen"), nie von selbst: weder beim
+  // ersten Zeigen noch wenn der Stand des Kerns später die Schritte ändert. Der Ablauf steht auch in den Einstellungen neben anderen
+  // Abschnitten, und ein Fokussprung von selbst risse die Person aus dem Abschnitt, zu dem sie gerade gesprungen ist.
+  const wechselVonPerson = useRef(false);
+  const wechseln = (neu: SchrittId | null) => {
+    wechselVonPerson.current = true;
+    setGewaehlt(neu);
+  };
   useEffect(() => {
-    if (erstesMal.current) {
-      erstesMal.current = false;
-      return;
-    }
+    if (!wechselVonPerson.current) return;
+    wechselVonPerson.current = false;
     titelRef.current?.focus();
   }, [aktuellId, fertig]);
 
   if (fertig) {
     return (
       <section className="ea-ablauf" aria-labelledby={kopfId}>
-        <h4 id={kopfId} ref={titelRef} tabIndex={-1} className="ea-ueberschrift">
+        <Ueberschrift ebene={4} id={kopfId} ref={titelRef} tabIndex={-1} className="ea-ueberschrift">
           Erste Schritte erledigt
-        </h4>
+        </Ueberschrift>
         <p className="ea-text">Den Stand siehst und änderst du jederzeit unter Einstellungen, Modellzugang.</p>
         <div className="ea-knoepfe">
           <button
@@ -59,7 +64,7 @@ export function EinrichtungsAblauf({
             className="btn-secondary"
             onClick={() => {
               setFertig(false);
-              setGewaehlt(alle[0] ?? null);
+              wechseln(alle[0] ?? null);
             }}
           >
             Noch einmal durchgehen
@@ -75,9 +80,10 @@ export function EinrichtungsAblauf({
   const voriger = nachbarSchritt(ids, aktuell.id, -1);
   const weiter = () => {
     if (naechster) {
-      setGewaehlt(naechster);
+      wechseln(naechster);
       return;
     }
+    wechselVonPerson.current = true;
     setFertig(true);
     onFertig?.();
   };
@@ -98,11 +104,11 @@ export function EinrichtungsAblauf({
             </li>
           ))}
         </ol>
-        <h4 id={kopfId} ref={titelRef} tabIndex={-1} className="ea-ueberschrift">
+        <Ueberschrift ebene={4} id={kopfId} ref={titelRef} tabIndex={-1} className="ea-ueberschrift">
           {aktuell.titel}
-        </h4>
+        </Ueberschrift>
       </div>
-      <Schritt key={aktuell.id} weiter={weiter} zurueck={voriger ? () => setGewaehlt(voriger) : undefined} />
+      <Schritt key={aktuell.id} weiter={weiter} zurueck={voriger ? () => wechseln(voriger) : undefined} />
     </section>
   );
 }

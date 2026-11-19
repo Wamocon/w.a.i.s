@@ -7,6 +7,7 @@ import { API_ANLEITUNG, falschesFeld, NICHT_AUTOMATISCH, TOKEN_ANLEITUNG, type A
 import { useSelect } from "@/lib/store";
 import type { ModellzugangAnfrage, SchluesselArt } from "@/lib/useWamo";
 import { wamo } from "@/lib/wamo";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /**
  * Bausteine für Schlüssel und Token: das Feld je Schlüsseltyp (SchluesselFormular) und das Senden mit Warten auf die
@@ -215,9 +216,9 @@ export function SchluesselFormular(p: FormularProps) {
 
   return (
     <section className="mz-abschnitt" aria-labelledby={idKopf} aria-busy={meins || undefined}>
-      <h4 id={idKopf} className="mz-ueberschrift">
+      <Ueberschrift ebene={4} id={idKopf} className="mz-ueberschrift">
         {p.ueberschrift}
-      </h4>
+      </Ueberschrift>
       <p className="mz-zweck">{p.zweck}</p>
       <p className="mz-status" data-hinterlegt={p.hinterlegt || undefined}>
         <span className="mz-marke" aria-hidden="true" />

@@ -27,6 +27,7 @@ import { beenden, starten, zieleLaden } from "@/lib/fernzugriffApi";
 import { codeBestaetigen } from "@/lib/geraeteVerwaltungApi";
 import { KernFehler } from "@/lib/kernApi";
 import { createStore, useSelect } from "@/lib/store";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /** So oft wird die Liste neu geladen, solange das Fenster sichtbar und kein Dialog offen ist (belegt und frei ändern sich von selbst). */
 const AUFFRISCHEN_MS = 30_000;
@@ -149,9 +150,9 @@ function ZielKarte({ z, onVerbinden }: { z: Ziel; onVerbinden: (z: Ziel, ausloes
           <StatusPlakette z={z} />
           {z.eigene && <span className="fz-tag">Deine Sitzung</span>}
         </div>
-        <h6 id={titelId} className="fz-name">
+        <Ueberschrift ebene={6} id={titelId} className="fz-name">
           {z.anzeige}
-        </h6>
+        </Ueberschrift>
         <p className="fz-zeile">{zielZeile(z)}</p>
         <div className="fz-aktionen">
           <button
@@ -205,9 +206,9 @@ function Sitzungsleiste({
   const knapp = restzeitKnapp(rest);
   return (
     <section className="fz-sitzung" aria-labelledby="fz-sitzung-titel" data-knapp={knapp || undefined}>
-      <h5 id="fz-sitzung-titel" className="fz-gruppe-titel">
+      <Ueberschrift ebene={5} id="fz-sitzung-titel" className="fz-gruppe-titel">
         Verbunden mit {meine.anzeige}
-      </h5>
+      </Ueberschrift>
       <p className="fz-rest">
         <span className="fz-rest-label">Restzeit</span>{" "}
         <time className="fz-rest-wert num" aria-label={`Restzeit ${restzeitSprache(rest)}`}>
@@ -536,7 +537,9 @@ export const Fernzugriff = memo(function Fernzugriff() {
       )}
       {u?.aktiv && ziele.length > 0 && (
         <section className="fz-gruppe" aria-label="Ziele">
-          <h5 className="fz-gruppe-titel">Ziele ({ziele.length})</h5>
+          <Ueberschrift ebene={5} className="fz-gruppe-titel">
+            Ziele ({ziele.length})
+          </Ueberschrift>
           <ul className="fz-liste">
             {ziele.map((z) => (
               <ZielKarte key={z.name} z={z} onVerbinden={oeffnen} />

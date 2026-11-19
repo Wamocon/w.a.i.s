@@ -13,6 +13,7 @@ import {
   type GithubAktion,
   type GithubZugang as Stand,
 } from "@/lib/githubZugang";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 const PFAD = "/github-zugang";
 const LINK_FEIN = "https://github.com/settings/personal-access-tokens/new";
@@ -88,9 +89,9 @@ export const GithubZugang = memo(function GithubZugang() {
   return (
     <div className="mz-inhalt">
       <section className="mz-abschnitt" aria-labelledby="github-zugang-kopf" aria-busy={beschaeftigt || undefined}>
-        <h4 id="github-zugang-kopf" className="mz-ueberschrift" ref={kopf} tabIndex={-1}>
+        <Ueberschrift ebene={4} id="github-zugang-kopf" className="mz-ueberschrift" ref={kopf} tabIndex={-1}>
           Eigenes GitHub-Token
-        </h4>
+        </Ueberschrift>
         <p className="mz-zweck">
           Damit arbeitet W.A.I.S. in Entwicklungsaufträgen mit deinen Repos: lesen, in einer abgeschotteten Umgebung ändern und erst nach
           deinem Klick einen Zweig wamo/&lt;Auftrag&gt; mit Pull Request einreichen. Gemergt wird nie durch W.A.I.S.

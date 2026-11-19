@@ -1,15 +1,19 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
-/** Ein Block innerhalb eines Abschnitts: Karte mit kleiner Überschrift der Stufe 4 (die Abschnittsüberschrift ist Stufe 3). */
+/**
+ * Ein Block innerhalb eines Abschnitts: Karte mit kleiner Überschrift. Ihre Stufe richtet sich nach der Seite (components/Ueberschrift.tsx):
+ * in den Einstellungen ist es die Stufe 5 (Seite 2, Gruppe 3, Abschnitt 4).
+ */
 export function Block({ titel, children }: { titel: string; children: ReactNode }) {
   const id = useId();
   return (
     <section className="ez-block" aria-labelledby={id}>
-      <h4 id={id} className="ez-block-titel">
+      <Ueberschrift ebene={4} id={id} className="ez-block-titel">
         {titel}
-      </h4>
+      </Ueberschrift>
       {children}
     </section>
   );

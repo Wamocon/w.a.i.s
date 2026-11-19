@@ -232,24 +232,29 @@ describe("Umschalter Hören und Sprechen", () => {
   });
 });
 
-describe("Abschnitt Sprache und Ton", () => {
+describe("Abschnitt Mikrofon und Sprache", () => {
   beforeEach(() => resetWamo());
 
-  it("zeigt den Grund eines Rückfalls und wo man umschaltet", () => {
+  it("zeigt den Umschalter für Hören und Sprechen mit dem Grund eines Rückfalls und was gerade läuft", () => {
     wamo.set((s) => ({
       ...s,
       betrieb: { ...BETRIEB, modelle: { stt: "Soniox (Rückfall)", tts: "Soniox Nina (Rückfall)" }, spracheGrund: "Sprachausgabe: im Kern noch nicht eingerichtet" },
     }));
     render(<SpracheAbschnitt mikrofone={async () => []} mikrofonWaehlen={() => true} />);
-    expect(screen.getByText(/Hinweis zu dieser Sitzung: Sprachausgabe: im Kern noch nicht eingerichtet\./)).toBeTruthy();
-    expect(screen.getByText(/Umschalten zwischen Soniox und Im Haus/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Hören und Sprechen" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Spracherkennung" })).toBeTruthy();
+    expect(screen.getByText(/Diese Sitzung weicht von der Wahl ab: Sprachausgabe: im Kern noch nicht eingerichtet\./)).toBeTruthy();
+    expect(screen.getByText("Soniox (Rückfall)")).toBeTruthy();
+    // der frühere Satz "Umschalten unter Modellzugang" ist weg: der Umschalter steht jetzt hier
+    expect(screen.queryByText(/Umschalten zwischen Soniox und Im Haus/)).toBeNull();
   });
 
-  it("Laborsicht: kein Modellzugang, kein Hinweis zum Umschalten", () => {
+  it("Laborsicht: kein Modellzugang, kein Umschalter für Hören und Sprechen", () => {
     expect(abschnitteFuer({ rolle: "mitglied", labor: true }).map((a) => a.id)).not.toContain("modellzugang");
     wamo.set((s) => ({ ...s, betrieb: { ...BETRIEB, spracheGrund: "x" } }));
     render(<SpracheAbschnitt mikrofone={async () => []} mikrofonWaehlen={() => true} nurMikrofon />);
-    expect(screen.queryByText(/Umschalten zwischen Soniox/)).toBeNull();
-    expect(screen.queryByText(/Hinweis zu dieser Sitzung/)).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Spracherkennung" })).toBeNull();
+    expect(screen.queryByText(/Diese Sitzung weicht von der Wahl ab/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Hören und Sprechen" })).toBeNull();
   });
 });

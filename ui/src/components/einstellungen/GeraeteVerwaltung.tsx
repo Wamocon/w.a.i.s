@@ -25,6 +25,7 @@ import { aktionSenden, codeBestaetigen, geraeteLaden } from "@/lib/geraeteVerwal
 import { geraeteAnzeige } from "@/lib/geraeteAnzeige";
 import { KernFehler } from "@/lib/kernApi";
 import { createStore, useSelect } from "@/lib/store";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /** So oft wird die Liste neu geladen, solange das Fenster sichtbar und kein Dialog offen ist (neue Anträge erscheinen von selbst). */
 const AUFFRISCHEN_MS = 60_000;
@@ -92,9 +93,9 @@ function GeraeteKarte({
           {g.bindung === "automatisch" && <span className="gv-tag">Automatisch gebunden</span>}
         </div>
         <div>
-          <h6 id={titelId} className="gv-name">
+          <Ueberschrift ebene={6} id={titelId} className="gv-name">
             {g.name}
-          </h6>
+          </Ueberschrift>
           <span className="gv-kennung">{g.kennung}</span>
         </div>
         <dl className="gv-daten">
@@ -456,13 +457,17 @@ export const GeraeteVerwaltung = memo(function GeraeteVerwaltung() {
 
       {warten.length > 0 && (
         <section className="gv-gruppe" aria-label="Wartende Geräte">
-          <h5 className="gv-gruppe-titel">Wartet auf Freigabe ({warten.length})</h5>
+          <Ueberschrift ebene={5} className="gv-gruppe-titel">
+            Wartet auf Freigabe ({warten.length})
+          </Ueberschrift>
           <ul className="gv-liste">{warten.map(zeige)}</ul>
         </section>
       )}
       {uebrige.length > 0 && (
         <section className="gv-gruppe" aria-label="Aktive und gesperrte Geräte">
-          <h5 className="gv-gruppe-titel">Geräte ({uebrige.length})</h5>
+          <Ueberschrift ebene={5} className="gv-gruppe-titel">
+            Geräte ({uebrige.length})
+          </Ueberschrift>
           <ul className="gv-liste">{uebrige.map(zeige)}</ul>
         </section>
       )}

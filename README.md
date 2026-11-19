@@ -453,21 +453,33 @@ neu erzeugen: `python scripts/wamo_icons_erzeugen.py` (Pillow nötig).
 
 Alle Formulare und Schalter liegen auf der Einstellungsseite (Zahnrad in der Kopfzeile oder „Einstellungen öffnen“ in der
 linken Seitenleiste, `ui/src/components/einstellungen/`). Sie ist keine eigene Route, sondern eine Ansicht der Hauptseite über
-den Hash `#einstellungen/<abschnitt>`: Das passt zur Desktop-App, Links und „Zurück“ des Browsers gehen, und ein laufendes
-Gespräch bleibt unberührt (die Kommandozentrale wird nur verborgen, Meldungen stehen oben in der Seite). Ab 860 px zwei
-Spalten (Gliederung links), darunter eine Liste, die in den Abschnitt führt. Escape schließt wie „Zurück“, lässt aber
-Eingaben in Textfeldern in Ruhe.
+den Hash `#einstellungen/<kennung>`: Das passt zur Desktop-App, Links und „Zurück“ des Browsers gehen, und ein laufendes
+Gespräch bleibt unberührt (die Kommandozentrale wird nur verborgen, Meldungen stehen oben in der Seite). Sechs Gruppen gliedern
+die Seite: Die Gliederung links zeigt nur die Gruppen, rechts stehen die Abschnitte der gewählten Gruppe untereinander (ab drei
+Abschnitten mit einer Sprungleiste). Ab 860 px zwei Spalten, darunter eine Liste, die in die Gruppe führt. Die Kennung im Hash ist
+eine Gruppe (`#einstellungen/zugaenge`) oder ein Abschnitt (`#einstellungen/stimme`, auch die Adressen aus der Zeit vor der
+Gruppierung): Ein Abschnitt öffnet seine Gruppe, springt zu ihm und setzt den Fokus auf seine Überschrift. Gruppen- und
+Abschnittskennungen überschneiden sich nie. Eine Gruppe erscheint, wenn mindestens einer ihrer Abschnitte für die Rolle sichtbar
+ist (Mitglied: fünf Gruppen, Admin: sechs, Laborkonten: nur „Sprache und Stimme“ mit der Mikrofonwahl). Escape schließt wie
+„Zurück“, lässt aber Eingaben in Textfeldern in Ruhe.
 
-| Abschnitt (Kennung) | Inhalt | Sichtbar für |
-| --- | --- | --- |
-| Konto und Profil (`konto`) | E-Mail, aktives Profil, Rolle, Abmelden | alle |
-| Modellzugang (`modellzugang`) | API-Schlüssel (Gespräch), Claude-Code-Token (Entwicklungsaufträge), Modus, geführte Anleitung | alle |
-| Verbrauch (`verbrauch`) | Kontingent des Max-Abos aus der Servernachricht `kontingent`: Sitzungslimit, Wochenlimit, Fable limit | Admin |
-| Sprache und Ton (`sprache`) | Mikrofonwahl, Spracherkennung und Sprachausgabe laut Betriebsmeldung | alle |
-| Darstellung (`darstellung`) | Normal, Fokus, Zentrale, Nacht | alle |
-| Geräte und PC (`geraete`) | Verbindungen, Geräteverwaltung (Freigeben, Sperren, Widerrufen), PC-Steuerung (nur Admin, auch im Browser; Autostart nur in der Desktop-App), Betriebsart, Stand der Geräteeinrichtung | alle, Geräteverwaltung und PC-Steuerung nur Admin |
-| Teilen (`teilen`) | Geteilte Arbeit: mit mir, von mir, Dateien | alle |
-| Info (`info`) | Version, Kern, Hinweise an Admins | alle, Hinweise nur Admin |
+| Gruppe (Kennung) | Abschnitt (Kennung) | Inhalt | Sichtbar für |
+| --- | --- | --- | --- |
+| Konto und Allgemeines (`allgemein`) | Konto (`konto`) | E-Mail, aktives Profil, Rolle, Abmelden | alle |
+| | Erste Schritte (`start`) | Modellzugang in Schritten, Installer, Prüfliste, Updates der App | alle |
+| | Darstellung (`darstellung`) | Helligkeit, Ansicht (Normal, Fokus, Zentrale, Nacht), Untertitel | alle |
+| | Info (`info`) | Version, Kern, Hinweise an Admins | alle, Hinweise nur Admin |
+| Sprache und Stimme (`sprache-stimme`) | Mikrofon und Sprache (`sprache`) | Mikrofonwahl mit Test, Still starten beim Tippen, Hören und Sprechen (Soniox oder im Haus, Stimme im Haus) | alle, Laborkonten nur die Mikrofonwahl |
+| | Eigene Stimme (`stimme`) | Stimmerkennung, Einlernen, Abdrücke löschen | alle, nicht im Labor |
+| Modelle und Zugänge (`zugaenge`) | Modellzugang (`modellzugang`) | API-Schlüssel (Gespräch), Claude-Code-Token (Entwicklungsaufträge), Modus, Modelle je Aufgabe, geführte Anleitung | alle |
+| | GitHub-Zugang (`github`) | eigenes Token für Entwicklungsaufträge | alle |
+| | Verbrauch (`verbrauch`) | Kontingent des Max-Abos aus der Servernachricht `kontingent`: Sitzungslimit, Wochenlimit, Fable limit | Admin, Mitglieder mit eigenem Token |
+| Geräte und PC (`geraete-pc`) | Geräte und PC-Steuerung (`geraete`) | Verbindungen, Geräteverwaltung (Freigeben, Sperren, Widerrufen), PC-Steuerung (auch im Browser; Autostart nur in der Desktop-App), Betriebsart, Stand der Geräteeinrichtung | alle, Geräteverwaltung und PC-Steuerung nur Admin |
+| | Fernzugriff (`fernzugriff`) | Desktop der Sparks unterwegs bedienen | Admin |
+| Gedächtnis und Teilen (`inhalte`) | Gedächtnis (`gedaechtnis`) | offene Vorschläge fürs gemeinsame Gedächtnis prüfen | Admin |
+| | Teilen (`teilen`) | Geteilte Arbeit: mit mir, von mir, Dateien | alle |
+| Verwaltung (`verwaltung`) | Neue Mitglieder (`mitglieder`) | Stand der Einrichtung je Person, Rechte der GitHub-Zugänge | Admin |
+| | Änderungen (`aenderungen`) | Stand der Selbstüberarbeitung von W.A.I.S. | Admin |
 
 Der Abschnitt Verbrauch ist **Format ungeprüft**: Das Datenformat des Kerns (`voice-core/kontingent.py`) ist noch an keinem
 echten Token bestätigt, die Seite sagt das dort auch (`ui/src/lib/verbrauch.ts`). In der Entwicklung zeigt

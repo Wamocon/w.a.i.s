@@ -91,7 +91,7 @@ export const GedaechtnisAbschnitt = memo(function GedaechtnisAbschnitt() {
   const anzahl = liste?.length ?? 0;
 
   return (
-    <Block titel="Offene Vorschläge fürs gemeinsame Gedächtnis">
+    <Block titel="Offene Vorschläge">
       <p className="ez-text">{TEXT_ERKLAERUNG}</p>
       {!geladen ? (
         <p className="ez-leer" role="status">

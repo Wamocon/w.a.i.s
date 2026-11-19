@@ -237,25 +237,28 @@ describe("Hauptansicht eines Laborkontos: was bleibt", () => {
 });
 
 describe("Hauptansicht eines Laborkontos: Einstellungen nur mit Mikrofon", () => {
-  it("die Gliederung hat nur Sprache und Ton", async () => {
+  it("die Gliederung hat nur die Gruppe Sprache und Stimme", async () => {
     zeige(PLATZ, { hash: "#einstellungen" });
     await ruhe();
-    const nav = screen.getByRole("navigation", { name: "Abschnitte der Einstellungen" });
-    expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual([expect.stringMatching(/^Sprache und Ton/)]);
+    const nav = screen.getByRole("navigation", { name: "Gruppen der Einstellungen" });
+    expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual([expect.stringMatching(/^Sprache und Stimme/)]);
   });
 
-  it("die Gliederung beschreibt den Abschnitt in der Laborsicht kurz mit Mikrofon wählen", async () => {
+  it("die Gliederung beschreibt die Gruppe in der Laborsicht kurz mit Mikrofon wählen", async () => {
     zeige(PLATZ, { hash: "#einstellungen" });
     await ruhe();
-    const nav = screen.getByRole("navigation", { name: "Abschnitte der Einstellungen" });
+    const nav = screen.getByRole("navigation", { name: "Gruppen der Einstellungen" });
     expect(within(nav).getByText("Mikrofon wählen", { selector: ".ez-nav-kurz" })).toBeTruthy();
     expect(within(nav).queryByText(/Hören und Stimme/)).toBeNull();
   });
 
-  it("der Abschnitt selbst trägt dieselbe Kurzzeile", async () => {
+  it("die Gruppe selbst trägt dieselbe Kurzzeile, der einzige Abschnitt darin wiederholt sie nicht", async () => {
     zeige(PLATZ, { hash: "#einstellungen/sprache" });
     await ruhe();
-    expect(document.querySelector(".ez-abschnitt-kurz")?.textContent).toBe("Mikrofon wählen");
+    expect(document.querySelector(".ez-gruppe-kurz")?.textContent).toBe("Mikrofon wählen");
+    expect(document.querySelector(".ez-abschnitt-kurz")).toBeNull();
+    expect(screen.getByRole("heading", { level: 3, name: "Sprache und Stimme" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 4, name: "Mikrofon und Sprache" })).toBeTruthy();
   });
 
   it("zeigt in diesem Abschnitt die Mikrofonwahl, aber nicht Start beim Tippen oder Hören und Sprechen", async () => {
@@ -266,13 +269,14 @@ describe("Hauptansicht eines Laborkontos: Einstellungen nur mit Mikrofon", () =>
     expect(screen.queryByText("Hören und Sprechen")).toBeNull();
   });
 
-  it("ein Link auf einen gesperrten Abschnitt zeigt ihn nicht, auch Konto mit Abmelden nicht", async () => {
-    for (const abschnitt of ["modellzugang", "konto", "start", "geraete", "info", "fernzugriff", "verbrauch"]) {
+  it("ein Link auf eine gesperrte Gruppe oder einen gesperrten Abschnitt zeigt sie nicht, auch Konto mit Abmelden nicht", async () => {
+    for (const abschnitt of ["modellzugang", "konto", "start", "geraete", "info", "fernzugriff", "verbrauch", "stimme", "zugaenge", "allgemein", "verwaltung"]) {
       const { unmount } = zeige(PLATZ, { hash: `#einstellungen/${abschnitt}` });
       await ruhe();
       const seite = document.querySelector<HTMLElement>(".ez");
       expect(seite, abschnitt).not.toBeNull();
-      expect(seite!.querySelector("#ez-h-abschnitt"), abschnitt).toBeNull();
+      expect(seite!.querySelector(".ez-gruppe"), abschnitt).toBeNull();
+      expect(seite!.querySelector(".ez-abschnitt-titel"), abschnitt).toBeNull();
       expect(within(seite!).queryByRole("button", { name: "Abmelden" }), abschnitt).toBeNull();
       unmount();
     }
@@ -411,31 +415,22 @@ describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
   it("hat in den Einstellungen alle Abschnitte", async () => {
     zeige(ADMIN, { hash: "#einstellungen" });
     await ruhe();
-    const nav = screen.getByRole("navigation", { name: "Abschnitte der Einstellungen" });
+    const nav = screen.getByRole("navigation", { name: "Gruppen der Einstellungen" });
     const titel = within(nav).getAllByRole("link").map((l) => l.querySelector(".ez-nav-titel")?.textContent);
     expect(titel).toEqual([
-      "Konto und Profil",
-      "Erste Schritte",
-      "Modellzugang",
-      "GitHub-Zugang",
-      "Verbrauch",
-      "Sprache und Ton",
-      "Stimme",
-      "Gedächtnis",
-      "Neue Mitglieder",
-      "Darstellung",
+      "Konto und Allgemeines",
+      "Sprache und Stimme",
+      "Modelle und Zugänge",
       "Geräte und PC",
-      "Fernzugriff",
-      "Änderungen",
-      "Teilen",
-      "Info",
+      "Gedächtnis und Teilen",
+      "Verwaltung",
     ]);
   });
 
-  it("zeigt bei Sprache und Ton auch Start beim Tippen und Hören und Sprechen", async () => {
+  it("zeigt bei Mikrofon und Sprache auch Start beim Tippen und Hören und Sprechen", async () => {
     zeige(ADMIN, { hash: "#einstellungen/sprache" });
     await ruhe();
-    expect(document.querySelector(".ez-abschnitt-kurz")?.textContent).toBe("Mikrofon, Hören und Stimme");
+    expect(document.querySelector(".ez-abschnitt-kurz")?.textContent).toBe("Mikrofon, Spracherkennung und Sprachausgabe");
     expect(screen.getByText("Start beim Tippen")).toBeTruthy();
     expect(screen.getByText("Hören und Sprechen")).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Mikrofon" })).toBeTruthy();

@@ -91,12 +91,13 @@ describe("Hauptansicht eines normalen Kontos", () => {
     expect(kern()).not.toBeNull();
   });
 
-  it("bietet in den Einstellungen den Abschnitt Stimme an", async () => {
+  it("bietet in den Einstellungen den Abschnitt Eigene Stimme an, in der Gruppe Sprache und Stimme", async () => {
     zeige(ADMIN, "#einstellungen/stimme");
     sitzungMitStimme();
     await ruhe();
-    const nav = screen.getByRole("navigation", { name: "Abschnitte der Einstellungen" });
-    expect(within(nav).getByText("Stimme", { selector: ".ez-nav-titel" })).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "Gruppen der Einstellungen" });
+    expect(within(nav).getByText("Sprache und Stimme", { selector: ".ez-nav-titel" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 4, name: "Eigene Stimme" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Neu einlernen" })).toBeTruthy();
   });
 });
@@ -185,12 +186,13 @@ describe("Hauptansicht eines Laborkontos", () => {
     expect(kern()).not.toBeNull();
   });
 
-  it("hat in den Einstellungen keinen Abschnitt Stimme", async () => {
+  it("hat in den Einstellungen keinen Abschnitt Eigene Stimme", async () => {
     zeige(PLATZ, "#einstellungen/stimme");
     sitzungMitStimme();
     await ruhe();
-    const nav = screen.getByRole("navigation", { name: "Abschnitte der Einstellungen" });
-    expect(within(nav).queryByText("Stimme", { selector: ".ez-nav-titel" })).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Gruppen der Einstellungen" });
+    expect(within(nav).getByText("Sprache und Stimme", { selector: ".ez-nav-titel" })).toBeTruthy(); // die Gruppe bleibt, mit nur dem Mikrofon
+    expect(screen.queryByRole("heading", { name: "Eigene Stimme" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Neu einlernen" })).toBeNull();
   });
 });
