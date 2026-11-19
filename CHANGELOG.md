@@ -6,6 +6,43 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.7.0] - 2026-11-19
+
+### Hinzugefügt
+
+- Stimmprüfung kalibrieren, Schwelle nach Länge, Einlernen wie Prüfen, persönliche Schwelle (Migration 0025)
+- W.A.I.S. erklärt, warum etwas nicht ging (Fehlerbuch)
+- Canvas-Reiter schließen, Historie, Bilder und Dateien
+- Mikrofontest, Hinweis bei Gerätewechsel und genauere Stimmprüfung
+- Entwicklungsaufträge für später speichern
+- Schnittstelle für persönliche GitHub-Zugänge (Plan C, Paket S)
+- Persönliche GitHub-Zugänge, GitHub-Logik und Auszug (Plan C, Paket D-b)
+- Zweites Sprechermodell im Schattenbetrieb
+- Persönliche GitHub-Zugänge, Kern und Oberfläche (Plan C, Paket K)
+- Einwilligung stimme-2 für den Schattenbetrieb
+- Persönliche GitHub-Zugänge, Dispatcher und Skripte (Plan C, Paket D-a)
+- Stimmabdruck je Mikrofon und Mikrofontest ohne W.A.I.S
+- Oberfläche für Aufträge an W.A.I.S. selbst
+- Aufträge an W.A.I.S. selbst speichern (Rückstand für Admins, Skript für Claude Code)
+- Mikrofonkette im Protokoll (Klasse, Echo, Rauschen, Verstärkung, Rate)
+- Einstellungen in sechs Gruppen neu geordnet
+
+### Behoben
+
+- Selbstanhebung des Hosts mit gültigem Prozess-Handle
+- Kurze eigene Äußerungen erben das Urteil eigen
+- Kern-Kanal prüft die Grenz-Flags von Claude Code über die Optionsprüfung
+- Auftrag_entwuerfe in den Ausnahmen der Labor-Löschliste, Fehlalarm des Secret-Scans markiert
+- Next.js 16.4.6 (zwei Hinweise zu use cache)
+- Einhängen gegen die Schnittstelle von Paket D-b, Befunde der Reviews (Plan C, Paket D-a)
+- Drop-in schreibt WAMO_ENTWICKLUNG_GITHUB immer, Vertrag mit Paket K (Plan C, Paket D-a)
+- Zeitlimit der Modi nach den engeren Grenzen, Tests zu Dispatcher 10 (Plan C, Paket D-a)
+- INVOCATION_ID in den Sandbox-Schritten klon, ausgabe, pruefung entfernen
+- Sandbox-Schritt klon ohne approvals.json, Rauchtest mit echtem Durchlauf
+- Kern prüft die Auftragsart vor der Karte gegen die Arten des Kanals
+- Die Stimme sperrt nichts mehr (Standard beobachten), Ersetzen des Abdrucks ohne Stimmnachweis
+- Hinweiszeile zählt offene und laufende Einträge (max gilt dafür)
+
 ## [0.6.0] - 2026-11-17
 
 ### Hinzugefügt
@@ -861,7 +898,8 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/wamo/compare/v0.6.0...HEAD
+[Unveröffentlicht]: https://github.com/Wamocon/wamo/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Wamocon/wamo/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Wamocon/wamo/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Wamocon/wamo/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Wamocon/wamo/compare/v0.4.0...v0.4.1
