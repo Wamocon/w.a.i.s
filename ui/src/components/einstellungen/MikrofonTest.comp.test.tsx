@@ -348,7 +348,7 @@ describe("Mikrofon öffnen", () => {
     expect(zu).toHaveBeenCalled();
   });
 
-  it("in Sprache und Ton, Block Eingabe, auch in der Laborsicht", async () => {
+  it("in Mikrofon und Sprache, Block Eingabe, auch in der Laborsicht", async () => {
     render(<SpracheAbschnitt mikrofone={async () => LISTE} mikrofonWaehlen={() => true} nurMikrofon />);
     await act(async () => undefined);
     expect(screen.getByRole("button", { name: "Mikrofon testen" })).toBeTruthy();

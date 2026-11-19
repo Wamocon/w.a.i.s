@@ -5,6 +5,7 @@ import { abgeschlossenText, ansicht, type Diff, type Status, type Wirkung } from
 import { statusLaden } from "@/lib/aenderungenApi";
 import { AenderungenFreigabe, type Ausgang } from "./AenderungenFreigabe";
 import { Block, Daten } from "./Block";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /**
  * Abschnitt "Änderungen" (nur Admin): der Stand der Selbstüberarbeitung (Konzept docs/selbstueberarbeitung.md, Schritt 1.5). Die Karte liest den
@@ -81,7 +82,9 @@ function WirkungBlock({ w }: { w: Wirkung }) {
   const arten = Object.entries(w.nach_art);
   return (
     <div className="ae-wirkung">
-      <h5 className="ae-unter">Wirkungsflächen</h5>
+      <Ueberschrift ebene={5} className="ae-unter">
+        Wirkungsflächen
+      </Ueberschrift>
       {w.anzahl === 0 && w.neue_pakete === 0 && !w.windows ? (
         <p className="ez-klein">Die Prüfung fand keine neuen Wirkungsflächen.</p>
       ) : (
@@ -196,7 +199,9 @@ export const AenderungenAbschnitt = memo(function AenderungenAbschnitt() {
           )}
           {a.anfrage.pruefstandZeilen.length > 0 && (
             <>
-              <h5 className="ae-unter">Prüfstand</h5>
+              <Ueberschrift ebene={5} className="ae-unter">
+                Prüfstand
+              </Ueberschrift>
               <Daten zeilen={a.anfrage.pruefstandZeilen} />
             </>
           )}

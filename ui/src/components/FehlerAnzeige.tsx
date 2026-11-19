@@ -70,7 +70,7 @@ export const FehlerAnzeige = memo(function FehlerAnzeige({
               className="btn-secondary btn-small"
               onClick={() => {
                 onSchliessen();
-                einstellungenOeffnen("sprache"); // Abschnitt "Sprache und Ton", Block "Eingabe" mit der Mikrofonwahl
+                einstellungenOeffnen("sprache"); // Abschnitt "Mikrofon und Sprache", Block "Eingabe" mit der Mikrofonwahl
               }}
             >
               Mikrofon wählen

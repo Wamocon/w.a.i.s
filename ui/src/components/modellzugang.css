@@ -25,6 +25,7 @@
 }
 .mz-ueberschrift {
   margin: 0; display: flex; align-items: center; gap: 8px;
+  font-size: 1em; font-weight: 700; /* unabhängig von der Stufe der Überschrift (components/Ueberschrift.tsx) */
 }
 .mz-ueberschrift::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 .mz-zweck { margin: 0; font-size: 16px; line-height: 1.4; }

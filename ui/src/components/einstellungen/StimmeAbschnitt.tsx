@@ -50,7 +50,7 @@ const frageZiel = (f: Frage | null): string | null => (f === null ? null : f.art
  * Ein Abdruck je Mikrofon (Wunsch vom 18.11.2026, lib/stimmMikrofon.ts): Meldet der Kern mehrere (Liste mit max über 1), stehen hier
  * die eingelernten Mikrofone mit Datum. Das laufende hat "Neu einlernen", jedes hat "Löschen"; ein noch nicht eingelerntes laufendes
  * Mikrofon kommt mit "Für dieses Mikrofon einlernen" dazu (gesperrt, wenn schon drei eingelernt sind), "Alle Abdrücke löschen" ist der
- * Widerruf. Eingelernt wird immer mit dem Mikrofon, das im Gespräch läuft; ein anderes wählt man unter Sprache und Ton. Ohne Liste oder mit
+ * Widerruf. Eingelernt wird immer mit dem Mikrofon, das im Gespräch läuft; ein anderes wählt man unter Mikrofon und Sprache. Ohne Liste oder mit
  * max 1 (Kern ohne Migration 0029) bleibt alles wie zuvor.
  */
 export const StimmeAbschnitt = memo(function StimmeAbschnitt({ aktionen }: { aktionen: StimmabdruckAktionen | undefined }) {
@@ -262,7 +262,7 @@ export const StimmeAbschnitt = memo(function StimmeAbschnitt({ aktionen }: { akt
 
 /**
  * Die Stimmprüfung hängt am Mikrofon (Befund 17.11.2026: im Browser lief ein anderes, leises Gerät, der Besitzer galt als fremd). Deshalb
- * steht hier, welches Mikrofon läuft, mit dem Weg zur Wahl im Abschnitt "Sprache und Ton". Die Wahl selbst gibt es nur dort (auch in der
+ * steht hier, welches Mikrofon läuft, mit dem Weg zur Wahl im Abschnitt "Mikrofon und Sprache". Die Wahl selbst gibt es nur dort (auch in der
  * Laborsicht, die diesen Abschnitt nicht hat). Seit 18.11.2026 dazu das Mikrofon beim Einlernen (lib/stimmMikrofon.ts) und ein Satz, wenn
  * gerade ein anderes läuft (Hauptursache der Fehlurteile im Befund dieses Tages). Mit einem Abdruck je Mikrofon stehen die eingelernten oben
  * in der Liste, hier nur noch, welches läuft und ob es eingelernt ist.

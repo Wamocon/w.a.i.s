@@ -8,7 +8,7 @@ import { useStillStartErlaubt } from "@/lib/useStillStart";
 const MINUTEN = Math.round(LEERLAUF_MS / 60_000);
 
 /**
- * Geräteschalter "Still starten beim Tippen" (Abschnitt Sprache und Ton): Standard an, gilt für diese Person auf diesem Gerät (kein
+ * Geräteschalter "Still starten beim Tippen" (Abschnitt Mikrofon und Sprache): Standard an, gilt für diese Person auf diesem Gerät (kein
  * Server-Zustand). Auf Laborplätzen gibt es ihn nicht. Der Hinweis nennt die Grenze: Der Kern löst je Profil die laufende Sitzung ab, und die
  * Oberfläche erfährt vor dem Start nichts von einer Sitzung auf einem anderen Gerät. Wer das nicht will, schaltet es auf dem jeweiligen Gerät aus.
  */

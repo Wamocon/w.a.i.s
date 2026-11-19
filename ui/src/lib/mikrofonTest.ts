@@ -1,7 +1,7 @@
 /**
  * Mikrofontest (Wunsch vom 18.11.2026: "Können wir irgendwie die Stärke meines Mikrofons messen?"). Hintergrund: Die Stimmprüfung hielt den
  * Besitzer oft für fremd, Hauptursache war ein anderes Mikrofon als beim Einlernen, das deutlich leiser war (Pegelspitze im Median -27 statt
- * -8 dBFS). Der Test zeigt in den Einstellungen (Sprache und Ton, Block Eingabe), wie gut das gewählte Mikrofon die Stimme liefert.
+ * -8 dBFS). Der Test zeigt in den Einstellungen (Mikrofon und Sprache, Block Eingabe), wie gut das gewählte Mikrofon die Stimme liefert.
  *
  * Ablauf: kurz einschwingen (EINSCHWING_MS, das Mikrofon öffnet sich, die Verstärkung des Browsers stellt sich ein), bis RUHE_MS still sein,
  * dann SPRECHEN_MS sprechen. Gemessen wird im Browser mit einem AnalyserNode in Fenstern von 2048 Abtastwerten im Takt TAKT_MS (RMS und

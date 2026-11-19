@@ -48,7 +48,7 @@
   display: grid; gap: 6px; padding: 12px 14px;
   background: var(--glas); border: 1px solid var(--kante); border-left: 2px solid var(--core); border-radius: 10px;
 }
-.geteilt-editor h5 { margin: 0 0 4px; font: 600 12px/1.25 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
+.geteilt-editor :is(h5, h6, [role="heading"]) { margin: 0 0 4px; font: 600 12px/1.25 var(--display); letter-spacing: 0.14em; text-transform: uppercase; }
 .geteilt-editor label, .teilen-form > label { font-size: 15px; font-weight: 700; }
 
 .teilen { display: grid; gap: 8px; justify-items: start; }

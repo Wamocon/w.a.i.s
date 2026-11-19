@@ -2,7 +2,7 @@
 // Ausführen im Ordner ui/:  npm test
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { hashFuer, parseHash, type AbschnittId } from "./einstellungenAbschnitte.ts";
+import { hashFuer, parseHash, type AbschnittId, type GruppeId } from "./einstellungenAbschnitte.ts";
 import {
   basisNachErsetzen,
   nachRueckschrittNochOffen,
@@ -12,13 +12,16 @@ import {
   zurListeSchritt,
 } from "./einstellungenVerlauf.ts";
 
-test("Tiefe der Adresse: zweispaltig 1, am Handy 2 im Abschnitt", () => {
+test("Tiefe der Adresse: zweispaltig 1, am Handy 2 in einer Gruppe (auch über einen Abschnitt)", () => {
   assert.equal(tiefe(parseHash(""), true), 0);
   assert.equal(tiefe(parseHash("#einstellungen"), true), 1);
   assert.equal(tiefe(parseHash("#einstellungen/konto"), true), 1);
   assert.equal(tiefe(parseHash("#einstellungen"), false), 1);
   assert.equal(tiefe(parseHash("#einstellungen/konto"), false), 2);
   assert.equal(tiefe(parseHash("#einstellungen/unbekannt"), false), 1);
+  // eine Gruppenkennung zählt wie eine Abschnittskennung: am Handy ist die Gruppe die zweite Ebene
+  assert.equal(tiefe(parseHash("#einstellungen/zugaenge"), false), 2);
+  assert.equal(tiefe(parseHash("#einstellungen/zugaenge"), true), 1);
 });
 
 test("schließen: über der Basis zurückgehen, sonst ersetzen", () => {
@@ -83,13 +86,15 @@ function ablauf(zweispaltig: boolean, start = "") {
   const t = () => tiefe(parseHash(v.hash), zweispaltig);
   return {
     v,
-    oeffnen(abschnitt: AbschnittId | null = null) {
+    oeffnen(abschnitt: AbschnittId | GruppeId | null = null) {
       if (parseHash(v.hash).offen) return;
       v.basis = 0;
+      // wie einstellungenOeffnen: am Handy führt die Liste in die Gruppe, sie liegt als eigener Eintrag darunter
+      if (tiefe(parseHash(hashFuer(abschnitt)), zweispaltig) === 2) v.push(hashFuer(null));
       v.push(hashFuer(abschnitt));
     },
-    waehlen(id: AbschnittId) {
-      const art = waehlenSchritt({ zweispaltig, aktuell: v.hash, ziel: hashFuer(id), vonListe: parseHash(v.hash).abschnitt === null });
+    waehlen(id: AbschnittId | GruppeId) {
+      const art = waehlenSchritt({ zweispaltig, aktuell: v.hash, ziel: hashFuer(id), vonListe: parseHash(v.hash).gruppe === null });
       if (art === "neu") v.push(hashFuer(id));
       else if (art === "ersetzen") v.ersetzen(hashFuer(id));
     },
@@ -168,4 +173,56 @@ test("erneutes Öffnen bei offener Seite legt keinen weiteren Eintrag an", () =>
   a.oeffnen();
   a.oeffnen();
   assert.equal(a.v.eintraege.length, n);
+});
+
+test("am Handy: Gruppe wählen legt einen Eintrag an, der Sprung zu einem Abschnitt darin ersetzt ihn nur", () => {
+  const a = ablauf(false);
+  a.oeffnen();
+  a.waehlen("zugaenge");
+  assert.equal(a.v.hash, "#einstellungen/zugaenge");
+  assert.equal(a.v.eintraege.length, 3); // Gespräch, Liste, Gruppe
+  a.waehlen("github"); // Sprungleiste in der Gruppe: derselbe Eintrag
+  assert.equal(a.v.hash, "#einstellungen/github");
+  assert.equal(a.v.eintraege.length, 3);
+  a.zurListe();
+  assert.equal(a.v.hash, "#einstellungen");
+  a.schliessen();
+  assert.equal(a.v.hash, "");
+  assert.equal(a.v.index, 0);
+});
+
+test("Direkteinstieg per alter Adresse eines Abschnitts am Handy: die Gruppe ist die zweite Ebene, Zurück führt zur Liste", () => {
+  const a = ablauf(false, "#einstellungen/stimme");
+  a.waehlen("sprache"); // Sprung innerhalb derselben Gruppe: ersetzt
+  assert.equal(a.v.eintraege.length, 2);
+  a.zurListe();
+  assert.equal(a.v.hash, "#einstellungen");
+  assert.equal(a.v.index, 1);
+});
+
+test("am Handy: Öffnen mit Ziel aus dem Gespräch legt Liste und Gruppe an, Alle Einstellungen führt zur Liste, Zum Gespräch zurück zum Gespräch", () => {
+  const a = ablauf(false);
+  a.oeffnen("stimme"); // etwa der Knopf Mikrofon wählen in einer Fehlermeldung
+  assert.deepEqual(a.v.eintraege, ["", "#einstellungen", "#einstellungen/stimme"]);
+  a.zurListe();
+  assert.equal(a.v.hash, "#einstellungen");
+  assert.equal(a.v.index, 1);
+  a.waehlen("zugaenge");
+  a.schliessen(); // Gruppe, Liste, Gespräch: zwei Schritte zurück, nicht aus der Seite hinaus
+  assert.equal(a.v.hash, "");
+  assert.equal(a.v.index, 0);
+
+  const b = ablauf(false);
+  b.oeffnen("stimme");
+  b.schliessen(); // direkt aus der Gruppe: beide angelegten Einträge sind weg
+  assert.equal(b.v.hash, "");
+  assert.equal(b.v.index, 0);
+});
+
+test("zweispaltig: Öffnen mit Ziel legt nur einen Eintrag an", () => {
+  const a = ablauf(true);
+  a.oeffnen("stimme");
+  assert.deepEqual(a.v.eintraege, ["", "#einstellungen/stimme"]);
+  a.schliessen();
+  assert.equal(a.v.index, 0);
 });

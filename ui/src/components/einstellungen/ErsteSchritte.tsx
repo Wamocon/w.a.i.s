@@ -20,6 +20,7 @@ import { SCHRITT_TITEL } from "@/lib/einrichtungSchritte";
 import { kernJson } from "@/lib/kernApi";
 import { accessToken } from "@/lib/supabase";
 import { Block } from "./Block";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /**
  * Abschnitt "Erste Schritte" (Kennung start), Teil Prüfliste: die Prüfliste der Einrichtung aus Kern und Desktop-App (lib/einrichtung.ts, Planpapier
@@ -239,9 +240,9 @@ export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
     <>
       <EinrichtungsAblauf schritte={MODELL_SCHRITTE} />
       <section className="ea-ablauf" aria-labelledby={id}>
-        <h4 id={id} className="ea-ueberschrift">
+        <Ueberschrift ebene={4} id={id} className="ea-ueberschrift">
           {SCHRITT_TITEL.installer}
-        </h4>
+        </Ueberschrift>
         <InstallerDownload />
       </section>
       <Pruefliste />

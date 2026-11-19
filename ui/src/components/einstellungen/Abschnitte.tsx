@@ -3,6 +3,7 @@
 import { memo, useId, useState } from "react";
 import { HinweiseListe } from "@/components/Hinweise";
 import { mikrofonFreigeben, useMikrofonListe } from "@/components/MikrofonWahl";
+import { SprachWahl } from "@/components/SprachWahl";
 import { useEffektiveDarstellung } from "@/components/kommando/ansicht";
 import {
   DARSTELLUNGEN,
@@ -15,10 +16,12 @@ import { rolleText } from "@/lib/einstellungenAbschnitte";
 import { useDesktopApp, useServerBrowser } from "@/lib/geraet";
 import { gewaehltesMikrofon, standardText, type Mikrofon } from "@/lib/mikrofon";
 import { untertitelSetzen, useUntertitel } from "@/lib/einstellungen";
+import { useModellzugangSenden } from "@/lib/modellzugangApi";
 import { useNutzer } from "@/lib/nutzer";
 import { zurGeraeteverwaltung } from "@/lib/einstellungenHash";
 import { useSelect } from "@/lib/store";
 import { THEMEN, themaWaehlen, type Thema } from "@/lib/thema";
+import type { ModellzugangAnfrage } from "@/lib/useWamo";
 import { useThema } from "@/lib/useThema";
 import { istOnline, wamo } from "@/lib/wamo";
 import { Block, Daten } from "./Block";
@@ -28,7 +31,7 @@ import { StillStartEinstellung } from "./StillStart";
 /** Version aus package.json, zur Build-Zeit eingesetzt (next.config.ts), wie in der Fußzeile der Anmeldeseite. */
 const VERSION = process.env.WAMO_VERSION ?? "0.1.0";
 
-// ---------- Konto und Profil ----------
+// ---------- Konto ----------
 export const KontoAbschnitt = memo(function KontoAbschnitt({
   email,
   onAbmelden,
@@ -58,12 +61,9 @@ export const KontoAbschnitt = memo(function KontoAbschnitt({
           ]}
         />
         <p className="ez-klein">
-          Zum Profilwechsel meldest du dich ab und mit dem anderen Profil wieder an. PC-Werkzeuge, Entwicklung,
-          Verbrauch und Änderungen sehen nur Profile mit der Rolle Admin.
+          Abmelden beendet ein laufendes Gespräch und meldet dich auf diesem Gerät ab. Für einen Profilwechsel meldest du dich danach
+          mit dem anderen Profil wieder an.
         </p>
-      </Block>
-      <Block titel="Abmelden">
-        <p className="ez-text">Beendet ein laufendes Gespräch und meldet dich auf diesem Gerät ab.</p>
         <div>
           <button type="button" className="btn-secondary" onClick={onAbmelden}>
             Abmelden
@@ -74,7 +74,7 @@ export const KontoAbschnitt = memo(function KontoAbschnitt({
   );
 });
 
-// ---------- Sprache und Ton ----------
+// ---------- Mikrofon und Sprache ----------
 /**
  * Mikrofonwahl (lib/mikrofon.ts): gespeichert je Person auf diesem Gerät, in diesem Browser oder dieser App. Die Auswahl nennt das
  * Standardgerät (im Browser das des Browsers, das nicht dem von Windows folgen muss, in der Desktop-App das von Windows) mit Namen und
@@ -193,25 +193,32 @@ function MikrofonEinstellung({
 }
 
 /**
+ * Abschnitt "Mikrofon und Sprache": Mikrofonwahl mit Test, der Schalter "Still starten beim Tippen" und Hören und Sprechen (SprachWahl:
+ * Soniox oder im Haus je Richtung, dazu die Stimme im Haus; früher ein Teil des Modellzugangs, dort stand der Satz "Umschalten unter
+ * Modellzugang" für eine Anzeige, die hier nur las). Darunter, was in dieser Sitzung gerade läuft.
  * nurMikrofon: Laborsicht (lib/laborPlatz.ts), nur die Mikrofonwahl mit dem Mikrofontest als reiner Anzeige (ohne Speicher); die übrigen
  * Blöcke entfallen. mikrofonUmschalten: Mikrofon des laufenden Gesprächs umschalten (useWamo, toggleMic), für die Dauer des Tests.
  * ausgabeAnhalten: W.A.I.S. schweigt während des Tests (useWamo, ausgabeAnhalten); die Laborsicht bekommt es nicht.
+ * modellzugang: Datenkanal des Kerns für die Wahl von Hören und Sprechen (useWamo, modellzugang); ohne ihn geht die Wahl über die
+ * HTTP-Schnittstelle (lib/modellzugangApi.ts).
  */
 export const SpracheAbschnitt = memo(function SpracheAbschnitt({
   mikrofone,
   mikrofonWaehlen,
   mikrofonUmschalten,
   ausgabeAnhalten,
+  modellzugang,
   nurMikrofon = false,
 }: {
   mikrofone: () => Promise<Mikrofon[]>;
   mikrofonWaehlen: (id: string) => boolean;
   mikrofonUmschalten?: () => void;
   ausgabeAnhalten?: (an: boolean) => void;
+  modellzugang?: (anfrage: ModellzugangAnfrage) => boolean;
   nurMikrofon?: boolean;
 }) {
   const modelle = useSelect(wamo, (s) => s.betrieb?.modelle ?? null);
-  const grund = useSelect(wamo, (s) => s.betrieb?.spracheGrund ?? null);
+  const senden = useModellzugangSenden(modellzugang);
   if (nurMikrofon) {
     return (
       <Block titel="Eingabe">
@@ -234,27 +241,15 @@ export const SpracheAbschnitt = memo(function SpracheAbschnitt({
         <StillStartEinstellung />
       </Block>
       <Block titel="Hören und Sprechen">
-        {modelle && (modelle.stt || modelle.tts) ? (
+        <SprachWahl senden={senden} />
+        {modelle && (modelle.stt || modelle.tts) && (
           <Daten
             zeilen={[
-              { name: "Spracherkennung", wert: modelle.stt ?? "unbekannt" },
-              { name: "Sprachausgabe", wert: modelle.tts ?? "unbekannt" },
+              { name: "Läuft gerade: Spracherkennung", wert: modelle.stt ?? "unbekannt" },
+              { name: "Läuft gerade: Sprachausgabe", wert: modelle.tts ?? "unbekannt" },
             ]}
           />
-        ) : (
-          <p className="ez-text">
-            Spracherkennung und Sprachausgabe deines Profils erscheinen hier, sobald ein Gespräch läuft.
-          </p>
         )}
-        {grund && (
-          <p className="ez-klein" data-rueckfall>
-            Hinweis zu dieser Sitzung: {grund.replace(/[.\s]+$/, "")}.
-          </p>
-        )}
-        <p className="ez-klein">
-          Die Angaben stammen aus der Meldung des Kerns zu diesem Gespräch. Umschalten zwischen Soniox und Im Haus kannst du unter
-          Modellzugang.
-        </p>
       </Block>
     </>
   );
@@ -301,7 +296,6 @@ function HelligkeitBlock() {
       <p className="ez-klein" role="status">
         {nacht ? "In der Darstellung Nacht bleibt die Oberfläche dunkel." : ""}
       </p>
-      <p className="ez-klein">Die Wahl gilt für dieses Gerät und bleibt erhalten.</p>
     </Block>
   );
 }
@@ -372,7 +366,7 @@ export const DarstellungAbschnitt = memo(function DarstellungAbschnitt() {
         <p className="ez-klein" role="status">
           {pausiert ? `${DARSTELLUNG_TEXT[gewaehlt]} pausiert, solange etwas auf deine Entscheidung wartet.` : ""}
         </p>
-        <p className="ez-klein">Die Wahl gilt für dieses Gerät und bleibt erhalten. Im Gespräch wechselst du oben in der Mitte.</p>
+        <p className="ez-klein">Im Gespräch wechselst du oben in der Mitte.</p>
       </Block>
       <UntertitelBlock />
     </>

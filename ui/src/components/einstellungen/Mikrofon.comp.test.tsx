@@ -53,7 +53,7 @@ afterEach(() => {
   nutzerSetzen({ id: null, email: null });
 });
 
-describe("Mikrofonwahl in Sprache und Ton", () => {
+describe("Mikrofonwahl in Mikrofon und Sprache", () => {
   it("nennt das Standardgerät des Browsers mit Namen und sagt, was beim nächsten Gespräch läuft", async () => {
     zeigen();
     await geladen();
@@ -146,7 +146,7 @@ describe("Mikrofonwahl in Sprache und Ton", () => {
 });
 
 describe("Weg zur Mikrofonwahl", () => {
-  it("Pegelwarnung: der Knopf am Hinweis öffnet Sprache und Ton und schließt den Hinweis", async () => {
+  it("Pegelwarnung: der Knopf am Hinweis öffnet Mikrofon und Sprache und schließt den Hinweis", async () => {
     act(() => wamo.set((s) => ({ ...s, error: { art: "hinweis", text: LEISE_TEXT, aktion: "mikrofon_waehlen" } })));
     const onSchliessen = vi.fn();
     render(

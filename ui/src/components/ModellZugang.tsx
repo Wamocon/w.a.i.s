@@ -4,7 +4,7 @@ import { memo } from "react";
 import { ModellAuswahl } from "@/components/ModellAuswahl";
 import { ModellWahl } from "@/components/ModellWahl";
 import { FELD, SchluesselFormular, useSchluesselAktionen } from "@/components/SchluesselFormular";
-import { SprachWahl } from "@/components/SprachWahl";
+import { Ueberschrift } from "@/components/Ueberschrift";
 import type { Modellzugang } from "@/lib/nachrichten";
 import { useSelect } from "@/lib/store";
 import type { ModellzugangAnfrage } from "@/lib/useWamo";
@@ -23,8 +23,9 @@ function kopfzeile(z: Modellzugang | null): string {
  * Karte Modellzugang des Profils (eigene Karte in der linken Spalte, auch ohne laufendes Gespräch). Oben der
  * Umschalter Automatisch oder Nur Hausmodelle (ModellWahl), darunter zwei getrennte Schlüsseltypen: der
  * Anthropic-API-Schlüssel für das Gespräch (bezahlt nach Verbrauch, Standardmodell Haiku) und der Claude-Code-Token
- * für Entwicklungsaufträge (aus dem Max-Tarif). Darunter die Modelle je Aufgabe (ModellAuswahl) und ganz unten Hören und Sprechen
- * (SprachWahl: Spracherkennung und Sprachausgabe je Soniox oder im Haus, dazu die Stimme im Haus).
+ * für Entwicklungsaufträge (aus dem Max-Tarif). Darunter die Modelle je Aufgabe (ModellAuswahl). Hören und Sprechen (SprachWahl:
+ * Spracherkennung und Sprachausgabe je Soniox oder im Haus, dazu die Stimme im Haus) steht seit der Gruppierung der Einstellungen im
+ * Abschnitt "Mikrofon und Sprache" (components/einstellungen/Abschnitte.tsx), nicht mehr hier.
  * Mit Sitzung gehen die Anfragen über den Datenkanal, sonst über die
  * HTTP-Schnittstelle des Kerns (lib/modellzugangApi.ts); der Kern speichert den Schlüssel verschlüsselt. Der
  * API-Schlüssel wird vorher mit einer kleinen Anfrage geprüft, der Token nur auf sein Format (eine Anfrage würde das
@@ -61,7 +62,7 @@ export const ModellZugang = memo(function ModellZugang({
     <div className="mz-inhalt">
       {!online && (
         <p className="mz-offline" role="status">
-          Gerade läuft kein Gespräch. Du kannst Schlüssel, Token, Modus, Modelle und Stimme trotzdem hier einstellen: Die Änderung wird
+          Gerade läuft kein Gespräch. Du kannst Schlüssel, Token, Modus und Modelle trotzdem hier einstellen: Die Änderung wird
           direkt am Kern gespeichert und gilt ab der nächsten Sitzung.
         </p>
       )}
@@ -117,9 +118,9 @@ export const ModellZugang = memo(function ModellZugang({
         </>
       )}
       <section className="mz-abschnitt" aria-labelledby="modellzugang-modus">
-        <h4 id="modellzugang-modus" className="mz-ueberschrift">
+        <Ueberschrift ebene={4} id="modellzugang-modus" className="mz-ueberschrift">
           Modus
-        </h4>
+        </Ueberschrift>
         <p className="mz-zweck">Welche Modelle W.A.I.S. benutzen darf, unabhängig davon, welche Schlüssel hinterlegt sind.</p>
         <p className="mz-statuszeile">
           <span className="mz-art" data-art={zugang?.art}>
@@ -129,22 +130,13 @@ export const ModellZugang = memo(function ModellZugang({
         <ModellWahl senden={sende} />
       </section>
       <section className="mz-abschnitt" aria-labelledby="modellzugang-modelle">
-        <h4 id="modellzugang-modelle" className="mz-ueberschrift">
+        <Ueberschrift ebene={4} id="modellzugang-modelle" className="mz-ueberschrift">
           Modelle je Aufgabe
-        </h4>
+        </Ueberschrift>
         <p className="mz-zweck">
           Welches Modell W.A.I.S. für welche Aufgabe nimmt. Automatisch wählt das beste erlaubte Modell nach der Modellkarte.
         </p>
         <ModellAuswahl senden={sende} />
-      </section>
-      <section className="mz-abschnitt" aria-labelledby="modellzugang-stimme">
-        <h4 id="modellzugang-stimme" className="mz-ueberschrift">
-          Hören und Sprechen
-        </h4>
-        <p className="mz-zweck">
-          Wo dein Gesprochenes in Text und die Antworten von W.A.I.S. in Sprache umgewandelt werden, je Richtung getrennt wählbar.
-        </p>
-        <SprachWahl senden={sende} />
       </section>
       <p className="mz-klein">
         Beides liegt verschlüsselt im Kern, wird nie angezeigt und nie in Gesprächen, Aufgaben oder im Gedächtnis

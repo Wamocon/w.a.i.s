@@ -67,8 +67,8 @@
 }
 .ez-kopf { display: flex; align-items: center; justify-content: space-between; gap: 10px 12px; flex-wrap: wrap; padding-left: 6px; }
 .ez-titel { margin: 0; font: 600 12px/1.2 var(--display); letter-spacing: 0.3em; text-transform: uppercase; }
-.ez-titel, .ez-abschnitt-titel { justify-self: start; }
-.ez-titel:focus-visible, .ez-abschnitt-titel:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.ez-titel, .ez-gruppe-titel, .ez-abschnitt-titel { justify-self: start; }
+.ez-titel:focus-visible, .ez-gruppe-titel:focus-visible, .ez-abschnitt-titel:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .ez-zumgespraech { border-radius: 999px; min-height: 36px; font-size: 15px; }
 .ez-nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ez-nav-link {
@@ -84,19 +84,36 @@
 .ez-nav-titel { font: 600 15px/1.2 var(--body); }
 .ez-nav-kurz { font-size: 14px; line-height: 1.3; color: var(--ink-soft); }
 
-/* ---------- Abschnitt (rechts) ---------- */
+/* ---------- Gruppe mit ihren Abschnitten (rechts) ---------- */
 .ez-inhalt {
   position: relative; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   padding: 22px 28px 56px;
 }
-.ez-abschnitt { max-width: 760px; margin: 0 auto; }
-.ez-abschnitt-kopf { display: grid; gap: 6px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
-.ez-abschnitt-titel {
+.ez-gruppe { max-width: 760px; margin: 0 auto; display: grid; gap: 32px; }
+.ez-gruppe-kopf { display: grid; gap: 6px; padding-bottom: 14px; border-bottom: 1px solid var(--rule); }
+.ez-gruppe-titel {
   position: relative; margin: 0; padding-top: 16px;
   font: 700 clamp(20px, 2.4vw, 26px)/1.15 var(--display); letter-spacing: 0.02em;
 }
-.ez-abschnitt-titel::before { content: ""; position: absolute; top: 0; left: 0; width: 36px; height: 4px; border-radius: 2px; background: var(--accent); }
-.ez-abschnitt-kurz { margin: 0; font-size: 16px; color: var(--ink-soft); }
+.ez-gruppe-titel::before { content: ""; position: absolute; top: 0; left: 0; width: 36px; height: 4px; border-radius: 2px; background: var(--accent); }
+.ez-gruppe-kurz { margin: 0; font-size: 16px; color: var(--ink-soft); }
+/* Sprungleiste: nur Links auf die Abschnitte der Gruppe, ohne eigene Fläche */
+.ez-sprung { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin-top: 8px; font-size: 15px; }
+.ez-sprung-label { color: var(--ink-soft); }
+.ez-sprung ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 16px; }
+.ez-sprung a {
+  display: inline-block; padding: 4px 0; color: var(--ink);
+  text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 4px;
+}
+.ez-sprung a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ez-abschnitt { display: grid; gap: 14px; min-width: 0; }
+.ez-abschnitt + .ez-abschnitt { padding-top: 28px; border-top: 1px solid var(--rule); }
+.ez-abschnitt-kopf { display: grid; gap: 4px; }
+.ez-abschnitt-titel {
+  margin: 0; font: 700 clamp(18px, 2vw, 21px)/1.2 var(--display); letter-spacing: 0.02em;
+  scroll-margin-top: calc(var(--top, 0px) + 16px);
+}
+.ez-abschnitt-kurz { margin: 0; font-size: 15px; color: var(--ink-soft); }
 .ez-abschnitt-inhalt { display: grid; gap: 16px; min-width: 0; }
 .ez-wege { display: none; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 6px -4px; }
 .ez-zurueck {
@@ -115,6 +132,7 @@
 }
 .ez-block-titel {
   margin: 0; display: flex; align-items: center; gap: 8px;
+  font-size: 1em; font-weight: 700; /* wie die Überschrift der Stufe 4 vorher: die Stufe richtet sich nach der Seite, die Größe nicht */
 }
 .ez-block-titel::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
 .ez-text { margin: 0; font-size: 16px; line-height: 1.45; }
@@ -216,9 +234,10 @@
   .ez-gitter { display: block; }
   .ez-seite { overflow: visible; padding: 16px 16px 28px; border-right: 0; }
   .ez-inhalt { overflow: visible; padding: 12px 16px 40px; }
-  .ez[data-ansicht="liste"] .ez-inhalt, .ez[data-ansicht="abschnitt"] .ez-seite { display: none; }
+  .ez[data-ansicht="liste"] .ez-inhalt, .ez[data-ansicht="gruppe"] .ez-seite { display: none; }
   .ez-wege { display: flex; }
-  .ez-abschnitt-titel { font-size: 28px; }
+  .ez-gruppe-titel { font-size: 28px; }
+  .ez-sprung a { min-height: 44px; display: inline-flex; align-items: center; padding: 0; }
   .ez-nav ul { gap: 8px; }
   .ez-nav-link {
     min-height: 60px; padding: 12px 40px 12px 16px;

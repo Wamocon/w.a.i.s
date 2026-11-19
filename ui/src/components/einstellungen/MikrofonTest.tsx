@@ -27,7 +27,7 @@ import { Daten } from "./Block";
 import "./mikrofonTest.css";
 
 /**
- * Mikrofontest im Block Eingabe (Abschnitt Sprache und Ton, auch in der Laborsicht; Logik und Schwellen in lib/mikrofonTest.ts): ein Knopf,
+ * Mikrofontest im Block Eingabe (Abschnitt Mikrofon und Sprache, auch in der Laborsicht; Logik und Schwellen in lib/mikrofonTest.ts): ein Knopf,
  * dann 3 s still sein und 5 s sprechen, danach Ampel, ein Satz, der Name des Mikrofons und die Messwerte. Getestet wird das Gerät, das die
  * Auswahl darüber nennt (fehlt es, das Standardgerät), mit denselben Einstellungen wie im Gespräch. Der Ton bleibt im Browser; nach dem Test,
  * beim Abbrechen, beim Verlassen der Seite und wenn das Gerät getrennt wird, schließt sich das Mikrofon. Läuft ein Gespräch mit offenem

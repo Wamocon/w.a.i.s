@@ -22,6 +22,7 @@ import {
 import { aufsCanvas, canvasLaden } from "@/lib/canvasOeffnen";
 import { einstellungenSchliessen } from "@/lib/einstellungenHash";
 import { zeigeToast } from "@/lib/wamo";
+import { Ueberschrift } from "@/components/Ueberschrift";
 
 /**
  * "Geteilte Arbeit": was andere mit mir geteilt haben (öffnen, herunterladen, bearbeiten, zurückgeben), was ich geteilt
@@ -404,9 +405,9 @@ function Editor({
         void speichern();
       }}
     >
-      <h5 ref={kopf} tabIndex={-1}>
+      <Ueberschrift ebene={5} ref={kopf} tabIndex={-1}>
         {titel} bearbeiten (neue Fassung)
-      </h5>
+      </Ueberschrift>
       <label htmlFor={`${id}-text`}>Inhalt</label>
       <textarea id={`${id}-text`} rows={14} maxLength={100_000} value={text} onChange={(e) => setText(e.target.value)} />
       {meldung && (
