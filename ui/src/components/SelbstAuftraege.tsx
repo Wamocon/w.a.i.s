@@ -121,6 +121,7 @@ export const SelbstAuftraege = memo(function SelbstAuftraege({ aktionen }: { akt
   };
 
   const anzahl = stand.liste.length;
+  const aktiv = stand.liste.filter((a) => a.status === "offen" || a.status === "in_arbeit").length;
   const fehlerId = `${id}-fehler`;
 
   return (
@@ -150,7 +151,8 @@ export const SelbstAuftraege = memo(function SelbstAuftraege({ aktionen }: { akt
       )}
       {anzahl > 0 && (
         <p className="entwuerfe-hinweis">
-          {anzahl} {anzahl === 1 ? "Eintrag" : "Einträge"} im Rückstand{stand.max !== null ? `, höchstens ${stand.max}` : ""}.
+          {/* max ist die Obergrenze der offenen und laufenden Einträge im Kern (200), die Liste enthält auch die zuletzt abgeschlossenen */}
+          {aktiv} {aktiv === 1 ? "Eintrag" : "Einträge"} offen oder in Arbeit{stand.max !== null ? `, höchstens ${stand.max}` : ""}.
         </p>
       )}
       {/* Die Region bleibt immer im DOM; der Text steckt in einem Element mit der Nummer der Meldung als key, damit auch ein zweites

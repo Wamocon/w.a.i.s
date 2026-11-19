@@ -123,7 +123,8 @@ describe("Aufträge an W.A.I.S. selbst: Liste", () => {
     expect(within(eintraege[1]).getByText("SA-7")).toBeTruthy();
     expect(within(eintraege[1]).getByText("Offen")).toBeTruthy();
     expect(eintraege[1].textContent).toMatch(/Fehlerbehebung · Priorität Hoch · Quelle Sprache/);
-    expect(screen.getByText(/2 Einträge im Rückstand, höchstens 200/)).toBeTruthy();
+    // zwei Einträge in der Liste, aber nur einer offen: max (200) gilt für offene und laufende, nicht für die abgeschlossenen
+    expect(screen.getByText(/1 Eintrag offen oder in Arbeit, höchstens 200/)).toBeTruthy();
   });
 
   it("alle vier Statusmarken stehen als Text da", () => {
@@ -188,7 +189,7 @@ describe("Aufträge an W.A.I.S. selbst: Liste", () => {
   it("ein einzelner Eintrag steht in der Einzahl, ohne Grenze fehlt der Zusatz", () => {
     stand({ max: null });
     render(<SelbstAuftraege aktionen={aktionen()} />);
-    expect(screen.getByText("1 Eintrag im Rückstand.")).toBeTruthy();
+    expect(screen.getByText("1 Eintrag offen oder in Arbeit.")).toBeTruthy();
   });
 });
 
