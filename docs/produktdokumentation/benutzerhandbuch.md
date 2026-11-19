@@ -12,7 +12,7 @@
 
 W.A.I.S. ist der Sprachassistent der WAMOCON GmbH. Du sprichst mit ihm oder tippst, und er antwortet. Auf Wunsch öffnet er Programme an deinem Laptop, erstellt Dateien, bereitet Mails vor und merkt sich Dinge. Wichtig: Alles, was etwas verändert oder nach außen geht, passiert erst, wenn du auf einer Karte auf „Freigeben“ klickst. Das kann W.A.I.S. nie selbst.
 
-Nicht jede Funktion steht jedem Profil offen. Was du siehst, hängt von deiner Rolle und davon ab, was dein Admin für dich freigeschaltet hat (siehe [Rollen und Rechte](../fachlich/rollen-und-rechte.md)). Fehlt dir etwas in diesem Handbuch an deinem Bildschirm, frag deinen Admin.
+Nicht jede Funktion steht jedem Profil offen. Was du siehst, hängt von deiner Rolle und davon ab, was dein Admin für dich freigeschaltet hat (siehe [Rollen und Rechte](fachkonzept.md#rollen-und-rechte)). Fehlt dir etwas in diesem Handbuch an deinem Bildschirm, frag deinen Admin.
 
 ### Lernpfad in vier Stufen
 
@@ -109,7 +109,7 @@ Gut zu wissen:
 
 - Es gibt einen Abdruck je Mikrofon, höchstens drei je Person. W.A.I.S. speichert dazu den Namen des Mikrofons, wie dein Browser oder die App ihn nennt. Ein Abdruck, der vor der Einführung dieser Regel eingelernt wurde, gilt als „Unbekanntes Mikrofon“. Wechselst du das Mikrofon, fragt W.A.I.S. „Für dieses Mikrofon ist deine Stimme noch nicht eingelernt. Jetzt einlernen?“, dazu gibt es „Für dieses Mikrofon einlernen“. „Neu einlernen“ ersetzt nur den Abdruck dieses einen Mikrofons. Hast du schon drei, lösche zuerst einen.
 - Löschen: „Löschen“ bei einem Mikrofon entfernt nur dessen Abdruck, „Alle Abdrücke löschen“ entfernt alle und gilt zugleich als Widerruf deiner Einwilligung. Beides fragt noch einmal nach („Ja, Abdruck löschen“, „Ja, alle löschen“).
-- Im Standardmodus misst W.A.I.S. die Stimme nur, zeigt das Ergebnis im Modul „Stimme“ (Eigen, Fremd, Unklar, Nicht eingelernt) und sperrt nichts: Jede Stimme darf unterbrechen, und deine Äußerungen erreichen das Modell auch bei ungenauer Erkennung. Der strenge Modus, in dem nur deine Stimme zählt, gilt nur, wenn dein Admin ihn ausdrücklich am Server einschaltet. Hintergrund zur Genauigkeit: [Recherche zur Sprechererkennung](../../stimme-recherche-2026-11-18.md).
+- Im Standardmodus misst W.A.I.S. die Stimme nur, zeigt das Ergebnis im Modul „Stimme“ (Eigen, Fremd, Unklar, Nicht eingelernt) und sperrt nichts: Jede Stimme darf unterbrechen, und deine Äußerungen erreichen das Modell auch bei ungenauer Erkennung. Der strenge Modus, in dem nur deine Stimme zählt, gilt nur, wenn dein Admin ihn ausdrücklich am Server einschaltet. Hintergrund zur Genauigkeit: [Recherche zur Sprechererkennung](../stimme-recherche-2026-11-18.md).
 - Der Stimmabdruck ist keine Freigabe und schützt nicht vor Aufnahmen oder geklonten Stimmen.
 
 Quellen: `voice-core/stimme_einlernen.py`, `voice-core/stimme_einwilligung.py`, `voice-core/stimme_mikrofon.py`, `voice-core/stimme_gate.py`, `ui/src/components/einstellungen/StimmeAbschnitt.tsx`, `ui/src/lib/stimme.ts`, `ui/src/lib/stimmMikrofon.ts`.
@@ -385,9 +385,9 @@ Hilft nichts davon, nenne deinem Admin die genaue Meldung und frage W.A.I.S. im 
 
 ## Weiterführend
 
-- [Produktübersicht](../fachlich/produktuebersicht.md): was W.A.I.S. kann und was nicht
-- [Funktionskatalog](../fachlich/funktionskatalog.md): alle Funktionen mit Voraussetzung und Freigabe
-- [Rollen und Rechte](../fachlich/rollen-und-rechte.md): wer was darf
-- [Administrationshandbuch](../betrieb/administrationshandbuch.md): Anleitung für Admins
-- [Glossar](../glossar.md)
-- Bestehende Dokumente: [Komfort-Paket](../../komfort-paket.md), [Office und Versand](../../office-und-versand.md), [Ausrollen neuer Nutzer](../../ausrollen-neue-nutzer.md)
+- [Produktübersicht](fachkonzept.md#produktübersicht-wais): was W.A.I.S. kann und was nicht
+- [Funktionskatalog](fachkonzept.md#funktionskatalog-wais): alle Funktionen mit Voraussetzung und Freigabe
+- [Rollen und Rechte](fachkonzept.md#rollen-und-rechte): wer was darf
+- [Administrationshandbuch](betrieb.md#administrationshandbuch): Anleitung für Admins
+- [Glossar](glossar.md)
+- Bestehende Dokumente: [Komfort-Paket](../komfort-paket.md), [Office und Versand](../office-und-versand.md), [Ausrollen neuer Nutzer](../ausrollen-neue-nutzer.md)
