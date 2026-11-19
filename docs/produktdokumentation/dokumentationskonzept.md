@@ -111,6 +111,7 @@ Die Rollen der Wurzeldateien nach dem ECC-Rollenvertrag:
 4. **Vor jedem Versionssprung** gilt die Prüfliste unten.
 5. **Keine Geheimnisse, keine Fremdverweise.** Keine Zugangsdaten in Dokumenten. Keine Verweise auf andere Systeme oder Vorgängerprojekte (siehe `CLAUDE.md`).
 6. **Text- und Formregeln.** Deutsch mit echten Umlauten, keine Gedankenstriche im Fließtext, Anzeigename "W.A.I.S.".
+7. **PDF-Export aktuell halten.** Der Ordner `final/` enthält die fertigen Dokumente als PDF im WAMOCON-Design. Nach jeder inhaltlichen Änderung an einem Dokument werden sein PDF und das Gesamtdokument neu erzeugt, die Markdown-Quelle bleibt maßgeblich.
 
 | Änderung am Produkt | Nachzuziehen in |
 |---|---|
@@ -131,6 +132,7 @@ Die Rollen der Wurzeldateien nach dem ECC-Rollenvertrag:
 4. REA-Befunde am gebauten Installer erneuert (zwei Befehle, siehe `technik/desktop-auslieferung-rea.md`).
 5. Kopfblöcke der geänderten Dokumente zeigen den neuen geprüften Commit.
 6. Formprüfung der Dokumente bestanden (siehe unten).
+7. PDFs im Ordner `final/` aus den geänderten Quellen neu erzeugt.
 
 ### Formprüfung (von Hand oder in der CI)
 

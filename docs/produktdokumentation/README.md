@@ -24,6 +24,10 @@ W.A.I.S. (WAMOCON's Artificial Intelligence System) ist der Sprachassistent der 
 | in Sicherheit oder Datenschutz | [Sicherheit und Datenschutz](sicherheit/sicherheit-und-datenschutz.md) | [Rollen und Rechte](fachlich/rollen-und-rechte.md), [Befunde der ausgelieferten App](technik/desktop-auslieferung-rea.md) |
 | verantwortlich für Releases | [Release und Ausrollen](betrieb/release-und-ausrollen.md) | [Befunde der ausgelieferten App](technik/desktop-auslieferung-rea.md), [Qualität und Tests](entwicklung/qualitaet-und-tests.md) |
 
+## Fertige Dokumente (PDF)
+
+Alle Dokumente liegen zusätzlich als fertig gesetzte PDF-Dateien im WAMOCON-Design im Ordner [final/](final/README.md): das [Gesamtdokument](final/00-W.A.I.S.-Produktdokumentation-Gesamt.pdf) und je ein PDF pro Dokument. Die Markdown-Dateien in den Unterordnern sind die Quellen und bleiben maßgeblich.
+
 ## Dokumentenlandkarte
 
 Die Dokumentart folgt Diátaxis (Erklärung, Referenz, Anleitung, Lernpfad). Begründung und Pflegeregeln stehen im [Dokumentationskonzept](dokumentationskonzept.md).
