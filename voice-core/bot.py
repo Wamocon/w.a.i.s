@@ -55,6 +55,10 @@ Nachrichten von der Oberfläche:
   {"type": "mikrofontest", "data": {"aktion": "start"}}
                                           Mikrofontest in den Einstellungen: eine laufende Antwort von W.A.I.S. unterbrechen
                                           (stimme_sitzung.mikrofontest; nie in Laborsitzungen)
+  {"type": "mikrofon_info", "data": {"echo", "rauschen", "verstaerkung", "rate", "kanaele", "klasse"}}
+                                          Signalkette der Aufnahme nach jedem Spurwechsel: Schalter (true, false, null), Rate in Hz,
+                                          Kanäle, Klasse eingebaut|headset|bluetooth|unbekannt, nie ein Gerätename; nur ins Log
+                                          (mikrofon_kette.py; nie in Laborsitzungen)
   {"type": "vergessen", "data": {"id"}}   eigenen Eintrag deaktivieren (memory.forget)
   {"type": "freigabe", "data": {"job": "pc", "id", "entscheidung"}}
                                           Freigabe einer kritischen PC-Aktion (pc_freigaben.py; Admin oder freigeschaltetes
@@ -1649,6 +1653,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         elif msg.type == "mikrofontest" and stimme is not None:
             # Mikrofontest (Einstellungen, Sprache und Ton): W.A.I.S. schweigt, eine laufende Antwort wird unterbrochen; nie im Labor
             await stimme.mikrofontest(data)
+        elif msg.type == "mikrofon_info" and stimme is not None:
+            # Signalkette der Aufnahme (Klasse, Echo, Rauschen, Verstärkung, Rate; nie ein Gerätename): prüfen, merken, eine Logzeile; nie im Labor
+            await stimme.mikrofon_info(msg.data)  # roh: ein Wert, der kein Objekt ist, gilt dort nicht (data wäre dann leer)
         elif msg.type == "modellzugang":
             # Eigener Claude-Schlüssel: hinterlegen, ersetzen, löschen, Stand (gilt ab der nächsten Sitzung).
             # Der Inhalt dieser Nachricht wird nie geloggt und nie zurückgeschickt.

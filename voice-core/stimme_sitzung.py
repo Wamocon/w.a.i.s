@@ -33,6 +33,11 @@ bleibt alles wie vorher: ein Abdruck, das unbekannte Mikrofon, stimme-1 oder sti
 Mikrofontest (Wunsch vom 18.11.2026): Die Client-Nachricht {"type": "mikrofontest", "data": {"aktion": "start"}} unterbricht eine laufende
 Antwort von W.A.I.S. (mikrofontest, Stimmpruefer.ausgabe_unterbrechen). Die Oberfläche schaltet die Wiedergabe für die Dauer des Tests stumm
 und wertet den Test als ungültig, wenn W.A.I.S. trotzdem spricht. Laborsitzungen bekommen keine Stimmsitzung, die Nachricht wirkt dort nicht.
+
+Mikrofonkette (19.11.2026, mikrofon_kette.py): Die Client-Nachricht {"type": "mikrofon_info", "data": {"echo", "rauschen", "verstaerkung", "rate",
+"kanaele", "klasse"}} meldet, mit welcher Signalkette die Person spricht (Zahlen und eine grobe Klasse, nie ein Gerätename). Die Sitzung merkt sich
+den letzten Stand (kette), schreibt je Änderung eine Logzeile "Mikrofonkette: ..." und gibt die Klasse an die Urteilszeilen des Prüfers weiter.
+Nichts davon geht an die Oberfläche, in die Datenbank oder an das Modell; ein Fehler darin stört das Gespräch nie.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ from loguru import logger
 
 import labor
 from memory import MemoryStore
+from mikrofon_kette import KettenProtokoll
 from stimme_einwilligung import einwilligung_gilt, einwilligung_nachricht
 from stimme_gate import StimmGate, stand_nachricht
 from stimme_mikrofon import MAX_ABDRUECKE, UNBEKANNTES_MIKROFON, Mikrofon, kennung_gueltig, mikrofon_aus
@@ -111,8 +117,9 @@ class StimmSitzung:
             logger.info("Stimmprüfung aus: keine Datenbank für das Profil")
             gate.modus = "aus"  # ohne Datenbank gibt es keinen Abdruck, nichts zu prüfen und nichts einzulernen
         kwargs = {"uhr": uhr} if uhr is not None else {}
+        self.kette = KettenProtokoll()  # Signalkette der Aufnahme, wie die Oberfläche sie meldet (mikrofon_kette.py)
         self.pruefer = Stimmpruefer(gate, modell, speichern=self._speichern, sagen=sagen, nachweis=self.nachweis_ok, schatten=schatten,
-                                    **kwargs)
+                                    kette=self.kette.kurz, **kwargs)
         self.waechter = StimmWaechter(gate, self.pruefer)
 
     @classmethod
@@ -320,3 +327,11 @@ class StimmSitzung:
         selbst stumm). Andere Aktionen wirken nicht."""
         if isinstance(daten, dict) and daten.get("aktion") == "start":
             await self.pruefer.ausgabe_unterbrechen()
+
+    async def mikrofon_info(self, daten: object) -> None:
+        """Die Oberfläche meldet die Kette der Aufnahme (Spurwechsel, neue Verbindung): prüfen, merken, eine Zeile ins Log. Keine Antwort, nie ein
+        Fehler nach außen (mikrofon_kette.KettenProtokoll.aufnehmen wirft nie, hier steht trotzdem ein zweites Netz)."""
+        try:
+            self.kette.aufnehmen(daten)
+        except Exception as e:
+            logger.warning("Mikrofonkette: Meldung nicht verarbeitet ({})", type(e).__name__)
