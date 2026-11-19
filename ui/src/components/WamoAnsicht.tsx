@@ -26,6 +26,7 @@ import { GeraetEinrichtung, GeraetZeile } from "@/components/GeraetEinrichtung";
 import { Hinweise as AdminHinweise, HinweiseZaehler } from "@/components/Hinweise";
 import { Kopfzeile } from "@/components/Kopfzeile";
 import type { Sitzung } from "@/components/LoginGate";
+import { SelbstAuftraege } from "@/components/SelbstAuftraege";
 import { FehlerAnzeige } from "@/components/FehlerAnzeige";
 import { StillAktionen, UebernehmenHinweis } from "@/components/StillStart";
 import { Verlauf } from "@/components/Verlauf";
@@ -219,6 +220,7 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
           <Auftraege onDecide={aktionen.entscheideAuftrag} onSpeichern={ansicht.labor ? undefined : aktionen.entwuerfe?.speichern} />
           <AuftraegeLeer />
           <GespeicherteAuftraege aktionen={ansicht.labor ? undefined : aktionen.entwuerfe} />
+          <SelbstAuftraege aktionen={ansicht.labor ? undefined : aktionen.selbstAuftraege} />
         </>
       }
       vorgaenge={
