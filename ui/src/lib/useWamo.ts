@@ -8,6 +8,14 @@ import { betriebsartFuerStart, KERN, kernUrl, type Betriebsart, type Betriebsart
 import { alleFristenLoeschen, fristStarten } from "@/lib/auftragFrist";
 import { auftragLaeuft, auftraegeNachFrist, auftraegeNachStart, auftragStartbar, auftragVerwerfbar } from "@/lib/auftragStart";
 import { speichernMoeglich } from "@/lib/auftragEntwuerfe";
+import {
+  selbstDarfOeffnen,
+  selbstDarfVerwerfen,
+  selbstEingabeFehler,
+  SELBST_ARTEN,
+  SELBST_PRIORITAETEN,
+  type SelbstEingabe,
+} from "@/lib/selbstAuftraege";
 import { abgelaufenHinweis } from "@/lib/laborKarte";
 import { useNeuladenWarnung } from "@/lib/useNeuladenWarnung";
 import { neuladenPlanen } from "@/lib/laborNeuladen";
@@ -147,6 +155,7 @@ import {
   reduceBotOutput,
   reduceBotTranscript,
   resetWamo,
+  selbstAuftragWarten,
   wamo,
   wartetAufEntscheidung,
   zeigeToast,
@@ -247,6 +256,9 @@ export type WamoAktionen = {
   /** Gespeicherte Aufträge (lib/auftragEntwuerfe.ts): Karte für später speichern, gespeicherten Auftrag laden oder löschen. Optional, damit
    *  die Vorschau ohne Kern auskommt; nie im Labor. */
   entwuerfe?: EntwurfAktionen;
+  /** Aufträge an W.A.I.S. selbst (lib/selbstAuftraege.ts): anlegen, verwerfen, wieder öffnen. Optional, damit die Vorschau ohne Kern
+   *  auskommt; nie im Labor. */
+  selbstAuftraege?: SelbstAuftragAktionen;
 };
 
 /** Je true, wenn gesendet; der Kern antwortet mit auftrag_entwuerfe. Laden legt nur die Karte an, gestartet wird sie per Klick. */
@@ -254,6 +266,14 @@ export type EntwurfAktionen = {
   speichern: (a: Auftrag) => boolean;
   laden: (id: string) => boolean;
   loeschen: (id: string) => boolean;
+};
+
+/** Je true, wenn gesendet; der Kern antwortet mit selbstauftraege (genau eine Antwort je Aktion). In Arbeit und Erledigt setzt die
+ *  Oberfläche nie, das tut nur, wer den Auftrag bearbeitet. */
+export type SelbstAuftragAktionen = {
+  speichern: (e: SelbstEingabe) => boolean;
+  verwerfen: (nr: number) => boolean;
+  oeffnen: (nr: number) => boolean;
 };
 
 /** Die drei Aktionen am Stimmabdruck; der Kern prüft sie und antwortet mit stimmabdruck-Nachrichten. true, wenn gesendet. */
@@ -319,6 +339,13 @@ type ClientMessage =
   | {
       type: "auftrag_entwurf";
       data: { aktion: "liste" } | { aktion: "speichern"; job: string } | { aktion: "laden" | "loeschen"; id: string };
+    }
+  | {
+      type: "selbstauftrag";
+      data:
+        | { aktion: "liste" }
+        | { aktion: "speichern"; titel: string; beschreibung: string; art?: string; prioritaet?: 1 | 2 | 3 }
+        | { aktion: "verwerfen" | "oeffnen"; nr: number };
     };
 
 function senden(client: PipecatClient, msg: ClientMessage) {
@@ -640,6 +667,7 @@ export function useWamo(): WamoAktionen {
         approvals: [],
         auftraege: [],
         entwuerfe: null, // Liste und Knöpfe gibt es nur mit einer Sitzung, die sie angeboten hat; beim nächsten Verbinden neu abgefragt
+        selbstAuftraege: null, // ebenso der Rückstand der Aufträge an W.A.I.S. selbst
         micOn: true,
         textMoeglich: false,
         mikrofon: null,
@@ -1818,6 +1846,31 @@ export function useWamo(): WamoAktionen {
     return wamo.subscribe(pruefe);
   }, []);
 
+  // Aufträge an W.A.I.S. selbst (lib/selbstAuftraege.ts): die Liste einmal je Verbindung abfragen, sobald die Sitzung eines Admins steht
+  // (Betriebsmeldung und Profil da; Laborkonten nie). Erst die Antwort des Kerns mit Liste zeigt den Block; ein Kern ohne dieses Angebot
+  // antwortet nicht oder mit Nein, dann bleibt alles unsichtbar, ohne Fehlermeldung.
+  useEffect(() => {
+    let abgefragt: unknown = null;
+    const pruefe = () => {
+      const s = wamo.get();
+      if (!istOnline(s)) {
+        abgefragt = null;
+        return;
+      }
+      const client = clientRef.current;
+      if (!s.betrieb || s.profil?.rolle !== "admin" || !client || abgefragt === client) return;
+      abgefragt = client; // je Verbindung einmal prüfen, auch wenn es ein Laborkonto ist
+      if (istLaborKonto(nutzerLesen().email)) return;
+      try {
+        senden(client, { type: "selbstauftrag", data: { aktion: "liste" } });
+      } catch {
+        // ohne Antwort bleibt es ohne Block, alles andere geht weiter
+      }
+    };
+    pruefe();
+    return wamo.subscribe(pruefe);
+  }, []);
+
   // Autostart der PC-Steuerung: Einstellung an, Profil admin, PC-Host verbunden und Steuerung aus
   // -> einmal je Verbindung einschalten. Den Hinweis gibt es erst, wenn der Kern "an" bestätigt.
   useEffect(() => {
@@ -2006,6 +2059,44 @@ export function useWamo(): WamoAktionen {
     };
   }, []);
 
+  // Aufträge an W.A.I.S. selbst: nur senden; Liste und Meldung übernimmt die Antwort (wamo.ts). Bis dahin (höchstens SELBST_WARTEN_MS,
+  // dann ein Hinweis) sind die Knöpfe gesperrt, damit nichts doppelt hinausgeht. Gesendet wird nur, was zur Liste und zum Status passt.
+  const selbstAuftraege = useMemo<SelbstAuftragAktionen>(() => {
+    const schicken = (data: Exclude<Extract<ClientMessage, { type: "selbstauftrag" }>["data"], { aktion: "liste" }>) => {
+      const client = clientRef.current;
+      const s = wamo.get();
+      if (!s.selbstAuftraege || s.selbstAuftraege.wartet !== null) return false;
+      if (!client || !istOnline(s)) {
+        zeigeToast("Aufträge an W.A.I.S.: keine Verbindung.");
+        return false;
+      }
+      try {
+        senden(client, { type: "selbstauftrag", data });
+      } catch {
+        zeigeToast("Aufträge an W.A.I.S.: die Nachricht ging nicht hinaus.");
+        return false;
+      }
+      selbstAuftragWarten(data.aktion);
+      return true;
+    };
+    const eintrag = (nr: number) => wamo.get().selbstAuftraege?.liste.find((a) => a.nr === nr);
+    return {
+      speichern: (e) => {
+        if (selbstEingabeFehler(e) !== null) return false;
+        if (!SELBST_ARTEN.includes(e.art) || !SELBST_PRIORITAETEN.includes(e.prioritaet)) return false;
+        return schicken({ aktion: "speichern", titel: e.titel.trim(), beschreibung: e.beschreibung.trim(), art: e.art, prioritaet: e.prioritaet });
+      },
+      verwerfen: (nr) => {
+        const a = eintrag(nr);
+        return !!a && selbstDarfVerwerfen(a.status) && schicken({ aktion: "verwerfen", nr });
+      },
+      oeffnen: (nr) => {
+        const a = eintrag(nr);
+        return !!a && selbstDarfOeffnen(a.status) && schicken({ aktion: "oeffnen", nr });
+      },
+    };
+  }, []);
+
   const schliesseFehler = useCallback(() => setFehler(null), []);
 
   // Mikrofone für die Auswahl in der Mikrofon-Warnung (Bezeichnungen gibt es erst nach der Freigabe)
@@ -2084,6 +2175,7 @@ export function useWamo(): WamoAktionen {
       canvasAktiv,
       teams,
       entwuerfe,
+      selbstAuftraege,
     }),
     [
       connect,
@@ -2111,6 +2203,7 @@ export function useWamo(): WamoAktionen {
       canvasAktiv,
       teams,
       entwuerfe,
+      selbstAuftraege,
     ],
   );
 }

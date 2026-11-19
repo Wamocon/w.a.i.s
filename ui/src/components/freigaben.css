@@ -72,6 +72,42 @@
 .entwurf-frage { align-self: center; font-size: 14px; font-weight: 700; color: var(--ink); }
 .entwuerfe-leer, .entwuerfe-hinweis { margin: 0; font-size: 13px; color: var(--ink-soft); }
 
+/* Aufträge an W.A.I.S. selbst (components/SelbstAuftraege.tsx): Liste wie die gespeicherten Aufträge (.entwuerfe, .entwurf), dazu Statusmarke
+   (immer mit Text, nie nur Farbe), Hinweis nach Fremdinhalt und das Formular. Der Reiter ist ein Seitenbereich: alles bricht um, nichts hat feste Breite. */
+.selbst-text, .selbst-zaehler { margin: 0; font-size: 13px; color: var(--ink-soft); }
+.selbst-status { margin: 0; font-size: 14px; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.selbst-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 4px; }
+.selbst-nr { font: 600 12px/1.3 var(--hud); letter-spacing: 0.06em; color: var(--ink-soft); }
+.selbst-marke {
+  padding: 1px 8px; border: 1px solid var(--steuer-rand); border-radius: 999px;
+  font-size: 12px; font-weight: 700; line-height: 1.5; color: var(--ink-soft);
+}
+.selbst-marke[data-status="offen"] { color: var(--ink); }
+.selbst-marke[data-status="in_arbeit"] { border-color: var(--core); color: var(--ink); }
+.selbst-marke[data-status="erledigt"] { border-color: var(--ink); color: var(--ink); }
+.selbst-eintrag[data-status="verworfen"] .entwurf-titel { color: var(--ink-soft); text-decoration: line-through; }
+.selbst-unsicher {
+  margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--core); border-radius: 4px;
+  font-size: 14px; font-weight: 700; color: var(--ink); background: color-mix(in srgb, var(--core) 10%, transparent);
+}
+.selbst-ergebnis { margin: 0 0 8px; font-size: 14px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.selbst-form {
+  display: grid; gap: 4px; max-width: 640px; margin-top: 8px; padding: 12px;
+  border: 1px solid var(--kante); border-radius: 10px; background: var(--panel);
+}
+.selbst-form-titel { margin: 0 0 2px; font: 600 12px/1.3 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+.selbst-form label { margin-top: 6px; font-size: 13px; font-weight: 700; color: var(--ink); }
+.selbst-form input, .selbst-form textarea, .selbst-form select {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--kante); border-radius: 6px;
+  background: var(--glas-stark); color: var(--ink); font: 14px/1.4 var(--body);
+}
+.selbst-form input[aria-invalid="true"], .selbst-form textarea[aria-invalid="true"] { border-color: var(--core); }
+.selbst-form textarea { min-height: 96px; resize: vertical; }
+.selbst-paar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.selbst-paar > div { display: grid; gap: 4px; align-content: start; }
+.selbst-knoepfe { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.selbst-knoepfe button[aria-busy="true"] { cursor: progress; }
+
 /* Meldungen: Fehler mit Symbol, Toast, Gemerktes, Hinweiskasten (Glas und Kante stehen in hud.css) */
 .error { display: grid; grid-template-columns: 16px 1fr; gap: 10px; align-items: start; padding: 12px 14px; }
 .error .sym { margin-top: 3px; }

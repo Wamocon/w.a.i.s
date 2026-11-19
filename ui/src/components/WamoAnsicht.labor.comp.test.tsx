@@ -83,8 +83,34 @@ function aktionen(): WamoAktionen {
     mikrofone: vi.fn(async () => []),
     mikrofonWaehlen: vi.fn(() => true),
     canvasAktiv: vi.fn(() => true),
+    selbstAuftraege: { speichern: vi.fn(() => true), verwerfen: vi.fn(() => true), oeffnen: vi.fn(() => true) },
   };
 }
+
+/** Der Kern hat den Rückstand der Aufträge an W.A.I.S. selbst geliefert (erst dann gibt es den Block). */
+const rueckstandDa = () =>
+  wamo.set((s) => ({
+    ...s,
+    presence: "idle",
+    selbstAuftraege: {
+      liste: [
+        {
+          nr: 7,
+          titel: "Der Verlauf lädt zu langsam",
+          art: "fehlerbehebung",
+          prioritaet: 1,
+          status: "offen",
+          quelle: "sprache",
+          unsicher: false,
+          erstelltMs: Date.UTC(2026, 10, 18, 9),
+        },
+      ],
+      max: 200,
+      meldung: null,
+      wartet: null,
+      verspaetet: null,
+    },
+  }));
 
 const CANVAS_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 const einElementImCanvas = () =>
@@ -172,6 +198,15 @@ describe("Hauptansicht eines Laborkontos: was fehlt", () => {
     expect(meldungen).not.toBeNull();
     expect(within(meldungen!).queryByText(/wartet auf die Freigabe durch einen Admin/)).toBeNull();
     expect(within(meldungen!).queryByText(/offene[nr]? Hinweis/)).toBeNull();
+  });
+
+  it("zeigt den Block Aufträge an W.A.I.S. selbst nie, auch wenn ein Rückstand im Zustand läge", async () => {
+    rueckstandDa();
+    zeige(PLATZ);
+    await ruhe();
+    expect(screen.queryByRole("heading", { name: "Aufträge an W.A.I.S. selbst", hidden: true })).toBeNull();
+    expect(screen.queryByRole("form", { name: "Neuer Auftrag an W.A.I.S.", hidden: true })).toBeNull();
+    expect(screen.queryByText("Der Verlauf lädt zu langsam")).toBeNull();
   });
 
   it("meldet den offenen Reiter des Canvas nicht an den Kern (die Laborsitzung nimmt diese Nachricht nicht an)", async () => {
@@ -311,6 +346,16 @@ describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
     expect(screen.getByRole("button", { name: "Verlauf öffnen", hidden: true })).toBeTruthy();
     expect(screen.getByText("Modellzugang", { selector: "dt" })).toBeTruthy();
     expect(document.querySelector(".kz-gespraech")?.getAttribute("data-verlauf")).toBe("true");
+  });
+
+  it("zeigt den Block Aufträge an W.A.I.S. selbst erst mit dem Rückstand des Kerns, ohne ihn nichts", async () => {
+    zeige(ADMIN);
+    await ruhe();
+    expect(screen.queryByRole("heading", { name: "Aufträge an W.A.I.S. selbst", hidden: true })).toBeNull();
+    act(() => rueckstandDa());
+    expect(screen.getByRole("heading", { name: "Aufträge an W.A.I.S. selbst", hidden: true })).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Neuer Auftrag an W.A.I.S.", hidden: true })).toBeTruthy();
+    expect(screen.getByText("Der Verlauf lädt zu langsam")).toBeTruthy();
   });
 
   it("meldet den offenen Reiter des Canvas an den Kern", async () => {

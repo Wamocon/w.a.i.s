@@ -4,6 +4,19 @@ import type { AuftragStand } from "./auftragStart.ts"; // relativ, nur der Typ (
 import { JIRA_PROJEKTE_MAX, linkOk, projektOk, schluesselOk, type JiraErgebnis, type JiraStatus } from "./jiraStory.ts";
 import { istOfficeFormat, OFFICE_FORMATE, type DateiMeldung, type OfficeFormat } from "./export.ts";
 import { MAIL_VERSAND_ZUSTAENDE, type MailVersandZustand } from "./mail.ts";
+import {
+  SELBST_AKTIONEN,
+  SELBST_BEARBEITER,
+  SELBST_ERGEBNIS_MAX,
+  SELBST_LISTE_MAX,
+  SELBST_MAX_OBERGRENZE,
+  SELBST_PRIORITAETEN,
+  SELBST_QUELLEN,
+  SELBST_STATUS,
+  SELBST_TITEL_MAX,
+  type SelbstAktion,
+  type SelbstAuftrag,
+} from "./selbstAuftraege.ts";
 
 /**
  * RTVI-Servernachrichten des Voice-Core (kommen über onServerMessage in useWamo.ts an).
@@ -410,6 +423,16 @@ export type ServerMessage =
       entwuerfe?: AuftragEntwurf[];
       max?: number;
     }
+  /** Aufträge an W.A.I.S. selbst (lib/selbstAuftraege.ts): genau eine Antwort je Aktion, text bei ok und grund bei ok false (hier immer text),
+   *  bei ok die frische Liste (auftraege) und die Grenze (max) */
+  | {
+      type: "selbstauftraege";
+      aktion: SelbstAktion;
+      ok: boolean;
+      text: string;
+      auftraege?: SelbstAuftrag[];
+      max?: number;
+    }
   | { type: "sitzung_beendet"; grund: string; anmelden?: boolean }
   /** Testlabor: der Betreuer hat den Durchlauf beendet; die Seite lädt sich neu (lib/laborNeuladen.ts). Trägt nie Inhalte. */
   | { type: "labor_durchlauf_ende" }
@@ -613,6 +636,48 @@ function entwurfListe(roh: unknown[]): AuftragEntwurf[] {
     };
     const repo = repoName(e.repo);
     if (repo) eintrag.repo = repo;
+    liste.push(eintrag);
+  }
+  return liste;
+}
+
+/** Ergebnis eines Auftrags an W.A.I.S. selbst: mehrzeilig erlaubt, aber ohne Steuerzeichen, mit höchstens einer Leerzeile in Folge, gekürzt. */
+function selbstErgebnis(roh: unknown): string | undefined {
+  if (!isStr(roh)) return undefined;
+  const t = sauber(schnitt(roh, SELBST_ERGEBNIS_MAX * 2), SELBST_ERGEBNIS_MAX)
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return t || undefined;
+}
+
+/** Liste der Aufträge an W.A.I.S. selbst: nur Einträge mit gültiger Nummer und bekanntem Status (die Nummer zählt einmal, der erste Eintrag
+ *  gilt; eine unbekannte Quelle lässt nur die Quelle weg), Texte einzeilig und gekürzt, Aufzählungen und Zahlen geprüft, höchstens
+ *  SELBST_LISTE_MAX in der Reihenfolge des Kerns; gelesen werden höchstens doppelt so viele Einträge (Ungültige zählen mit). */
+function selbstAuftragListe(roh: unknown[]): SelbstAuftrag[] {
+  const liste: SelbstAuftrag[] = [];
+  const gesehen = new Set<number>();
+  for (const e of roh.slice(0, SELBST_LISTE_MAX * 2)) {
+    if (liste.length >= SELBST_LISTE_MAX) break;
+    if (!isObj(e)) continue;
+    const nr = e.nr;
+    if (typeof nr !== "number" || !Number.isSafeInteger(nr) || nr < 1 || nr > 2_147_483_647 || gesehen.has(nr)) continue;
+    if (!oneOf(e.status, SELBST_STATUS)) continue;
+    gesehen.add(nr);
+    const ms = e.erstellt_ms;
+    const eintrag: SelbstAuftrag = {
+      nr,
+      titel: zeile(e.titel, SELBST_TITEL_MAX) ?? "Auftrag",
+      art: zeile(e.art, 60) ?? "",
+      prioritaet: SELBST_PRIORITAETEN.find((p) => p === e.prioritaet) ?? 2,
+      status: e.status,
+      unsicher: e.unsicher === true,
+      erstelltMs: typeof ms === "number" && ms >= ENTWURF_MS_MIN && ms <= ENTWURF_MS_MAX ? Math.round(ms) : 0,
+    };
+    if (oneOf(e.quelle, SELBST_QUELLEN)) eintrag.quelle = e.quelle;
+    if (oneOf(e.bearbeiter, SELBST_BEARBEITER)) eintrag.bearbeiter = e.bearbeiter;
+    const ergebnis = selbstErgebnis(e.ergebnis);
+    if (ergebnis) eintrag.ergebnis = ergebnis;
     liste.push(eintrag);
   }
   return liste;
@@ -966,6 +1031,20 @@ export function parseServerMessage(data: unknown): ServerMessage | null {
       if (isStr(m.job) && m.job) aus.job = m.job.slice(0, 100);
       if (Array.isArray(m.entwuerfe)) aus.entwuerfe = entwurfListe(m.entwuerfe);
       if (typeof m.max === "number" && Number.isInteger(m.max) && m.max >= 1 && m.max <= 1000) aus.max = m.max;
+      return aus;
+    }
+    case "selbstauftraege": {
+      if (!oneOf(m.aktion, SELBST_AKTIONEN) || typeof m.ok !== "boolean") return null;
+      // bei ok false steht der Satz laut Vertrag in grund; fehlt er, gilt text
+      const satz = zeile(m.ok ? m.text : isStr(m.grund) ? m.grund : m.text, 300);
+      const aus: Extract<ServerMessage, { type: "selbstauftraege" }> = {
+        type: "selbstauftraege",
+        aktion: m.aktion,
+        ok: m.ok,
+        text: satz ?? (m.ok ? "" : "Das ging nicht."),
+      };
+      if (Array.isArray(m.auftraege)) aus.auftraege = selbstAuftragListe(m.auftraege);
+      if (typeof m.max === "number" && Number.isInteger(m.max) && m.max >= 1 && m.max <= SELBST_MAX_OBERGRENZE) aus.max = m.max;
       return aus;
     }
     case "labor_durchlauf_ende":

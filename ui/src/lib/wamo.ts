@@ -30,6 +30,7 @@ import {
   type EntwuerfeStand,
   type EntwurfWarten,
 } from "./auftragEntwuerfe.ts"; // relativ aus demselben Grund
+import { SELBST_WARTEN_MS, selbstNachAntwort, type SelbstStand, type SelbstWarten } from "./selbstAuftraege.ts"; // relativ aus demselben Grund
 import { JIRA_LEER, type JiraStand } from "./jiraStory.ts"; // relativ aus demselben Grund
 import { liveBildLoeschen } from "./liveBild.ts"; // relativ aus demselben Grund
 import { PC_EIN_LEER, type PcEinschalten } from "./pcSchalter.ts"; // relativ aus demselben Grund
@@ -173,6 +174,9 @@ export type WamoState = {
   /** Für später gespeicherte Aufträge (lib/auftragEntwuerfe.ts); null, solange der Kern keine Liste geschickt hat (dann fehlen Knopf
    *  und Liste, etwa ohne Entwicklungsaufträge oder im Labor) */
   entwuerfe: EntwuerfeStand | null;
+  /** Rückstand der Aufträge an W.A.I.S. selbst (lib/selbstAuftraege.ts); null, solange der Kern nicht mindestens einmal mit Liste geantwortet
+   *  hat (dann fehlt der Block ganz, etwa im Labor, für Mitglieder oder bei einem Kern ohne dieses Angebot) */
+  selbstAuftraege: SelbstStand | null;
   canvas: CanvasItem[];
   /** geschlossene Reiter dieser Sitzung, zuletzt geschlossen zuerst (lib/canvasHistorie.ts); Schließen blendet nur aus */
   canvasZu: Geschlossen<CanvasItem>[];
@@ -251,6 +255,7 @@ export const initialState: WamoState = {
   approvals: [],
   auftraege: [],
   entwuerfe: null,
+  selbstAuftraege: null,
   canvas: [],
   canvasZu: [],
   betrieb: null,
@@ -618,6 +623,7 @@ export function resetWamo(state: WamoState = initialState) {
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = null;
   entwurfFristLoeschen();
+  selbstFristLoeschen();
   for (const t of ablaufTimer.values()) clearTimeout(t);
   ablaufTimer.clear();
   for (const t of memoTimer.values()) clearTimeout(t.timer);
@@ -730,6 +736,34 @@ export function entwurfWarten(aktion: EntwurfWarten["aktion"], kennung: string) 
     wamo.set((s) => (s.entwuerfe ? { ...s, entwuerfe: { ...s.entwuerfe, wartet: null } } : s));
     zeigeToast("Gespeicherte Aufträge: noch keine Antwort vom Kern. Bitte die Liste prüfen, bevor du es noch einmal versuchst.");
   }, ENTWURF_WARTEN_MS);
+}
+
+// ---------- Aufträge an W.A.I.S. selbst: Warten auf die Antwort ----------
+
+let selbstFrist: ReturnType<typeof setTimeout> | null = null;
+let selbstNr = 0;
+
+function selbstFristLoeschen() {
+  if (selbstFrist) clearTimeout(selbstFrist);
+  selbstFrist = null;
+}
+
+/** Eine Aktion am Rückstand ist gesendet: die Knöpfe warten auf die Antwort. Kommt nach SELBST_WARTEN_MS keine, sind sie wieder frei, und
+ *  ein Hinweis sagt es. Ohne Zustand (kein Angebot des Kerns) ändert sich nichts. */
+export function selbstAuftragWarten(aktion: SelbstWarten["aktion"]) {
+  selbstNr += 1;
+  const n = selbstNr;
+  selbstFristLoeschen();
+  wamo.set((s) => (s.selbstAuftraege ? { ...s, selbstAuftraege: { ...s.selbstAuftraege, wartet: { aktion, n } } } : s));
+  selbstFrist = setTimeout(() => {
+    selbstFrist = null;
+    if (wamo.get().selbstAuftraege?.wartet?.n !== n) return;
+    // verspaetet: kommt die Antwort doch noch, entsperrt sie kein neues Warten (selbstNachAntwort)
+    wamo.set((s) =>
+      s.selbstAuftraege ? { ...s, selbstAuftraege: { ...s.selbstAuftraege, wartet: null, verspaetet: aktion } } : s,
+    );
+    zeigeToast("Aufträge an W.A.I.S.: noch keine Antwort vom Kern. Bitte die Liste prüfen, bevor du es noch einmal versuchst.");
+  }, SELBST_WARTEN_MS);
 }
 
 // ---------- Jira-Stories: Ergebnis schließen ----------
@@ -975,6 +1009,15 @@ export function applyServerMessage(msg: ServerMessage) {
         ansage: entwurfAnsage(msg) ?? s.ansage,
       }));
       if (!wamo.get().entwuerfe?.wartet) entwurfFristLoeschen(); // beantwortet: keine Frist und kein Hinweis mehr
+      return;
+    case "selbstauftraege":
+      // Aufträge an W.A.I.S. selbst: erst eine gelungene Antwort mit Liste legt den Zustand an (selbstNachAntwort); jede Rückmeldung zeigt
+      // der Block selbst über eine eigene Live-Region, deshalb keine zweite Ansage der Seite
+      wamo.set((s) => {
+        const neu = selbstNachAntwort(s.selbstAuftraege, msg);
+        return neu === s.selbstAuftraege ? s : { ...s, selbstAuftraege: neu };
+      });
+      if (!wamo.get().selbstAuftraege?.wartet) selbstFristLoeschen(); // beantwortet: keine Frist und kein Hinweis mehr
       return;
     case "sitzung_beendet":
       wamo.set((s) => ({
