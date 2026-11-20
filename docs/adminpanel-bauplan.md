@@ -1,6 +1,6 @@
 # Admin-Panel "Werkstatt": Bauplan und Schnittstellen-Inventur
 
-Stand: 20.11.2026. Status: Entscheidungen von Niko am 20.11.2026 getroffen (Abschnitt 1), gebaut wird nach dem Labortag. Das Konzept mit Varianten und Entscheidungen steht in `docs/adminpanel-werkstatt.md`. Dieses Dokument plant den Bau (ECC-Planung) und hält die Inventur der vorhandenen Schnittstellen fest (REA, aus der laufenden Oberfläche Version 0.7.0 und dem Quelltext).
+Stand: 20.11.2026. Status: Entscheidungen von Niko am 20.11.2026 getroffen (Abschnitt 1). Stufe 1 wird auf Nikos Wunsch vorgezogen und geht bis Mo 23.11.2026 früh live (Abschnitt 1.1), Stufe 2 und 3 werden nach dem Labortag gebaut. Das Konzept mit Varianten und Entscheidungen steht in `docs/adminpanel-werkstatt.md`. Dieses Dokument plant den Bau (ECC-Planung) und hält die Inventur der vorhandenen Schnittstellen fest (REA, aus der laufenden Oberfläche Version 0.7.0 und dem Quelltext).
 
 ## 1. Entscheidungen von Niko (20.11.2026)
 
@@ -12,15 +12,32 @@ Niko hat die fünf Punkte des Konzepts am 20.11.2026 entschieden. A3 ist gegenü
 | A2 | Zugang nur für Admins mit aktivem Profil, ohne `labor_art`, mit zweitem Faktor (aal2) und Erlaubnisliste; der Port ist nur aus den Admin-Quellen erreichbar (`infra/sokrates2/README.md`, Abschnitt 6.1) |
 | A3 | Alles darf das Panel schreiben, stufenweise. Stufe 1: Laborkonfiguration und Laborerstellung (Termine, Plätze, Fristen, Checkliste, Laborprofile anlegen). Stufe 2: freischalten, sperren, zählen, Löschwunsch je Zeitfenster. Stufe 3: weitere Aktionen (zum Beispiel Mitglieder, Releases, Installer, Aufträge), je Stufe mit eigener Sicherheitsprüfung. Geheimnisse (Startpasswörter, zweite Faktoren mit QR und Seeds, Dienstschlüssel) erscheinen nie im Browser: Ein kleiner Helfer am Server erzeugt sie und übergibt sie nur an die Betreuer |
 | A4 | Kennzahlen werden verdichtet und ohne `user_id` gespeichert, Frist 30 Tage |
-| A5 | Phase 1 läuft parallel zu Plan C, Phase 2 ist vor dem nächsten Labortag fertig |
+| A5 | Stufe 2 läuft parallel zu Plan C und ist vor dem nächsten Labortag fertig |
+| A6 | Stufe 1 geht bis Mo 23.11.2026 früh live. Go/No-Go ist am So 22.11.2026 um 18:00, ausgerollt wird nur, was vollständig geprüft ist |
+| A7 | Kartenkatalog mit Use-Case-Editor, komplett von null aufbaubar, Zuordnung der Karten zu Gästen |
+| A8 | Veröffentlichte Karten laden sofort im Kern nach (Schalter `WAMO_LABOR_KARTEN_NACHLADEN`, Standard aus, Zuschalten nach einer Probekarte) |
 
 Folge von A3: Die Pakete W7 bis W9 beginnen mit Laborkonfiguration und Laborerstellung. Dazu kommt ein Paket für den Helfer am Server, der Konten, Passwörter und Faktoren erzeugt (Aufwand wird in Phase 0 neu geschätzt, die Stundenangaben unten gelten für den Umfang vor dieser Entscheidung).
 
 Weitere Annahmen: systemd-Dienst mit Unix-Socket und nft-Ausgang wie beim Freigabe-Dienst (`infra/sokrates2/freigabe-einrichten.sh`); 20 Stunden Arbeit je Woche, Pause vom 24.12. bis 01.01.
 
+### 1.1 Stufe 1 bis Montag
+
+Stufe 1 ist ein neuer Dienst und berührt den Sprachpfad nicht. Der Kern wird nur durch das Nachladen der Karten berührt. Fünf Pakete laufen parallel, jedes mit eigenem Zweig und PR:
+
+| Paket | Zweig | Inhalt |
+| --- | --- | --- |
+| DB | `feat/werkstatt-db` | Migration `0031_werkstatt`: Plan, Karten, Zuordnung, Versionen, Freigabekarten, Lesefunktionen, zwei Ansichten für den Kern |
+| API | `feat/werkstatt-api` | Dienst `werkstatt/`: Anmeldung, Dashboards, Protokolle, Labor-Planer, Karten, Veröffentlichen mit Karte und frischem Faktor |
+| KERN | `feat/werkstatt-kern` | Modul `voice-core/labor_karten_db.py`: Nachladen alle 30 Sekunden, nur die zwei Ansichten, Schalter aus |
+| INFRA | `feat/werkstatt-infra` | Einrichten, Rückweg, Rauchtest, Sammler, Caddy-Site 55448, Firewall |
+| UI | `feat/werkstatt-ui` | Seite `/werkstatt` mit Dashboards, Labor-Planer, Karten und Use Cases, Protokollen |
+
+Nicht in Stufe 1: Freischalten, Sperren, Zählen und Löschen von Laborprofilen, Konten, zweite Faktoren, Schreibzugriffe auf den Labor-Dienst. Die Datenbankrolle `wamo_werkstatt` bekommt kein `execute` auf `labor_loeschen`.
+
 ## 2. Arbeitspakete
 
-Jedes Paket kann ein eigener PR sein.
+Jedes Paket kann ein eigener PR sein. Die Pakete W1 bis W6 sind der Kern von Stufe 1 und werden mit den fünf Paketen aus Abschnitt 1.1 vorgezogen. W7 bis W11 gehören zu Stufe 2.
 
 | Nr. | Paket | Inhalt | Ergebnis (prüfbar) | Abhängigkeit | Stunden | Phase |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -82,6 +99,8 @@ Fehlerbild: `{code, text}` ohne interne Namen.
 
 ## 4. Datenmodell (Migration 0032, grob)
 
+Für Stufe 1 liegt alles in einer gebündelten Migration `0031_werkstatt` (Plan, Karten, Versionen, Freigabekarten, Lesefunktionen). Der Entwurf unten gilt dafür mit den Tabellennamen `labor_termine`, `labor_plaetze`, `labor_checkliste`, `labor_karten`, `labor_zuordnung`, `labor_karten_versionen` und `werkstatt_karten`. Dazu kommen zwei Ansichten, die allein `wamo_core` lesen darf: `labor_karten_aktive_version` und `labor_wissen_aktiv` (die Wissenstexte der aktiven Version). Nur sie sieht der Kern beim Nachladen.
+
 - **`labor_termine`:** `tag` (eindeutig), `beginn`, `ende`, `status` (entwurf, freigegeben, laufend, nachlauf, abgeschlossen), `einwilligung_version`, `frist_loeschen` mit der Prüfung "zwischen `tag` und `tag` plus 14 Tage" (Annahme). `erstellt_von` als Fremdschlüssel mit `on delete set null` und partiellem Index.
 - **`labor_termin_plaetze`:** Schlüssel ist Termin plus Platz 1 bis 16. `zweck` ist besucher, reserve oder abnahme, wobei abnahme nur die Plätze 15 und 16 bekommen (`docs/labor-dienst-vertrag.md`, Abschnitt 6). `kennung` nach `KENNUNG_RE`. Kein Gerätename.
 - **`labor_checkliste`:** `nr`, `titel` (höchstens 120 Zeichen), `quelle` (Abschnitt im Runbook), `faellig`, `erledigt_at`, `erledigt_von`.
@@ -106,14 +125,24 @@ Für alle neuen Tabellen gilt: RLS, Policy nach dem `core_all`-Muster für `wamo
 
 ## 6. Zeitplan
 
-Bis Mo 23.11. früh entsteht nur Papier: Die Entscheidungen A1 bis A5 sind getroffen, dazu dieser Plan, der Vertragsentwurf und ein Klickdummy ohne Server. Bis zum Labortag am Sa 05.12. ruht das Panel.
+Stufe 1 wird vorgezogen (A6). Der Plan bis zum Freeze:
+
+| Zeitpunkt | Inhalt |
+| --- | --- |
+| Fr 20.11.2026 | Vertrag, fünf Pakete parallel in eigenen Arbeitsbäumen |
+| Sa 21.11.2026 | PRs, Reviews, Merge der Migration, Anwendung in `wamo_dev` und `wamo_test` |
+| So 22.11.2026 bis 18:00 | Ausrollen am Server: Dienst und Sammler, Oberfläche (blau und grün), Kern-Release mit ausgeschaltetem Schalter, Rauchtest, Labor-Rauchtest, Probekarte, dann Schalter an |
+| So 22.11.2026, 18:00 | Go/No-Go: Fehlt etwas Geprüftes, wird nicht ausgerollt, das Panel geht dann nach dem Labortag live |
+| Mo 23.11.2026 früh | Freeze, Panel live |
+
+Die folgenden Meilensteine gelten für Stufe 2 und 3. Der Labortag am Sa 05.12.2026 und sein Nachlauf haben Vorrang.
 
 | Meilenstein | Datum | Inhalt |
 | --- | --- | --- |
-| M1 | Fr 11.12.2026 | Löschnachweis des Labors erbracht (hat Vorrang); W1 und W2 in `wamo_dev` |
-| M2 | Fr 18.12.2026 | W3 bis W5 fertig, Sicherheitsproben grün |
-| M3 | Fr 15.01.2027 | W6 und Doku; Phase 1 in Betrieb |
-| M4 | Fr 12.02.2027 | Phase 2 in Betrieb. Gilt nur, wenn der nächste Labortag frühestens am 12.03.2027 liegt, sonst den Umfang kürzen |
+| M1 | Fr 11.12.2026 | Löschnachweis des Labors erbracht (hat Vorrang) |
+| M2 | Fr 18.12.2026 | Entwurf von W7 und W8 (Freischalten, Sperren, Löschwunsch) in `wamo_dev` |
+| M3 | Fr 15.01.2027 | W9 und Doku; Stufe 2 in Betrieb |
+| M4 | Fr 12.02.2027 | Stufe 2 vollständig. Gilt nur, wenn der nächste Labortag frühestens am 12.03.2027 liegt, sonst den Umfang kürzen |
 
 ## 7. Risiken, Abbruchkriterien, Definition of Done
 

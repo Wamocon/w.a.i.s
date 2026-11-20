@@ -1,12 +1,12 @@
 # Admin-Panel "Werkstatt" für W.A.I.S.: Konzeptentwurf
 
-Stand: 20.11.2026. Status: Die fünf Entscheidungen in Abschnitt 7 hat Niko am 20.11.2026 getroffen. Anlass ist der Wunsch von Niko vom 20.11.2026 nach einem separat aufrufbaren Admin-Panel, in dem sich ein Labortag planen und konfigurieren lässt und das Dashboards und Protokolle enthält.
+Stand: 20.11.2026. Status: Die fünf Entscheidungen in Abschnitt 7 hat Niko am 20.11.2026 getroffen. Am Nachmittag des 20.11.2026 kam die Entscheidung dazu, Stufe 1 schon bis Mo 23.11.2026 live zu nehmen, mit Kartenkatalog, Use-Case-Editor und Nachladen der Karten im Kern (Abschnitt 7, Punkte 6 bis 8). Anlass ist der Wunsch von Niko vom 20.11.2026 nach einem separat aufrufbaren Admin-Panel, in dem sich ein Labortag planen und konfigurieren lässt und das Dashboards und Protokolle enthält.
 
 Der Bauplan mit Arbeitspaketen, Schnittstelle, Datenmodell, Testplan und der Inventur der vorhandenen Schnittstellen steht in `docs/adminpanel-bauplan.md`.
 
 ## 1. Einschätzung
 
-Die Idee lohnt sich, aber erst nach dem Labortag am 05.12.2026 und nur als getrennter, schmaler Dienst. Der größte Nutzen: Stand, Protokolle und Laborvorbereitung liegen an einem Ort. Heute sind es über ein Dutzend Einstiegsskripte mit ssh (`docs/labor-runbook.md`, Abschnitte 9 und 10). Die größte Gefahr ist ein Generalschlüssel im Browser, der Profile freischaltet und Daten löscht und so die heutige Rechtetrennung aushebelt.
+Die Idee lohnt sich, und zwar als getrennter, schmaler Dienst. Stufe 1 geht auf Nikos Wunsch schon vor dem Labortag am 05.12.2026 live (Go/No-Go am So 22.11.2026 um 18:00), alles Weitere folgt danach. Der größte Nutzen: Stand, Protokolle und Laborvorbereitung liegen an einem Ort. Heute sind es über ein Dutzend Einstiegsskripte mit ssh (`docs/labor-runbook.md`, Abschnitte 9 und 10). Die größte Gefahr ist ein Generalschlüssel im Browser, der Profile freischaltet und Daten löscht und so die heutige Rechtetrennung aushebelt.
 
 ## 2. Zielbild und Nutzer
 
@@ -19,7 +19,10 @@ Das Panel ist nur für Admins ohne Laborprofil und nur aus den Admin-Quellen err
 | Dashboards | Sitzungen, Latenz p50 und p95 (`voice-core/latenz.py`), Verbrauch je Baustein (`voice-core/llm_anbieter.py`), Aufträge (`kernkanal.jsonl`), Kern-Slots, Installer | lesend |
 | Protokolle | Journal-Marken nach Erlaubnisliste (`docs/produktdokumentation/betrieb.md`, Abschnitt 10), Tabelle `actions`, Löschnachweise | lesend |
 | Labor-Planer | Termin, Plätze, Einwilligungsversion, Checkliste; Laborprofile freischalten und sperren, Zählung, Löschwunsch je Zeitfenster, Nachlauf als geführter Ablauf | schreibend mit Karte |
+| Karten und Use Cases | Kartenkatalog (Gruppen W, A, J, M, S, G), Use-Case-Editor komplett von null (Titel, Aufgabe, Erwartung, Fehlerfall, Lernziel, Wissen, Werkzeuge, Dauer), Zuordnung der Karten zu Gästen, Veröffentlichen, sofortiges Nachladen im Kern | schreibend mit Karte |
 | Werkstatt | Release-Stand, Selbstaufträge (`docs/selbstauftraege.md`), Schalter-Übersicht | lesend |
+
+In Stufe 1 schreibt der Labor-Planer nur Termine, Plätze, Fristen und die Checkliste. Freischalten, Sperren, Zählen und Löschwunsch gehören zu Stufe 2 und bleiben bis dahin Skript.
 
 Diese Handgriffe bleiben Skript:
 
@@ -52,9 +55,9 @@ Diese Handgriffe bleiben Skript:
 
 | Phase | Inhalt | Aufwand | Zeitpunkt |
 | --- | --- | --- | --- |
-| 0 | Konzept, Entscheidungen, statischer Klickdummy im WMC-Design | 6 h | Entscheidungen bis Mo 23.11. früh; der Klickdummy berührt nichts Ausgerolltes |
-| 1 | Dienst-Gerüst, Dashboards, Protokolle | 40 h | ab Mo 07.12., also nach dem Labortag am Sa 05.12.; Nachlauf und Kontenlöschung haben Vorrang |
-| 2 | Labor-Planer mit Karten und Migration | 45 h | fertig vier Wochen vor dem nächsten Labortag (Termin offen) |
+| 0 | Konzept, Entscheidungen, statischer Klickdummy im WMC-Design | 6 h | erledigt am 20.11.2026 |
+| 1 (Stufe 1, vorgezogen) | Dienst-Gerüst, Dashboards, Protokolle, Labor-Planer ohne Freischalten und Löschen, Kartenkatalog mit Editor, Nachladen im Kern; fünf Pakete parallel | Bauplan 1.1 | Go-Live Mo 23.11.2026 früh, Go/No-Go So 22.11.2026 um 18:00; ausgerollt wird nur, was vollständig geprüft ist |
+| 2 | Labor-Planer mit Freischalten, Sperren, Löschwunsch und Migration | 45 h | fertig vier Wochen vor dem nächsten Labortag (Termin offen); Nachlauf und Kontenlöschung haben Vorrang |
 | 3 | Releases, Installer, Selbstaufträge, Aufträge | 40 h | nach Phase 2; der Release-Dienst ist erst ein Gerüst (`betrieb.md`, Abschnitt 9) |
 
 Hinweise aus der Prüfung:
@@ -68,10 +71,15 @@ Hinweise aus der Prüfung:
 2. **Zugang:** Admins mit Erlaubnisliste, nur aus den Admin-Quellen.
 3. **Schreibumfang:** Alles, stufenweise, beginnend mit Laborkonfiguration und Laborerstellung (Termine, Plätze, Fristen, Checkliste, Laborprofile anlegen). Geheimnisse (Startpasswörter, zweite Faktoren mit QR und Seeds, Dienstschlüssel) erscheinen nie im Browser: Ein kleiner Helfer am Server erzeugt sie und übergibt sie nur an die Betreuer.
 4. **Datenhaltung:** verdichtete Kennzahlen mit 30 Tagen Löschfrist statt Rohprotokollen.
-5. **Vorrang nach dem 05.12.** gegenüber Plan C (67 bis 87 Stunden, `docs/persoenliche-zugaenge.md`, Abschnitt 4.3): Phase 1 läuft parallel dazu, Phase 2 ist vor dem nächsten Labortag fertig.
+5. **Vorrang nach dem 05.12.** gegenüber Plan C (67 bis 87 Stunden, `docs/persoenliche-zugaenge.md`, Abschnitt 4.3): Stufe 2 läuft parallel dazu und ist vor dem nächsten Labortag fertig.
+6. **Vorziehen (20.11.2026, nachmittags):** Stufe 1 geht bis Mo 23.11.2026 früh live. Go/No-Go ist am So 22.11.2026 um 18:00: Ausgerollt wird nur, was vollständig geprüft ist. Das Panel ist ein neuer Dienst und berührt den Sprachpfad nicht. Der Kern wird nur durch das Nachladen (Punkt 8) berührt.
+7. **Kartenkatalog und Use-Case-Editor:** Niko will Use Cases komplett von null aufbauen können, nicht nur die 17 vorhandenen Karten ändern. Jede Karte hat Gruppe, Titel, Aufgabe, Erwartung, optional einen Fehlerfall, ein Lernziel, Wissen (keines, Glossar, ISTQB-Basis oder eigener Text), erlaubte Werkzeuge und eine Dauer. Karten werden Gästen (Plätzen) zugeordnet.
+8. **Wirkung im Kern:** Veröffentlichte Karten laden sofort im Kern nach (Schalter `WAMO_LABOR_KARTEN_NACHLADEN`, Standard aus, nur über `wamo-core-env`). Das Nachladen liest nur zwei Ansichten, prüft Länge und Zeichenbudget (zusammen mit den Labor-Daten höchstens 6000 Zeichen) und behandelt die Texte als Daten, nie als Anweisung.
 
 ## 8. Risiken
 
 1. **Generalschlüssel im Browser.** Gegenmaßnahme: Admin-Quellen, frischer zweiter Faktor je Aktion, schmale Rolle, Ratengrenzen, Audit.
 2. **Gesprächsinhalte rutschen in die Protokolle.** Gegenmaßnahme: Erlaubnisliste der Felder, ein Test je Quelle, Löschfrist.
 3. **Skript und Panel laufen auseinander.** Gegenmaßnahme: Beide nutzen dieselben Datenbankfunktionen, die Skripte bleiben der Rückweg, dazu ein Vertragstest wie `voice-core/test_kernkanal_vertrag.py`.
+4. **Zeitdruck bei Stufe 1.** Gegenmaßnahme: Go/No-Go am So 22.11.2026 um 18:00, Rückweg `wamo-werkstatt-rueckweg.sh`, der Kern-Release geht mit ausgeschaltetem Schalter hinaus und das Nachladen wird erst nach einer Probekarte zugeschaltet.
+5. **Fremdtext im Prompt der Laborsitzung.** Karten sind Text, den das Modell liest. Gegenmaßnahme: Schreiben nur durch Admins nach Karte und frischem zweiten Faktor, Texte nur als abgegrenzte Daten, höchstens 900 Zeichen je Karte und 6000 insgesamt, bei jedem Fehler bleibt die letzte gültige Version, im Log stehen nur Versionsnummern.
