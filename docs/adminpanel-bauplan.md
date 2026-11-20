@@ -1,18 +1,20 @@
 # Admin-Panel "Werkstatt": Bauplan und Schnittstellen-Inventur
 
-Stand: 20.11.2026. Status: Entwurf. Das Konzept mit Varianten und Entscheidungen steht in `docs/adminpanel-werkstatt.md`. Dieses Dokument plant den Bau (ECC-Planung) und hält die Inventur der vorhandenen Schnittstellen fest (REA, aus der laufenden Oberfläche Version 0.7.0 und dem Quelltext).
+Stand: 20.11.2026. Status: Entscheidungen von Niko am 20.11.2026 getroffen (Abschnitt 1), gebaut wird nach dem Labortag. Das Konzept mit Varianten und Entscheidungen steht in `docs/adminpanel-werkstatt.md`. Dieses Dokument plant den Bau (ECC-Planung) und hält die Inventur der vorhandenen Schnittstellen fest (REA, aus der laufenden Oberfläche Version 0.7.0 und dem Quelltext).
 
-## 1. Annahmen bis zur Bestätigung
+## 1. Entscheidungen von Niko (20.11.2026)
 
-Die fünf Entscheidungen des Konzepts sind noch nicht bestätigt. Der Plan rechnet mit den Empfehlungen.
+Niko hat die fünf Punkte des Konzepts am 20.11.2026 entschieden. A3 ist gegenüber der Empfehlung erweitert, A4 verkürzt.
 
-| Nr. | Annahme |
+| Nr. | Entscheidung |
 | --- | --- |
 | A1 | Variante B: eigener Dienst `wamo-werkstatt` mit Datenbankrolle `wamo_werkstatt`, Port 55448 hinter `wamo-caddy` |
 | A2 | Zugang nur für Admins mit aktivem Profil, ohne `labor_art`, mit zweitem Faktor (aal2) und Erlaubnisliste; der Port ist nur aus den Admin-Quellen erreichbar (`infra/sokrates2/README.md`, Abschnitt 6.1) |
-| A3 | Geschrieben wird nur bei Laborprofilen: freischalten, sperren, zählen, Löschwunsch je Zeitfenster. Mitglieder, Konten, Faktoren und alles mit root bleiben Skript |
-| A4 | Kennzahlen werden verdichtet und ohne `user_id` gespeichert, Frist 90 Tage |
+| A3 | Alles darf das Panel schreiben, stufenweise. Stufe 1: Laborkonfiguration und Laborerstellung (Termine, Plätze, Fristen, Checkliste, Laborprofile anlegen). Stufe 2: freischalten, sperren, zählen, Löschwunsch je Zeitfenster. Stufe 3: weitere Aktionen (zum Beispiel Mitglieder, Releases, Installer, Aufträge), je Stufe mit eigener Sicherheitsprüfung. Geheimnisse (Startpasswörter, zweite Faktoren mit QR und Seeds, Dienstschlüssel) erscheinen nie im Browser: Ein kleiner Helfer am Server erzeugt sie und übergibt sie nur an die Betreuer |
+| A4 | Kennzahlen werden verdichtet und ohne `user_id` gespeichert, Frist 30 Tage |
 | A5 | Phase 1 läuft parallel zu Plan C, Phase 2 ist vor dem nächsten Labortag fertig |
+
+Folge von A3: Die Pakete W7 bis W9 beginnen mit Laborkonfiguration und Laborerstellung. Dazu kommt ein Paket für den Helfer am Server, der Konten, Passwörter und Faktoren erzeugt (Aufwand wird in Phase 0 neu geschätzt, die Stundenangaben unten gelten für den Umfang vor dieser Entscheidung).
 
 Weitere Annahmen: systemd-Dienst mit Unix-Socket und nft-Ausgang wie beim Freigabe-Dienst (`infra/sokrates2/freigabe-einrichten.sh`); 20 Stunden Arbeit je Woche, Pause vom 24.12. bis 01.01.
 
@@ -104,7 +106,7 @@ Für alle neuen Tabellen gilt: RLS, Policy nach dem `core_all`-Muster für `wamo
 
 ## 6. Zeitplan
 
-Bis Mo 23.11. früh entsteht nur Papier: Bestätigung von A1 bis A5, dieser Plan, der Vertragsentwurf und ein Klickdummy ohne Server. Bis zum Labortag am Sa 05.12. ruht das Panel.
+Bis Mo 23.11. früh entsteht nur Papier: Die Entscheidungen A1 bis A5 sind getroffen, dazu dieser Plan, der Vertragsentwurf und ein Klickdummy ohne Server. Bis zum Labortag am Sa 05.12. ruht das Panel.
 
 | Meilenstein | Datum | Inhalt |
 | --- | --- | --- |
@@ -123,8 +125,8 @@ Risiken mit Abbruchkriterium:
 
 Definition of Done:
 
-- **Phase 0:** Annahmen bestätigt, Doku-PR liegt vor, nichts ausgerollt.
-- **Phase 1:** Rauchtest grün und Rückweg geprobt; Sicherheitsproben grün und Abdeckung mindestens 80 Prozent; Migration in `wamo_dev` und `wamo_test` je zweimal angewendet; Reviews ohne CRITICAL und ohne HIGH; Kennzahlen verschwinden nach 90 Tagen (Test); Doku und Namensvertrag nachgezogen.
+- **Phase 0:** Entscheidungen getroffen, Doku-PR liegt vor, Aufwand für A3 neu geschätzt, nichts ausgerollt.
+- **Phase 1:** Rauchtest grün und Rückweg geprobt; Sicherheitsproben grün und Abdeckung mindestens 80 Prozent; Migration in `wamo_dev` und `wamo_test` je zweimal angewendet; Reviews ohne CRITICAL und ohne HIGH; Kennzahlen verschwinden nach 30 Tagen (Test); Doku und Namensvertrag nachgezogen.
 - **Phase 2:** Alles aus Phase 1, dazu: Jede Schreibaktion hat Trockenlauf, Karte, frischen Faktor und eine Zeile in `actions`; Vertragstest grün; `scripts/wamo_labor.py` bleibt unverändert als Rückweg; Probe mit einem Wegwerf-Laborprofil in `wamo_dev` bis zum Nachweis 0; Fristen kommen aus einer Quelle.
 
 ## 8. Inventur der vorhandenen Schnittstellen (REA)
