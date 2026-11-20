@@ -369,7 +369,7 @@ Die Hauptansicht setzt `components/WamoAnsicht.tsx` zusammen, den Rahmen mit Rei
 | Pfad (unter `ui/src/components/`) | Aufgabe |
 |---|---|
 | `WamoAnsicht.tsx`, `kommando/Rahmen.tsx`, `kommando/Reiter.tsx` | Zusammenbau, Reiter, Hauptschaltfläche |
-| `UpdateHinweis.tsx` | Pop-up "Update verfügbar" (schwebende Karte unten rechts, am Handy unten über die Breite), eingehängt in `WamoAnsicht.tsx`, nur in der Desktop-App und nie in der Laborsicht. Siehe Abschnitt 7 und 3.4. |
+| `UpdateHinweis.tsx` | Band "Update verfügbar" (im Fluss der Meldungen, Platz `meldungen` des Rahmens, ohne feste Position; Test `updateHinweisCss.test.ts`), eingehängt in `WamoAnsicht.tsx`, nur in der Desktop-App und nie in der Laborsicht. Siehe Abschnitt 7 und 3.4. |
 | `Kopfzeile.tsx`, `Statusleiste.tsx`, `ProfilChip.tsx`, `kommando/Statusanzeige.tsx`, `kommando/ZentraleStatus.tsx` | Wortmarke, Profil, Verbindung, Betriebsart, Modelle, PC-Host, Mikrofon, Uhrzeit, Zahnrad zu den Einstellungen |
 | `kommando/PraesenzKern.tsx`, `Orb.tsx`, `kommando/KernRinge.tsx`, `kommando/Kernbereich.tsx` | Lichtkugel (WebGL, ein Fragment-Shader) in HUD-Ringen (SVG). Fehlt WebGL, zeigt das Stylesheet eine Kugel aus einem Farbverlauf. |
 | `VoiceLine.tsx`, `kommando/Gespraech.tsx`, `LiveCaption.tsx`, `Verlauf.tsx` | Stimmlinie, Block Gespräch, Live-Untertitel, Verlauf (`role="log"`, nur fertige Züge) |

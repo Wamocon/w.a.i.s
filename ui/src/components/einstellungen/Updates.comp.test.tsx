@@ -1,7 +1,7 @@
 // Komponententest des Abschnitts "Updates" der Einstellungen (components/einstellungen/Updates.tsx): Zustände mit Titel, Satz und
 // Zeichen, Update nur nach Bestätigung der App, Token erst beim Klick und nur an die App, höchstens eine Installation zugleich,
 // "Nach Updates suchen" einmal je 10 Sekunden, nach dem Aushängen setzt keine späte Antwort mehr Zustand, im Browser nur ein Satz
-// und der Installer. Kern (lib/kernApi.ts) und Anmeldung (lib/supabase.ts) sind Attrappen, die Desktop-Brücke ist ein falsches
+// und der Verweis auf den Installer in den Ersten Schritten (der Download steht nur dort). Kern (lib/kernApi.ts) und Anmeldung (lib/supabase.ts) sind Attrappen, die Desktop-Brücke ist ein falsches
 // window.wamoDesktop.
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -126,13 +126,14 @@ describe("UpdatesAbschnitt in der Desktop-App", () => {
     expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
   });
 
-  it("ältere App ohne Version und ohne Update-Teil: sagt es, fragt den Server nichts und bietet den Installer an", async () => {
+  it("ältere App ohne Version und ohne Update-Teil: sagt es, fragt den Server nichts und verweist auf den Installer in den Ersten Schritten", async () => {
     kernAntwortet({ "/installer": MANIFEST });
     appSetzen({ version: undefined, update: undefined });
     await zeige();
     expect(zustand().textContent).toContain("Prüfung nicht möglich");
     expect(wert("Installiert")).toBe("unbekannt");
-    expect(screen.getByTestId("installer-download")).toBeTruthy();
+    expect(screen.queryByTestId("installer-download")).toBeNull(); // der Download steht nur in den Ersten Schritten
+    expect(screen.getByRole("link", { name: "Installer in den Ersten Schritten herunterladen" }).getAttribute("href")).toBe("#einstellungen/start");
     expect(vi.mocked(kernJson)).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
   });
@@ -378,7 +379,7 @@ describe("UpdatesAbschnitt in der Desktop-App", () => {
         <UpdatesAbschnitt />
       </UeberschriftVersatz>,
     );
-    await screen.findByTestId("installer-download");
+    await screen.findByRole("link", { name: "Installer in den Ersten Schritten herunterladen" });
     expect(screen.getByRole("heading", { level: 5, name: "Version" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 5, name: "Installer" })).toBeTruthy();
     expect(screen.queryAllByRole("heading", { level: 6 })).toHaveLength(0);
@@ -394,10 +395,13 @@ describe("UpdatesAbschnitt im Browser", () => {
     delete window.wamoDesktop;
   });
 
-  it("ein ruhiger Satz und der Installer, kein Update-Knopf, kein Abruf des Servers", async () => {
+  it("ein ruhiger Satz und ein Verweis auf die Ersten Schritte, kein zweiter Installer, kein Update-Knopf, kein Abruf des Servers", async () => {
     render(<UpdatesAbschnitt />);
     expect(screen.getByText(/Updates installiert die Desktop-App/)).toBeTruthy();
-    expect(screen.getByTestId("installer-download")).toBeTruthy();
+    // der Download steht genau einmal auf der Seite, in den Ersten Schritten (Abschnitt start); hier nur der Verweis dorthin
+    expect(screen.queryByTestId("installer-download")).toBeNull();
+    const verweis = screen.getByRole("link", { name: "Installer in den Ersten Schritten herunterladen" });
+    expect(verweis.getAttribute("href")).toBe("#einstellungen/start");
     expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Nach Updates suchen" })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
@@ -413,7 +417,15 @@ describe("UpdatesAbschnitt im Browser", () => {
       </UeberschriftVersatz>,
     );
     expect(screen.getByRole("heading", { level: 5, name: "Im Browser" })).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 5, name: "Installer" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Installer" })).toBeNull();
     expect(screen.queryAllByRole("heading", { level: 6 })).toHaveLength(0);
+  });
+
+  it("der Verweis öffnet die Ersten Schritte in den Einstellungen (ohne Neuladen)", async () => {
+    const user = userEvent.setup();
+    history.replaceState(null, "", "#");
+    render(<UpdatesAbschnitt />);
+    await user.click(screen.getByRole("link", { name: "Installer in den Ersten Schritten herunterladen" }));
+    expect(window.location.hash).toBe("#einstellungen/start");
   });
 });

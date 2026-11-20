@@ -175,6 +175,8 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
           <GemerktHinweis onVergessen={vergesseEintrag} />
           {!ansicht.labor && <DateiHinweis onOeffnen={aktionen.office?.oeffnen} />}
           {!ansicht.labor && <MailVersandHinweis onZurueckholen={aktionen.mail?.zurueckholen} />}
+          {/* Update-Band: im Fluss der Meldungen, nie über anderen Flächen (components/UpdateHinweis.tsx): nur in der Desktop-App, nie im Labor */}
+          {!ansicht.labor && <UpdateHinweis />}
           {ansicht.adminHinweise && <AdminHinweise />}
           {ansicht.geraeteEinrichtung && <GeraetEinrichtung />}
         </>
@@ -241,8 +243,6 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
           {ansicht.verlauf && <Verlauf offen={verlaufOffen} onSchliessen={schliesseVerlauf} />}
           <Ansage />
           {ansicht.stimme && <StimmeIgnoriertHinweis />}
-          {/* Pop-up "Update verfügbar": nur in der Desktop-App, nie in der Laborsicht (components/UpdateHinweis.tsx) */}
-          {!ansicht.labor && <UpdateHinweis />}
         </>
       }
       einstellungen={

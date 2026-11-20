@@ -14,6 +14,7 @@ import { bildAnzeigen, liveBildLoeschen } from "@/lib/liveBild";
 import { stilleText } from "@/lib/mikrofon";
 import type { Vorgang, VorgangSchritt } from "@/lib/nachrichten";
 import { nutzerSetzen } from "@/lib/nutzer";
+import { updates, updatesZuruecksetzen } from "@/lib/updatesStore";
 import { PC_EIN_LEER } from "@/lib/pcSchalter";
 import { abdruckGestartet, abdruckOeffnen, STIMME_LEER } from "@/lib/stimme";
 import { bereiteText, schluesselHinweis } from "@/lib/textEingabe";
@@ -52,6 +53,8 @@ import {
  *   /?vorschau=1&pcauto=1           Autostart der PC-Steuerung (simuliert, ändert die Geräte-Einstellung nicht)
  *   /?vorschau=1&desktop=1          wie in der Desktop-App mit angemeldeter Beispielperson: mit &zustand=offline ist der Schalter
  *                                   PC-Steuerung ohne Gespräch bedienbar (Ablauf simuliert), das Modul PC der Kopfzeile führt zu ihm
+ *   /?vorschau=1&desktop=1&update=1 dazu das Update-Band "Update verfügbar" (Version 0.8.0 bestätigt, nichts wird geladen oder installiert);
+ *                                   mit &freigabe=1 oder &viele=1 sieht man, dass es keine Freigabe und keine Eingabe überdeckt
  *   /?vorschau=1&fehler=1           offline mit Fehlermeldung
  *   /?vorschau=1&fehler=mikrofon    Mikrofon liefert keinen Ton (Warnung mit Gerätewahl)
  *   /?vorschau=1&rolle=mitglied     Profil als Mitglied
@@ -565,6 +568,11 @@ function Hauptvorschau() {
     if (desktop) {
       (window as unknown as { wamoDesktop: unknown }).wamoDesktop = { isDesktop: true, levels: () => undefined };
       nutzerSetzen({ id: "00000000-0000-4000-8000-000000000001", email: "vorschau@wamocon.com" });
+      // Update-Band (&update=1): ein von der App bestätigtes Angebot im Speicher, frisch geprüft (das Band fragt dann nichts nach)
+      if (param("update") === "1") {
+        const manifest = { manifest: '{"version":"0.8.0"}', signatur: `${"B".repeat(86)}==` };
+        updates.set((z) => ({ ...z, stand: { art: "geprueft", manifest, ergebnis: { ok: true, version: "0.8.0", neuer: true } }, zeit: Date.now() }));
+      }
     }
     // Autostart simulieren: der Kern meldet nach kurzer Zeit "an", dazu der Hinweis
     const autoTimer =
@@ -653,6 +661,7 @@ function Hauptvorschau() {
       einlernenStoppen();
       resetWamo();
       if (desktop) {
+        updatesZuruecksetzen();
         delete (window as unknown as { wamoDesktop?: unknown }).wamoDesktop;
         nutzerSetzen({ id: null, email: null });
       }
