@@ -24,6 +24,11 @@ WURZEL = Path(__file__).resolve().parent.parent
 WORKFLOWS = WURZEL / ".github" / "workflows"
 DATEIEN = {"deploy.yml": None, "deploy-dev.yml": "dev", "deploy-test.yml": "test", "deploy-prod.yml": "prod"}
 LABELS = ["self-hosted", "linux", "ARM64", "wais-deploy"]
+# Jobs bei GitHub: im öffentlichen Repository der GitHub-Runner, nur im privaten der eigene (Commit a2ce5e4, ci: Runner nach Sichtbarkeit wählen).
+# Der Ausdruck ist fest vorgegeben: Ein öffentliches Repository darf nie auf dem eigenen Runner laufen (fremder Code aus Forks).
+RUNNER_BEI_GITHUB = (
+    "${{ github.repository_visibility == 'private' && fromJSON('[\"self-hosted\",\"linux\",\"ARM64\"]') || 'ubuntu-latest' }}"
+)
 SHA_USES = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}")
 WAIS_BEFEHLE = {"pruefen-stand", "verteilen", "test-kern", "test-oberflaeche", "prod-kern", "prod-oberflaeche", "ausleiten",
                 "rueckweg", "rauchtest", "status"}
@@ -105,7 +110,7 @@ def test_andere_jobs_laufen_bei_github(name):
     for job_name, job in jobs(name):
         if server_job(job) or "uses" in job:
             continue
-        assert job["runs-on"] == "ubuntu-latest", job_name
+        assert job["runs-on"] in ("ubuntu-latest", RUNNER_BEI_GITHUB), job_name
         assert "environment" not in job, job_name
         assert "github.ref == 'refs/heads/main'" in job["if"] and "github.event.repository.fork == false" in job["if"]
         assert isinstance(job.get("timeout-minutes"), int), job_name
