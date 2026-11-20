@@ -1,6 +1,6 @@
 WAMOCON GmbH, Mergenthalerallee 79-81, 65760 Eschborn
 
-# Testlabor 28.11.2026: Messrunde 1 (P6a), Text-Fälle der 17 Karten
+# Testlabor 05.12.2026: Messrunde 1 (P6a), Text-Fälle der 17 Karten
 
 Stand 13.11.2026, Vorlauf mit Folgemessung. Gemessen auf dem Stand `origin/main` 5590470 mit dem Messlauf aus Zweig `docs/labor-messrunde-1`. Die Wiederholung auf dem Release-Kandidaten bleibt für Do 19.11. vorgesehen, damit Befunde noch als Code in den Freeze kommen (`docs/testlabor-wamo.md`, 3.7).
 

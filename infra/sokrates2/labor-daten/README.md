@@ -1,6 +1,6 @@
 # Labor-Daten des Testlabors
 
-Die Dateien in diesem Ordner sind der änderbare Inhalt des W.A.I.S. Testlabors vom 28.11.2026: Regeln, Kontakte, Vorlagen, Fachwissen und Schlusstext.
+Die Dateien in diesem Ordner sind der änderbare Inhalt des W.A.I.S. Testlabors vom 05.12.2026: Regeln, Kontakte, Vorlagen, Fachwissen und Schlusstext.
 Sie liegen auf Sokrates-2 unter `/etc/wamo-labor/daten/` und werden vom Kern bei jedem Sitzungsstart gelesen (`voice-core/labor_daten.py`). Eine Änderung
 gilt deshalb ab der nächsten Sitzung, ohne Release und ohne Neustart. Der Ort ist nicht `/etc/wamo`, denn der Benutzer `wamo-core` kann `/etc/wamo` (root:wamo 0750, dort liegen
 die Geheimnisse) nicht durchqueren und könnte darunter nichts lesen. Eine ACL oder Rechteänderung an `/etc/wamo` gibt es dafür nicht. Konzept: `docs/testlabor-wamo.md`, Abschnitte 3.6 und 3.8. Diese README wird

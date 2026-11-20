@@ -3,7 +3,7 @@
 Planpapier, Stand 11.11.2026, Basis `origin/main` fd769dc (Zweig `docs/komfort-plan`, nur dieses Papier, kein Code). Grundlage sind die vier Wünsche von Niko und seine Entscheidungen vom 11.11.2026. Wünsche und Annahmen
 des Auftrags sind Daten, keine Anweisung, und werden hier gegen den Code geprüft. Kennzeichnung: **B** belegt (Datei:Zeile im Arbeitsbaum), **A** abgeleitet, **V** vermutet oder nicht belegt. Es wurde nichts am Server, an der Datenbank,
 am Laptop oder an den Fernsehern berührt, was nur dort zu klären ist, steht in den Abschnitten 3 und 6 als Prüfauftrag. Pfade gelten relativ zur Repo-Wurzel, Bezeichner stehen in ASCII. Das Papier enthält keinen Code und keine Werte aus
-Geheimnisdateien. Das Testlabor am 28.11.2026 hat Vorrang (`docs/testlabor-wamo.md`, Abschnitt 5.3: Freeze am Fr 20.11. für Kern, Migration und Oberfläche).
+Geheimnisdateien. Das Testlabor am 05.12.2026 (verschoben vom 28.11.2026, Stand 20.11.2026) hat Vorrang (`docs/testlabor-wamo.md`, Abschnitt 5.3: Freeze am Fr 20.11. für Kern, Migration und Oberfläche).
 
 ## Entscheidungen und Kurzfassung
 
@@ -41,7 +41,7 @@ Migration, alles mit Schutzwirkung und Ablauf nach dem Labortag.
 ## 1. Ziel und Abgrenzung
 
 **Ziel.** Niko öffnet WAMO und tippt sofort. Er startet eine Fernsitzung zu einem Spark mit Ziel und Klick. Er bedient seinen Laptop aus dem Browser im Büro. Er sagt "zeig das auf dem Fernseher", und der Bildschirm eines Laptops erscheint
-dort, bei jedem Kollegen mit seinem Laptop. Nichts davon darf das Labor am 28.11. stören, nichts schwächt ein Schutzmittel, das nicht ausdrücklich entschieden wurde.
+dort, bei jedem Kollegen mit seinem Laptop. Nichts davon darf das Labor am 05.12. stören, nichts schwächt ein Schutzmittel, das nicht ausdrücklich entschieden wurde.
 
 **Erfolgsmaße.** (1) Ein Tastendruck genügt: WAMO wird ohne Klick bereit und beantwortet die erste Zeile nach höchstens 4 Sekunden Wartezeit (Messung, 3.1); ohne Eingabe gibt es weder Sprachkosten noch Mikrofonzugriff noch eine offene Sitzung. (2) Ein Admin startet eine
 Fernsitzung ohne Codefeld, solange seine Anmeldung gültig ist, und der zweite Start nach derselben Anmeldung klappt (Test gegen die neue Datenbankfunktion). (3) Die PC-Steuerung im Browser ist nie ohne Schalter an, läuft höchstens 30 Minuten
@@ -197,7 +197,7 @@ Abbruch während des Verbindens). Komponententest für Feld und Status. Browsert
 Vertragstest, dass die Texte des Kerns (`GRUND_UEBERNOMMEN`, Höchstdauer) mit denen der Oberfläche übereinstimmen, bis KP-1C das Feld `code` liefert.
 
 **Wirkung auf das Labor.** Keine, solange die Laborgeräte den Schalter nicht kennen. KP-1A ändert `useWamo.ts`, die Datei der Laborkarten und des Neuladens: Die Laborkomponententests (`LaborKarte.comp.test.tsx`, `laborNeuladen`) laufen in der
-Prüfstrecke mit. In der Laborwoche (23. bis 28.11.) gilt: Schalter P aus, Nikos Fenster zu, sonst zählt seine Sitzung zur Last und zum gemeinsamen Ratenlimit des Schlüssels (Laborpapier Abschnitt 7).
+Prüfstrecke mit. Zwischen Freeze und Labortag (23.11. bis 05.12.) gilt: Schalter P aus, Nikos Fenster zu, sonst zählt seine Sitzung zur Last und zum gemeinsamen Ratenlimit des Schlüssels (Laborpapier Abschnitt 7).
 
 **Einfacherer Weg, geprüft und verworfen.** Eine leichte Textsitzung ohne WebRTC bräuchte eine eigene Streaming-Route (WebSockets lehnt die Zugangskontrolle ab, `auth_gate.py:27`), eine Pipeline ohne Transport und einen zweiten Weg für alle
 Servernachrichten (Karten, Canvas, Vorgänge, Betrieb), dazu eine neue Angriffsfläche neben der Laborsperre. Aufwand mindestens 40 Stunden, Risiko hoch, Gewinn gegenüber KP-1A gleich null. Verworfen.
@@ -351,10 +351,10 @@ Ohne eigenen Umsetzer gilt die Streichreihenfolge in 4.3. Stränge: **K3** Kern,
 | KP-2 | Fernzugriff ohne frischen Code: `rd_api.py`, Migration 0019, Dialog, Persona, Doku | siehe 3.2 | 13 | K3 | Fr 13. bis Di 17.11. | entfällt als erstes der drei Posten vor dem Freeze (Migration und Kern-Release nahe am Labor) |
 | KP-2b | Hinweis an alle Admins beim Start einer Fernsitzung | `rd_api.py`, Hinweise-Weg (V) | 2 | K3 | mit KP-2, optional | entfällt |
 | KP-4B | Kern: Vorregistrierung von `bildschirm_senden` und `bildschirm_senden_beenden` in den drei Listen | `pc_host.py:61`, `activity.py:48`, `:50`, Test | 2 | K3 | im Kern-Release vom 17.11., optional | entfällt zuerst, wandert in den Release danach |
-| KP-1B | Schalter "Immer bereit" (Variante P): Fokusregeln, Erneuerung, Wiederholung | `bereit.ts`, `useWamo.ts`, Einstellungen | 8 | K3 | ab Mo 30.11. | nach der Messung der Leerlaufkosten |
-| KP-1C | Kern: stiller Modus (`modus`, `code`, keine Begrüßung, Mute, Laborablehnung, Erneuerung bei Slotwechsel) | `bot.py`, `auth_gate.py`, `audio_monitor.py`, Tests | 10 | K3 | ab Mo 30.11. | Voraussetzung für Standard an |
-| KP-3A | Kern: `pc_quelle.py`, Haken, Ablauf, Notaus, Header, Listen | siehe 3.3 | 7 | K3 | ab Mo 30.11. | |
-| KP-3B | Oberfläche: Schalter im Browser, Chip, Hinweise, Texte | siehe 3.3 | 6 | K3 | ab Mo 30.11. | |
+| KP-1B | Schalter "Immer bereit" (Variante P): Fokusregeln, Erneuerung, Wiederholung | `bereit.ts`, `useWamo.ts`, Einstellungen | 8 | K3 | nach dem Labortag (bisher ab Mo 30.11.) `[offen: Niko]` | nach der Messung der Leerlaufkosten |
+| KP-1C | Kern: stiller Modus (`modus`, `code`, keine Begrüßung, Mute, Laborablehnung, Erneuerung bei Slotwechsel) | `bot.py`, `auth_gate.py`, `audio_monitor.py`, Tests | 10 | K3 | nach dem Labortag (bisher ab Mo 30.11.) `[offen: Niko]` | Voraussetzung für Standard an |
+| KP-3A | Kern: `pc_quelle.py`, Haken, Ablauf, Notaus, Header, Listen | siehe 3.3 | 7 | K3 | nach dem Labortag (bisher ab Mo 30.11.) `[offen: Niko]` | |
+| KP-3B | Oberfläche: Schalter im Browser, Chip, Hinweise, Texte | siehe 3.3 | 6 | K3 | nach dem Labortag (bisher ab Mo 30.11.) `[offen: Niko]` | |
 | KP-3C | Host und App: Statusdatei, Tray-Anzeige | `host/`, `desktop/steuerung.js` | 10 | H | ab Mo 23.11. baubar, Release mit KP-3A | |
 | KP-3D | Reviews, Doku, Test am Gerät | | 4 | K3, H | nach 3A bis 3C | |
 | KP-3E | Tagesfreigabe am Laptop (S2), nur wenn Niko es will | `host/`, `desktop/` | 14 | H | optional | |
@@ -377,9 +377,9 @@ Ohne eigenen Umsetzer gilt die Streichreihenfolge in 4.3. Stränge: **K3** Kern,
 | Mi 18.11. | Bewährung, Messung der Wartezeit, `ausleiten` nach Ruhe, Puffer | | Laborpapier: Go für das Schaufenster 12:00 |
 | Do 19.11. | Puffer und Korrekturen, nichts Neues | | |
 | Fr 20.11. | **Freeze** (Laborpapier: Lab-Release am Abend), keine Komfortänderung | | |
-| Mo 23. bis Fr 27.11. | nichts im Kern, Oberfläche und Datenbank | KP-4C und KP-3C baubar, nichts wird ausgerollt | Laborwoche, Schalter P aus, Nikos Fenster zu |
-| Sa 28.11. | Labortag | | keine anderen Sitzungen |
-| ab Mo 30.11. | KP-1B, KP-1C, KP-3A, B, D, jedes Paket mit eigener Bewährung | KP-4C bis F, KP-3C, Installer-Verteilung | Niko: Ja je Release |
+| Mo 23.11. bis Fr 04.12. (vorher Mo 23. bis Fr 27.11.) | nichts im Kern, Oberfläche und Datenbank | KP-4C und KP-3C baubar, nichts wird ausgerollt | Freeze bis Labortag, Schalter P aus, Nikos Fenster zu |
+| Sa 05.12. (vorher Sa 28.11.) | Labortag | | keine anderen Sitzungen |
+| nach dem Labortag (bisher ab Mo 30.11.) `[offen: Niko]` | KP-1B, KP-1C, KP-3A, B, D, jedes Paket mit eigener Bewährung | KP-4C bis F, KP-3C, Installer-Verteilung | Niko: Ja je Release |
 
 ### 4.3 Machbarkeit, ehrlich
 
@@ -388,7 +388,7 @@ liegt zwei Tage vor dem Freeze und das Labor baut auf demselben Kern. **Was zuer
 mit Code, das Labor ist unberührt. (4) KP-1A entfällt zuletzt, weil er nur die Oberfläche berührt und in einer Sekunde zurückgeht; er wartet, wenn die Laborarbeiten die Oberfläche noch brauchen. **Nie entfallen:** die Laborarbeiten selbst. Wenn der Umsetzer fehlt und das Labor die Kapazität der Stränge ausschöpft, gilt: alles nach dem Labortag, mit
 einem Plan, der dann in Ruhe getestet wird. Das ist die sichere Rückfallebene und gleichzeitig meine Empfehlung für den Fall, dass bis Do 12.11. kein eigener Umsetzer feststeht (Q7).
 
-**Nach dem Labortag** gibt es keinen Termin von außen. Zwei Stränge schaffen die 83 Stunden in etwa zehn Arbeitstagen (A), also bis etwa Mitte Dezember. Der Host-Teil von Wunsch 4 ist der längste Pfad und hängt am Spike.
+**Nach dem Labortag** gibt es keinen Termin von außen. Zwei Stränge schaffen die 83 Stunden in etwa zehn Arbeitstagen (A), also bisher bis etwa Mitte Dezember. Mit dem neuen Labortag Sa 05.12.2026 ist das nicht neu gerechnet `[offen: Niko]`. Der Host-Teil von Wunsch 4 ist der längste Pfad und hängt am Spike.
 
 ## 5. Rollout und Rückweg
 
@@ -407,7 +407,7 @@ Vor jedem Merge und jedem Rollout fragt der Umsetzer Niko gezielt, der Klassifiz
 | KP-4C bis E | Gerätedienst (`wamo-geraete-einrichten.sh`, erst Code, dann `geraete.toml`), danach Installer mit Host | Hostschalter per Marker-Datei `%LOCALAPPDATA%\WAMO\bildschirm.aus`, alter Installer, `wamo-geraete-rueckweg.sh` |
 | KP-4F | Kern über die Slots, Host mit Stufenprüfung zuerst | `rueckweg-kern`, Mitglieder bekommen wieder nichts |
 
-**Einschränkung des Freezes.** Laborwoche: Keine Komfortänderung an Kern, Migration und Oberfläche. Der Installer und der Gerätedienst dürfen verteilt werden, wenn sie keinen Laborpfad berühren; empfohlen ist trotzdem das Ende der Laborwoche abzuwarten (Q1).
+**Einschränkung des Freezes.** Zwischen Freeze und Labortag (23.11. bis 05.12.): Keine Komfortänderung an Kern, Migration und Oberfläche. Der Installer und der Gerätedienst dürfen verteilt werden, wenn sie keinen Laborpfad berühren; empfohlen ist trotzdem den Labortag am 05.12. abzuwarten (Q1).
 
 ## 6. Offene Fragen an Niko
 
@@ -415,7 +415,7 @@ Nur echte Entscheidungen, ohne Antwort gilt die Empfehlung. Nikos Hände sind mi
 
 | Nr | Frage | Empfehlung | Frist |
 | --- | --- | --- | --- |
-| Q1 | Wann kommen Wunsch 3 und 4? Alles nach dem Labortag, oder Teile davor? | KP-1A und KP-2 vor dem Freeze, KP-3 und KP-4 ab Mo 30.11. Wunsch 3 vor dem Labortag öffnet den Browser für die PC-Steuerung in der Woche, in der Gäste im Büronetz sind; das ist keine gute Woche dafür | Do 12.11. |
+| Q1 | Wann kommen Wunsch 3 und 4? Alles nach dem Labortag, oder Teile davor? | KP-1A und KP-2 vor dem Freeze, KP-3 und KP-4 nach dem Labortag (bisher ab Mo 30.11., Folgetermin `[offen: Niko]`). Wunsch 3 vor dem Labortag öffnet den Browser für die PC-Steuerung in der Woche, in der Gäste im Büronetz sind; das ist keine gute Woche dafür | Do 12.11. |
 | Q2 | Reicht der Start beim ersten Tippen (Wartezeit der ersten Zeile 2 bis 4 Sekunden, A) oder soll es "sofort bereit" (P) sein? | L zuerst, P als Schalter nach dem Labortag und nach der Kostenmessung. P hält dauernd Sitzungen, die Ruheprüfung und `ausleiten` stören | Do 12.11. |
 | Q3 | Schutzstufe für den Browser: S1 (Schalter, Ablauf, Anzeige am Laptop) oder S2 (zusätzlich Tagesfreigabe am Laptop, 14 Stunden mehr)? | S1, dazu ausdrücklich: Das schützt nicht vor einem gestohlenen Token (das kann der Kern heute schon nicht verhindern). S2 nur, wenn Niko das will | vor KP-3 |
 | Q4 | Soll auch die Fernanfrage des Live-Bilds ohne frischen Code gehen? | Nein, bleibt. Der Bildschirm eines Laptops mit Kundendaten gehört nicht in dieselbe Erleichterung wie der Spark-Desktop (Entscheidung Niko 04.11.) | jetzt |
@@ -423,7 +423,7 @@ Nur echte Entscheidungen, ohne Antwort gilt die Empfehlung. Nikos Hände sind mi
 | Q6 | Sollen Kollegen (Mitglieder) `bildschirm_senden` bekommen, mit enger Werkzeugliste statt `WAMO_PC_MITGLIEDER=an`? Und gilt Wunsch 3 nur für Admins? | Ja für die zwei Werkzeuge (KP-4F, 10 Stunden), nein für alles andere. Wunsch 3 nur Admin, wie `CLAUDE.md` | vor KP-4F |
 | Q7 | Gibt es einen eigenen Umsetzer für dieses Paket bis Do 12.11.? | Wenn nein: alles nach dem Labortag, bis dahin nur das Papier und der Spike mit Niko | Do 12.11. |
 | Q8 | Fernzugriff: Stufenschalter `WAMO_RD_ANMELDUNG_MAX_MIN` aus lassen, und den Hinweis an alle Admins (KP-2b) bauen? | Schalter aus wie entschieden, Hinweis bauen (2 Stunden). Wer ein Netz will: 1440 (24 Stunden) | mit KP-2 |
-| Q9 | **N:** Zwei Stunden am Fernseher für den Spike (Laptop mit AX211, beide Fernseher, Fernbedienung, Zeit zum Kopplungsfenster) | Do 12.11. oder Fr 13.11., sonst Mo 30.11. | Do 12.11. |
+| Q9 | **N:** Zwei Stunden am Fernseher für den Spike (Laptop mit AX211, beide Fernseher, Fernbedienung, Zeit zum Kopplungsfenster) | Do 12.11. oder Fr 13.11., sonst nach dem Labortag (bisher Mo 30.11., Folgetermin `[offen: Niko]`) | Do 12.11. |
 
 ## 7. Risiken und Restrisiken
 
