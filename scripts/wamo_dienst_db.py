@@ -1,8 +1,9 @@
-"""Richtet den Datenbankzugang der Dienste Release und Freigabe (Anker) auf Sokrates-2 ein. Gibt nie ein Passwort aus.
+"""Richtet den Datenbankzugang der Dienste Release, Freigabe (Anker) und Werkstatt auf Sokrates-2 ein. Gibt nie ein Passwort aus.
 
 Je Dienst entsteht eine eigene Login-Rolle als Mitglied der Gruppenrolle aus Migration 0013 (wie bei wamo_core_s2):
-    release  wamo_release_s2  (Mitglied von wamo_release)   Zugangsdatei /etc/wamo-release/db.zugang
-    anker    wamo_anker_s2    (Mitglied von wamo_anker)     Zugangsdatei /etc/wamo-anker/db.zugang
+    release    wamo_release_s2        (Mitglied von wamo_release)     Zugangsdatei /etc/wamo-release/db.zugang
+    anker      wamo_anker_s2          (Mitglied von wamo_anker)       Zugangsdatei /etc/wamo-anker/db.zugang
+    werkstatt  wamo_werkstatt_login   (Mitglied von wamo_werkstatt)   Zugangsdatei /etc/wamo-werkstatt/db.zugang (Gruppenrolle aus Migration 0031)
 Ablauf wie bei scripts/wamo_db_rolle.py und wamo_kern_sokrates2.py db: Das Passwort entsteht lokal, nur der SCRAM-Hash geht an
 die Datenbank, die Zugangsdatei geht über stdin an root (0640 root:wamo-release bzw. 0600 root:root, bis es den Benutzer
 wamo-anker gibt), dazu eine Kopie des öffentlichen Zertifikats der WAMO-CA im selben Ordner. Danach prüft das Skript von hier aus mit
@@ -10,9 +11,9 @@ der echten Datenbankschicht (infra/sokrates2/pg/wamo_pg.py, TLS verify-full, die
 Supavisor, die Rechte der Rolle und dass fremde Rechte fehlen.
 
 Aufrufe (im Repo-Hauptordner, mit einem Python, das psycopg hat, zum Beispiel D:\\tmp\\wamo-pg\\venv\\Scripts\\python.exe):
-  python scripts/wamo_dienst_db.py einrichten release|anker [--trocken]   Rolle, Zugangsdatei, CA-Kopie, Prüfung
-  python scripts/wamo_dienst_db.py pruefen release|anker                  nur den Stand der Rolle in der Datenbank anzeigen
-  python scripts/wamo_dienst_db.py sperren release|anker                  Rolle auf nologin (Zugangsdatei bleibt, ist dann wertlos)
+  python scripts/wamo_dienst_db.py einrichten release|anker|werkstatt [--trocken]   Rolle, Zugangsdatei, CA-Kopie, Prüfung
+  python scripts/wamo_dienst_db.py pruefen release|anker|werkstatt                  nur den Stand der Rolle in der Datenbank anzeigen
+  python scripts/wamo_dienst_db.py sperren release|anker|werkstatt                  Rolle auf nologin (Zugangsdatei bleibt, ist dann wertlos)
 Die Prüfung mit der echten Datenbankschicht läuft nur im einrichten-Lauf (nur dort ist das Passwort bekannt; die Zugangsdatei
 gehört root und wird hier nie gelesen).
 Schema: WAMO_DB_SCHEMA aus der lokalen .env, sonst wamo_dev.
@@ -39,6 +40,8 @@ DIENSTE = {
                 "gruppe_os": "wamo-release", "modus": "0640"},
     "anker": {"rolle": "wamo_anker_s2", "gruppe_db": "wamo_anker", "ordner": "/etc/wamo-anker",
               "gruppe_os": "root", "modus": "0600"},  # der Benutzer wamo-anker entsteht erst mit dem Prozess des Freigabe-Dienstes
+    # der Benutzer wamo-werkstatt entsteht erst mit wamo-werkstatt-einrichten.sh, das die Datei dann auf root:wamo-werkstatt 0440 stellt
+    "werkstatt": {"rolle": "wamo_werkstatt_login", "gruppe_db": "wamo_werkstatt", "ordner": "/etc/wamo-werkstatt", "gruppe_os": "root", "modus": "0600"},
 }
 
 DB_SQL = """
@@ -156,21 +159,28 @@ def pruefen_mit(dienst: str, sch: str, tenant: str, passwort: str) -> None:
         print("  Hinweis  erste Anmeldung nach der Rotation abgelehnt (Pooler kennt das neue Passwort noch nicht), zweiter Versuch")
     wirksam = schritt("Anmeldung über Supavisor, wirksame Zeitgrenzen in der Transaktion",
                       lambda: "statement_timeout " + pg.eine("select current_setting('statement_timeout')")[0])
-    if wirksam is not None and wirksam != "statement_timeout 5s":
+    if dienst != "werkstatt" and wirksam is not None and wirksam != "statement_timeout 5s":   # die Grenze der Werkstatt setzt die Migration 0031
         ok.append(False)
         print(f"  FEHLER   die Zeitgrenze des Dienstes (5 s) gilt nicht: {wirksam}")
-    adapter = ReleaseDatenbank(pg, sch) if dienst == "release" else FreigabePg(pg, sch)
-    schritt("Funktion release_ist_admin", lambda: adapter.ist_admin("00000000-0000-4000-8000-000000000000"))
-    schritt("Anfragen lesen", lambda: len(pg.zeilen(f"select 1 from {sch}.release_anfragen limit 1")) >= 0)
-    # Verbotsproben: jede muss mit 42501 scheitern
-    verboten = [("delete in release_anfragen", f"delete from {sch}.release_anfragen"),
-                ("Zugriff auf profiles", f"select 1 from {sch}.profiles limit 1")]
+    if dienst == "werkstatt":   # die Werkstatt liest Sichten und Funktionen, schreibt nur ihre eigenen Tabellen und nie Profile oder Laborkonten
+        schritt("Funktion werkstatt_labor_stand", lambda: len(pg.zeilen(f"select 1 from {sch}.werkstatt_labor_stand() limit 1")) >= 0)
+        verboten = [("delete in profiles", f"delete from {sch}.profiles where false"),
+                    ("update in profiles", f"update {sch}.profiles set aktiv = aktiv where false"),
+                    ("labor_loeschen", f"select {sch}.labor_loeschen(gen_random_uuid(), now(), now())"),
+                    ("labor_zaehlen", f"select {sch}.labor_zaehlen(gen_random_uuid())")]
+    else:
+        adapter = ReleaseDatenbank(pg, sch) if dienst == "release" else FreigabePg(pg, sch)
+        schritt("Funktion release_ist_admin", lambda: adapter.ist_admin("00000000-0000-4000-8000-000000000000"))
+        schritt("Anfragen lesen", lambda: len(pg.zeilen(f"select 1 from {sch}.release_anfragen limit 1")) >= 0)
+        # Verbotsproben: jede muss mit 42501 scheitern
+        verboten = [("delete in release_anfragen", f"delete from {sch}.release_anfragen"),
+                    ("Zugriff auf profiles", f"select 1 from {sch}.profiles limit 1")]
     if dienst == "release":   # der Release-Dienst schreibt weder Freigaben noch den Stand
         verboten += [("insert in release_stand", f"insert into {sch}.release_stand (komponente, aktive_version) values ('ui', '0.0.0')"),
                      ("insert in release_freigaben",
                       f"insert into {sch}.release_freigaben (anfrage_id, freigeber, commit_id, tree_id, aal2_zeit) "
                       "values (gen_random_uuid(), gen_random_uuid(), repeat('a', 40), repeat('b', 40), now())")]
-    else:                     # der Anker legt keine Anfragen an (Stand und Freigaben dagegen gehören ihm)
+    elif dienst == "anker":   # der Anker legt keine Anfragen an (Stand und Freigaben dagegen gehören ihm)
         verboten += [("insert in release_anfragen", f"insert into {sch}.release_anfragen (angefordert_von, quelle) "
                                                     "values (gen_random_uuid(), 'main')")]
     for name, sql in verboten:
