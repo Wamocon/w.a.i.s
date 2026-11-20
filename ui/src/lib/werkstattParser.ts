@@ -40,7 +40,6 @@ export const istObj = (v: unknown): v is Obj => typeof v === "object" && v !== n
 /** Text ohne Steuerzeichen, gekürzt; leer ergibt null. */
 export function kurz(v: unknown, max = 200): string | null {
   if (typeof v !== "string") return null;
-  // eslint-disable-next-line no-control-regex
   const s = v.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
   return s ? s.slice(0, max) : null;
 }

@@ -39,7 +39,6 @@ const MAX_NUMMER = 99;
 const BUCHSTABEN = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 // ---------- Text ----------
-// eslint-disable-next-line no-control-regex
 const STEUERZEICHEN = /[\u0000-\u001f\u007f-\u009f]+/g;
 
 /** Kartentexte sind einzeilig: Steuerzeichen und Zeilenumbrüche werden zu einem Leerzeichen, doppelter Leerraum fällt weg. */
@@ -49,7 +48,7 @@ export function normalisieren(text: string): string {
 
 /** Enthält der Text Zeilenumbrüche oder Steuerzeichen, die beim Speichern zu Leerzeichen werden? */
 export function hatSteuerzeichen(text: string): boolean {
-  return /[\u0000-\u001f\u007f-\u009f]/.test(text); // eslint-disable-line no-control-regex
+  return /[\u0000-\u001f\u007f-\u009f]/.test(text);
 }
 
 // ---------- Gruppen und Kennungen ----------

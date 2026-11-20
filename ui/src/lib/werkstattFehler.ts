@@ -37,7 +37,6 @@ const DETAIL_MAX = 200;
 /** Text des Dienstes säubern: nur Text ohne Steuerzeichen, gekürzt; sonst null. */
 export function detailText(roh: unknown): string | null {
   if (typeof roh !== "string") return null;
-  // eslint-disable-next-line no-control-regex
   const sauber = roh.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
   return sauber ? sauber.slice(0, DETAIL_MAX) : null;
 }
