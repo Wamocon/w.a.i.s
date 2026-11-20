@@ -13,7 +13,7 @@ Du testest heute den Sprachassistenten W.A.I.S. der WAMOCON GmbH. Du sprichst mi
 - **Was du sagst und tippst.** Deine Sprache wird in Text umgewandelt, W.A.I.S. antwortet mit Text und Stimme. Dafür verarbeiten unsere Dienstleister für Spracherkennung und Sprachausgabe (Soniox) und für das Sprachmodell (Anthropic) deine Sprache und deinen Text in unserem Auftrag, nur für das Gespräch und nur zu diesem Zweck.
 - **Was wir speichern.** Den Gesprächstext und die Übungstickets deines Platzes speichern wir auf eigenen Servern von WAMOCON. Es gibt **keine Tonaufnahme**. Bitte nenne keine echten persönlichen Daten, nutze erfundene Namen.
 - **Wofür.** Wir verwenden die Gespräche nur zu Trainingszwecken bei WAMOCON, also zur Auswertung des Testlabors und zur Verbesserung von W.A.I.S. Wir geben sie nicht an Dritte weiter.
-- **Wie lange.** Ihre Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum **18.12.2026**.
+- **Wie lange.** Deine Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum **18.12.2026**.
 - **Deine Rechte.** Du kannst jederzeit Auskunft verlangen, Daten berichtigen oder löschen lassen, die Verarbeitung einschränken, widersprechen, deine Daten in einem gängigen Format erhalten und deine Einwilligung mit Wirkung für die Zukunft widerrufen. Sprich dazu den Betreuer an deinem Platz an, auf Wunsch löschen wir deine Daten sofort. Du kannst dich außerdem bei einer Datenschutzaufsichtsbehörde beschweren, zuständig ist der Hessische Beauftragte für Datenschutz und Informationsfreiheit (datenschutz.hessen.de).
 - **Freiwillig.** Die Teilnahme ist freiwillig. Ohne deine Zustimmung kannst du dir W.A.I.S. am Betreuer-Platz ansehen.
 

@@ -97,13 +97,13 @@ def test_dokument_hat_den_erwarteten_aufbau():
 
 
 def test_dokument_nennt_die_frist_der_konstante():
-    """Der Besuchertext (Niko, 20.11.2026): Ihre Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum <Datum>."""
+    """Der Besuchertext (Niko, 20.11.2026): Deine Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum <Datum>."""
     assert f"spätestens bis zum **{frist.deutsch(frist.AUFBEWAHRUNG_BIS)}**." in _abschnitt_1()
     assert not [d for d in DATUM.findall(_abschnitt_1().replace("**", "")) if d != frist.deutsch(frist.AUFBEWAHRUNG_BIS)], "ein zweites Datum im Besuchertext"
 
 
 def test_der_besuchertext_nennt_die_loeschung_unmittelbar_nach_der_veranstaltung():
-    satz = "Ihre Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum " + frist.deutsch(frist.AUFBEWAHRUNG_BIS) + "."
+    satz = "Deine Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum " + frist.deutsch(frist.AUFBEWAHRUNG_BIS) + "."
     ohne_markup = re.sub(r"\s+", " ", "".join(_seite().text))  # die Seite mit eingesetztem Datum, ohne die Maske von _normal
     assert satz in ohne_markup and satz in _abschnitt_1().replace("**", "")
 
