@@ -19,6 +19,9 @@ function sichereHerkunft(url: string | undefined): string {
   return o.startsWith("https://") ? o : "";
 }
 
+/** Standardadresse der Werkstatt (Dienst wamo-werkstatt, lib/werkstattApi.ts: WERKSTATT_STANDARD_URL); die Seite /werkstatt darf nur sie erreichen. */
+const WERKSTATT_STANDARD = "https://192.168.178.136:55448";
+
 // Build für Sokrates-2 (infra/sokrates2/wamo-ui): kein lokaler Kern, nur Betriebsart Büro (lib/geraet.ts)
 const nurBuero = (process.env.NEXT_PUBLIC_WAMO_NUR_BUERO ?? "").trim().toLowerCase() === "ja";
 
@@ -30,6 +33,7 @@ const connect = [
   herkunft(process.env.NEXT_PUBLIC_SUPABASE_URL),
   nurBuero ? "" : herkunft(process.env.NEXT_PUBLIC_VOICE_CORE_URL ?? "http://localhost:7860"),
   sichereHerkunft(process.env.NEXT_PUBLIC_WAMO_KERN_BUERO),
+  sichereHerkunft(process.env.NEXT_PUBLIC_WAMO_WERKSTATT_URL || WERKSTATT_STANDARD),
 ].filter(Boolean);
 
 // Next.js setzt Inline-Skripte (Hydration) und Inline-Styles (next/font, React-Styles, Mermaid-SVG),

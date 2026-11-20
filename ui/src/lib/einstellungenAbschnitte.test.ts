@@ -53,7 +53,7 @@ test("sechs Gruppen, jeder Abschnitt steht in genau einer, in der vorgesehenen R
       ["zugaenge", ["modellzugang", "github", "verbrauch"]],
       ["geraete-pc", ["geraete", "fernzugriff"]],
       ["inhalte", ["gedaechtnis", "teilen"]],
-      ["verwaltung", ["mitglieder", "aenderungen"]],
+      ["verwaltung", ["mitglieder", "aenderungen", "werkstatt"]],
     ],
   );
   const alle = GRUPPEN.flatMap((g) => g.abschnitte);
@@ -74,7 +74,7 @@ test("Admin sieht sechs Gruppen mit allen Abschnitten", () => {
   assert.deepEqual(gruppenIds({ rolle: "admin" }), [...GRUPPE_IDS]);
   assert.equal(abschnitteFuer({ rolle: "admin" }).length, ABSCHNITT_IDS.length);
   assert.deepEqual(abschnittIds("zugaenge", { rolle: "admin" }), ["modellzugang", "github", "verbrauch"]);
-  assert.deepEqual(abschnittIds("verwaltung", { rolle: "admin" }), ["mitglieder", "aenderungen"]);
+  assert.deepEqual(abschnittIds("verwaltung", { rolle: "admin" }), ["mitglieder", "aenderungen", "werkstatt"]);
 });
 
 test("Mitglied und unbekannte Rolle: fünf Gruppen ohne Verwaltung, nur die offenen Abschnitte", () => {
@@ -95,7 +95,7 @@ test("Verbrauch: auch für Mitglieder mit eigenem Claude-Code-Token, nie in der 
   assert.ok(!ids("mitglied").includes("verbrauch"));
   assert.deepEqual(abschnittIds("zugaenge", { rolle: "mitglied", token: true }), ["modellzugang", "github", "verbrauch"]);
   assert.deepEqual(abschnittIds("zugaenge", { rolle: "mitglied", token: false }), ["modellzugang", "github"]);
-  for (const id of ["gedaechtnis", "fernzugriff", "aenderungen"] as const) assert.ok(!mitToken("mitglied").includes(id), id);
+  for (const id of ["gedaechtnis", "fernzugriff", "aenderungen", "werkstatt"] as const) assert.ok(!mitToken("mitglied").includes(id), id);
   assert.ok(!abschnitteFuer({ rolle: "mitglied", token: true, labor: true }).map((a) => a.id).includes("verbrauch"));
   const erlaubt = gruppenFuer({ rolle: "mitglied", token: true });
   assert.equal(wirksameGruppe(parseHash("#einstellungen/verbrauch"), erlaubt, true), "zugaenge");
@@ -460,4 +460,13 @@ test("jede alte Adresse #einstellungen/<Abschnitt> öffnet über wirksameGruppe 
     assert.equal(gruppe, gruppeVon(id), id);
     assert.equal(sprungAbschnitt(ziel, admin.find((g) => g.id === gruppe)), id, id);
   }
+});
+
+test("Werkstatt: nur für Admins, nie in der Laborsicht, in der Gruppe Verwaltung", () => {
+  assert.ok(ids("admin").includes("werkstatt"));
+  for (const rolle of ["mitglied", null] as const) assert.ok(!ids(rolle).includes("werkstatt"), `Rolle ${rolle}`);
+  assert.equal(abschnitteFuer({ rolle: "admin" }).find((a) => a.id === "werkstatt")?.nurAdmin, true);
+  assert.ok(!abschnitteFuer({ rolle: "admin", labor: true }).some((a) => a.id === "werkstatt"));
+  assert.equal(gruppeVon("werkstatt"), "verwaltung");
+  assert.deepEqual(parseHash("#einstellungen/werkstatt"), { offen: true, gruppe: "verwaltung", abschnitt: "werkstatt" });
 });
