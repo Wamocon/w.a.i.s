@@ -15,10 +15,10 @@ am Server, Laborkonten mit infra/sokrates2/wamo_labor_konten_loeschen.py).
 
 Aufrufe (im Repo-Hauptordner, nur Standardbibliothek):
   python scripts/wamo_labor_nachlauf.py nachlauf                    # Trockenlauf: Plan, Zählung davor (nur lesen), Erinnerungen, nichts wird geändert
-  python scripts/wamo_labor_nachlauf.py nachlauf --ausfuehren       # führt die Schritte aus, frühestens am 28.11.2026
+  python scripts/wamo_labor_nachlauf.py nachlauf --ausfuehren       # führt die Schritte aus, frühestens am Labortag (frist.py)
 Optionen: --schema wamo_dev|wamo_test|wamo_prod (Standard wamo_dev, wie bei wamo_labor.py), --host (Standard WAMO_SSH_HOST oder wamo-sokrates2),
 --protokoll DATEI (hängt jede Zeile mit Zeit an, nie im Repo), --umschlag-datei (Standard %USERPROFILE%\\.wamo-labor\\umschlag-labor.txt, es werden nur
-die Namen der Dateien im Ordner genannt), --vor-dem-labortag (hebt die Sperre vor dem 28.11.2026 auf, für Übungen und das Aufräumen nach der Generalprobe).
+die Namen der Dateien im Ordner genannt), --vor-dem-labortag (hebt die Sperre vor dem Labortag auf, für Übungen und das Aufräumen nach der Generalprobe).
 
 Wege zum Server (es gibt keine neuen): Der Kern wird wie bei wamo_labor.py über ssh und die Anmeldung der Rolle wamo_admin angesprochen
 (wamo_labor.run_remote, Voraussetzung WAMO_ADMIN_DATABASE_URL). Der Dienst wird über seine Betreuer-Schnittstelle auf 127.0.0.1:18765 am Server
@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import importlib.util
 import json
 import os
 import re
@@ -56,7 +57,20 @@ import wamo_labor_faktoren_umschlag as um  # noqa: E402
 
 WURZEL = Path(__file__).resolve().parent.parent
 EXIT_OK, EXIT_FEHLER, EXIT_EINGABE, EXIT_ABBRUCH = 0, 1, 2, 130
-LABORTAG = date(2026, 11, 28)
+
+
+def _frist_laden():
+    """Die Frist des Testlabors steht nur in labor-dienst/wamo_labor_dienst/frist.py (eine Konstante, LABORTAG). Das Modul hat keine Abhängigkeiten und wird
+    hier aus seiner Datei geladen, ohne das Paket des Dienstes zu importieren."""
+    pfad = WURZEL / "labor-dienst" / "wamo_labor_dienst" / "frist.py"
+    spez = importlib.util.spec_from_file_location("wamo_labor_frist", pfad)
+    modul = importlib.util.module_from_spec(spez)
+    spez.loader.exec_module(modul)
+    return modul
+
+
+frist_quelle = _frist_laden()
+LABORTAG = frist_quelle.LABORTAG
 PLAETZE = tuple(range(1, 17))
 SCHEMA_RE = re.compile(r"wamo_(dev|test|prod)")
 HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")  # kein führender Strich: ssh hielte ihn für eine Option
@@ -476,11 +490,11 @@ def erinnerungen(umschlag_datei: Path) -> list[str]:
         f"     werden. {gefunden}",
         "  2. Platz-Skript auf jedem Laptop, im Kiosk-Konto, Chrome vorher schließen: wamo_labor_platz.py rueckweg --profil-loeschen",
         "     (nimmt Richtlinien, Zertifikat und Verknüpfungen zurück und löscht das Chrome-Profil mit der angemeldeten Sitzung des Platzes).",
-        "  3. Löschlauf am Server, Frist für alle Daten ist der 11.12.2026:",
+        f"  3. Löschlauf am Server, Frist für alle Daten ist der {frist_quelle.deutsch(frist_quelle.AUFBEWAHRUNG_BIS)}:",
         "     ssh wamo-sokrates2 \"sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN\"",
-        "     (Container, Token, Image und Kern-Einstellungen mit Nachweis; das Skript lässt ihn erst ab dem 12.12.2026 zu, vorher nur mit --vor-der-frist.",
-        "     Snapshots und Sicherungen des Servers über den 11.12.2026 hinaus von Hand prüfen.)",
-        "  4. Laborkonten löschen und alle Sitzungen widerrufen (Entscheidung Q11, spätestens 11.12.2026), erst ohne --ausfuehren als Trockenlauf,",
+        f"     (Container, Token, Image und Kern-Einstellungen mit Nachweis; das Skript lässt ihn erst ab dem {frist_quelle.deutsch(frist_quelle.LOESCHLAUF_AB)} zu, vorher nur mit --vor-der-frist.",
+        f"     Snapshots und Sicherungen des Servers über den {frist_quelle.deutsch(frist_quelle.AUFBEWAHRUNG_BIS)} hinaus von Hand prüfen.)",
+        f"  4. Laborkonten löschen und alle Sitzungen widerrufen (Entscheidung Q11, spätestens {frist_quelle.deutsch(frist_quelle.AUFBEWAHRUNG_BIS)}), erst ohne --ausfuehren als Trockenlauf,",
         "     dann mit --kennung labor-09 und danach für alle (Runbook Abschnitt 10, Punkt 6):",
         "     ssh wamo-sokrates2 \"python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN\"",
     ]
@@ -528,7 +542,7 @@ def vorbereiten(args: argparse.Namespace, kern: Callable, dienst: Callable, heut
     if not HOST_RE.fullmatch(args.host):
         raise EingabeFehler("Der Host ist ungültig (nur Buchstaben, Ziffern, Punkt, Strich und Unterstrich, kein Strich am Anfang).")
     if args.ausfuehren and heute() < LABORTAG and not args.vor_dem_labortag:
-        raise EingabeFehler("Ausführen ist erst ab dem Labortag, dem 28.11.2026, erlaubt (für Übungen und das Aufräumen nach der Generalprobe: --vor-dem-labortag).")
+        raise EingabeFehler(f"Ausführen ist erst ab dem Labortag, dem {frist_quelle.deutsch(LABORTAG)}, erlaubt (für Übungen und das Aufräumen nach der Generalprobe: --vor-dem-labortag).")
     protokoll = Protokoll(print, _protokoll_pfad(args.protokoll), jetzt)
     umschlag = Path(args.umschlag_datei).expanduser() if args.umschlag_datei else um.standard_pfad()
     return Zugriff(args.host, args.schema, kern, dienst, schlafen), protokoll, umschlag
@@ -542,7 +556,7 @@ def _parser() -> argparse.ArgumentParser:
     n.add_argument("--ausfuehren", action="store_true", help="wirklich ausführen (ohne dies nur Trockenlauf)")
     n.add_argument("--schema", default="wamo_dev")
     n.add_argument("--host", default=os.environ.get("WAMO_SSH_HOST", "wamo-sokrates2"))
-    n.add_argument("--vor-dem-labortag", action="store_true", help="hebt die Sperre vor dem 28.11.2026 auf (für Übungen und das Aufräumen nach der Generalprobe)")
+    n.add_argument("--vor-dem-labortag", action="store_true", help=f"hebt die Sperre vor dem {frist_quelle.deutsch(LABORTAG)} auf (für Übungen und das Aufräumen nach der Generalprobe)")
     n.add_argument("--protokoll", help="Datei, an die jede Zeile mit Zeit angehängt wird (nie im Repo)")
     n.add_argument("--umschlag-datei", help="Standard %%USERPROFILE%%\\.wamo-labor\\umschlag-labor.txt (es werden nur Dateinamen genannt)")
     return p

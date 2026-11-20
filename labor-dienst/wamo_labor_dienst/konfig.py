@@ -14,12 +14,14 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from .frist import AUFBEWAHRUNG_BIS, LABORTAG
+
 TOKEN_RE = re.compile(r"[A-Za-z0-9._~+/=-]{43,200}")  # 43 Zeichen sind 256 Bit in Base64
 TOKEN_MIN_VERSCHIEDEN = 16  # ein Token aus wenigen Zeichen ist nie zufällig
-STANDARD_BIS = date(2026, 12, 11)  # Aufbewahrung nach D10: 14 Tage nach dem Labortag
+STANDARD_BIS = AUFBEWAHRUNG_BIS  # Aufbewahrung nach D10, abgeleitet vom Labortag (frist.py, die einzige Quelle)
 HOECHSTES_BIS = STANDARD_BIS  # später darf die Aufbewahrung nie enden (D10), eine Einstellung darf nur früher löschen
-FRUEHESTES_BIS = date(2026, 11, 28)  # der Labortag: davor darf die Aufbewahrung nicht enden (sonst würden die Daten des Labortags gelöscht)
-FRUEHESTES_DATUM = date(2026, 11, 12)  # Stand des Baus: Eine Uhr davor geht falsch (sonst würde die Aufbewahrung nie greifen)
+FRUEHESTES_BIS = LABORTAG  # der Labortag: davor darf die Aufbewahrung nicht enden (sonst würden die Daten des Labortags gelöscht)
+FRUEHESTES_DATUM = date(2026, 11, 12)  # Stand des Baus: Eine Uhr davor geht falsch (sonst würde die Aufbewahrung nie greifen), liegt vor jedem Labortag
 PLATZ_MB_MIN, PLATZ_MB_MAX, PLATZ_MB_STANDARD = 2, 64, 16
 
 V_DATEN = "WAMO_LABOR_DIENST_DATEN"

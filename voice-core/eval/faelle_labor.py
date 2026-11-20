@@ -1,4 +1,4 @@
-"""Eval-Fälle für die 17 Karten des Testlabors am 28.11.2026 (P6a, Messrunde 1).
+"""Eval-Fälle für die 17 Karten des Testlabors (P6a, Messrunde 1).
 
 Gleiche Klasse Fall wie eval/faelle.py, gleiche Bewertung (eval/bewertung.py), eigene simulierte Dienstergebnisse: Es gibt keinen Dienst,
 keine Datenbank und keinen PC. Die Uhr des Testsatzes ist fest (faelle.ZEIT_ERGEBNIS: Montag, 19. Oktober 2026, 14:30), der Seed der

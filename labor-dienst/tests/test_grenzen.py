@@ -8,7 +8,7 @@ from datetime import date
 import pytest
 from echter_dienst import laufender_dienst
 from fastapi.testclient import TestClient
-from hilfen import BETREUER_TOKEN, KERN_TOKEN, LABORTAG, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen, token_datei
+from hilfen import BETREUER_TOKEN, KERN_TOKEN, TESTUHR_START, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen, token_datei
 
 from wamo_labor_dienst import browser_api, server, sicherheit
 from wamo_labor_dienst.app import create_app
@@ -218,7 +218,7 @@ def test_proxys_aus_der_umgebung(tmp_path):
 
 # ---------- Verbindungen und Fristen (echter Server) ----------
 def _dienst(tmp_path, **einstellung):
-    takt = Uhr(LABORTAG)
+    takt = Uhr(TESTUHR_START)
     konfig = Konfig(daten=tmp_path / "daten", kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN)
     return laufender_dienst(create_app(konfig, uhr=takt), **einstellung)
 

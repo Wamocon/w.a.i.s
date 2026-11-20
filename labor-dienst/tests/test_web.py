@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 from echter_dienst import laufender_dienst
-from hilfen import BETREUER_TOKEN, KERN_TOKEN, LABORTAG, Uhr, anlegen_http, oeffnen
+from hilfen import BETREUER_TOKEN, KERN_TOKEN, TESTUHR_START, Uhr, anlegen_http, oeffnen
 
-from wamo_labor_dienst import auslieferung
+from wamo_labor_dienst import auslieferung, frist
 from wamo_labor_dienst.app import create_app
 from wamo_labor_dienst.konfig import Konfig
 
@@ -53,7 +53,7 @@ def test_jede_adresse_der_liste_liefert_die_datei_mit_dem_richtigen_inhaltstyp(c
     name = SEITEN.get(adresse) or adresse.removeprefix("/web/")
     erwartet = HTML if name.endswith(".html") else DATEIEN[name]
     assert r.status_code == 200 and r.headers["content-type"] == erwartet
-    assert r.content == (WEB / name).read_bytes() and len(r.content) > 100
+    assert r.content == frist.einsetzen_bytes((WEB / name).read_bytes()) and len(r.content) > 100  # das Datum der Aufbewahrung setzt der Dienst ein
 
 
 @pytest.mark.parametrize("adresse", ALLE_ADRESSEN)
@@ -159,7 +159,7 @@ def _roh_anfrage(adresse: str, zeile: str) -> bytes:
 
 def test_ueber_echtes_http_gibt_es_keinen_pfad_trick(tmp_path):
     konfig = Konfig(daten=tmp_path / "daten", kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN)
-    with laufender_dienst(create_app(konfig, uhr=Uhr(LABORTAG))) as adresse:
+    with laufender_dienst(create_app(konfig, uhr=Uhr(TESTUHR_START))) as adresse:
         ok = _roh_anfrage(adresse, "/web/board.js")
         assert ok.startswith(b"HTTP/1.1 200") and b"content-type: text/javascript; charset=utf-8" in ok.lower()
         for zeile in ("/web/%2e%2e/board.html", "/web/%2E%2E/app.py", "/web/..%2fapp.py", "/web/%2e%2e%2f%2e%2e%2fpyproject.toml", "/web/board.js%2f..%2f..",

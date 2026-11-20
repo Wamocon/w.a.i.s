@@ -148,7 +148,7 @@ jobs:
             if passt '^(desktop/|host/|scripts/wamo-dist-|scripts/wamo-tunnel|infra/sokrates2/wamo-ca\.crt$)'; then an[desktop]=true; fi
             if passt '^(host/|voice-core/pc_host\.py$)'; then an[host]=true; fi
             # die Integrationstests des Labor-Dienstes nutzen den Dienstclient aus voice-core und das Abnahmeskript aus scripts
-            if passt '^(labor-dienst/|voice-core/labor_|voice-core/wamo_tls\.py$|scripts/wamo_labor|docs/labor-)'; then an[labor]=true; fi
+            if passt '^(labor-dienst/|voice-core/labor_|voice-core/wamo_tls\.py$|scripts/wamo_labor|docs/labor-|infra/sokrates2/wamo-labor/frist\.env$)'; then an[labor]=true; fi
             if passt '^(geraete/|infra/sokrates2/[^/]*\.toml\.example$)'; then an[geraete]=true; fi
             if passt '(\.sh$|\.ps1$|^infra/)'; then an[infra]=true; fi
             if passt '^(supabase/|infra/sokrates2/release/pruefer/(migration_lint|pruefer_scans)\.py$|scripts/wamo_migrationen_pruefen\.py$)'; then an[migrationen]=true; fi

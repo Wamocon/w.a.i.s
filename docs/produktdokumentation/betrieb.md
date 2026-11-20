@@ -861,7 +861,7 @@ Jede Person hinterlegt in den Einstellungen unter "GitHub-Zugang" ein eigenes To
 
 ### 15. Labor einrichten und löschen
 
-Der Labortag hat eigene Unterlagen. Er ist auf den 05.12.2026 verschoben (Stand 20.11.2026); `docs/labor-runbook.md`, `docs/labor-datenschutz-entwurf.md` und die Server-README nennen noch den 28.11.2026 und eine Löschfrist am 11.12.2026. Beides ist vor dem Labortag abzugleichen. Dieser Abschnitt nennt nur die Verwaltungsbefehle, die Abläufe stehen im Runbook.
+Der Labortag hat eigene Unterlagen. Er ist auf den 05.12.2026 verschoben (Stand 20.11.2026); `docs/labor-runbook.md`, `docs/labor-datenschutz-entwurf.md` und die Server-README gelten mit dem neuen Labortag und der Löschfrist 18.12.2026 (Löschlauf des Dienstes ab 19.12.2026, von Niko am 20.11.2026 bestätigt). Dieser Abschnitt nennt nur die Verwaltungsbefehle, die Abläufe stehen im Runbook.
 
 **Profile** (`scripts/wamo_labor.py`, Standard ist der Trockenlauf, ändern nur mit `--ausfuehren`)
 
@@ -880,8 +880,8 @@ Der Labortag hat eigene Unterlagen. Er ist auf den 05.12.2026 verschoben (Stand 
 **Nach dem Labortag**
 
 9. Nachlauf: `python scripts/wamo_labor_nachlauf.py nachlauf` (Trockenlauf), dann `nachlauf --ausfuehren` (frühestens am Labortag, laut Runbook am 28.11.2026, jetzt 05.12.2026): Zählung, Laborprofile sperren, Plätze des Dienstes löschen, Gesprächsdaten löschen, Zählung danach.
-10. Löschlauf am Server nach der Aufbewahrung (frühestens am 12.12.2026): `sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN`. Ohne das Bestätigungswort zeigt das Skript nur den Plan. Es schreibt einen Nachweis nach `/var/log/wamo-labor/loeschnachweis-<Zeit>.txt` (Namen, Größen, Zählungen, nie Inhalte).
-11. Nicht in der Hand der Skripte: Snapshots und Sicherungen des Servers über den 11.12.2026 hinaus.
+10. Löschlauf am Server nach der Aufbewahrung (frühestens am 19.12.2026): `sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN`. Ohne das Bestätigungswort zeigt das Skript nur den Plan. Es schreibt einen Nachweis nach `/var/log/wamo-labor/loeschnachweis-<Zeit>.txt` (Namen, Größen, Zählungen, nie Inhalte).
+11. Nicht in der Hand der Skripte: Snapshots und Sicherungen des Servers über den 18.12.2026 hinaus.
 
 Weiter: [../labor-runbook.md](../labor-runbook.md), [../labor-morgencheckliste.md](../labor-morgencheckliste.md), [../labor-platz-einrichten.md](../labor-platz-einrichten.md), [../labor-datenschutz-entwurf.md](../labor-datenschutz-entwurf.md).
 

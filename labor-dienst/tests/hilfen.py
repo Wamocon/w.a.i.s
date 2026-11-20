@@ -15,13 +15,13 @@ from wamo_labor_dienst.regeln import PRUEFER
 KERN_TOKEN = "".join(chr(ord("a") + (i * 7) % 26) for i in range(44))
 BETREUER_TOKEN = "".join("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[(i * 11) % 62] for i in range(47))
 ANLEGEN = {"typ": "bug", "prioritaet": "hoch", "titel": "Anmeldung schlägt fehl", "beschreibung": "Nach dem Klick passiert nichts."}
-LABORTAG = datetime(2026, 11, 28, 9, 30, tzinfo=UTC).timestamp()
+TESTUHR_START = datetime(2026, 11, 28, 9, 30, tzinfo=UTC).timestamp()  # fester Startpunkt der Test-Uhr, ohne Bezug zur Frist (frist.py)
 
 
 class Uhr:
     """Feste Uhr in Sekunden seit 1970, nur mit vor() verstellbar."""
 
-    def __init__(self, start: float = LABORTAG):
+    def __init__(self, start: float = TESTUHR_START):
         self.t = start
         self.mono = 1000.0  # die monotone Uhr zum Dienst (create_app(..., monotonic=uhr.monotonic)): läuft nur vorwärts
 

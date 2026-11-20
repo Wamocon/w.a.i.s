@@ -14,9 +14,9 @@
 | Labortag | Sa 28.11. | Sa 05.12. |
 | Nachlauf, Kern-Kanal wieder öffnen | ab Mo 30.11. | ab Mo 07.12. |
 | Laborkonten löschen, Sitzungen widerrufen | Mo 30.11. bis Fr 04.12. | Mo 07.12. bis Fr 11.12. |
-| Aufbewahrung und Löschlauf des Dienstes | bis Fr 11.12., Löschlauf ab Sa 12.12. | `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]` |
+| Aufbewahrung und Löschlauf des Dienstes | bis Fr 11.12., Löschlauf ab Sa 12.12. | bis Fr 18.12., Löschlauf ab Sa 19.12. (entschieden am 20.11.2026) |
 
-**Löschfrist.** Bisher galt die Aufbewahrung bis Fr 11.12.2026 und der Löschlauf ab Sa 12.12.2026 (Labortag plus 13 und plus 14 Tage). Mit gleichem Abstand wäre es Fr 18.12.2026 und Sa 19.12.2026. Entschieden ist das nicht. In allen Unterlagen steht dafür der einheitliche Wortlaut `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`. Code, Skripte und Einstellungen am Server tragen noch den 11.12. und den 12.12.2026. Sie werden erst mit der Entscheidung angepasst.
+**Löschfrist.** Von Niko am 20.11.2026 bestätigt: Aufbewahrung bis Fr 18.12.2026 und Löschlauf des Dienstes ab Sa 19.12.2026 (Labortag plus 13 und plus 14 Tage, der gleiche Abstand wie bisher mit Fr 11.12. und Sa 12.12.). Die Laborkonten werden direkt nach dem Labortag gelöscht (Nachlauf ab Mo 07.12., Konten löschen bis Fr 11.12.), der 18.12. und der 19.12. sind die Absicherung. Besuchertext: „Ihre Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum 18.12.2026.“ Code, Skripte und Einstellungen leiten die Daten aus der einen Konstante `LABORTAG` in `labor-dienst/wamo_labor_dienst/frist.py` ab (Löschlauf und Rauchtest lesen die erzeugte Datei `infra/sokrates2/wamo-labor/frist.env`). Am Server wirkt das mit dem nächsten Ausrollen und dem Neubau des Images.
 
 **Weiterhin offen:** Kiosk-Test des Platz-Skripts auf einem echten Platz-Laptop und einem Ersatzgerät, vor dem Freeze `[offen: Niko]`.
 
@@ -108,7 +108,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | Sa 05.12. (vorher Sa 28.11.) | Labortag. Kern-Kanal morgens sperren, kein Neustart des Gateways | alle | Morgencheckliste Teil B |
 | ab Mo 07.12. (vorher Mo 30.11.) | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`). Messungen H0 und M3 (`docs/hausmodelle-und-kikollege.md`) | W.A.I.S. | Runbook Abschnitt 10 |
 | Mo 07.12. bis Fr 11.12. (vorher Mo 30.11. bis Fr 04.12.) | Laborkonten löschen und Sitzungen widerrufen, nach dem Nachlauf. Das Werkzeug liegt vor: `infra/sokrates2/wamo_labor_konten_loeschen.py` (Trockenlauf als Standard, Bestätigungswort, Höchstgrenze 12, Nachweis). Ablauf: Trockenlauf `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py"`, dann ein Reservekonto mit `--kennung labor-09 --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN`, dann alle mit `--ausfuehren --bestaetigung LABORKONTEN-LOESCHEN` | W.A.I.S., Niko | Nachlauf gelaufen, Ja von Niko, Runbook Abschnitt 10, Punkt 6 |
-| bis zur Löschfrist `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]` (vorher bis Fr 11.12., Löschlauf ab 12.12.) | Nachweis "verbliebene Laborkonten: 0" (Ausgang 0, Zeile in `journalctl -t wamo-labor-loeschen`), Umschlag-Datei und Sicherungen löschen. Danach Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko, Entscheidung zur Löschfrist |
+| bis zur Löschfrist Fr 18.12.2026, Löschlauf ab Sa 19.12.2026 (entschieden am 20.11.2026; vorher bis Fr 11.12., Löschlauf ab 12.12.) | Nachweis "verbliebene Laborkonten: 0" (Ausgang 0, Zeile in `journalctl -t wamo-labor-loeschen`), Umschlag-Datei und Sicherungen löschen. Danach Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
 
 ### N.5 Offene Lieferungen
 
@@ -173,7 +173,7 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | Sa 05.12. (vorher Sa 28.11.) | Labortag. Kern-Kanal morgens sperren (`notaus`) | alle | Morgencheckliste Teil B |
 | Mo 07.12. (vorher Mo 30.11.) | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`) | W.A.I.S. | Runbook Abschnitt 10 |
 | Mo 07.12. bis Fr 11.12. (vorher Mo 30.11. bis Fr 04.12.) | Skript zum Löschen der Laborkonten und Widerrufen der Sitzungen (Trockenlauf als Standard, Bestätigungswort, Nachweis), mit Review | W.A.I.S. | Lücke 1 |
-| bis zur Löschfrist `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]` (vorher bis Fr 11.12., Löschlauf ab 12.12.) | Skript ausführen, Umschlag-Datei und Sicherungen löschen. Danach Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
+| bis zur Löschfrist Fr 18.12.2026, Löschlauf ab Sa 19.12.2026 (entschieden am 20.11.2026; vorher bis Fr 11.12., Löschlauf ab 12.12.) | Skript ausführen, Umschlag-Datei und Sicherungen löschen. Danach Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
 
 ## 5. Was Niko noch entscheiden oder liefern muss
 

@@ -35,3 +35,5 @@ desktop/testdaten/update/** -text
 *.service text eol=lf
 *.timer text eol=lf
 infra/sokrates2/wamo-git-zugang text eol=lf
+# frist.env wird vom Löschlauf und vom Rauchtest am Server gelesen (nur LF)
+infra/sokrates2/wamo-labor/frist.env text eol=lf

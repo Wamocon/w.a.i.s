@@ -8,7 +8,7 @@ import json
 import re
 import string
 
-from wamo_labor_rauchtest import (CADDY, CODE_SCHREIBEN, CODE_UID, CONTAINER, CORE_ENV, DATEN, IP_CADDY_LABOR, IP_DIENST, IP_LOKAL, KERN_URL, NETZ_CADDY,
+from wamo_labor_rauchtest import (CADDY, CODE_FRIST, CODE_SCHREIBEN, CODE_UID, CONTAINER, CORE_ENV, DATEN, IP_CADDY_LABOR, IP_DIENST, IP_LOKAL, KERN_URL, NETZ_CADDY,
                                   NETZ_LABOR, NETZ_LOKAL, PORT_LOOPBACK, PORT_SITE, Antwort, Welt)
 
 ALPHABET = string.ascii_letters + string.digits  # daraus entstehen die Wegwerf-Token der Attrappe, kein Literal
@@ -34,7 +34,7 @@ class Attrappe(Welt):
         "ungesund root schreibbar caps privilegiert ohne_nnp ohne_grenzen ohne_loggrenze netz_extern falscher_proxy port_offen port_zusatz "
         "token_modus token_besitzer daten_modus token_gleich token_kurz ca_falsch koepfe_fehlen kern_offen kern_variante_offen betreuer_offen "
         "betreuer_gegenprobe gesundheit_offen ausgang_internet ausgang_dns ausgang_kontrolle firewall_fehlt firewall_offen roundtrip_kaputt "
-        "roundtrip_ohne_token env_url env_token token_in_env ende_falsch arch_falsch labin_fehlt loopback_regel_fehlt fremd_dienst_offen "
+        "roundtrip_ohne_token env_url env_token token_in_env ende_falsch image_veraltet arch_falsch labin_fehlt loopback_regel_fehlt fremd_dienst_offen "
         "fremd_ip_offen fremd_kontrolle bridge_host_offen bridge_kontrolle".split())
 
     def __init__(self, fehler=()) -> None:
@@ -48,7 +48,8 @@ class Attrappe(Welt):
 
     def _dienst(self) -> dict:
         f = self.fehler
-        env = ["WAMO_LABOR_DIENST_BIS=" + ("2027-01-01" if "ende_falsch" in f else "2026-12-11"),
+        # Wie am Server: Die Compose-Datei trägt kein Ende der Aufbewahrung, es kommt aus dem Dienst (frist.py); nur ein Fehler setzt es
+        env = (["WAMO_LABOR_DIENST_BIS=2027-01-01"] if "ende_falsch" in f else []) + [
                "WAMO_LABOR_DIENST_PROXYS=" + ("172.28.0.99" if "falscher_proxy" in f else IP_CADDY_LABOR),
                "WAMO_LABOR_DIENST_KERN_TOKEN_DATEI=/run/wamo-labor/kern-token"] + (["GEHEIM=" + self.kern] if "token_in_env" in f else [])
         host = {"ReadonlyRootfs": "schreibbar" not in f, "CapDrop": None if "caps" in f else ["ALL"], "CapAdd": None, "Privileged": "privilegiert" in f,
@@ -72,6 +73,8 @@ class Attrappe(Welt):
 
     def im_dienst(self, code: str, *args: str) -> tuple[int, str]:
         f = self.fehler
+        if code == CODE_FRIST:  # das Image: im guten Zustand dasselbe Ende wie frist.env, im Fehler das Ende vor der Verschiebung
+            return 0, ("20000101\n" if "image_veraltet" in f else self.frist().get("WAMO_LABOR_AUFBEWAHRUNG_BIS", "") + "\n")
         if code == CODE_UID:
             return 0, "0 0\n" if "root" in f else "10001 10001\n"
         if code == CODE_SCHREIBEN:

@@ -63,7 +63,7 @@ Die Funktionen im Einzelnen stehen im [Funktionskatalog](#funktionskatalog-wais)
 
 **Fernzugriff und Geräte.** Admins öffnen den Desktop der Sparks (Sokrates 1, Sokrates 2, Caesar) über ein Gateway, die Sitzung startet immer die Person selbst. Jeder persönliche Laptop wird einmal gebunden und bekommt einen eigenen Tunnel, ein Admin gibt Geräte in der Geräteverwaltung frei. Gemeinsame Bürogeräte (Server, Drucker, Scanner, Router, NAS, Fernseher, Lautsprecher, Steckdosen) zeigt die Büro-Karte, per Zuruf lassen sich Fernseher, Lautsprecher und Steckdosen schalten, drucken geht nur mit Karte. Quellen: `voice-core/rd_api.py`, `voice-core/geraete_werkzeuge.py`, `voice-core/buero_api.py`, `voice-core/geraet_api.py`, `geraete/README.md`.
 
-**Testlabor.** Für den Labortag gibt es eigene Laborprofile (`labor-01` bis `labor-09` laut `docs/testlabor-wamo.md`, Entscheidung E11). Besucher führen ein Gespräch und arbeiten mit einem Test-Jira (`labor-dienst/`), Mails zeigen nur eine Bestätigung. Gesprächstext wird nur mit Einwilligung gespeichert und nach 14 Tagen gelöscht (Löschfrist 11.12.2026). Quellen: `voice-core/labor.py`, `voice-core/labor_werkzeuge.py`, `labor-dienst/`, `docs/testlabor-wamo.md`, `docs/labor-runbook.md`.
+**Testlabor.** Für den Labortag gibt es eigene Laborprofile (`labor-01` bis `labor-09` laut `docs/testlabor-wamo.md`, Entscheidung E11). Besucher führen ein Gespräch und arbeiten mit einem Test-Jira (`labor-dienst/`), Mails zeigen nur eine Bestätigung. Gesprächstext wird nur mit Einwilligung gespeichert und unmittelbar nach dem Labortag gelöscht (Löschfrist 18.12.2026). Quellen: `voice-core/labor.py`, `voice-core/labor_werkzeuge.py`, `labor-dienst/`, `docs/testlabor-wamo.md`, `docs/labor-runbook.md`.
 
 **Jira.** Aus einem Canvas-Dokument entsteht auf Wunsch eine User Story (Typ Story) in Jira, aber erst nach dem Klick auf „Freigeben“ und nie per Sprache. Das gibt es nur für Admins im Büro, mit eingeschaltetem Schalter `WAMO_JIRA` und nie im Labor. Quellen: `voice-core/jira_werkzeuge.py`, `voice-core/jira_client.py`, `docs/jira-benutzer-einrichten.md`.
 
@@ -154,7 +154,7 @@ Die Liste stammt aus `README.md` und ist teilweise älter als der Code. Wo der C
 | Migrationen 0010, 0011 und 0013 auf `wamo_prod` | nicht als angewendet belegt | laut `README.md` Stand 10.11.2026 |
 | Ausbaustufen P4 (eigene Sprachmodelle über LiteLLM) und P5 (Hören und Sprechen im Haus) | Stand 20.10.2026 | Hausmodelle, Hören und Stimme im Haus sind inzwischen wählbar (0.5.0), die Abnahme der Modelle im Haus steht laut README aus |
 | Weckwort „Hey WAMO“ | später | `CLAUDE.md` |
-| Testlabor | Labortag 05.12.2026 (verschoben vom 28.11.2026), Löschfrist nach der Verschiebung neu festzulegen (die Papiere nennen noch den 11.12.2026) | Mehrere Unterlagen im Repo (`docs/labor-restplan.md`, Runbook, Datenschutzentwurf) nennen noch den 28.11.2026 |
+| Testlabor | Labortag 05.12.2026 (verschoben vom 28.11.2026), Löschfrist 18.12.2026, Löschlauf ab 19.12.2026 (von Niko am 20.11.2026 bestätigt) | Mehrere Unterlagen im Repo (`docs/labor-restplan.md`, Runbook, Datenschutzentwurf) nennen noch den 28.11.2026 |
 | Persönliche Zugänge für Vercel, Supabase und weitere Konnektoren | Ausbaustufe nach dem Labortag | `docs/persoenliche-zugaenge.md` |
 
 ### Weiterführend
@@ -357,7 +357,7 @@ Alle Funktionen dieses Gebiets brauchen PC-Steuerung an, eine PC-Stufe (A oder M
 | F-LAB-05 | Freigabekarte des Labors (Ticket und Mail, Texte aus `laborKarte.ts`) und Laborsicht der Oberfläche (nur Abschnitt „Mikrofon und Sprache“ mit der Mikrofonwahl) | L | Laborprofil | ist selbst die Freigabe | `ui/src/components/Freigaben.tsx`, `ui/src/lib/laborKarte.ts`, `ui/src/lib/laborPlatz.ts` |
 | F-LAB-06 | Platz-Skript für Laptops (einrichten, starten, prüfen, Rückweg; Kiosk-Konto, Chrome-Richtlinien) | Betreuer, A | Windows, Kiosk-Konto ohne Administrator | nein | `scripts/wamo_labor_platz.py`, `docs/labor-platz-einrichten.md` |
 | F-LAB-07 | Zweite Faktoren der Laborprofile automatisch einrichten (mit QR) | A | `scripts/wamo_labor_faktoren.py` | nein | `scripts/wamo_labor_faktoren.py` |
-| F-LAB-08 | Nachlauf: Sperren, Löschen der Laborkonten, Nachweis (Löschfrist 11.12.2026) | Betreuer, A | Bestätigungswort beim Löschlauf | ja (Bestätigungswort) | `scripts/wamo_labor_nachlauf.py`, `voice-core/labor_loeschliste.py`, `docs/labor-runbook.md` |
+| F-LAB-08 | Nachlauf: Sperren, Löschen der Laborkonten, Nachweis (Löschfrist 18.12.2026) | Betreuer, A | Bestätigungswort beim Löschlauf | ja (Bestätigungswort) | `scripts/wamo_labor_nachlauf.py`, `voice-core/labor_loeschliste.py`, `docs/labor-runbook.md` |
 | F-LAB-09 | Labor-Dienst (Test-Jira mit Betreuer-Seite) | Betreuer | Container `wamo-labor-dienst` | nein | `labor-dienst/`, `docs/labor-dienst-vertrag.md` |
 
 ### 10. Jira (JIR)

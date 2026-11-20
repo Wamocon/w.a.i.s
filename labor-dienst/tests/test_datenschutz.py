@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from wamo_labor_dienst import auslieferung
+from wamo_labor_dienst import auslieferung, frist
 
 WURZEL = Path(__file__).resolve().parents[2]
 DOKUMENT = WURZEL / "docs" / "labor-datenschutz-entwurf.md"
@@ -16,9 +16,13 @@ WEB = Path(auslieferung.__file__).resolve().parent / "web"
 SEITE = WEB / "datenschutz.html"
 
 
+DATUM = re.compile(r"\b\d{2}\.\d{2}\.\d{4}\b")
+
+
 def _normal(text: str) -> str:
-    """Markdown-Zeichen (**, Rückstriche) und Leerraum vereinheitlichen, damit Dokument und Seite vergleichbar sind."""
-    return re.sub(r"\s+", " ", text.replace("**", "").replace("`", "")).strip()
+    """Markdown-Zeichen (**, Rückstriche) und Leerraum vereinheitlichen, damit Dokument und Seite vergleichbar sind. Das Datum der Frist kommt in der Seite
+    aus frist.py (Platzhalter), im Dokument steht es von Hand: Der Vergleich der Texte maskiert es, das Datum prüft test_dokument_nennt_die_frist_der_konstante."""
+    return DATUM.sub("<Datum>", re.sub(r"\s+", " ", text.replace("**", "").replace("`", "")).strip())
 
 
 def _abschnitt_1() -> str:
@@ -83,13 +87,25 @@ class _Sichtbar(HTMLParser):
 
 def _seite() -> _Sichtbar:
     p = _Sichtbar()
-    p.feed(SEITE.read_text(encoding="utf-8"))
+    p.feed(frist.einsetzen(SEITE.read_text(encoding="utf-8")))  # so liefert der Dienst die Seite aus
     return p
 
 
 def test_dokument_hat_den_erwarteten_aufbau():
     b = _bloecke()
     assert len(b["punkte"]) == 6 and b["verantwortlich"].startswith("Verantwortlich:") and b["einwilligung"].startswith("Einwilligung (Version ")
+
+
+def test_dokument_nennt_die_frist_der_konstante():
+    """Der Besuchertext (Niko, 20.11.2026): Ihre Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum <Datum>."""
+    assert f"spätestens bis zum **{frist.deutsch(frist.AUFBEWAHRUNG_BIS)}**." in _abschnitt_1()
+    assert not [d for d in DATUM.findall(_abschnitt_1().replace("**", "")) if d != frist.deutsch(frist.AUFBEWAHRUNG_BIS)], "ein zweites Datum im Besuchertext"
+
+
+def test_der_besuchertext_nennt_die_loeschung_unmittelbar_nach_der_veranstaltung():
+    satz = "Ihre Daten werden unmittelbar nach der Veranstaltung gelöscht, spätestens bis zum " + frist.deutsch(frist.AUFBEWAHRUNG_BIS) + "."
+    ohne_markup = re.sub(r"\s+", " ", "".join(_seite().text))  # die Seite mit eingesetztem Datum, ohne die Maske von _normal
+    assert satz in ohne_markup and satz in _abschnitt_1().replace("**", "")
 
 
 def test_altersangabe_ab_16_ohne_harte_grenze():
@@ -172,7 +188,7 @@ def test_seite_und_dateien_haben_dieselben_schutzkoepfe_wie_das_board(client, ad
 
 def test_seite_ist_oeffentlich_ohne_token_und_nur_get(client):
     r = client.get("/datenschutz")
-    assert r.status_code == 200 and r.headers["content-type"] == "text/html; charset=utf-8" and r.content == SEITE.read_bytes()
+    assert r.status_code == 200 and r.headers["content-type"] == "text/html; charset=utf-8" and r.content == frist.einsetzen_bytes(SEITE.read_bytes())
     for methode in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"):
         assert client.request(methode, "/datenschutz").status_code == 405
     for pfad in ("/datenschutz/", "/Datenschutz", "/DATENSCHUTZ", "/datenschutz.html", "/datenschutz/x", "/web/datenschutz.html"):

@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 from echter_dienst import abnahmeplaetze_vorbereiten, laufender_dienst
-from hilfen import BETREUER_TOKEN, KERN_TOKEN, LABORTAG
+from hilfen import BETREUER_TOKEN, KERN_TOKEN, TESTUHR_START
 
 import wamo_labor_abnahme as ab
 import wamo_labor_abnahme_basis as basis
@@ -47,7 +47,7 @@ def _meldungen(lauf: ab.LaufErgebnis) -> str:
 
 @pytest.fixture
 def dienst(tmp_path):
-    takt = basis.FalscherTakt(LABORTAG)
+    takt = basis.FalscherTakt(TESTUHR_START)
     konfig = Konfig(daten=tmp_path / "daten", kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN)
     with laufender_dienst(create_app(konfig, uhr=takt.jetzt)) as adresse:
         yield adresse, takt, abnahmeplaetze_vorbereiten(adresse)

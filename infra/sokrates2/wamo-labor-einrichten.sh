@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Labor-Dienst auf Sokrates-2 (Test-Jira des Testlabors am 28.11.2026): Container wamo-labor-dienst, HTTPS 55447 über wamo-caddy, Firewall,
+# Labor-Dienst auf Sokrates-2 (Test-Jira des Testlabors): Container wamo-labor-dienst, HTTPS 55447 über wamo-caddy, Firewall,
 # Token, Einstellungen für den Kern. Compose-Projekt wamo-labor (infra/sokrates2/wamo-labor/docker-compose.yml), Vertrag des Dienstes
 # docs/labor-dienst-vertrag.md. Nur als root (sudo), wie die übrigen Einrichtungsskripte. Wiederholbar (idempotent).
 #
@@ -45,7 +45,7 @@
 #
 # Fehler: Schritte mit Änderung (Caddy, Start) werden bei einem Fehler zurückgenommen (alte Site und altes Compose, Container weg). Token,
 # Ordner, Firewall-Ketten und das Image bleiben, sie schaden ohne Container nicht. Rückweg: wamo-labor-rueckweg.sh. Löschlauf nach der
-# Aufbewahrung (11.12.2026): wamo-labor-loeschlauf.sh.
+# Aufbewahrung (Ende und erster Löschtag stehen in wamo-labor/frist.env): wamo-labor-loeschlauf.sh.
 #
 # Folgeschritt (hier bewusst kein Befehl): Der Betreuer-Token geht später über ein PC-Skript per ssh in eine lokale Datei auf dem PC des Betreuers
 # (Befehl betreuer-token-ausgeben dort, nie hier). Dieses Skript zeigt keinen Token an.
@@ -226,7 +226,7 @@ netze_pruefen() {
 
 dateien_pruefen() {
   local f
-  for f in wamo-labor/docker-compose.yml wamo-caddy/kern/wamo-labor.caddy wamo-caddy/docker-compose.yml wamo-firewall.sh \
+  for f in wamo-labor/docker-compose.yml wamo-labor/frist.env wamo-caddy/kern/wamo-labor.caddy wamo-caddy/docker-compose.yml wamo-firewall.sh \
     wamo-firewall-einrichten.sh; do
     [ -f "$HERE/$f" ] || fehler "$HERE/$f fehlt (infra/sokrates2 vollständig verteilen)."
   done

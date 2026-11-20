@@ -171,7 +171,7 @@ Spalte "Frist" nennt nur, was im Repo belegt ist. "Keine automatische Frist bele
 | Zugänge der Personen | Claude-Schlüssel, Claude-Code-Token, GitHub-Token, Kontingent | Tabellen `model_access`, `github_zugang` als Chiffrat (AES-256-GCM) | Modellzugang, Aufträge | Person löscht selbst, Austritt über `wamo_nutzer.py austreten` | `voice-core/schluessel.py` |
 | Bildschirm und Live-Bild | Einzelbilder des eigenen Laptops | nur Arbeitsspeicher (Host, Kern, Browser), nie Datenbank oder Log | PC-Steuerung | höchstens 15 bis 30 Minuten Dauer, keine Aufzeichnung | `README.md` Live-Bild |
 | Büro-Mails und Nachrichten | Entwürfe für Outlook, Teams, OneNote | Entwurfsdateien `%LOCALAPPDATA%\WAMO\entwuerfe`, Dateien in `Dokumente\WAIS` | Versand durch die Person | Aufbewahrung am Laptop nicht belegt | `CLAUDE.md` (Mail, Office) |
-| Labor-Daten | Gesprächstext, Tickets, Kommentare, Einwilligungsvermerk je Platz | Tabellen des Kerns (nur mit `WAMO_LABOR_TEXT_SPEICHERN=an`), Dienst `wamo-labor-dienst` | Testlabor (geplant 28.11.2026, auf 05.12.2026 verschoben, Stand 20.11.2026) | spätestens 11.12.2026; Löschlauf frühestens 12.12.2026 mit Nachweis. Die Labor-Unterlagen im Repo nennen noch den alten Labortag; die Frist ist nach der Verschiebung neu festzulegen (zu klären) | `docs/labor-datenschutz-entwurf.md` 2 |
+| Labor-Daten | Gesprächstext, Tickets, Kommentare, Einwilligungsvermerk je Platz | Tabellen des Kerns (nur mit `WAMO_LABOR_TEXT_SPEICHERN=an`), Dienst `wamo-labor-dienst` | Testlabor (geplant 28.11.2026, auf 05.12.2026 verschoben, Stand 20.11.2026) | unmittelbar nach dem Labortag, spätestens 18.12.2026; Löschlauf frühestens 19.12.2026 mit Nachweis (von Niko am 20.11.2026 bestätigt) | `docs/labor-datenschutz-entwurf.md` 2 |
 | Kern-Journal | Metadaten, kein Gesprächstext (INFO) | Journal von Sokrates-2 | Betrieb | Rotation des Systems (Frist nicht belegt) | `infra/sokrates2/README.md` 10 |
 | Sicherungen | Datenbank und Konfiguration | im Repo nicht beschrieben | Verfügbarkeit, Wiederherstellung | offen, siehe Abschnitt 6 (Punkt 7) | `infra/sokrates2/README.md` 19 |
 
@@ -263,7 +263,7 @@ Mit der oder dem Datenschutzbeauftragten zu klären: Ob und wie die Pflichten na
 | 5 | Löschkonzept bei Austritt einer Person | dito, Administration |
 | 6 | Art. 50 KI-Verordnung für Gespräch und synthetische Stimme | dito |
 | 7 | Verzeichnis von Verarbeitungstätigkeiten und Sicherungskonzept | dito, Betrieb |
-| 8 | Löschfrist des Testlabors nach Verschiebung auf den 05.12.2026 (die Papiere nennen 28.11. und 11.12.2026) | Datenschutz, Betrieb |
+| 8 | Löschfrist des Testlabors nach Verschiebung auf den 05.12.2026: entschieden am 20.11.2026 (18.12.2026, Löschlauf ab 19.12.2026), der Server übernimmt sie mit dem nächsten Ausrollen | Betrieb |
 | 9 | Rückstand `selbstauftraege`: Frist und Umgang mit Einträgen nach Austritt der verfassenden Person | Datenschutz, Administration |
 | 10 | Restrisiko S9 (Stimme sperrt nichts): Tragbarkeit für den Echtbetrieb | verantwortliche Person |
 

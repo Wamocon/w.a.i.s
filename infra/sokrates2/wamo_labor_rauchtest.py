@@ -45,6 +45,10 @@ KERN_PFADE = ["/api/kern/durchlauf", "/api/kern/tickets", "//api/kern/durchlauf"
 CODE_UID = "import os; print(os.getuid(), os.getgid())"
 CODE_SCHREIBEN = "import os\ntry:\n    open('/app/.rauchtest', 'w').close(); os.unlink('/app/.rauchtest'); print('geschrieben')\nexcept OSError:\n    print('verweigert')"
 CODE_STATUS = "print(open('/proc/self/status').read())"
+# Das Ende der Aufbewahrung, das im Image steht (python -I nimmt /app nicht in den Suchpfad, deshalb der Eintrag)
+CODE_FRIST = "import sys; sys.path.insert(0, '/app'); from wamo_labor_dienst import frist; print(frist.AUFBEWAHRUNG_BIS.strftime('%Y%m%d'))"
+# Die einzige Quelle der Daten am Server: frist.env neben der Compose-Datei, erzeugt aus labor-dienst/wamo_labor_dienst/frist.py (nur Zeilen NAME=JJJJMMTT)
+FRIST_DATEI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wamo-labor", "frist.env")
 CODE_TCP = ("import socket, sys\ntry:\n    socket.create_connection((sys.argv[1], int(sys.argv[2])), 3).close(); print('offen')\n"
             "except OSError:\n    print('zu')")
 CODE_DNS = "import socket, sys\ntry:\n    socket.getaddrinfo(sys.argv[1], 443); print('aufgeloest')\nexcept OSError:\n    print('nicht')"
@@ -189,6 +193,15 @@ class Welt:
     def im_dienst(self, code: str, *args: str) -> tuple[int, str]:
         rc, out, _ = self.sh("docker", "exec", CONTAINER, "python", "-I", "-c", code, *args, timeout=20)
         return rc, out
+
+    def frist(self) -> dict[str, str]:
+        """Die Zeilen NAME=JJJJMMTT aus frist.env; fehlt die Datei oder eine Zeile, fehlt der Eintrag."""
+        try:
+            with open(FRIST_DATEI, encoding="utf-8") as f:
+                zeilen = f.read().splitlines()
+        except OSError:
+            return {}
+        return {m.group(1): m.group(2) for m in (re.fullmatch(r"(WAMO_LABOR_[A-Z_]+)=([0-9]{8})", z) for z in zeilen) if m}
 
     def tcp_vom_dienst(self, host: str, port: int) -> str:
         rc, out = self.im_dienst(CODE_TCP, host, str(port))
@@ -555,12 +568,19 @@ def p_core_env(w: Welt, p: Pruefer) -> None:
 
 
 @probe("P18", "Aufbewahrung und keine Token in der Umgebung",
-       "WAMO_LABOR_DIENST_BIS ist der 11.12.2026, und in docker inspect (Umgebung, Befehl, Beschriftungen) steht kein Token im Klartext.",
-       "Nicht, dass die Aufbewahrung am 11.12.2026 wirklich löscht (der Dienst muss dann laufen, sonst der Löschlauf) und nicht Sicherungen außerhalb.")
+       "Das Ende der Aufbewahrung (frist.env, erzeugt aus frist.py) gilt im Dienst: WAMO_LABOR_DIENST_BIS ist nicht gesetzt oder genau dieses Datum, das Image "
+       "nennt dasselbe Ende (ein nach einer Verschiebung nicht neu gebautes Image fällt auf), und in docker inspect (Umgebung, Befehl, Beschriftungen) steht kein Token im Klartext.",
+       "Nicht, dass die Aufbewahrung am Ende wirklich löscht (der Dienst muss dann laufen, sonst der Löschlauf) und nicht Sicherungen außerhalb.")
 def p_aufbewahrung(w: Welt, p: Pruefer) -> None:
     i = w.inspect(CONTAINER) or {}
     env = dict(e.split("=", 1) for e in i.get("Config", {}).get("Env") or [] if "=" in e)
-    p.pruefe(env.get("WAMO_LABOR_DIENST_BIS") == "2026-12-11", "WAMO_LABOR_DIENST_BIS ist 2026-12-11")
+    ende = w.frist().get("WAMO_LABOR_AUFBEWAHRUNG_BIS", "")
+    if p.pruefe(bool(ende), "frist.env nennt das Ende der Aufbewahrung (WAMO_LABOR_AUFBEWAHRUNG_BIS)"):
+        iso = f"{ende[:4]}-{ende[4:6]}-{ende[6:]}"
+        gesetzt = env.get("WAMO_LABOR_DIENST_BIS")
+        p.pruefe(gesetzt is None or gesetzt == iso, f"WAMO_LABOR_DIENST_BIS ist nicht gesetzt (Standard des Dienstes) oder {iso}")
+        rc, out = w.im_dienst(CODE_FRIST)
+        p.pruefe(rc == 0 and out.strip() == ende, f"das Image nennt dasselbe Ende der Aufbewahrung wie frist.env ({out.strip() if rc == 0 else 'nicht lesbar'}, erwartet {ende})")
     blob = json.dumps(i)
     for art in ("kern", "betreuer"):
         token = w.token(art)

@@ -1,10 +1,10 @@
-"""Betrieb: Gesundheit, Aufbewahrung bis 11.12.2026 (D10), Einstieg, Neustart ohne Datenverlust."""
+"""Betrieb: Gesundheit, Aufbewahrung bis zum Ende der Frist (D10, frist.py), Einstieg, Neustart ohne Datenverlust."""
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -12,13 +12,14 @@ from fastapi.testclient import TestClient
 from hilfen import BETREUER_TOKEN, KERN_TOKEN, Uhr, anlegen_http, betreuer_kopf, kern_kopf, oeffnen, token_datei
 
 from wamo_labor_dienst.app import create_app
+from wamo_labor_dienst.frist import AUFBEWAHRUNG_BIS, LABORTAG, LOESCHLAUF_AB
 from wamo_labor_dienst.konfig import Konfig
 
 PAKET_ORDNER = Path(__file__).resolve().parents[1]
 
 
-def _tag(jahr: int, monat: int, tag: int, stunde: int = 12) -> float:
-    return datetime(jahr, monat, tag, stunde, tzinfo=UTC).timestamp()
+def _tag(tag: date, stunde: int = 12) -> float:
+    return datetime(tag.year, tag.month, tag.day, stunde, tzinfo=UTC).timestamp()
 
 
 def test_gesundheit_ohne_token_nur_zustand_keine_daten(client):
@@ -52,9 +53,9 @@ def test_neustart_behaelt_die_daten(konfig, uhr):
         assert c.get("/api/browser/board", headers={"X-Platz-Token": token}).status_code == 200
 
 
-@pytest.mark.parametrize("jetzt,bleibt", [(_tag(2026, 11, 28), True), (_tag(2026, 12, 11, 23), True), (_tag(2026, 12, 12, 0), False), (_tag(2027, 1, 5), False)])
+@pytest.mark.parametrize("jetzt,bleibt", [(_tag(LABORTAG), True), (_tag(AUFBEWAHRUNG_BIS, 23), True), (_tag(LOESCHLAUF_AB, 0), False), (_tag(AUFBEWAHRUNG_BIS + timedelta(days=25)), False)])
 def test_beim_start_werden_daten_nach_der_aufbewahrung_geloescht(konfig, jetzt, bleibt):
-    uhr = Uhr(_tag(2026, 11, 28))
+    uhr = Uhr(_tag(LABORTAG))
     with TestClient(create_app(konfig, uhr=uhr), base_url="http://127.0.0.1") as c:
         d = oeffnen(c, 3)
         anlegen_http(c, d, titel="Daten des Labortags")
@@ -73,22 +74,22 @@ def test_beim_start_werden_daten_nach_der_aufbewahrung_geloescht(konfig, jetzt, 
 
 
 def test_aufbewahrung_loescht_auch_das_protokoll_und_die_tokens(konfig):
-    uhr = Uhr(_tag(2026, 11, 28))
+    uhr = Uhr(_tag(LABORTAG))
     app = create_app(konfig, uhr=uhr, monotonic=uhr.monotonic)
     with TestClient(app, base_url="http://127.0.0.1") as c:
         oeffnen(c, 3)
         c.post("/api/betreuer/plaetze/3/platz-token", headers=betreuer_kopf())
     assert (konfig.daten / "protokoll" / "dienst.jsonl").stat().st_size > 0
-    uhr.vor(_tag(2026, 12, 12) - uhr.t)  # die Zeit vergeht wirklich (ein bloßer Sprung der Wanduhr löscht nichts)
+    uhr.vor(_tag(LOESCHLAUF_AB) - uhr.t)  # die Zeit vergeht wirklich (ein bloßer Sprung der Wanduhr löscht nichts)
     assert app.state.dienst.aufbewahrung_pruefen() is True
     assert not (konfig.daten / "protokoll" / "dienst.jsonl").exists() and not (konfig.daten / "protokoll" / "betreuer.jsonl").exists()
     assert app.state.dienst.zentral.hat_token(3) is False
     assert app.state.dienst.aufbewahrung_pruefen() is True  # wiederholbar
 
 
-def test_aufbewahrung_bis_ist_einstellbar(konfig, uhr):
-    k = Konfig(daten=konfig.daten, kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN, bis=date(2026, 11, 27))
-    app = create_app(k, uhr=uhr)  # der Labortag liegt nach dem Datum: alles wird geleert
+def test_aufbewahrung_bis_ist_einstellbar(konfig):
+    k = Konfig(daten=konfig.daten, kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN, bis=LABORTAG - timedelta(days=1))
+    app = create_app(k, uhr=Uhr(_tag(LABORTAG)))  # der Labortag liegt nach dem Datum: alles wird geleert
     assert app.state.dienst.aufbewahrung_pruefen() is True
 
 
