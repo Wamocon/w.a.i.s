@@ -38,7 +38,7 @@ jobs:
   vorpruefung:
     name: Schutz von prod und Stand prüfen
     if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       actions: read

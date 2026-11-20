@@ -67,7 +67,7 @@ env:
 jobs:
   aenderungen:
     name: Änderungen erkennen
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     outputs:
       oberflaeche: ${{ steps.teile.outputs.oberflaeche }}
@@ -168,7 +168,7 @@ jobs:
     name: Oberfläche (ESLint, Typen, Tests, Build)
     needs: aenderungen
     if: needs.aenderungen.outputs.oberflaeche == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 20
     defaults:
       run:
@@ -208,7 +208,7 @@ jobs:
     name: Kern (Tests, Teil ${{ matrix.teil }} von 4)
     needs: aenderungen
     if: needs.aenderungen.outputs.kern == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -257,7 +257,7 @@ jobs:
     name: Python (Syntax und Lint, ganzes Repo)
     needs: aenderungen
     if: needs.aenderungen.outputs.python == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
       - name: Repository auschecken
@@ -295,7 +295,7 @@ jobs:
     name: Labor-Dienst (Tests mit den Versionen des Images)
     needs: aenderungen
     if: needs.aenderungen.outputs.labor == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 15
     env:
       # Python wie im Image (labor-dienst/Dockerfile); Testwerkzeuge in den Versionen aus voice-core/uv.lock,
@@ -336,7 +336,7 @@ jobs:
     name: Gerätedienst (Tests)
     needs: aenderungen
     if: needs.aenderungen.outputs.geraete == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 10
     defaults:
       run:
@@ -365,7 +365,7 @@ jobs:
     name: Skripte (Python- und Node-Tests)
     needs: aenderungen
     if: needs.aenderungen.outputs.skripte == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
       - name: Repository auschecken
@@ -463,7 +463,7 @@ jobs:
     name: Infra (bash -n, shellcheck, PowerShell-Syntax)
     needs: aenderungen
     if: needs.aenderungen.outputs.infra == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
       - name: Repository auschecken
@@ -537,7 +537,7 @@ jobs:
     name: Migrationen (Lint)
     needs: aenderungen
     if: needs.aenderungen.outputs.migrationen == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - name: Repository auschecken, volle Historie
@@ -572,7 +572,7 @@ jobs:
     name: Version (wamo_version.py pruefen)
     needs: aenderungen
     if: needs.aenderungen.outputs.version == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - name: Repository auschecken, mit Tags
@@ -593,7 +593,7 @@ jobs:
     name: Abhängigkeiten (Audit, nur Hinweis)
     needs: aenderungen
     if: needs.aenderungen.outputs.abhaengigkeiten == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 15
     env:
       PIP_AUDIT_VERSION: "2.10.1"
@@ -664,7 +664,7 @@ jobs:
     name: Ergebnis
     if: always()
     needs: [aenderungen, oberflaeche, kern, python, labor, geraete, skripte, desktop, host, infra, migrationen, version]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
       - name: Ergebnisse der Jobs auswerten

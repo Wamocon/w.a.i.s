@@ -37,7 +37,7 @@ jobs:
   stand:
     name: Stand auflösen (nur Commits aus main)
     if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read

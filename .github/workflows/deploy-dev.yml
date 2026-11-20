@@ -37,7 +37,7 @@ jobs:
   pruefungen:
     name: Stand auflösen und Prüf-Workflows abwarten
     if: github.ref == 'refs/heads/main' && github.event.repository.fork == false
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_visibility == 'private' && fromJSON('["self-hosted","linux","ARM64"]') || 'ubuntu-latest' }}
     timeout-minutes: 75
     permissions:
       actions: read
