@@ -44,6 +44,7 @@ def test_pruefen_findet_probleme(client, katalog):
     assert any("Karte J1" in p for p in d["probleme"]) and any("Anweisung" in p for p in d["probleme"])
     katalog.karten_tab["J2"]["wissenstext"] = "x" * 900
     katalog.karten_tab["W1"]["wissenstext"] = "y" * 900
+    katalog.karten_tab["J1"].update(werkzeuge=[], wissen="Eigener Text", wissenstext="z" * 900)
     assert any("Zeichenbudget" in p for p in client.post(f"{B}/pruefen", headers=kopf()).json()["probleme"])
 
 
