@@ -233,6 +233,6 @@ def test_eingabe_helfer():
             ganzzahl_lesen(falsch, "X", minimum=1, maximum=5)
     assert datum_lesen(None, "X", pflicht=False) is None and datum_lesen("2026-12-05", "X") == date(2026, 12, 5)
     assert zeit_lesen("09:05", "X").hour == 9 and zeit_lesen("09:05:30", "X").minute == 5 and zeit_lesen("", "X") is None
-    assert uuid_lesen(k.ADMIN) == k.ADMIN and uuid_lesen(k.ADMIN.upper()) is None and uuid_lesen("{" + k.ADMIN + "}") is None and uuid_lesen(5) is None
+    assert uuid_lesen(k.ADMIN) == k.ADMIN and uuid_lesen("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA") is None and uuid_lesen("{" + k.ADMIN + "}") is None and uuid_lesen(5) is None
     assert nummer_lesen("12") == 12 and nummer_lesen("0") is None and nummer_lesen("-1") is None and nummer_lesen("1" * 19) is None
     assert nummer_lesen("１２") is None and nummer_lesen(12) is None
