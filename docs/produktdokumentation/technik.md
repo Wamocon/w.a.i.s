@@ -5,7 +5,7 @@
 | Zweck | Technische Referenz der Komponenten: Aufbau von Kern, Oberfläche, Host und Desktop-App, Befunde der ausgelieferten App, Datenmodell, Schnittstellen und Konfiguration. |
 | Zielgruppe | Entwickler, Integratoren, Betrieb |
 | Dokumentart | Erklärung und Referenz |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce |
+| Stand | 20.11.2026, Version 0.7.0, geprüft gegen Commit 7caf977 |
 | Quellen | Die Kopftabelle jedes Kapitels nennt die Quellen |
 
 ## Inhalt
@@ -32,7 +32,7 @@
 
 Der Kern ist ein Python-Dienst auf Basis von Pipecat (Paket `pipecat-ai`, laut `voice-core/pyproject.toml` Version 1.12 bis unter 2). Er nimmt die Sprache der Person über WebRTC entgegen, erkennt sie, lässt ein Sprachmodell antworten, ruft bei Bedarf Werkzeuge auf und spricht die Antwort. Daneben stellt er unter `/wamo/api/` eigene HTTP-Schnittstellen bereit, die ohne laufendes Gespräch funktionieren.
 
-Auf oberster Ebene liegen 335 Python-Dateien, davon 206 Testdateien (`test_*.py`). Es gibt keine Unterpakete: jedes Modul liegt flach in `voice-core/`, die Module importieren sich gegenseitig über ihren Dateinamen. Die Ausnahme ist `voice-core/eval/` mit Messläufen und Testsätzen für die Modellabnahme.
+Auf oberster Ebene liegen 341 Python-Dateien, davon 209 Testdateien (`test_*.py`). Es gibt keine Unterpakete: jedes Modul liegt flach in `voice-core/`, die Module importieren sich gegenseitig über ihren Dateinamen. Die Ausnahme ist `voice-core/eval/` mit Messläufen und Testsätzen für die Modellabnahme.
 
 Der Kern läuft in zwei Betriebsarten (`WAMO_BETRIEB`, siehe `voice-core/bot.py` `betrieb_modus`): `lokal` (Standard, auf dem PC der Person, "Unterwegs") und `buero` (als Dienst `wamo-core` auf Sokrates-2). Alles andere als der Wert `buero` gilt als `lokal`.
 
@@ -121,6 +121,7 @@ Zeilenzahlen sind nicht angegeben, sie ändern sich laufend. Große Module sind 
 | `stimme_mikrofon.py` | je eingelerntem Mikrofon ein Abdruck, höchstens drei je Person (`MAX_ABDRUECKE`, Migration 0029); Kennung `unbekannt` oder 32 Hexzeichen aus dem Namen | `Mikrofon`, `mikrofon_kennung`, `mikrofon_name`, `kennung_gueltig` |
 | `stimme_einwilligung.py` | Text und Version der Einwilligung (Art. 9 DSGVO): `stimme-1` (ein Abdruck), `stimme-2` (mit Schattenabdruck), `stimme-3` (je Mikrofon, verlangt, sobald Migration 0029 da ist) | `einwilligung_gilt`, `einwilligung_nachricht`, `schatten_erlaubt` |
 | `stimme_schatten.py` | zweites Sprechermodell, misst nur mit und entscheidet nie | `SchattenModell`, `SchattenPruefung`, `schatten_an` |
+| `mikrofon_kette.py` | Mikrofonkette im Protokoll: Die Oberfläche meldet nach jedem Wechsel der Aufnahmespur die Client-Nachricht `mikrofon_info` (Echo-, Rausch- und Verstärkungsschalter, Rate, Kanäle, grobe Klasse `eingebaut`, `headset`, `bluetooth` oder `unbekannt`). Der Kern prüft sie streng (nur diese sechs Felder, feste Grenzen, nie ein Gerätename, nie Audio), schreibt höchstens 50 Logzeilen `Mikrofonkette:` je Sitzung und hängt die Klasse an die Urteilszeilen der Stimmprüfung (`, Kette <klasse>`). Der Stand liegt nur im Arbeitsspeicher der Sitzung, Laborprofile dürfen die Nachricht nicht senden. | `Kette`, `StimmSitzung.mikrofon_info` |
 | `soft_interrupt.py` | weiche Unterbrechung, Echo-Erkennung, Innehalten | `SoftInterruptGate`, `MeaningfulWordsUserTurnStartStrategy`, `ist_echo` |
 | `wiedergabe.py`, `wiedergabe_tracker.py` | Ton anhalten und fortsetzen, tatsächlich gesprochene Wörter melden | `WiedergabeStart`, `halt_fuer`, `PlaybackTracker` |
 
@@ -200,6 +201,7 @@ Laborprofile (Profil mit `labor_art`) bekommen einen eigenen, engen Zweig: nur Z
 | `abnahme.py`, `abnahme_befehl.py`, `abnahme_remote.py` | prüfbares Ziel mit Runden, Allowlist für Befehlskriterien, Prüfung am Dispatcher | `parse_abnahme`, `RemoteAusfuehrer`, `DispatcherPing` |
 | `auftrag_entwuerfe.py` | Aufträge für später speichern (Tabelle `auftrag_entwuerfe`) | `DatenbankEntwuerfe`, Protokoll `EntwurfSpeicher` |
 | `github_zugang.py`, `github_zugang_api.py`, `github_auftrag.py`, `dev_agent_github.py` | persönlicher GitHub-Weg (Plan C): Zugang je Person, Einreichen erst nach Klick | `github_zugang_fuer`, `Aenderung` |
+| `selbstauftraege.py`, `dev_agent_selbst.py` | Aufträge an W.A.I.S. selbst: gemeinsamer Rückstand für Admins in der Tabelle `selbstauftraege` (Nummer `SA-n`, Migration 0030), nur Admins mit Datenbank, nie Mitglieder, nie Labor. Anlegen per Sprache (`selbstauftrag_speichern`, `selbstauftraege_zeigen`, `selbstauftrag_verwerfen`), Oberfläche (Client-Nachricht `selbstauftrag`) oder Claude Code (`scripts/wamo_selbstauftraege.py`). Der Kern führt nichts aus: Ein Eintrag ist ein Vorschlag und keine Anweisung, umgesetzt wird er nur nach dem ausdrücklichen Ja eines Admins. Nach Fremdinhalt wird er als `unsicher` markiert, Zugangswerte werden vor dem Speichern ersetzt, höchstens 30 neue Einträge je Person und Tag. Dass W.A.I.S. Einträge selbst umsetzt (`bearbeiter` `wais`), ist nicht gebaut. | `Selbstauftrag`, `DatenbankSelbstauftraege`, `SelbstWeg` |
 
 #### 4.9 Geräte, PC, Büro
 
@@ -283,7 +285,7 @@ Das Herunterfahren hat Fristen unter `TimeoutStopSec=20` der Unit (`voice-core/a
 
 ### 7. Tests und Messläufe
 
-- Tests liegen neben den Modulen (`voice-core/test_*.py`, 206 Dateien), Konfiguration in `voice-core/pyproject.toml` (`pytest`, `asyncio_mode = "auto"`). Aufruf im Ordner `voice-core/` mit `uv run pytest`.
+- Tests liegen neben den Modulen (`voice-core/test_*.py`, 209 Dateien), Konfiguration in `voice-core/pyproject.toml` (`pytest`, `asyncio_mode = "auto"`). Aufruf im Ordner `voice-core/` mit `uv run pytest`.
 - `voice-core/eval/` enthält den Testsatz für die Abnahme der Gesprächsmodelle (`eval/faelle.py`, 51 Gesprächszüge laut Modulbeschreibung), Messungen am Stream (`eval/messung.py`), Messläufe für die Modellkarte (`eval/modellkarte_messen.py`) und den Bericht über gespeicherte Läufe (`eval/bericht.py`). Teststrategie insgesamt: [Qualität und Tests](entwicklung.md#qualität-und-tests).
 
 ### Weiterführend
@@ -303,7 +305,7 @@ Das Herunterfahren hat Fristen unter `TimeoutStopSec=20` der Unit (`voice-core/a
 
 ### 1. Überblick
 
-Die Oberfläche ist eine Next.js-Anwendung (`next` 16.4.6, `react` 19.3.0, laut `ui/package.json`, Version 0.6.0). Sie ist die "Kommandozentrale" im WMC-Corporate-Design: ein Präsenzkern, Live-Untertitel, Stimmlinie, Zeitleiste der Werkzeuge, Canvas, Freigabekarten und die Einstellungen. Sprachverbindung zum Kern über den Pipecat-Client (`@pipecat-ai/client-js`) mit `@pipecat-ai/small-webrtc-transport`, Anmeldung über `@supabase/supabase-js`, Diagramme über `mermaid`.
+Die Oberfläche ist eine Next.js-Anwendung (`next` 16.4.6, `react` 19.3.0, laut `ui/package.json`, Version 0.7.0). Sie ist die "Kommandozentrale" im WMC-Corporate-Design: ein Präsenzkern, Live-Untertitel, Stimmlinie, Zeitleiste der Werkzeuge, Canvas, Freigabekarten und die Einstellungen. Sprachverbindung zum Kern über den Pipecat-Client (`@pipecat-ai/client-js`) mit `@pipecat-ai/small-webrtc-transport`, Anmeldung über `@supabase/supabase-js`, Diagramme über `mermaid`.
 
 Dieselbe Oberfläche läuft an drei Orten:
 
@@ -357,7 +359,8 @@ Die Einstellungen sind keine eigene Route. Der Hash (`#einstellungen`, `#einstel
 | `ui/src/lib/erstanmeldung.ts` | Reine Logik der Erstanmeldung: Stand `keine`, `offen`, `abgelaufen`, `erledigt` von `GET /wamo/api/erstanmeldung`. Jede andere Antwort heißt `keine`, durchgesetzt wird im Kern. Passwörter stehen nie in Meldungen oder Speichern. |
 | `ui/src/components/erstanmeldung/` | Geführter Ablauf: `Erstanmeldung.tsx` (Leiste der Schritte), `schritte.tsx` (Liste `ERSTANMELDUNG_SCHRITTE`), `PasswortSchritt.tsx`, `typen.ts`. Merker im `sessionStorage` (`wamo-erstanmeldung-<user_id>`). |
 | `ui/src/components/einrichtung/` | Geführte Einrichtung beim Ausrollen: `EinrichtungsAblauf.tsx`, Schritte Token, API-Schlüssel, Zusammenfassung, Installer (`InstallerDownload.tsx`), Anbindung `fuerErstanmeldung.tsx`. |
-| `ui/src/lib/einrichtung.ts`, `einrichtungSchritte.ts`, `installer.ts`, `installerApi.ts` | Prüfliste (`GET /wamo/api/einrichtung/stand`), Schritteliste, Installer-Download, Updates der App über die Brücke. |
+| `ui/src/lib/einrichtung.ts`, `einrichtungSchritte.ts`, `installer.ts`, `installerApi.ts` | Prüfliste (`GET /wamo/api/einrichtung/stand`), Schritteliste, Installer-Download. In `einrichtung.ts` liegen auch die Bausteine für das Update der App über die Brücke (`updateStandLaden`, `updateInstallieren`), die der Abschnitt Updates und das Pop-up nutzen. |
+| `ui/src/lib/updates.ts`, `updatesStore.ts`, `updateHinweis.ts`, `ui/src/components/einstellungen/Updates.tsx`, `useUpdates.ts`, `useSperre.ts`, `Zeichen.tsx` | Updates der Desktop-App: reine Logik der Ansicht (Zustand, Titel, Satz, Angebot), der gemeinsame Speicher (Stand, Suche, Installation), Logik des Pop-ups, Abschnitt Updates der Einstellungen, Sperre "einmal je 10 Sekunden" und das Zeichen vor einem Zustand (Haken, Ausrufezeichen, Hinweis, Pfeil, Punkte). |
 
 ### 5. Kommandozentrale (Hauptansicht)
 
@@ -366,6 +369,7 @@ Die Hauptansicht setzt `components/WamoAnsicht.tsx` zusammen, den Rahmen mit Rei
 | Pfad (unter `ui/src/components/`) | Aufgabe |
 |---|---|
 | `WamoAnsicht.tsx`, `kommando/Rahmen.tsx`, `kommando/Reiter.tsx` | Zusammenbau, Reiter, Hauptschaltfläche |
+| `UpdateHinweis.tsx` | Pop-up "Update verfügbar" (schwebende Karte unten rechts, am Handy unten über die Breite), eingehängt in `WamoAnsicht.tsx`, nur in der Desktop-App und nie in der Laborsicht. Siehe Abschnitt 7 und 3.4. |
 | `Kopfzeile.tsx`, `Statusleiste.tsx`, `ProfilChip.tsx`, `kommando/Statusanzeige.tsx`, `kommando/ZentraleStatus.tsx` | Wortmarke, Profil, Verbindung, Betriebsart, Modelle, PC-Host, Mikrofon, Uhrzeit, Zahnrad zu den Einstellungen |
 | `kommando/PraesenzKern.tsx`, `Orb.tsx`, `kommando/KernRinge.tsx`, `kommando/Kernbereich.tsx` | Lichtkugel (WebGL, ein Fragment-Shader) in HUD-Ringen (SVG). Fehlt WebGL, zeigt das Stylesheet eine Kugel aus einem Farbverlauf. |
 | `VoiceLine.tsx`, `kommando/Gespraech.tsx`, `LiveCaption.tsx`, `Verlauf.tsx` | Stimmlinie, Block Gespräch, Live-Untertitel, Verlauf (`role="log"`, nur fertige Züge) |
@@ -388,29 +392,44 @@ Die Hauptansicht setzt `components/WamoAnsicht.tsx` zusammen, den Rahmen mit Rei
 | `ui/src/components/DateiHinweis.tsx` | Hinweis nach dem Speichern einer Datei am PC (Pfad, "Im Ordner zeigen") |
 | `ui/src/components/MailFormular.tsx`, `MailVersand.tsx`, `TeamsFormular.tsx`, `JiraStory.tsx`, `ui/src/lib/mail.ts`, `teams.ts`, `jiraStory.ts` | Mail über Outlook, Teams-Nachricht, User Story in Jira: jeweils vorbereiten, Karte freigeben lassen |
 | `ui/src/components/GespeicherteAuftraege.tsx`, `ui/src/lib/auftragEntwuerfe.ts`, `auftragStart.ts`, `auftragFrist.ts`, `auftragAbnahme.ts`, `einreichen.ts` | Entwicklungsaufträge: starten, für später speichern, Frist, Abnahme, Einreichen mit eigenem GitHub-Token (nur per Klick) |
+| `ui/src/components/SelbstAuftraege.tsx`, `ui/src/lib/selbstAuftraege.ts` | Aufträge an W.A.I.S. selbst: Liste des gemeinsamen Rückstands, Anlegen, Verwerfen und Wieder-Öffnen (Reiter Aufträge der Hauptansicht, `WamoAnsicht.tsx`). Nur für Admins, nie in der Laborsicht. Die Stände "in Arbeit" und "erledigt" setzt diese Seite nie. |
 | `ui/src/components/Teilen.tsx`, `Geteilt.tsx`, `Scans.tsx`, `ui/src/lib/teilenHilfe.ts` | Arbeit teilen, geteilte Arbeit, Scans und NAS-Dateien |
 
 ### 7. Einstellungen
 
-Die Ansicht liegt in `ui/src/components/einstellungen/`, die Gliederung in `ui/src/lib/einstellungenAbschnitte.ts` (`ABSCHNITTE`). Wer welchen Abschnitt sieht, bestimmt `nurAdmin`, `auchMitToken` und `laborSicht` dort. Die Rolle kommt vom Kern, der sie noch einmal prüft.
+Die Ansicht liegt in `ui/src/components/einstellungen/`, die Gliederung in `ui/src/lib/einstellungenAbschnitte.ts` (`GRUPPEN`, `ABSCHNITTE`). Seit 0.7.0 ordnen sechs Gruppen die Seite, jede Gruppe zeigt ihre Abschnitte untereinander. Wer welchen Abschnitt sieht, bestimmt `nurAdmin`, `auchMitToken` und `laborSicht` dort. Die Rolle kommt vom Kern, der sie noch einmal prüft. Eine Gruppe erscheint, sobald ein Abschnitt für die Rolle sichtbar ist: Mitglieder sehen fünf Gruppen (ohne Verwaltung), die Laborsicht genau eine.
 
-| Abschnitt (ID) | Titel | Sichtbar | Komponente oder Logik |
-|---|---|---|---|
-| `konto` | Konto und Profil | alle | `KontoAbschnitt` in `Abschnitte.tsx` |
-| `start` | Erste Schritte | alle, nie in der Laborsicht | `ErsteSchritte.tsx`, `einrichtung/` |
-| `modellzugang` | Modellzugang | alle | `ModellZugang.tsx` mit `ModellWahl.tsx`, `ModellAuswahl.tsx`, `SprachWahl.tsx`, `SchluesselFormular.tsx` |
-| `github` | GitHub-Zugang | alle (der Kern sagt, ob erlaubt) | `GithubZugang.tsx`, `lib/githubZugang.ts` |
-| `verbrauch` | Verbrauch | Admins und Profile mit eigenem Claude-Code-Token | `Verbrauch.tsx`, `lib/verbrauch.ts` |
-| `sprache` | Sprache und Ton | alle, auch Laborsicht (nur Mikrofon) | `SpracheAbschnitt` in `Abschnitte.tsx`, `MikrofonTest.tsx` (Mikrofontest in Sprache und Ton ohne W.A.I.S., Ergebnis je Gerät und Person im Browser), `SprachWahl.tsx` |
-| `stimme` | Stimme | alle | `StimmeAbschnitt.tsx`: Liste der eingelernten Mikrofone (ein Abdruck je Mikrofon, höchstens drei), Einlernen, Löschen einzeln oder alle |
-| `gedaechtnis` | Gedächtnis | nur Admins | `Gedaechtnis.tsx`, `lib/gedaechtnis.ts` |
-| `mitglieder` | Neue Mitglieder | nur Admins | `NeueMitglieder.tsx`, `GithubRechte.tsx`, `lib/mitgliederUebersicht.ts` |
-| `darstellung` | Darstellung | alle | `DarstellungAbschnitt` in `Abschnitte.tsx`, `kommando/darstellung.ts` |
-| `geraete` | Geräte und PC | alle | `Geraete.tsx`, `GeraeteVerwaltung.tsx` |
-| `fernzugriff` | Fernzugriff | nur Admins | `Fernzugriff.tsx`, `lib/fernzugriff.ts` |
-| `aenderungen` | Änderungen | nur Admins | `Aenderungen.tsx`, `AenderungenFreigabe.tsx`, `lib/aenderungen.ts` |
-| `teilen` | Teilen | alle | `Geteilt.tsx` (Block "Geteilte Arbeit") |
-| `info` | Info | alle | `InfoAbschnitt` in `Abschnitte.tsx` (Version aus `WAMO_VERSION`) |
+Die Adresse steht im Hash. Gruppen und Abschnitte haben getrennte Kennungen (`allgemein`, `sprache-stimme`, `zugaenge`, `geraete-pc`, `inhalte`, `verwaltung` für die Gruppen). Eine Abschnittskennung wie `#einstellungen/stimme` öffnet die Gruppe des Abschnitts und springt zu ihm, eine Gruppenkennung öffnet die Gruppe am Anfang. Im Hash steht nur eine Kennung aus den festen Listen, nie ein Wert aus dem Formular.
+
+| Gruppe (ID) | Abschnitt (ID) | Titel | Sichtbar | Komponente oder Logik |
+|---|---|---|---|---|
+| Konto und Allgemeines (`allgemein`) | `konto` | Konto | alle | `KontoAbschnitt` in `Abschnitte.tsx` |
+| | `start` | Erste Schritte | alle, nie in der Laborsicht | `ErsteSchritte.tsx`, `einrichtung/` (Modellzugang, Installer und Prüfliste). Die Zeile "App-Version" der Prüfliste hat keinen Installier-Knopf mehr, sie verweist nur auf den Abschnitt Updates. |
+| | `darstellung` | Darstellung | alle | `DarstellungAbschnitt` in `Abschnitte.tsx`, `kommando/darstellung.ts` |
+| | `updates` | Updates | alle, nie in der Laborsicht | `Updates.tsx` (`UpdatesAbschnitt`), `useUpdates.ts`, `lib/updates.ts`, `lib/updatesStore.ts`. In der Desktop-App: installierte Version, Version auf dem Server, Zustand mit Zeichen, Titel und Satz, "Update installieren" (nur nach Bestätigung durch die App) und "Nach Updates suchen". Im Browser: ein Satz, dass die Desktop-App selbst aktualisiert, und der Installer für Windows. |
+| | `info` | Info | alle | `InfoAbschnitt` in `Abschnitte.tsx` (Zeile "Version der Oberfläche" aus `WAMO_VERSION`, auch im Browser; die installierte App steht im Abschnitt Updates) |
+| Sprache und Stimme (`sprache-stimme`) | `sprache` | Mikrofon und Sprache | alle, auch Laborsicht (dort nur Mikrofon wählen) | `SpracheAbschnitt` in `Abschnitte.tsx`, `MikrofonTest.tsx` (Mikrofontest in Sprache und Ton ohne W.A.I.S., Ergebnis je Gerät und Person im Browser), `SprachWahl.tsx` |
+| | `stimme` | Eigene Stimme | alle | `StimmeAbschnitt.tsx`: Liste der eingelernten Mikrofone (ein Abdruck je Mikrofon, höchstens drei), Einlernen, Löschen einzeln oder alle |
+| Modelle und Zugänge (`zugaenge`) | `modellzugang` | Modellzugang | alle | `ModellZugang.tsx` mit `ModellWahl.tsx`, `ModellAuswahl.tsx`, `SprachWahl.tsx`, `SchluesselFormular.tsx` |
+| | `github` | GitHub-Zugang | alle (der Kern sagt, ob erlaubt) | `GithubZugang.tsx`, `lib/githubZugang.ts` |
+| | `verbrauch` | Verbrauch | Admins und Profile mit eigenem Claude-Code-Token | `Verbrauch.tsx`, `lib/verbrauch.ts` |
+| Geräte und PC (`geraete-pc`) | `geraete` | Geräte und PC-Steuerung | alle | `Geraete.tsx`, `GeraeteVerwaltung.tsx` |
+| | `fernzugriff` | Fernzugriff | nur Admins | `Fernzugriff.tsx`, `lib/fernzugriff.ts` |
+| Gedächtnis und Teilen (`inhalte`) | `gedaechtnis` | Gedächtnis | nur Admins | `Gedaechtnis.tsx`, `lib/gedaechtnis.ts` |
+| | `teilen` | Teilen | alle | `Geteilt.tsx` (Block "Geteilte Arbeit") |
+| Verwaltung (`verwaltung`) | `mitglieder` | Neue Mitglieder | nur Admins | `NeueMitglieder.tsx`, `GithubRechte.tsx`, `lib/mitgliederUebersicht.ts` |
+| | `aenderungen` | Änderungen | nur Admins | `Aenderungen.tsx`, `AenderungenFreigabe.tsx`, `lib/aenderungen.ts` |
+
+Der Abschnitt `updates` (Updates der Desktop-App suchen und installieren) steht in der Gruppe Konto und Allgemeines vor `info`. Er kam mit dem Pull Request 237 und ist zum Stand dieser Dokumentation noch nicht in `main`. Vorher war das Update nur ein Punkt der Prüfliste in "Erste Schritte".
+
+Stand, Suche und Installation liegen in einem gemeinsamen Speicher des Fensters (`ui/src/lib/updatesStore.ts`). Ihn teilen sich der Abschnitt Updates und das Pop-up `UpdateHinweis` (`ui/src/components/UpdateHinweis.tsx`), damit es nur eine Quelle, höchstens eine Suche und höchstens eine Installation zugleich gibt. Ablauf und Schutzregeln:
+
+- Eine Brücke gibt es nur in der Desktop-App (`window.wamoDesktop.update`). Die Oberfläche holt das signierte Manifest beim Kern und reicht es nur an die App weiter, sie liest es nie selbst. Ein Angebot gibt es erst, wenn die App Signatur und steigende Version bestätigt hat (`angebotAus` in `lib/updates.ts`).
+- Das Token holt erst der Klick auf "Update installieren" und es geht nur an die App. Es steht in keinem Zustand, in keinem Satz und in keinem Speicher.
+- Nach einem gestarteten Update läuft nichts mehr: keine weitere Suche, keine zweite Installation, denn die App beendet sich. Eine neue Suche löscht den Fehler der letzten Installation. "Nach Updates suchen" geht einmal je 10 Sekunden.
+- Das Pop-up "Update verfügbar" hängt in `WamoAnsicht.tsx`, nur in der Desktop-App, nur mit angemeldetem Profil und nie in der Laborsicht. Es nimmt keinen Fokus, öffnet keinen Dialog und hält keinen Ton an. Läuft ein Gespräch, sagt der Satz, dass das Update es beendet. Im Abschnitt Updates selbst erscheint keine zweite Karte.
+- Prüftakt des Pop-ups: beim Start, danach alle 30 Minuten (der Takt überspringt eine Prüfung, wenn die letzte jünger als 15 Minuten ist) und bei Rückkehr ins Fenster, wenn die letzte Prüfung älter als 10 Minuten ist. Eine Störung bei einer Prüfung im Hintergrund lässt ein bestätigtes Angebot nicht verschwinden.
+- "Später" blendet das Pop-up für diese Version aus. Gemerkt wird es je Profil im `localStorage` (Schlüssel `wamo.update.spaeter.<user_id>`, ein Eintrag mit Version, Zeitpunkt und Kennung des App-Starts). Dieselbe Version erscheint erst nach dem nächsten Start der App oder nach 24 Stunden wieder, eine neuere sofort. Fehlt der Speicher oder wirft er, gilt ein Rückfall im Arbeitsspeicher und das Pop-up erscheint nach dem nächsten Start wieder.
 
 ### 8. Logik unter `ui/src/lib/` nach Themen
 
@@ -419,7 +438,7 @@ Reine Logik liegt in `.ts`-Dateien ohne React, damit sie unter `node:test` prüf
 | Thema | Dateien | Aufgabe |
 |---|---|---|
 | Gespräch und Ton | `gespraech.ts`, `untertitel.ts`, `weicherStopp.ts`, `stillStart.ts`, `useStillStart.ts`, `pegelWarnung.ts`, `mikrofon.ts`, `mikrofonTest.ts` | Zeilen, Untertitel, Verhalten beim Unterbrechen, stiller Start beim Tippen, Mikrofon und Test |
-| Stimme | `stimme.ts`, `stimmFilter.ts`, `stimmMikrofon.ts`, `mikrofonTest.ts`, `stimmfarben.ts`, `sprachwahl.ts` | Stimmabdruck, Sätze erst nach dem Urteil zeigen, Liste der Mikrofone der Abdrücke und Hinweis "Für dieses Mikrofon einlernen" (Name des Mikrofons nur im Browser, Schlüssel `wamo.stimme.mikrofon.<user_id>`), Mikrofontest (Schlüssel `wamo.mikrofontest.<user_id>`), Farben, Wahl Soniox oder Haus |
+| Stimme | `stimme.ts`, `stimmFilter.ts`, `stimmMikrofon.ts`, `mikrofonTest.ts`, `mikrofonKette.ts`, `stimmfarben.ts`, `sprachwahl.ts` | Stimmabdruck, Sätze erst nach dem Urteil zeigen (nur im Modus `streng`), Mikrofonkette (nach jedem Spurwechsel eine Nachricht `mikrofon_info` mit Schaltern, Rate, Kanälen und grober Klasse, nie ein Gerätename), Liste der Mikrofone der Abdrücke und Hinweis "Für dieses Mikrofon einlernen" (Name des Mikrofons nur im Browser, Schlüssel `wamo.stimme.mikrofon.<user_id>`), Mikrofontest (Schlüssel `wamo.mikrofontest.<user_id>`), Farben, Wahl Soniox oder Haus |
 | Modelle | `modellauswahl.ts`, `modellwahl.ts`, `modellKurz.ts`, `modellzugangApi.ts`, `modellzugangHilfe.ts`, `schluesselhilfe.ts` | Wahl je Bereich, Zugang, Hilfetexte |
 | Geräte und PC | `geraeteApi.ts`, `geraeteVerwaltung.ts`, `geraeteAnzeige.ts`, `geraeteMedien.ts`, `pcSchalter.ts`, `usePcSchalter.ts`, `liveBild.ts`, `bueroApi.ts`, `fernzugriff.ts`, `fernzugriffApi.ts` | Geräteliste, PC-Steuerung, Live-Bild, Büro-Karte, Fernzugriff |
 | Labor | `laborPlatz.ts`, `laborKarte.ts`, `laborNeuladen.ts` | Laborsicht (Laborkonten), Karten, Neuladen |
@@ -463,8 +482,8 @@ In der Desktop-App gibt es `window.wamoDesktop` (Typ in `ui/src/lib/useWamo.ts`)
 | `npm run dev` | Entwicklungsserver |
 | `npm run build`, `npm start` | Produktions-Build und Start |
 | `npm run lint` | ESLint 9 mit `eslint-config-next` |
-| `npm test` | Logiktests: `node --test "src/**/*.test.ts"` (Node lädt TypeScript selbst, kein DOM). 86 Dateien. |
-| `npm run test:komponenten` | `vitest run` in jsdom für `*.comp.test.tsx` (Testing Library, user-event). 66 Dateien. |
+| `npm test` | Logiktests: `node --test "src/**/*.test.ts"` (Node lädt TypeScript selbst, kein DOM). 90 Dateien (mit Pull Request 237). |
+| `npm run test:komponenten` | `vitest run` in jsdom für `*.comp.test.tsx` (Testing Library, user-event). 73 Dateien (mit Pull Request 237). |
 
 Zwei getrennte Systeme, damit sich beide nicht stören (Begründung im Kopf von `ui/vitest.config.ts`). Testdateien liegen neben dem Code und gehören nie zum Build. Strategie insgesamt: [Qualität und Tests](entwicklung.md#qualität-und-tests).
 
@@ -508,7 +527,7 @@ Zwei Betriebsarten, beide am selben Host:
 
 #### 2.1 Aufbau
 
-Python-Paket `wamo-host` (Version 0.6.0, `host/pyproject.toml`), Abhängigkeiten laut Datei: `mcp` (MCP-SDK, Version 1.x), `mss`, `pillow`, `pywin32` und `comtypes` (nur Windows), `python-docx`, `openpyxl`, `python-pptx`. Der Server heißt in FastMCP `wamo-host` (`FastMCP("wamo-host", ...)` in `wamo_host.py`). Start: `wamo_host.py --stdio` oder `--http`, ohne Argument bricht er mit einer Aufrufhilfe ab.
+Python-Paket `wamo-host` (Version 0.7.0, `host/pyproject.toml`), Abhängigkeiten laut Datei: `mcp` (MCP-SDK, Version 1.x), `mss`, `pillow`, `pywin32` und `comtypes` (nur Windows), `python-docx`, `openpyxl`, `python-pptx`. Der Server heißt in FastMCP `wamo-host` (`FastMCP("wamo-host", ...)` in `wamo_host.py`). Start: `wamo_host.py --stdio` oder `--http`, ohne Argument bricht er mit einer Aufrufhilfe ab.
 
 | Datei | Aufgabe |
 |---|---|
@@ -610,7 +629,7 @@ Die Gegenseite in der App ist `desktop/livebild.js`, im Kern `voice-core/bildstr
 
 #### 3.1 Aufbau
 
-Electron 44 (`desktop/package.json`, Paket `wamo-desktop`, Version 0.6.0), gebaut mit `electron-builder` 26 als NSIS-Installer pro Benutzer ohne Administratorrechte (`oneClick`, `perMachine: false`, `allowElevation: false`). App-Kennung `de.wamocon.wamo`, Produktname "W.A.I.S.", Artefakt `WAIS-Setup-<Version>.exe`. Alle Module außer `main.js` und den Preload-Dateien sind reine Node-Module ohne `electron`-Import und deshalb mit `node --test` prüfbar (17 Testdateien).
+Electron 44 (`desktop/package.json`, Paket `wamo-desktop`, Version 0.7.0), gebaut mit `electron-builder` 26 als NSIS-Installer pro Benutzer ohne Administratorrechte (`oneClick`, `perMachine: false`, `allowElevation: false`). App-Kennung `de.wamocon.wamo`, Produktname "W.A.I.S.", Artefakt `WAIS-Setup-<Version>.exe`. Alle Module außer `main.js` und den Preload-Dateien sind reine Node-Module ohne `electron`-Import und deshalb mit `node --test` prüfbar (17 Testdateien).
 
 | Datei | Aufgabe |
 |---|---|
@@ -665,7 +684,7 @@ Das Live-Bild lässt sich ausdrücklich nicht über die Brücke schalten: nur Tr
 
 `desktop/update.js` (nur installierte App):
 
-1. Die Oberfläche holt beim Kern das Manifest (`GET /wamo/api/installer`) und gibt Text und Signatur an die App.
+1. Die Oberfläche holt beim Kern das Manifest (`GET /wamo/api/installer`) und gibt Text und Signatur an die App. Das geschieht im Abschnitt Updates der Einstellungen und im Pop-up "Update verfügbar" (Abschnitt 7 der Oberfläche), nicht mehr in der Prüfliste der Ersten Schritte.
 2. Die App vertraut dem Kern nicht. Sie prüft die Ed25519-Signatur über die exakten Bytes des Manifests gegen die fest eingebauten öffentlichen Schlüssel (`desktop/update-schluessel.json`), erst danach liest sie das JSON.
 3. Ein Update gibt es nur bei streng steigender Version, nach einer Rückfrage im Hauptprozess, über eine Verbindung, deren Kette vor dem ersten gesendeten Byte zur WAMO-CA geprüft ist, und nur, wenn Größe und SHA-256 der geladenen Datei genau zum signierten Manifest passen. Dann startet der Installer.
 4. Manifest `aktuell.json`: genau die Felder `v` (1), `produkt` (`wais-desktop`), `version`, `datei`, `groesse`, `sha256`, `bauzeit`, `commit`; höchstens 4 KB, UTF-8 ohne BOM. Signatur `aktuell.json.sig`: eine Zeile Base64 über 64 Byte.
@@ -734,7 +753,7 @@ Jede REA-Aussage trägt eine Evidence-Kennung. Beobachtung, Ableitung und Unbeka
 | SHA-256 der Programmdatei | `97e4dd60c643482e2acc50a7f54f00d7a788591b30a93a2524c826f7ce9ae9d4` |
 | Anwendungsarchiv | `resources/app.asar` |
 | SHA-256 des Archivs | `3962bf4c576e4447e2ef81b114386725c2e368d4e5f6624e22b7d1f00b2a25d8` |
-| Version in `package.json` des Archivs | 0.6.0, gleich `desktop/package.json` im Repo |
+| Version in `package.json` des Archivs | 0.6.0, der damals analysierte Stand. `desktop/package.json` im Repo steht seit dem Release auf 0.7.0, die Befunde dieses Kapitels sind für 0.7.0 nicht neu erhoben |
 | Evidence Fuses | `ev_be93c9ebee6928ac2d00034d419053f72c7eed64e8d83a03ab42a9e0d1e0e2c5` |
 | Evidence Analyse (Elternbefund) | `ev_b145597f1fe24d6012ccebc3cb220fcc0f8cf1c14660562155c74a369f6c2410` |
 
@@ -853,7 +872,7 @@ REA überschreibt kein vorhandenes Bündel, der zweite Befehl braucht einen neue
 | Zweck | Beschreibt die Postgres-Datenbank von W.A.I.S.: Schemas, Tabellen je Migration, Rollen und Rechte, Trigger und Funktionen, Aufbewahrungsregeln und die Regeln für Migrationen. |
 | Zielgruppe | Entwicklerinnen und Entwickler, Datenbankprüfer, Administratoren. |
 | Dokumentart | Referenz mit Erklärung |
-| Quellen | `supabase/migrations/` (Dateien `0001` bis `0003` und `0010` bis `0029`), `supabase/tests/`, `infra/sokrates2/supabase-wamo/wamo_auth.sql`, `scripts/render-migration.sh`, `scripts/wamo_db_rolle.py`, `scripts/wamo_dienst_db.py`, `CLAUDE.md` |
+| Quellen | `supabase/migrations/` (Dateien `0001` bis `0003` und `0010` bis `0030`), `supabase/tests/`, `infra/sokrates2/supabase-wamo/wamo_auth.sql`, `scripts/render-migration.sh`, `scripts/wamo_db_rolle.py`, `scripts/wamo_dienst_db.py`, `CLAUDE.md` |
 
 Dieses Dokument nennt nur Aufbau, Namen und Regeln. Zugangsdaten, Schlüssel und Inhalte von Datensätzen stehen nirgends, auch nicht gekürzt.
 
@@ -960,11 +979,11 @@ erDiagram
   }
 ```
 
-Hinweis zum Diagramm: In `0001` verweisen `user_id` von `profiles`, `sessions`, `speakers`, `memories`, `actions` und `canvas_items` auf `auth.users(id)`. Ab `0002` verweist `devices.user_id` auf `profiles(user_id)`. Neuere Tabellen (`model_access`, `vorgaenge`, `dateien`, `teilungen`, `auftrag_entwuerfe`, `github_zugang`) verweisen bewusst auf `profiles(user_id)`, nicht auf `auth.users`, damit die Tabelle der Anmeldung nicht gesperrt wird und GoTrue nicht staut (Kommentar in `0017` und `0026`).
+Hinweis zum Diagramm: In `0001` verweisen `user_id` von `profiles`, `sessions`, `speakers`, `memories`, `actions` und `canvas_items` auf `auth.users(id)`. Ab `0002` verweist `devices.user_id` auf `profiles(user_id)`. Neuere Tabellen (`model_access`, `vorgaenge`, `dateien`, `teilungen`, `auftrag_entwuerfe`, `github_zugang`, `selbstauftraege`) verweisen bewusst auf `profiles(user_id)`, nicht auf `auth.users`, damit die Tabelle der Anmeldung nicht gesperrt wird und GoTrue nicht staut (Kommentar in `0017` und `0026`).
 
 ### 5. Tabellen je Migration
 
-Die Nummern `0004` bis `0009` fehlen im Verzeichnis. Als Beobachtung: Der Kommentar in `0010_modellzugang.sql` sagt, die Nummern `0002` bis `0009` gehörten anderen Strängen (Geräte, Teilen). Ein weiterer Beleg für die Lücke steht nicht im Repo. Insgesamt gibt es 23 Migrationen mit je einer `.down.sql`. SQL-Tests in `supabase/tests/` gibt es zu `0002`, `0003`, `0011`, `0013` bis `0015` und `0017` bis `0029`; zu `0001`, `0010`, `0012` und `0016` liegt dort keine Testdatei.
+Die Nummern `0004` bis `0009` fehlen im Verzeichnis. Als Beobachtung: Der Kommentar in `0010_modellzugang.sql` sagt, die Nummern `0002` bis `0009` gehörten anderen Strängen (Geräte, Teilen). Ein weiterer Beleg für die Lücke steht nicht im Repo. Insgesamt gibt es 24 Migrationen mit je einer `.down.sql`. SQL-Tests in `supabase/tests/` gibt es zu `0002`, `0003`, `0011`, `0013` bis `0015` und `0017` bis `0030`; zu `0001`, `0010`, `0012` und `0016` liegt dort keine Testdatei.
 
 | Nr. | Datei | Zweck in einer Zeile | Neue Tabellen |
 |---|---|---|---|
@@ -991,8 +1010,9 @@ Die Nummern `0004` bis `0009` fehlen im Verzeichnis. Als Beobachtung: Der Kommen
 | 0027 | `0027_github_zugang` | Persönliche GitHub-Zugänge für Entwicklungsaufträge, Rechte je Person | `github_zugang`, `github_rechte` |
 | 0028 | `0028_stimme_schatten` | Abdruck des zweiten Sprechermodells im Schattenbetrieb | Spalten `voiceprint_shadow`, `shadow_model` |
 | 0029 | `0029_stimme_mikrofone` | Ein Stimmabdruck je Mikrofon, höchstens drei je Person | Spalten `mikrofon`, `mikrofon_name`, Trigger `speakers_mikrofon_grenze` |
+| 0030 | `0030_selbstauftraege` | Rückstand an Aufträgen an W.A.I.S. selbst, gemeinsam für Admins, Nummer `SA-n` | `selbstauftraege` |
 
-Reihenfolgen und Abhängigkeiten stehen im Kopf jeder Datei (zum Beispiel "0010 danach nie erneut anwenden" in `0011` und `0023`, weil ihr `revoke all` die Spaltenrechte der späteren Migrationen zurücknähme; `0018` vor dem Kern-Release, `0020` vor dem Kern mit `gedaechtnis_api.py`, `0029` nach dem Kern mit dem neuen Stand).
+Reihenfolgen und Abhängigkeiten stehen im Kopf jeder Datei (zum Beispiel "0010 danach nie erneut anwenden" in `0011` und `0023`, weil ihr `revoke all` die Spaltenrechte der späteren Migrationen zurücknähme; `0018` vor dem Kern-Release, `0020` vor dem Kern mit `gedaechtnis_api.py`, `0029` nach dem Kern mit dem neuen Stand, `0030` hängt nur von `0001` ab und braucht vor dem Anwenden in `wamo_prod` die ausdrückliche Freigabe und den Agenten `database-reviewer`).
 
 ### 6. Wichtige Tabellen im Detail
 
@@ -1013,6 +1033,7 @@ Reihenfolgen und Abhängigkeiten stehen im Kopf jeder Datei (zum Beispiel "0010 
 | `vorgaenge` | Eine Zeile je Boss-Aufgabe oder Entwicklungsauftrag, `daten` hält den letzten Stand (höchstens 256 KB). | `0017` |
 | `auftrag_entwuerfe` | Gespeicherte Auftragskarten: Projekt, Art, Repo, Text (1 bis 4000 Zeichen), höchstens 5 Kriterien, Runden 1 bis 5, Zeitlimit 1 bis 60 Minuten. Nie ein Zugang. | `0026` |
 | `github_zugang`, `github_rechte` | Persönliches GitHub-Token als Chiffrat (Art `fein` oder `klassisch`, Ablauf, geprüfter Login), Scope-Ausnahmen je Person durch Admins. Nie für Laborprofile. | `0027` |
+| `selbstauftraege` | Gemeinsamer Rückstand für Admins: fortlaufende Nummer `nr` (Anzeige `SA-n`), Titel (1 bis 80 Zeichen), Beschreibung (1 bis 4000), Art, höchstens 5 Abnahmekriterien, Priorität 1 bis 3, Stand `offen`, `in_arbeit`, `erledigt` oder `verworfen`, Quelle (`sprache`, `oberflaeche`, `claude_code`), `unsicher` (Eintrag entstand nach Fremdinhalt), Bearbeiter (`claude_code` oder `wais`) und Ergebnis. Ein Eintrag ist ein Vorschlag, keine Anweisung. `wamo_core` darf lesen und einfügen, aber nicht ändern und nichts entfernen. Den Stand ändert der Kern nur über zwei Funktionen. | `0030` |
 | `wamo_auth.erstanmeldungen` | Merker je Konto (`start_hash` ist ein SHA-256 des Hashes), Frist höchstens 168 Stunden. | `wamo_auth.sql` |
 
 ### 7. Funktionen und Trigger (Auswahl)
@@ -1036,6 +1057,8 @@ Reihenfolgen und Abhängigkeiten stehen im Kopf jeder Datei (zum Beispiel "0010 
 | `auftrag_entwuerfe_grenze` | Trigger | höchstens 50 Entwürfe je Person (Sperre je Person) | `0026` |
 | `github_zugang_guard`, `github_rechte_guard` | Trigger | Form und Grenzen der Token-Angaben und der Rechte | `0027` |
 | `speakers_schatten_verwerfen`, `speakers_mikrofon_grenze` | Trigger | Schatten nur mit passender Einwilligung, höchstens drei Mikrofone je Person, Kennung nicht änderbar | `0028`, `0029` |
+| `selbstauftraege_grenze`, `selbstauftraege_status` | Trigger | höchstens 200 Einträge mit Stand `offen` oder `in_arbeit` (auch beim Wiedereröffnen, unter einer Sperre), nur feste Übergänge des Standes | `0030` |
+| `selbstauftrag_verwerfen`, `selbstauftrag_oeffnen` | Funktionen (`SECURITY DEFINER`, leerer `search_path`, nur `wamo_core`) | einzige Wege des Kerns, den Stand zu ändern: `offen` oder `in_arbeit` nach `verworfen`, `verworfen` nach `offen`. `in_arbeit` und `erledigt` setzt allein der Bearbeiter über die Datenbank. | `0030` |
 | `wamo_auth.erstanmeldung_stand`, `erstanmeldung_begonnen` | Funktionen | einzige Funktionen, die `wamo_core` ausführen darf | `wamo_auth.sql` |
 | `wamo_auth.erstanmeldung_anlegen`, `erstanmeldung_uebersicht`, `passwort_geaendert` | Funktion, Trigger | nur `postgres`; der Trigger auf `auth.users` setzt "erledigt" beim Passwortwechsel und blockiert GoTrue nie | `wamo_auth.sql` |
 
@@ -1054,6 +1077,7 @@ Stände (`erstanmeldung_stand`): `keine` (kein Merker, zum Beispiel Konten von v
 | Geräte | Widerruf ist endgültig; Tunnelplätze werden nach dem Widerruf mindestens eine Stunde nicht neu vergeben; die Verwaltungsliste zeigt Widerrufene 90 Tage lang | `0002`, `0014` |
 | Vorgänge | kein `delete`; nach 24 Stunden gilt ein offener Vorgang als abgebrochen, 30 Tage nach dem Ende wird der Stand geleert, die Zeile bleibt als Spur | `0017` |
 | Auftragsentwürfe | höchstens 50 je Person, Aufbewahrung 90 Tage, der Kern löscht ältere höchstens einmal je Stunde und Prozess | `0026` |
+| Aufträge an W.A.I.S. selbst | werden nie gelöscht: Verwerfen und Erledigen sind Stände, der Verlauf bleibt. Wird das Profil des Erstellers gelöscht, bleibt der Eintrag erhalten (Verweis auf `NULL` gesetzt), denn der Rückstand gehört W.A.I.S. Eine Ausnahme in `voice-core/labor_loeschliste.py` hält fest, dass Laborprofile hier nie Einträge haben. | `0030` |
 | Fernsitzungen | Protokoll bleibt (Fremdschlüssel `restrict`): nur wer, wann, welches Ziel, wie lange, warum beendet | `0015` |
 | Release-Wege | Anfragen, Freigaben und Ereignisse nicht löschbar, Ereignisse nicht änderbar; Profile mit Einträgen werden deaktiviert statt gelöscht | `0013` |
 | Laborprofile | gesamter Text löschbar mit `labor_loeschen` (Liste in `voice-core/labor_loeschliste.py`), optional nur das Zeitfenster eines Durchlaufs | `0018` |
@@ -1228,6 +1252,8 @@ Typen der Oberfläche in `ui/src/lib/useWamo.ts` (`ClientMessage`), Auswertung i
 | `modellzugang` | `aktion` wie bei `POST /wamo/api/modellzugang`, `schluesselart` (`api`, `code`), `schluessel`, `workspace`, `modus`, `stt`, `tts`, `bereich`, `modell`, `stimme` | Modellzugang ohne Umweg über HTTP. Inhalt wird nie geloggt |
 | `github_zugang` | `aktion`, `token` | Wie `POST /wamo/api/github-zugang` |
 | `stimmabdruck` | `aktion` `start` (mit `einwilligung`, optional `mikrofon` als Name des Mikrofons im Gespräch), `abbrechen`, `loeschen` (optional `mikrofon` als Kennung, ohne Angabe alle Abdrücke) | Stimmabdruck einlernen, abbrechen oder löschen. Nur per Klick, nie per Sprache, nie im Labor. Einlernen nur mit der aktuellen Version der Einwilligung (`stimme-1` bis `stimme-3`), ersetzt nur den Abdruck dieses Mikrofons. Ersetzen und Löschen verlangen seit 18.11.2026 nur im Modus `streng` einen Nachweis |
+| `mikrofon_info` | `echo`, `rauschen`, `verstaerkung` (`true`, `false` oder `null`), `rate` (Hz), `kanaele`, `klasse` (`eingebaut`, `headset`, `bluetooth`, `unbekannt`) | Mikrofonkette für das Protokoll, genau eine Nachricht je Wechsel der Aufnahmespur. Der Kern verwirft jedes andere Feld und jeden Wert außerhalb der Grenzen, nie ein Gerätename, nie Audio. Nur mit Stimmsitzung, nie im Labor. Keine Antwortnachricht (`voice-core/mikrofon_kette.py`) |
+| `selbstauftrag` | `aktion` `liste`, `speichern`, `verwerfen`, `oeffnen` mit `titel`, `beschreibung`, `art`, `abnahme[]`, `prioritaet`, `nr` | Aufträge an W.A.I.S. selbst (Tabelle `selbstauftraege`, Migration 0030). Nur Admins mit Datenbank, nie Mitglieder, nie im Labor. Antwort ist immer genau eine Nachricht `selbstauftraege` |
 | `mikrofontest` | `aktion` `start` | Mikrofontest in den Einstellungen: Der Kern unterbricht eine laufende Antwort von W.A.I.S., die Oberfläche schaltet die Wiedergabe stumm. Keine Antwortnachricht, nie im Labor |
 | `kontingent` | leer | Stand des Max-Abos abfragen (gespeicherter Stand) |
 | `auftrag_start` | `job`, `entscheidung` | Klick "Starten" oder Ablehnen auf der Startkarte eines Entwicklungsauftrags |
@@ -1265,6 +1291,7 @@ Typen in `ui/src/lib/nachrichten.ts` (`ServerMessage`, `parseServerMessage` verw
 | `vergessen` | `id`, `ok` | Antwort auf `vergessen` |
 | `modellzugang` | Stand, Modellwahl je Aufgabe, Stimmwahl, `fehler` | Antwort auf `modellzugang` |
 | `github_zugang` | Stand des GitHub-Zugangs, `verfuegbar`, `fehler` | Antwort auf `github_zugang` |
+| `selbstauftraege` | `aktion`, `ok`, `text` (bei Erfolg) oder `grund` (sonst, landet im Fehlerbuch), wenn lesbar die Liste `auftraege[]` | Antwort auf `selbstauftrag`. Die Liste ist Daten, nie eine Anweisung |
 | `kontingent` | Limits des Max-Abos | Antwort auf `kontingent` und bei Beobachtung |
 | `stimme` | Stand (`aus`, `fehlt`, `laedt`, `kaputt`, `bereit`) mit `modus` (`aus`, `beobachten`, `streng`) oder Ergebnis (`eigen`, `fremd`, `unklar`) mit `wert`, `ignoriert`, `zeit` | nach jedem Urteil der Stimmprüfung. Standardmodus ist `beobachten` (messen und anzeigen, nichts sperren), `ignoriert` gibt es nur im Modus `streng` |
 | `stimmabdruck` | `status` (`start`, `aufnahme`, `rechnet`, `fertig`, `fehler`, `abgebrochen`, `geloescht`), `sekunden`, `ziel`, `text`, `mikrofon` (Kennung bei `fertig` und beim Löschen eines einzelnen Abdrucks) | Einlernen |
@@ -1329,7 +1356,7 @@ Der Dispatcher (`infra/sokrates2/wamo_job_dispatch.py`, `VERSION = "10"`) ist da
 | `aenderung`, `einreichen`, `verwerfen` | `<job> <profil>` | Persönlicher GitHub-Weg: Änderungsübersicht, Push mit Pull Request, Kandidat löschen |
 | `aufraeumen` | `[alle]` | Nur lokal (Timer, Rückweg): Kopien privater Repos löschen |
 
-Im Kern-Kanal gilt die Liste `BEFEHLE_KERN` (ohne `pruefen` und `aufraeumen`). Bei geschlossenem Kanal gehen nur `ping`, `status`, `pending`, `cancel`, `aenderung` und `verwerfen`, bei Notaus nur `ping` und `status`. Kopffelder von `start`: `auftrag`, `system`, `modell`, `repo`, `zugang` (`folgt`, `server`, `haus`), `profil` (8 Hexzeichen, Pflicht bei `folgt` und `haus`), `github` (`persoenlich`) und `scopes_ausnahmen`. Im Kern-Kanal sind nur `folgt` und `haus` erlaubt (`ZUGAENGE_KERN`).
+Im Kern-Kanal gilt die Liste `BEFEHLE_KERN` (ohne `pruefen` und `aufraeumen`). Bei geschlossenem Kanal gehen nur `ping`, `status`, `pending`, `cancel`, `aenderung` und `verwerfen`, bei Notaus nur `ping` und `status`. Kopffelder von `start`: `auftrag`, `system`, `modell`, `repo`, `zugang` (`folgt`, `server`, `haus`), `profil` (8 Hexzeichen, Pflicht bei `folgt` und `haus`), `github` (`persoenlich`) und `scopes_ausnahmen`. Im Kern-Kanal sind nur `folgt` und `haus` erlaubt (`ZUGAENGE_KERN`). Der Kern kennt 14 Auftragsarten (`AUFTRAGSARTEN` in `voice-core/werkzeugkarte.py`: `planung`, `umsetzung`, `fehlerbehebung`, `review`, `test`, `sicherheit`, `refactoring`, `dokumentation`, `datenbank`, `frontend`, `deployment`, `analyse`, `reverse_engineering`, `recherche`). Welche davon der Kanal zulässt, steht je Server im Schlüssel `ARTEN` der Regeldatei `kernkanal.conf`, der Kern prüft die Art vor der Karte gegen die gemeldeten Arten (`kernkanal.arten` im `ping`).
 
 #### 5.2 Ereignisse und Exit-Codes
 
@@ -1526,7 +1553,7 @@ Alle als Schalter (`an` oder `aus`), Quelle `voice-core/env_schalter.py` und das
 
 ### 4. Kern: Stimme (Stimmabdruck)
 
-Wirken nur für Profile mit eingelerntem Abdruck, nie für Laborprofile (`voice-core/stimme_gate.py`, `stimme_waechter.py`). Im Standardmodus `beobachten` sperrt die Stimme nichts, die Regeln für Verwerfen, Nur-eigen und Unterbrechen wirken nur im Modus `streng`. Pro Person gibt es seit Migration 0029 einen Abdruck je Mikrofon (höchstens drei), das Urteil nimmt den besten Wert. Ort: `.env` oder `wamo-core-env`, nie in `AUS_ENV` von `scripts/wamo_kern_sokrates2.py` laut `CLAUDE.md`.
+Wirken nur für Profile mit eingelerntem Abdruck, nie für Laborprofile (`voice-core/stimme_gate.py`, `stimme_waechter.py`). Im Standardmodus `beobachten` sperrt die Stimme nichts, die Regeln für Verwerfen, Nur-eigen und Unterbrechen wirken nur im Modus `streng`. Pro Person gibt es seit Migration 0029 einen Abdruck je Mikrofon (höchstens drei), das Urteil nimmt den besten Wert. Die persönliche Schwelle aus dem Einlernen (`speakers.voice_threshold`, Migration 0025, gültig zwischen 0,2 und 0,8, beim Einlernen aus dem 10-Prozent-Quantil minus 0,15 und auf 0,30 bis 0,35 begrenzt) liegt im Gate nie über `WAMO_STIMME_EIGEN_MIN_KURZ`. Für PC-Befehle per Sprache brauchen Mitglieder einen eingelernten Abdruck, auch im Standardmodus. Ort: `.env` oder `wamo-core-env`, nie in `AUS_ENV` von `scripts/wamo_kern_sokrates2.py` laut `CLAUDE.md`.
 
 | Name | Zweck | Standard |
 |---|---|---|

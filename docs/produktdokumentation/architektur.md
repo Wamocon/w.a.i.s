@@ -5,7 +5,7 @@
 | Zweck | Beschreibt Aufbau, Zusammenspiel und Entscheidungen von W.A.I.S.: arc42, C4-Diagramme und Entscheidungsregister. |
 | Zielgruppe | Architekten, Entwickler, Sicherheit |
 | Dokumentart | Erklärung und Referenz |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce |
+| Stand | 20.11.2026, geprüft gegen Commit 7caf977, Produktversion 0.7.0 |
 | Quellen | Die Kopftabelle jedes Kapitels nennt die Quellen |
 
 ## Inhalt
@@ -35,12 +35,12 @@ W.A.I.S. ist der Sprachassistent der WAMOCON GmbH. Die Langform ist "WAMOCON's A
 
 | Fähigkeit | Kurzbeschreibung | Mehr |
 |---|---|---|
-| Gespräch | Sprache rein, Sprache raus, Unterbrechen jederzeit, Untertitel, Canvas für Tabellen, Code, Dokumente, Diagramme | [Funktionskatalog W.A.I.S.](fachkonzept.md#funktionskatalog-wais) |
+| Gespräch | Sprache rein, Sprache raus, Unterbrechen jederzeit, Untertitel, Canvas für Tabellen, Code, Dokumente, Diagramme (Reiter schließen, Historie, Bilder, Dateien), Erklärung auf Nachfrage, warum etwas nicht ging | [Funktionskatalog W.A.I.S.](fachkonzept.md#funktionskatalog-wais) |
 | PC-Steuerung | Fenster, Tastatur, Maus, PowerShell lesen, Office, Mail, Teams, OneNote am eigenen Laptop, jede kritische Aktion nur nach Klick | [PC-Host und Desktop-App](technik.md#pc-host-und-desktop-app) |
-| Entwicklungsaufträge | Claude Code in einer Sandbox auf dem Server, Ergebnis als Pull Request nach Klick | [`../entwicklung-im-betrieb.md`](../entwicklung-im-betrieb.md) |
+| Entwicklungsaufträge | Claude Code in einer Sandbox auf dem Server, 14 Auftragsarten, Ergebnis als Pull Request nach Klick, Aufträge für später speichern, Rückstand mit Aufträgen an W.A.I.S. selbst (nur Admins) | [`../entwicklung-im-betrieb.md`](../entwicklung-im-betrieb.md), [`../selbstauftraege.md`](../selbstauftraege.md) |
 | Gedächtnis | Persönliche Eigenschaften und gemeinsames Firmenwissen, gemeinsame Einträge erst nach Freigabe | [Datenmodell: Datenbank, Rollen und Migrationen](technik.md#datenmodell-datenbank-rollen-und-migrationen) |
 | Bürogeräte | Status und Steuerung gemeinsamer Geräte im Büro über einen Gerätedienst | `geraete/README.md` |
-| Testlabor | Eingeschränktes Profil für Besucher am Labortag 28.11.2026 | [`../testlabor-wamo.md`](../testlabor-wamo.md) |
+| Testlabor | Eingeschränktes Profil für Besucher am Labortag 05.12.2026 (verschoben vom 28.11.2026) | [`../testlabor-wamo.md`](../testlabor-wamo.md) |
 
 Produktumfang und Abgrenzung: [Produktübersicht W.A.I.S.](fachkonzept.md#produktübersicht-wais).
 
@@ -75,12 +75,12 @@ Quellen: `README.md`, `CLAUDE.md`, `voice-core/pyproject.toml`, `ui/package.json
 | Art | Randbedingung | Folge |
 |---|---|---|
 | Technik | Voice-Core auf Pipecat ab 1.12 und unter 2, Python ab 3.11 | Pipeline aus Bausteinen (Frames), Soniox, Anthropic, MCP und WebRTC kommen als Pipecat-Pakete |
-| Technik | Oberfläche Next.js 16.4.6 mit React 19.3.0, Desktop-App Electron 44.10.1, beide in Version 0.6.0 | Gemeinsame Oberfläche für Browser und App, Brücke `window.wamoDesktop` |
+| Technik | Oberfläche Next.js 16.4.6 mit React 19.3.0, Desktop-App Electron 44.10.1, beide in Version 0.7.0 | Gemeinsame Oberfläche für Browser und App, Brücke `window.wamoDesktop` |
 | Technik | PC-Host nur für Windows (MCP-Server mit PowerShell, UI Automation, COM) | PC-Steuerung gibt es nur an Windows-Laptops |
 | Technik | Eigener Supabase-Stack auf dem Server Sokrates-2, Postgres mit TLS, Rolle `wamo_core` | Kein `service_role` im Kern, Schemas `wamo_dev`, `wamo_test`, `wamo_prod` |
 | Technik | Modelle im Haus nur über das zentrale LiteLLM-Gateway | Keine direkten Adressen von Modellknoten |
 | Technik | Server ist ein ARM64-Linux (Runner-Labels `linux, ARM64`), Zugriff über SSH | Skripte für Einrichtung und Rückweg je Dienst unter `infra/sokrates2/` |
-| Organisation | Freeze für Kern, Migrationen, Oberfläche und Dienste ab Montag 23.11.2026 früh, Testlabor am 28.11.2026 | Neuere Pakete laufen hinter Schaltern, Stand je Paket im jeweiligen Planpapier |
+| Organisation | Freeze für Kern, Migrationen, Oberfläche und Dienste ab Montag 23.11.2026 früh, Testlabor am 05.12.2026 (verschoben vom 28.11.2026) | Neuere Pakete laufen hinter Schaltern, Stand je Paket im jeweiligen Planpapier |
 | Organisation | Einheitliches Corporate Design WMC, deutsche Texte mit echten Umlauten, keine Gedankenstriche im Fließtext | Gilt für Oberfläche, Sprachausgabe und Dokumente |
 | Organisation | Namensvertrag: Anzeigename W.A.I.S., alle technischen Kennungen bleiben `wamo` | Siehe Abschnitt 8.3 |
 | Recht | Einwilligung für Stimmabdruck und Laborprofile, Löschfristen, Datenschutzhinweis | Eigene Tabellen und Löschläufe, Version der Einwilligung wird geprüft |
@@ -140,7 +140,7 @@ Quellen: `README.md` (Tabelle der Ordner), `CLAUDE.md`, Ordnerstruktur des Repos
 
 | Baustein | Aufgabe | Technik | Läuft auf | Tiefe |
 |---|---|---|---|---|
-| `ui/` | Oberfläche: Präsenzkern, Untertitel, Stimmlinie, Werkzeug-Zeitleiste, Canvas, Freigabekarten, Anmeldung mit zweitem Faktor, Einstellungen | Next.js 16, React 19 | als Container `wamo-ui` auf dem Server (Browser), in der Desktop-App eingebettet | [Oberfläche: Aufbau der Next.js-Anwendung](technik.md#oberfläche-aufbau-der-nextjs-anwendung) |
+| `ui/` | Oberfläche: Präsenzkern, Untertitel, Stimmlinie, Werkzeug-Zeitleiste, Canvas, Freigabekarten, Anmeldung mit zweitem Faktor, Einstellungen in sechs Gruppen (Konto und Allgemeines mit dem Abschnitt Updates, Sprache und Stimme, Modelle und Zugänge, Geräte und PC, Gedächtnis und Teilen, Verwaltung nur für Admins), Pop-up "Update verfügbar" | Next.js 16, React 19 | als Container `wamo-ui` auf dem Server (Browser), in der Desktop-App eingebettet | [Oberfläche: Aufbau der Next.js-Anwendung](technik.md#oberfläche-aufbau-der-nextjs-anwendung) |
 | `desktop/` | App-Fenster, Markierung am Zielfenster, Tray, Autostart, Update, Host-Umgebung, Live-Bild | Electron 44 | Windows-PC | [PC-Host und Desktop-App](technik.md#pc-host-und-desktop-app) |
 | `host/` | Werkzeuge am Windows-PC mit Risikoklassen und Audit-Log | Python, MCP (FastMCP) | Windows-PC | [PC-Host und Desktop-App](technik.md#pc-host-und-desktop-app) |
 | `voice-core/` | Gespräch, Zugangskontrolle, Rechte, Werkzeuge, Gedächtnis, Entwicklungsaufträge, HTTP-Schnittstellen | Python, Pipecat | Server (Büro) oder PC (Unterwegs) | [Voice-Core: Aufbau des Python-Kerns](technik.md#voice-core-aufbau-des-python-kerns) |
@@ -158,12 +158,12 @@ Der Kern ist der größte Baustein. Die Gruppen unten fassen die Module in `voic
 |---|---|---|
 | Zugang und Schnittstellen | `auth_gate.py`, `wamo_api.py`, `*_api.py`, `kern_dienst.py` | Token-Prüfung, Identität, HTTP-Routen, Start als Dienst auf einem Unix-Socket |
 | Gespräch | `bot.py`, `persona.py`, `llm_anbieter.py`, `sprache_anbieter.py`, `soniox_tts.py`, `soft_interrupt.py`, `wiedergabe.py`, `turn_wache.py`, `wartesatz.py`, `fuellwoerter.py`, `latenz.py` | Pipeline, Persona, Wahl der Anbieter, Unterbrechungen, Wartesätze, Latenzmessung |
-| Stimmprüfung | `stimme_pruefer.py`, `stimme_gate.py`, `stimme_waechter.py`, `stimme_modell.py`, `stimme_mikrofon.py`, `stimme_einlernen.py`, `stimme_sitzung.py`, `stimme_speicher.py` | Stimmabdruck je Mikrofon einlernen, jede Äußerung prüfen, Regeln für Werkzeuge (nur im Modus streng sperrend) |
+| Stimmprüfung | `stimme_pruefer.py`, `stimme_gate.py`, `stimme_waechter.py`, `stimme_modell.py`, `stimme_mikrofon.py`, `stimme_einlernen.py`, `stimme_sitzung.py`, `stimme_speicher.py`, `stimme_schatten.py`, `mikrofon_kette.py` | Stimmabdruck je Mikrofon einlernen, jede Äußerung prüfen, Regeln für Werkzeuge (nur im Modus streng sperrend), zweites Sprechermodell im Schattenbetrieb (nur Logzeile), Mikrofonkette im Protokoll |
 | Werkzeuge im Gespräch | `tools.py`, `activity.py`, `werkzeug_wache.py`, `ausgaben_kuerzen.py`, `suche.py`, `screen.py` | Zeit, Websuche, Canvas, Merken, Bildschirm, Aktivitätsmeldungen |
 | PC-Steuerung | `pc_host.py`, `pc_geraet.py`, `pc_tunnel.py`, `pc_freigaben.py`, `pc_mitglied.py`, `rechte.py` | Verbindung zum Host je Gerät, Freigabekarten, Schutz der Mitglieder |
 | Office und Versand | `office_werkzeuge.py`, `outlook_werkzeuge.py`, `teams_werkzeuge.py`, `onenote_werkzeuge.py`, `jira_*.py` | Canvas als Datei, Mail, Teams, OneNote, Jira-Story, jeweils mit Karte |
 | Geräte und Teilen | `geraete_*.py`, `buero_api.py`, `teilen.py`, `teilen_werkzeuge.py` | Bürogeräte, geteilte Canvas, Dateien und Aufträge |
-| Entwicklungsaufträge | `dev_agent*.py`, `dev_guard.py`, `entwicklung_betrieb.py`, `abnahme*.py`, `github_*.py`, `kontingent.py`, `werkzeugkarte.py`, `vorgang_stream.py` | Aufträge vorbereiten, an den Dispatcher geben, Fortschritt, Prüfen, Einreichen |
+| Entwicklungsaufträge | `dev_agent*.py`, `dev_guard.py`, `entwicklung_betrieb.py`, `abnahme*.py`, `github_*.py`, `auftrag_entwuerfe.py`, `selbstauftraege.py`, `kontingent.py`, `werkzeugkarte.py`, `vorgang_stream.py` | Aufträge vorbereiten, für später speichern, an den Dispatcher geben, Fortschritt, Prüfen, Einreichen, Rückstand für Aufträge an W.A.I.S. selbst (Mixin `dev_agent_selbst.py`) |
 | Modelle und Zugänge | `modellzugang.py`, `modellwahl.py`, `schluessel.py`, `boss.py`, `modellkarte.py` | Eigener Schlüssel je Profil (verschlüsselt), Modellwahl, Boss |
 | Daten | `memory.py`, `learning.py`, `vorgaenge.py`, `fehlerbuch.py`, `canvas_*.py` | Gedächtnis, Lernen, Vorgänge, Fehlerbuch, Canvas |
 | Labor | `labor*.py` | Eng begrenztes Profil: Pfadliste, Durchlauf, Einwilligung, Ticket-Werkzeuge, Löschfunktion |
@@ -175,7 +175,7 @@ Der Kern ist der größte Baustein. Die Gruppen unten fassen die Module in `voic
 |---|---|---|
 | Oberfläche | `ui/src/app` (Seiten und `version.json`), `ui/src/components` (Karten, Canvas, Formulare), `ui/src/lib` (Zustand, Nachrichten, Schnittstellen) | Zentrale Zustandsverwaltung und Verbindung in `ui/src/lib/useWamo.ts`, Nachrichtenformate in `ui/src/lib/nachrichten.ts` |
 | Host | `host/wamo_host.py` (Werkzeuge), `windows_control.py`, `uia_control.py` (UI Automation), `office_*.py`, `live_bild.py`, `host_http.py` | Der Host erzwingt Klassen und Freigaben selbst |
-| Desktop | `desktop/main.js`, `preload.js`, `geraet.js`, `host-umgebung.js`, `update.js`, `livebild.js`, `markierung.js` | Brücke `window.wamoDesktop` zwischen Oberfläche und Rechner |
+| Desktop | `desktop/main.js`, `preload.js`, `geraet.js`, `host-umgebung.js`, `update.js`, `livebild.js`, `markierung.js` | Brücke `window.wamoDesktop` zwischen Oberfläche und Rechner. Der Weg des Updates steht in Abschnitt 6.6 |
 | Dienste auf dem Server | Dispatcher mit Kern-Kanal, Release-Dienst, Anker, Freigabe-Dienst, Prüfer-Sandbox, Haus-Proxy, Gerätedienst, Gateway für Fernzugriff, Labor-Dienst | Namen, Pfade und Schalter stehen in der Tabelle "Namensvertrag" in `CLAUDE.md` |
 
 ### 6. Laufzeitsicht
@@ -186,7 +186,7 @@ Quellen: `voice-core/bot.py`, `voice-core/auth_gate.py`, `voice-core/pc_freigabe
 
 1. Die Oberfläche startet die Sitzung mit `POST /start` und sendet das WebRTC-Angebot. Die Zugangskontrolle prüft Token, zweiten Faktor, Höchstalter, aktives Profil und Erstanmeldung und schreibt die geprüfte Identität in den Body.
 2. Der Bot baut die Pipeline: Mikrofon, Sprachaktivität (Silero), Spracherkennung (Soniox), Turn-Erkennung (Smart Turn und Satzende-Marker des Modells), Modell im Streaming, Sprachausgabe.
-3. Die Stimmprüfung bewertet jede Äußerung und vergleicht sie mit den Abdrücken der Person (ein Abdruck je Mikrofon). Im Standardmodus `beobachten` misst sie nur und sperrt nichts, im Modus `streng` (nur auf ausdrücklichen Wunsch) verwirft sie fremde Stimmen. Für gesprochene PC-Befehle brauchen Mitglieder zusätzlich einen eingelernten Abdruck.
+3. Die Stimmprüfung bewertet jede Äußerung und vergleicht sie mit den Abdrücken der Person (ein Abdruck je Mikrofon). Im Standardmodus `beobachten` misst sie nur und sperrt nichts, im Modus `streng` (nur auf ausdrücklichen Wunsch) verwirft sie fremde Stimmen. Für gesprochene PC-Befehle brauchen Mitglieder zusätzlich einen eingelernten Abdruck. Die Oberfläche meldet bei jedem Wechsel des Mikrofons die Mikrofonkette (nur Zahlen und eine grobe Klasse, nie den Gerätenamen), der Kern schreibt sie ins Protokoll und hängt die Klasse an die Urteilszeilen.
 4. Ruft das Modell ein PC-Werkzeug auf, prüft der Kern Rechte (`rechte.py`), PC-Steuerung und PC-Sperre und leitet an den Host weiter. Der Host stuft die Aktion ein.
 5. Eine kritische Aktion liefert `needs_approval`. Der Kern zeigt eine Freigabekarte. Erst der Klick der Person führt die Aktion einmal aus, vorher prüft der Host Ziel, Sperre und Adresse erneut.
 6. Das Ergebnis geht als Fremdinhalt zurück ins Gespräch. Aktivitäten, Untertitel und Canvas erscheinen live in der Oberfläche.
@@ -200,10 +200,11 @@ Quellen: `voice-core/bot.py`, `voice-core/auth_gate.py`, `voice-core/pc_freigabe
 
 #### 6.3 Entwicklungsauftrag über den Kern-Kanal
 
-1. Das Modell bereitet einen Auftrag vor. Der Kern prüft Zulassung, Schalter, Kostengrenzen und Auftragsart und zeigt eine Startkarte.
+1. Das Modell bereitet einen Auftrag vor. Der Kern prüft Zulassung, Schalter, Kostengrenzen und Auftragsart (eine der 14 Arten der Werkzeugkarte) und zeigt eine Startkarte. Die Person kann den Auftrag stattdessen für später speichern (Tabelle `auftrag_entwuerfe`, Migration 0026) und später per Klick laden, dann laufen alle Prüfungen erneut.
 2. Nach dem Klick ruft der Kern den Dispatcher per SSH mit dem Schlüssel des Kern-Kanals auf. Der Dispatcher prüft die Regeln des Kanals in fester Reihenfolge und antwortet bei Verstoß mit `kanal_gesperrt`.
 3. Er startet Claude Code in einer abgeschotteten Sandbox mit einem Platz je Person. Ereignisse und Fortschritt kommen als JSON-Zeilen zurück und erscheinen in der Aufgabenleiste.
 4. Im persönlichen GitHub-Weg bleibt das Token außerhalb der Sandbox. Der Dispatcher meldet die Änderung, die Person liest die Karte und klickt "Einreichen". Erst dann gehen Push auf `wamo/<auftrag>` und Pull Request hinaus.
+5. Aufträge an W.A.I.S. selbst laufen nicht von allein. Admins legen Wünsche im gemeinsamen Rückstand ab (Tabelle `selbstauftraege`, Nummer `SA-n`, Migration 0030). Ein Eintrag ist ein Vorschlag und keine Anweisung: Er wird nur nach dem ausdrücklichen Ja eines Admins umgesetzt, und der Selbstschutz für das eigene Repo bleibt. Dass W.A.I.S. Einträge selbst umsetzt, ist als Ausbaustufe über den Release-Weg geplant und nicht gebaut.
 
 #### 6.4 Release ohne Unterbrechung
 
@@ -216,6 +217,16 @@ Quellen: `voice-core/bot.py`, `voice-core/auth_gate.py`, `voice-core/pc_freigabe
 1. Ein Laborprofil durchläuft dieselbe Zugangskontrolle, danach gilt eine feste Pfadliste.
 2. Vor `/start` und jedem Angebot prüft der Kern beim Labor-Dienst Durchlauf und Einwilligung. Fehlt eine von beiden, endet es mit 403, ist der Dienst nicht erreichbar, mit 503.
 3. Die Sitzung kennt nur Zeit, Websuche, Canvas und Ticket-Werkzeuge. Der Betreuer beendet den Durchlauf, die Oberfläche lädt neu.
+
+#### 6.6 Update der Desktop-App
+
+Quellen: `desktop/update.js`, `ui/src/lib/updates.ts`, `ui/src/lib/updatesStore.ts`, `ui/src/lib/updateHinweis.ts`, `ui/src/components/UpdateHinweis.tsx`, `ui/src/components/einstellungen/Updates.tsx`.
+
+1. Der Server hält ein signiertes Manifest bereit (Ablage der Installer-Verteilung, ausgeliefert über `GET /wamo/api/installer`). Die Desktop-App bestätigt Signatur und steigende Version, erst dann gibt es ein Angebot. Die Oberfläche liest das Manifest nie selbst, sie reicht es nur an die App weiter.
+2. Die Oberfläche fragt beim Start, danach alle 30 Minuten und beim Wiederöffnen des Fensters, wenn die letzte Prüfung älter als 10 Minuten ist. Gibt es ein bestätigtes Angebot, erscheint unten rechts das Pop-up "Update verfügbar" mit "Jetzt aktualisieren", "Später" und einem Verweis auf den Abschnitt Updates. Es nimmt keinen Fokus, öffnet keinen Dialog und hält keinen Ton an. Läuft ein Gespräch, sagt der Satz, dass das Update es beendet.
+3. "Später" blendet die Karte für diese Version aus (je Profil gemerkt): dieselbe Version kommt erst nach dem nächsten Start oder nach 24 Stunden wieder, eine neuere sofort.
+4. Der Klick auf "Jetzt aktualisieren" oder im Abschnitt Updates auf "Update installieren" holt erst das Token und gibt es nur an die App. Die App fragt im eigenen Fenster nach, lädt den Installer, prüft ihn und startet danach neu. Es läuft höchstens eine Installation zugleich.
+5. Das Pop-up und die Installation gibt es nur in der Desktop-App und nur mit angemeldetem Profil, nie in der Laborsicht. Im Browser zeigt der Abschnitt Updates einen ruhigen Satz und den Installer für Windows zum Herunterladen.
 
 ### 7. Verteilungssicht
 
@@ -278,7 +289,7 @@ Quellen: `voice-core/rechte.py`, `voice-core/pc_mitglied.py`, `voice-core/pc_fre
 | Stimme | Die Stimme ist ein Hinweis, kein Zugangsschutz. Seit 18.11.2026 sperrt sie nichts, solange der Modus `beobachten` gilt (Standard von `WAMO_STIMME_PRUEFUNG`). Es schützen weiter zweiter Faktor und Freigabekarten. |
 | Risikoklassen im Host | `read` sofort, `change` protokolliert, `critical` nur nach Karte, `blocked` nie. Das Modell kann keine Freigabe erteilen. |
 | Freigabekarte | Gilt für eine Sitzung, befristet und genau einmal. Solange eine Karte offen ist, ruhen alle Eingaben. |
-| Entwicklungsaufträge | Zulassung je Profil, Kostengrenzen, Kanalregeln im Dispatcher, Klick für Start und Einreichen. |
+| Entwicklungsaufträge | Zulassung je Profil, Kostengrenzen, Kanalregeln im Dispatcher, Klick für Start und Einreichen. Der Rückstand für Aufträge an W.A.I.S. selbst ist nur für Admins, nie für Mitglieder und Laborprofile. |
 
 Inhalte aus Web, Dateien, Gedächtnis und Werkzeugen gelten als Daten und werden nie als Anweisung befolgt.
 
@@ -317,7 +328,7 @@ Quellen: `voice-core/auth_gate.py`, `voice-core/werkzeug_wache.py`, `voice-core/
 
 Quellen: `infra/sokrates2/wamo_job_dispatch.py`, `voice-core/dev_guard.py`, `CLAUDE.md` (Prüfer-Sandbox, Haus-Proxy).
 
-Aufträge laufen als eigener Benutzer in einer Sandbox ohne Zugang zu den Geheimnissen des Servers. Der Ausgang ist durch Firewall-Regeln begrenzt, die Ports je Platz sind getrennt. Ein Wächter vor jedem Werkzeugaufruf von Claude Code entscheidet nach Regeln im Code, nicht im Prompt. Das Repo von W.A.I.S. selbst ist für Aufträge gesperrt. Der Dispatcher prüft jeden Start gegen Regeln des Kanals, Grenzen je Person und Gesamtgrenzen. Fremder Code wird in einer eigenen Prüfer-Sandbox ohne Geheimnisse geprüft.
+Aufträge laufen als eigener Benutzer in einer Sandbox ohne Zugang zu den Geheimnissen des Servers. Der Ausgang ist durch Firewall-Regeln begrenzt, die Ports je Platz sind getrennt. Ein Wächter vor jedem Werkzeugaufruf von Claude Code entscheidet nach Regeln im Code, nicht im Prompt. Das Repo von W.A.I.S. selbst ist für Aufträge gesperrt. Der Dispatcher (Version 10) prüft jeden Start gegen Regeln des Kanals, Grenzen je Person und Gesamtgrenzen. Im persönlichen GitHub-Weg laufen Klon, Ausgabe und Prüfung als getrennte Sandbox-Schritte ohne Netz, das Token der Person liegt nie in der Sandbox. Fremder Code wird in einer eigenen Prüfer-Sandbox ohne Geheimnisse geprüft.
 
 #### 8.7 Blau und Grün, Kern-Slots
 
@@ -356,7 +367,7 @@ Zahlen stehen nur, wo sie im Repo belegt sind. Messwerte sind Momentaufnahmen mi
 | Q-6 | Verfügbarkeit | Ein neuer Kern-Stand wird ausgerollt, während Gespräche laufen. | Neue Sitzungen gehen auf den neuen Slot, laufende bleiben auf der alten Instanz, bis sie enden. Umschaltung am 02.11.2026 live geübt (laut README). |
 | Q-7 | Verfügbarkeit | Der Tunnel zum Laptop bricht ab. | W.A.I.S. meldet "PC nicht erreichbar" und spricht weiter, danach wieder verbunden (laut README, Gesprächstest 20.10.2026). |
 | Q-8 | Wartbarkeit | Ein Grund-Code des Kern-Kanals wird ergänzt. | Der Vertragstest schlägt fehl, bis beide Seiten dieselbe Liste führen. |
-| Q-9 | Datenschutz, Stimme | Eine Person lernt ihren Stimmabdruck ein. | Nur nach ausdrücklicher Einwilligung (Version `stimme-3` nennt je Mikrofon einen Abdruck). Gespeichert wird je Mikrofon ein Zahlenvektor (192 Zahlen), höchstens drei je Person, nie eine Aufnahme. Löschen geht jederzeit. Beleg: `README.md` (Sicherheitsmodell, Stimmabdruck), `voice-core/stimme_einwilligung.py`, `voice-core/stimme_mikrofon.py`. |
+| Q-9 | Datenschutz, Stimme | Eine Person lernt ihren Stimmabdruck ein. | Nur nach ausdrücklicher Einwilligung (Version `stimme-3` nennt je Mikrofon einen Abdruck). Gespeichert wird je Mikrofon ein Zahlenvektor (192 Zahlen), höchstens drei je Person, nie eine Aufnahme. Ein zweites Sprechermodell (Schattenbetrieb, Schalter `WAMO_STIMME_SCHATTEN`, Standard aus) legt nur mit der Fassung `stimme-2` oder höher einen zweiten Abdruck ab und schreibt nur eine Logzeile. Löschen geht jederzeit. Beleg: `README.md` (Sicherheitsmodell, Stimmabdruck), `voice-core/stimme_einwilligung.py`, `voice-core/stimme_mikrofon.py`. |
 | Q-10 | Datenschutz, Labor | Der Labortag ist vorbei. | Laborprofile werden gesperrt, alle Texte gelöscht, Löschfrist 11.12.2026. Test "danach ist nichts mehr da" (`docs/testlabor-wamo.md`, `voice-core/test_labor_loeschen.py`). |
 | Q-11 | Last, Labor | Mehrere Plätze laufen gleichzeitig (am Labortag vier Besucher-Plätze, der Lasttest prüft bis acht Sitzungen). | Bestehensregel des Plans bei acht Sitzungen: p95 des ersten Tons höchstens 3500 ms und höchstens das 1,5-fache des Werts bei einer Sitzung, keine Abbrüche, CPU unter 70 Prozent, Speicher unter 2,8 GB, kein 429. Der volle Lasttest ist für Freitag 20.11.2026 geplant (`docs/testlabor-wamo.md`, `docs/labor-lasttest.md`). |
 
@@ -368,11 +379,11 @@ Quellen: `README.md` (Abschnitte "Stand" und "Offen"), `docs/labor-restplan.md`,
 
 | Nr | Risiko | Stand laut Repo | Gegenmaßnahme |
 |---|---|---|---|
-| RK-1 | Die Stimmerkennung war bei Mikrofon- oder Raumwechsel zu ungenau, Aufträge und Aktionen blieben stehen. | Standard ist `beobachten` seit 18.11.2026 abends, die Stimme sperrt nichts (`CLAUDE.md`, `README.md`). | Schutz bleibt über zweiten Faktor und Freigabekarten. Ein Abdruck je Mikrofon (höchstens drei, Migration 0029) mindert die Streuung. Mitglieder brauchen für gesprochene PC-Befehle einen eingelernten Abdruck. Recherche: `docs/stimme-recherche-2026-11-18.md`. |
+| RK-1 | Die Stimmerkennung war bei Mikrofon- oder Raumwechsel zu ungenau, Aufträge und Aktionen blieben stehen. | Standard ist `beobachten` seit 18.11.2026 abends, die Stimme sperrt nichts (`CLAUDE.md`, `README.md`). | Schutz bleibt über zweiten Faktor und Freigabekarten. Ein Abdruck je Mikrofon (höchstens drei, Migration 0029), eine Schwelle nach Länge der Äußerung und eine persönliche Schwelle beim Einlernen (Migration 0025) mindern die Streuung, die Mikrofonkette im Protokoll macht die Ursachen sichtbar. Mitglieder brauchen für gesprochene PC-Befehle einen eingelernten Abdruck. Recherche: `docs/stimme-recherche-2026-11-18.md`. |
 | RK-2 | Wartezeit bis zum ersten Ton liegt über dem Ziel, einzelne Ausreißer bis 6,1 s. | Messung 31.10.2026, Maßnahmen und Schalter in `docs/gespraech-optimierung.md`. | Persona-Block, Wartesatz, Satz vor Werkzeug, Prompt-Cache vorwärmen. Schalter erst nach Messung an. |
 | RK-3 | Ein gekaperter Kern sieht entschlüsselte persönliche Tokens. | Bewusst akzeptiert (Plan C, C4). | Token nie in der Sandbox, Push erst nach Klick, Schreiben nur auf eigenen Zweig. |
 | RK-4 | Ein gestohlenes Anmelde-Token kann Fernsitzungen starten, bis die Anmeldung abläuft. | Restrisiko in `docs/remote-desktop.md` beschrieben. | Jeder Start geht als Hinweis an alle Admins. Ein Stufenschalter begrenzt das Alter des Codes. |
-| RK-5 | Der Labortag am 28.11.2026 hängt an Ausweichwegen: Das Hausmodell als Ausweichweg bricht in Tests ab, ein Büro-Fall besteht nur 4 von 17 Läufen. | `docs/labor-restplan.md` (R9, R10), Stand 17.11.2026. | Laufende Messrunden, Lasttest am 20.11.2026, Freeze ab 23.11.2026. |
+| RK-5 | Der Labortag am 05.12.2026 (verschoben vom 28.11.2026) hängt an Ausweichwegen: Das Hausmodell als Ausweichweg bricht in Tests ab, ein Büro-Fall besteht nur 4 von 17 Läufen. | `docs/labor-restplan.md` (R9, R10), Stand 17.11.2026. | Laufende Messrunden, Lasttest am 20.11.2026, Freeze ab 23.11.2026. |
 | RK-6 | Das gemeinsame Ratenlimit des einen Server-Schlüssels zeigt sich erst bei gleichzeitiger Last von Labor und Büro. | `docs/labor-lasttest.md`. | Der Lasttest misst es ausdrücklich. |
 | RK-7 | Der Stand einzelner Pakete am Server ist nur dort prüfbar. Rauchtests des Kern-Kanals liefen laut README Stand 11.11.2026 noch nicht. | Mehrere Abschnitte in `README.md` und `infra/sokrates2/README.md` tragen den Zusatz "nicht ausgerollt". | Stufen mit eigenen Rauchtests je Dienst, siehe [Betriebshandbuch](betrieb.md#betriebshandbuch). |
 | RK-8 | Zugänge zu Jira, Vercel und Supabase für Aufträge sind gesperrt, bis technische Konten und enge Token bereitstehen. | `README.md` (Abschnitt "Offen"), Vercel und Supabase persönlich erst nach dem 05.12.2026. | Schalter bleiben aus. |
@@ -383,7 +394,7 @@ Quellen: `README.md` (Abschnitte "Stand" und "Offen"), `docs/labor-restplan.md`,
 |---|---|---|---|
 | TS-1 | Migrationen 0010, 0011 und 0013 sind auf `wamo_prod` im Repo nicht als angewendet belegt. | `README.md` (Abschnitt "Offen") | Vor jedem Apply auf PROD prüft der Agent `database-reviewer`. |
 | TS-2 | Das README trägt mehrere Stand-Abschnitte, ältere sind teilweise überholt und als solche markiert. | `README.md` | Diese Produktdokumentation soll die Lesbarkeit verbessern. Pflege: [`dokumentationskonzept.md`](dokumentationskonzept.md). |
-| TS-3 | Einzelne Dateien sind sehr groß: `infra/sokrates2/wamo_job_dispatch.py` hat 5344 Zeilen, `host/wamo_host.py` 2820, `ui/src/lib/useWamo.ts` 2116, `voice-core/bot.py` 1961, `voice-core/dev_agent.py` 1938 (Zeilen je nach Arbeitsstand). | Zeilenzahl der Dateien | Teile sind schon in Module ausgelagert (zum Beispiel `wamo_job_kernkanal.py`, `wamo_job_github.py`). |
+| TS-3 | Einzelne Dateien sind sehr groß: `infra/sokrates2/wamo_job_dispatch.py` hat 5344 Zeilen, `host/wamo_host.py` 2820, `ui/src/lib/useWamo.ts` 2246, `voice-core/bot.py` 1971, `voice-core/dev_agent.py` 1952 (Zeilen je nach Arbeitsstand). | Zeilenzahl der Dateien | Teile sind schon in Module ausgelagert (zum Beispiel `wamo_job_kernkanal.py`, `wamo_job_github.py`). |
 | TS-4 | Codesignatur des Installers: Der Weg ist eingebaut, das Zertifikat folgt. Ohne Zertifikat baut `npm run dist` unsigniert. | `README.md` (Windows-Installer) | Signierte Updates der App sind eigenständig gelöst (E-28). |
 | TS-5 | Aktuelle Ergebnisse der Testläufe sind im Repo nicht zusammengefasst, das README nennt Zahlen vom 20.10.2026. | `README.md` | Teststrategie: [Qualität und Tests](entwicklung.md#qualität-und-tests). |
 | TS-6 | Das Weckwort "Hey WAMO" ist vorgesehen und nicht umgesetzt. Hören und Stimme im Haus sind eingebaut, aber nicht umgestellt. | `CLAUDE.md` (Namensvertrag) | Soniox bleibt Standard (E-30). |
@@ -769,7 +780,7 @@ sequenceDiagram
 
 ### Format und Regeln
 
-Das Register nutzt ein ADR-Kurzformat (Architecture Decision Record, kurze Entscheidungsnotiz): Nummer, Datum, Entscheidung, Begründung, Folge, Quelle. Aufgenommen ist nur, was im Repo mit Datum oder als verbindliche Entscheidung belegt ist. Wer die Entscheidung getroffen hat, steht in der Quelle (meist Niko, Geschäftsführung der WAMOCON GmbH). Die Nummern E-01 bis E-40 sind in der Reihenfolge der Aufnahme vergeben und ändern sich nicht. Eine spätere Entscheidung, die eine frühere ändert, nennt sie in der Spalte "Folge". Die ausführlichen Begründungen stehen in den verlinkten Planpapieren unter `docs/`, hier steht nur der Kern.
+Das Register nutzt ein ADR-Kurzformat (Architecture Decision Record, kurze Entscheidungsnotiz): Nummer, Datum, Entscheidung, Begründung, Folge, Quelle. Aufgenommen ist nur, was im Repo mit Datum oder als verbindliche Entscheidung belegt ist. Wer die Entscheidung getroffen hat, steht in der Quelle (meist Niko, Geschäftsführung der WAMOCON GmbH). Die Nummern E-01 bis E-41 sind in der Reihenfolge der Aufnahme vergeben und ändern sich nicht. Eine spätere Entscheidung, die eine frühere ändert, nennt sie in der Spalte "Folge". Die ausführlichen Begründungen stehen in den verlinkten Planpapieren unter `docs/`, hier steht nur der Kern.
 
 Dauerregeln ohne Datum stehen am Ende in Abschnitt 5. Offene Fragen stehen nicht hier, sondern im jeweiligen Planpapier und im Abschnitt "Risiken und technische Schulden" von [Architekturdokumentation nach arc42](#architekturdokumentation-nach-arc42).
 
@@ -818,13 +829,14 @@ Dauerregeln ohne Datum stehen am Ende in Abschnitt 5. Offene Fragen stehen nicht
 | E-28 | 15.11.2026 | Signierte Updates der Desktop-App: Manifest und Signatur, öffentliche Schlüsselliste in der App, Signieren nur von Ständen aus `origin/main`. Jeder Versionssprung bekommt einen signierten Installer. | Die App darf nur geprüfte Stände installieren. | `desktop/update.js`, `scripts/wamo-dist-signieren.cjs`, Codesignatur "WAMOCON GmbH" folgt (Entscheidung N8). | `docs/ausrollen-neue-nutzer.md`, `CLAUDE.md` (Ausrollen neuer Nutzer), `README.md` |
 | E-29 | 16.11.2026 | Mitglieder bekommen PC-Steuerung für ihren eigenen Laptop mit derselben Werkzeugliste wie Admins (Entscheidung N10), freigeschaltet je Profil über `WAMO_PC_MITGLIEDER_PROFILE`. Enger bleibt der Schutz: gesprochene PC-Befehle nur mit eingelerntem Stimmabdruck (seit E-34 entscheidet das Urteil der Stimme nur im Modus `streng`), nach Fremdinhalt eine Karte für jede Änderung, Einwilligung fürs Bildschirmbild. | Mitglieder sollen am eigenen Laptop arbeiten können, ohne dass ein manipulierter Inhalt Aktionen auslöst. | Rechte an einer Stelle: `voice-core/rechte.py`. Entwicklungsaufträge der Mitglieder (P5) mit Trennung je Profil im Kern-Kanal, ohne eigene Kostengrenze. | `voice-core/rechte.py`, `voice-core/pc_mitglied.py`, `docs/ausrollen-neue-nutzer.md` (N6, N10, Befunde 2, 3, 5) |
 | E-30 | 16.11.2026 | Hausmodelle für Hören und Stimme (Paket H5) messen und einbauen, aber nicht umstellen: Soniox bleibt Standard. Wählbare Haus-Stimmen genau `sohee` (Standard), `uncle_fu`, `ono_anna`. Laborsitzung immer Soniox. | Messung vor Umstellung, das Testlabor hat Vorrang. | Schalter und Wahl je Person, Migrationen 0023 und 0024. | `docs/hausmodelle-und-kikollege.md` (Nachtrag 16.11.), `CLAUDE.md` (Hören und Stimme im Haus) |
-| E-31 | 16.11.2026 | Gleichzeitige Entwicklungsaufträge: sechs gesamt, je Person drei. Freeze für Kern, Migrationen, Oberfläche und Dienste am Server ab Montag 23.11.2026 früh. | Mehrere Personen arbeiten parallel. Das Testlabor am 28.11.2026 hat Vorrang. | Dispatcher 9, Platzsperren, Portbereich je Platz. | `CLAUDE.md` (Gleichzeitige Entwicklungsaufträge), `docs/labor-restplan.md` (E1), `docs/labor-dienst-vertrag.md` |
+| E-31 | 16.11.2026 | Gleichzeitige Entwicklungsaufträge: sechs gesamt, je Person drei. Freeze für Kern, Migrationen, Oberfläche und Dienste am Server ab Montag 23.11.2026 früh. | Mehrere Personen arbeiten parallel. Das Testlabor hat Vorrang (damals für den 28.11.2026 geplant, inzwischen auf den 05.12.2026 verschoben). | Dispatcher 9, Platzsperren, Portbereich je Platz. | `CLAUDE.md` (Gleichzeitige Entwicklungsaufträge), `docs/labor-restplan.md` (E1), `docs/labor-dienst-vertrag.md` |
 | E-32 | 17.11.2026 | Labortag mit vier Besucher-Plätzen, keine Aufzeichnung fürs Schaufenster. Admin-Ports 55446, 55322 und 56543 nur für freigegebene Quellen (Q13). | Kleinere, besser prüfbare Last. Admin-Ports gehören nicht ins gesamte Büro-LAN. | Reserveprofile bleiben eingerichtet. Firewall-Liste `/etc/wamo/admin-quellen`. | `docs/testlabor-wamo.md` (E17, E18), `docs/labor-lasttest.md`, `infra/sokrates2/README.md` Abschnitt 6.1 |
 | E-33 | 17.11.2026 | Stimmwächter im Modus streng: Nur die eingelernte Stimme erreicht das Sprachmodell und nur sie unterbricht. Einwilligung im Schattenbetrieb des zweiten Sprechermodells (18.11.2026). | Fremde Stimmen im Raum sollen keine Aktionen auslösen. | `WAMO_STIMME_NUR_EIGEN`, `WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN`. Seit E-34 gilt das nur noch im Modus `streng`. | `README.md` Abschnitt "Stimmabdruck", `voice-core/stimme_waechter.py` |
 | E-34 | 18.11.2026 | Die Stimme sperrt nichts mehr (Entscheidung von Niko am Abend, "Mache diese Sperre raus"). Der Standard von `WAMO_STIMME_PRUEFUNG` ist `beobachten`: messen, anzeigen, loggen. `streng` gilt nur auf ausdrücklichen Wunsch. Es wird kein Standard mehr gebaut, der Werkzeuge, Äußerungen, Aufträge, das Unterbrechen oder das Ersetzen des Abdrucks von der erkannten Stimme abhängig macht. | Die Erkennung war bei Mikrofon- und Raumwechsel zu ungenau (eigene Sätze bei 0,0 bis 0,35), Aufträge und Aktionen blieben stehen. Ein schlechter Abdruck verhinderte außerdem das Ersetzen des schlechten Abdrucks. | Es schützen weiter zweiter Faktor und Freigabekarten. Ersetzen und Löschen eines Abdrucks gehen im Standard immer, nur im Modus `streng` braucht es einen Nachweis. Mitglieder brauchen für gesprochene PC-Befehle weiter einen eingelernten Abdruck (E-29), das Urteil sperrt dort nichts. | `CLAUDE.md` (Stimmwächter), `README.md` Abschnitt "Stimmabdruck", `voice-core/stimme_gate.py` |
 | E-35 | 18.11.2026 | Persönliche GitHub-Zugänge für Entwicklungsaufträge (Plan C): Das Token kommt nie in die Sandbox. Schreiben nur auf einen eigenen Zweig `wamo/<auftrag>` plus Pull Request, nie auf den Standardzweig, Push erst nach dem Klick auf der Freigabekarte, Merge durch Menschen. Das eigene Repo bleibt gesperrt. Laborprofile bekommen nie etwas davon. | Entwicklungsaufträge sollen mit den eigenen Zugängen der Person laufen, und man soll sehen, wer welche Änderung veranlasst hat. | Dispatcher 10, Schalter `WAMO_ENTWICKLUNG_GITHUB`, live seit 18.11.2026. Vercel und Supabase nach dem 05.12.2026. | `docs/persoenliche-zugaenge.md` (C1 bis C8, Z1 bis Z8), `README.md`, `infra/sokrates2/README.md` Abschnitt 18.3 |
 | E-36 | 18.11.2026 | Fehlerbuch nur im Speicher der Sitzung (höchstens 20 Einträge, nie in der Datenbank, nie Wortlaut). | W.A.I.S. soll erklären können, warum etwas nicht ging, ohne Inhalte zu speichern. | Werkzeug `fehler_erklaeren`. | `CLAUDE.md` (Fehlerbuch), `voice-core/fehlerbuch.py` |
-| E-40 | 18.11.2026 | Stimmabdruck je Mikrofon: Jede Person lernt jedes ihrer Mikrofone einmal ein, höchstens drei Abdrücke je Person. Die Prüfung nimmt den besten Wert über alle Abdrücke. Neue Einwilligungsfassung `stimme-3`. Dazu ein Mikrofontest, in dem W.A.I.S. schweigt. | Der wichtigste Faktor der Stimmprüfung ist das Mikrofon: Mit dem Laptop-Mikrofon eingelernt lagen kurze eigene Sätze am selben Gerät bei 0,53 bis 0,71, mit einem anderen Gerät bei 0,14 bis 0,49. | Migration 0029 (Spalten `mikrofon` und `mikrofon_name`, die Datenbank erzwingt die Grenze selbst). Client-Nachricht `mikrofontest`, Server-Nachricht `stimmabdruck_mikrofone`. Abdrücke aus früheren Fassungen bleiben gültig. | `voice-core/stimme_mikrofon.py`, `voice-core/stimme_einwilligung.py`, `supabase/migrations/0029_stimme_mikrofone.sql` |
+| E-40 | 18.11.2026 | Stimmabdruck je Mikrofon: Jede Person lernt jedes ihrer Mikrofone einmal ein, höchstens drei Abdrücke je Person. Die Prüfung nimmt den besten Wert über alle Abdrücke. Neue Einwilligungsfassung `stimme-3`. Dazu ein Mikrofontest, in dem W.A.I.S. schweigt. | Der wichtigste Faktor der Stimmprüfung ist das Mikrofon: Mit dem Laptop-Mikrofon eingelernt lagen kurze eigene Sätze am selben Gerät bei 0,53 bis 0,71, mit einem anderen Gerät bei 0,14 bis 0,49. | Migration 0029 (Spalten `mikrofon` und `mikrofon_name`, die Datenbank erzwingt die Grenze selbst). Client-Nachricht `mikrofontest`, Server-Nachricht `stimmabdruck_mikrofone`. Abdrücke aus früheren Fassungen bleiben gültig. Seit 19.11.2026 meldet die Oberfläche die Mikrofonkette (Klasse, Echo, Rauschen, Verstärkung, Rate) ins Protokoll, ohne Gerätenamen. | `voice-core/stimme_mikrofon.py`, `voice-core/stimme_einwilligung.py`, `voice-core/mikrofon_kette.py`, `supabase/migrations/0029_stimme_mikrofone.sql` |
+| E-41 | 19.11.2026 | Gemeinsamer Rückstand für Aufträge an W.A.I.S. selbst (Wunsch von Niko). Nur Admins legen Einträge an, ein Eintrag ist ein Vorschlag und keine Anweisung und wird nur nach dem ausdrücklichen Ja eines Admins umgesetzt. Der Selbstschutz für das eigene Repo bleibt. Dass W.A.I.S. Einträge selbst umsetzt, ist eine Ausbaustufe und nicht gebaut. | Wünsche an das Produkt sollen nicht verloren gehen, ohne dass ein Text im Rückstand etwas auslöst. | Migration 0030 (Tabelle `selbstauftraege`, Nummer `SA-n`, der Kern hat kein Recht zum Ändern des Standes, nur zwei Funktionen verwerfen und öffnen), Skript `scripts/wamo_selbstauftraege.py` für Claude Code. | `docs/selbstauftraege.md`, `voice-core/selbstauftraege.py`, `CLAUDE.md` (Aufträge an W.A.I.S. selbst) |
 
 ### 4. Ausrollen über GitHub
 

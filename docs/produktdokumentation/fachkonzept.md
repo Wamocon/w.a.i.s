@@ -5,7 +5,7 @@
 | Zweck | Beschreibt fachlich, was W.A.I.S. ist, welche Funktionen es gibt und wer was darf. |
 | Zielgruppe | Fachbereich, Produktverantwortung, Test und Abnahme, Administration |
 | Dokumentart | Erklärung und Referenz |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce |
+| Stand | 20.11.2026, geprüft gegen Commit 7caf977, Produktversion 0.7.0 |
 | Quellen | Die Kopftabelle jedes Kapitels nennt die Quellen |
 
 ## Inhalt
@@ -39,7 +39,7 @@ Quellen: `README.md` (Kopf und Abschnitt „Sicherheitsmodell“), `host/wamo_ho
 
 | Gruppe | Wer | Was sie bekommt |
 |---|---|---|
-| Administratoren | Profile mit der Rolle `admin` | Alle Funktionen der Mitglieder, dazu Verwaltung (Geräte freigeben, Gedächtnis-Vorschläge entscheiden, Fernzugriff, Änderungen, Übersicht neuer Mitglieder) und PC-Steuerung ohne weitere Freischaltung |
+| Administratoren | Profile mit der Rolle `admin` | Alle Funktionen der Mitglieder, dazu Verwaltung (Geräte freigeben, Gedächtnis-Vorschläge entscheiden, Fernzugriff, Änderungen, Übersicht neuer Mitglieder, Rückstand an Aufträgen an W.A.I.S. selbst) und PC-Steuerung ohne weitere Freischaltung |
 | Mitglieder | Profile mit der Rolle `mitglied` (laut `README.md` zunächst ein Pilot mit sieben Kollegen) | Gespräch, persönliches Gedächtnis, Canvas, Teilen, Bürogeräte. PC-Steuerung und Entwicklungsaufträge nur, wenn ein Admin sie je Person am Server freischaltet |
 | Besucher des Testlabors | Laborprofile (`labor_art` Platz oder Schaufenster, Rolle `mitglied`) | Ein enges Gespräch mit Testwerkzeugen (Uhrzeit, Websuche, Canvas, Test-Jira, Test-Mail), sonst nichts |
 
@@ -49,7 +49,7 @@ Die genaue Zuordnung steht in [Rollen und Rechte](#rollen-und-rechte). Quellen: 
 
 Die Funktionen im Einzelnen stehen im [Funktionskatalog](#funktionskatalog-wais). Hier die Kurzfassung.
 
-**Sprachgespräch und Stimmerkennung.** Livegespräch im Browser oder in der Desktop-App mit Unterbrechen mitten im Satz, Live-Untertiteln und alternativer Texteingabe. Spracherkennung und Sprachausgabe laufen standardmäßig über Soniox, wahlweise mit Modellen im Haus. Das Gesprächsmodell ist standardmäßig Claude Haiku. Die Stimmerkennung ist freiwillig: Die Person lernt mit ausdrücklicher Einwilligung einen Stimmabdruck ein (Zahlen, keine Aufnahme), je Mikrofon einen, höchstens drei. Seit dem 18.11.2026 ist der Standardmodus „beobachten“: Die Erkennung misst und zeigt, sperrt aber nichts. Der Modus „streng“ (nur die eigene Stimme wird gehört und darf unterbrechen) gilt nur auf ausdrücklichen Wunsch. Ausnahme: Mitglieder mit PC-Steuerung brauchen für gesprochene PC-Befehle einen eingelernten Abdruck, sonst gehen diese Befehle nur getippt. Ein Mikrofontest in den Einstellungen misst Pegel und Rauschen, ohne dass W.A.I.S. dazwischenredet. Quellen: `voice-core/bot.py`, `voice-core/stimme_gate.py` (`STANDARD_MODUS`), `voice-core/stimme_einwilligung.py`, `voice-core/stimme_mikrofon.py`, `docs/stimme-recherche-2026-11-18.md`.
+**Sprachgespräch und Stimmerkennung.** Livegespräch im Browser oder in der Desktop-App mit Unterbrechen mitten im Satz, Live-Untertiteln und alternativer Texteingabe. Spracherkennung und Sprachausgabe laufen standardmäßig über Soniox, wahlweise mit Modellen im Haus. Das Gesprächsmodell ist standardmäßig Claude Haiku. Die Stimmerkennung ist freiwillig: Die Person lernt mit ausdrücklicher Einwilligung einen Stimmabdruck ein (Zahlen, keine Aufnahme), je Mikrofon einen, höchstens drei. Seit dem 18.11.2026 ist der Standardmodus „beobachten“: Die Erkennung misst und zeigt, sperrt aber nichts. Der Modus „streng“ (nur die eigene Stimme wird gehört und darf unterbrechen) gilt nur auf ausdrücklichen Wunsch. Ausnahme: Mitglieder mit PC-Steuerung brauchen für gesprochene PC-Befehle einen eingelernten Abdruck, sonst gehen diese Befehle nur getippt. Ein Mikrofontest in den Einstellungen misst Pegel und Rauschen, ohne dass W.A.I.S. dazwischenredet. Damit sich Einbrüche der Erkennung erklären lassen, schreibt der Kern die Aufnahmekette (Echo- und Rauschunterdrückung, Verstärkung, Abtastrate, grobe Klasse des Mikrofons) als Zahlen ins Protokoll, nie den Gerätenamen und nie Audio. Quellen: `voice-core/bot.py`, `voice-core/stimme_gate.py` (`STANDARD_MODUS`), `voice-core/stimme_einwilligung.py`, `voice-core/stimme_mikrofon.py`, `docs/stimme-recherche-2026-11-18.md`.
 
 **Gedächtnis.** Persönliche Einträge (Eigenschaften, Vorlieben, Verhalten) sieht nur die Person selbst. Gemeinsame Einträge (Firma, Projekte, Abläufe) wirken erst nach der Freigabe durch einen Admin, ausdrücklich für alle gemerkte Einträge eines Admins gelten sofort. Inhalte aus dem Gedächtnis gelten für das Sprachmodell als Daten, nie als Anweisung. Quellen: `voice-core/tools.py` (`merken_status`), `voice-core/gedaechtnis_api.py`, `README.md` (Abschnitt „Nutzer und Gedächtnis“).
 
@@ -59,7 +59,7 @@ Die Funktionen im Einzelnen stehen im [Funktionskatalog](#funktionskatalog-wais)
 
 **Canvas.** Tabelle, Code, Dokument, Mermaid-Diagramm und Bild (als Verweis). Reiter lassen sich überarbeiten, schließen und über die Historie wieder öffnen, kopieren, herunterladen und mit anderen Profilen teilen (lesen oder bearbeiten). Quellen: `voice-core/tools.py`, `voice-core/canvas_historie.py`, `voice-core/teilen.py`, `ui/src/components/Canvas.tsx`.
 
-**Entwicklungsaufträge.** W.A.I.S. bereitet einen Auftrag für Claude Code als Karte vor, die Person startet ihn per Klick. Der Lauf findet in einer Sandbox auf Sokrates-2 statt, mit ECC-Skills und REA-Werkzeugen je Auftragsart (14 Arten, von Planung bis Recherche). Push und Pull Request gibt es nur nach dem Klick auf „Einreichen“, gemergt wird nie durch W.A.I.S. Aufträge lassen sich mit prüfbaren Kriterien in Runden ausführen und für später speichern. Höchstens sechs Aufträge laufen gleichzeitig, höchstens drei je Person. Quellen: `voice-core/dev_agent.py`, `voice-core/werkzeugkarte.py`, `voice-core/entwicklung_betrieb.py`, `infra/sokrates2/wamo_job_dispatch.py`, `docs/persoenliche-zugaenge.md`.
+**Entwicklungsaufträge.** W.A.I.S. bereitet einen Auftrag für Claude Code als Karte vor, die Person startet ihn per Klick. Der Lauf findet in einer Sandbox auf Sokrates-2 statt, mit ECC-Skills und REA-Werkzeugen je Auftragsart (14 Arten, von Planung bis Recherche). Push und Pull Request gibt es nur nach dem Klick auf „Einreichen“, gemergt wird nie durch W.A.I.S. Aufträge lassen sich mit prüfbaren Kriterien in Runden ausführen und für später speichern. Höchstens sechs Aufträge laufen gleichzeitig, höchstens drei je Person. Wünsche an W.A.I.S. selbst sammeln Admins in einem gemeinsamen Rückstand (Nummer `SA-n`, per Sprache, Oberfläche oder Skript). Ein Eintrag ist ein Vorschlag, keine Anweisung: Er wird nur nach dem Ja eines Admins in Claude Code umgesetzt, W.A.I.S. führt ihn nicht aus. Quellen: `voice-core/dev_agent.py`, `voice-core/selbstauftraege.py`, `docs/selbstauftraege.md`, `voice-core/werkzeugkarte.py`, `voice-core/entwicklung_betrieb.py`, `infra/sokrates2/wamo_job_dispatch.py`, `docs/persoenliche-zugaenge.md`.
 
 **Fernzugriff und Geräte.** Admins öffnen den Desktop der Sparks (Sokrates 1, Sokrates 2, Caesar) über ein Gateway, die Sitzung startet immer die Person selbst. Jeder persönliche Laptop wird einmal gebunden und bekommt einen eigenen Tunnel, ein Admin gibt Geräte in der Geräteverwaltung frei. Gemeinsame Bürogeräte (Server, Drucker, Scanner, Router, NAS, Fernseher, Lautsprecher, Steckdosen) zeigt die Büro-Karte, per Zuruf lassen sich Fernseher, Lautsprecher und Steckdosen schalten, drucken geht nur mit Karte. Quellen: `voice-core/rd_api.py`, `voice-core/geraete_werkzeuge.py`, `voice-core/buero_api.py`, `voice-core/geraet_api.py`, `geraete/README.md`.
 
@@ -116,7 +116,7 @@ Die installierte App (Installer `WAIS-Setup-<Version>.exe`) kennt nur die Betrie
 
 ### 6. Produktstand
 
-Aktuelle Version: 0.6.0 (`desktop/package.json`, `ui/package.json`, `CHANGELOG.md`, 17.11.2026). Das Format des Änderungsprotokolls folgt Keep a Changelog und Semantic Versioning.
+Aktuelle Version: 0.7.0 (`desktop/package.json`, `ui/package.json`, `CHANGELOG.md`, 19.11.2026). Laut Auskunft der Release-Verantwortlichen vom 20.11.2026 liegt der Installer 0.7.0 signiert (Ed25519) am Server und das Release `v0.7.0` steht auf GitHub, der Kern läuft in Slots. Das Repo belegt davon nur den Vergleichslink `v0.6.0...v0.7.0` im `CHANGELOG.md`. Das Format des Änderungsprotokolls folgt Keep a Changelog und Semantic Versioning.
 
 | Version | Datum | Inhalt in einem Satz |
 |---|---|---|
@@ -127,8 +127,16 @@ Aktuelle Version: 0.6.0 (`desktop/package.json`, `ui/package.json`, `CHANGELOG.m
 | 0.4.1 | 16.11.2026 | Härtung: Karte beim Lesen sensibler Host-Daten, Karte für Mitglieder nach Fremdinhalt, Einwilligung fürs Bildschirmbild |
 | 0.5.0 | 16.11.2026 | Strengerer Stimmwächter, Hören und Stimme im Haus wählbar, Modelle je Person umschaltbar, gestreamte Stimme im Haus |
 | 0.6.0 | 17.11.2026 | Nur die eingelernte Stimme hört und unterbricht (im Modus streng), Mikrofonwahl und Pegelwarnung, Werkzeuge für das Testlabor, Admin-Ports nur für freigegebene Quellen |
+| 0.7.0 | 19.11.2026 | Stimme sperrt nichts mehr (Standard „beobachten“), Abdruck je Mikrofon und Mikrofontest, Einstellungen in sechs Gruppen, persönliche GitHub-Zugänge, Aufträge für später speichern und an W.A.I.S. selbst, Fehlerbuch, Canvas schließen mit Historie, Bildern und Dateien |
 
-Nach 0.6.0 sind im Repo ohne Eintrag im Änderungsprotokoll (Abschnitt „Unveröffentlicht“ ist leer) unter anderem gelandet: persönliche GitHub-Zugänge für Entwicklungsaufträge (Plan C, laut `README.md` live seit 18.11.2026), gespeicherte Aufträge, Fehlerbuch (`fehler_erklaeren`), Canvas schließen mit Historie, Bildern und Dateien, Stimmabdruck je Mikrofon (Migration 0029), Mikrofontest ohne W.A.I.S. und der Wechsel des Stimm-Standards auf „beobachten“. Quellen: `CLAUDE.md` (Namensvertrag), `git log` ab `v0.6.0`.
+Der Abschnitt „Unveröffentlicht“ im Änderungsprotokoll ist leer. Die Version 0.7.0 umfasst:
+
+- **Stimme:** Die Erkennung sperrt nichts mehr (Standard „beobachten“, Entscheidung vom 18.11.2026), ein Abdruck je Mikrofon (Migration 0029) mit Mikrofontest ohne W.A.I.S. und Hinweis beim Gerätewechsel, Schwelle nach Länge der Äußerung, persönliche Schwelle beim Einlernen (Migration 0025), Erben des Urteils bei kurzen Äußerungen, zweites Sprechermodell im Schattenbetrieb (Migration 0028) und die Mikrofonkette im Protokoll.
+- **Einstellungen:** sechs Gruppen statt fünfzehn einzelner Punkte, neu der Abschnitt „Updates“ für die Desktop-App (vor „Info“, ersetzt die Installation in der Prüfliste „Erste Schritte“) und das Pop-up „Update verfügbar“ in der Desktop-App.
+- **Entwicklungsaufträge:** persönliche GitHub-Zugänge (Plan C, Dispatcher 10, laut `README.md` live seit 18.11.2026), Aufträge für später speichern (Migration 0026), Aufträge an W.A.I.S. selbst mit dem Rückstand `SA-n` (Migration 0030, nur Admins).
+- **Gespräch und Canvas:** „Warum ging etwas nicht“ (Fehlerbuch, `fehler_erklaeren`), Canvas-Reiter schließen, Historie, Bilder und Dateien.
+
+Quellen: `CHANGELOG.md` (Abschnitt 0.7.0), `CLAUDE.md` (Namensvertrag), `README.md`.
 
 ### 7. Offene Punkte und Ausbaustufen
 
@@ -142,10 +150,11 @@ Die Liste stammt aus `README.md` und ist teilweise älter als der Code. Wo der C
 | Router schreibend | nur als Entwurf, Stand 10.11.2026 | `geraete/README.md` |
 | Codesignatur des Installers | Weg eingebaut, Zertifikat folgt (Entscheidung N8) | Ohne Zertifikat warnt Windows SmartScreen |
 | Selbstüberarbeitung (Release-Dienst, Anker, Karte „Änderungen“) | Stufe 0 vorbereitet, Stand 20.10.2026 | Ob der Dienst in Betrieb ist, ist im Repo nicht belegt |
+| Aufträge an W.A.I.S. selbst: Umsetzung durch W.A.I.S. (`bearbeiter = 'wais'`) | Ausbaustufe, nicht gebaut, Stand 19.11.2026 | Bis dahin sammelt der Rückstand und Claude Code setzt nach dem Ja eines Admins um. Der Weg braucht eigene Entscheidungen und läuft über den Release-Weg der Selbstüberarbeitung (`docs/selbstauftraege.md`, `docs/selbstueberarbeitung.md`) |
 | Migrationen 0010, 0011 und 0013 auf `wamo_prod` | nicht als angewendet belegt | laut `README.md` Stand 10.11.2026 |
 | Ausbaustufen P4 (eigene Sprachmodelle über LiteLLM) und P5 (Hören und Sprechen im Haus) | Stand 20.10.2026 | Hausmodelle, Hören und Stimme im Haus sind inzwischen wählbar (0.5.0), die Abnahme der Modelle im Haus steht laut README aus |
 | Weckwort „Hey WAMO“ | später | `CLAUDE.md` |
-| Testlabor | Labortag 28.11.2026 laut `docs/labor-restplan.md`, Löschfrist 11.12.2026 | `docs/persoenliche-zugaenge.md` nennt den 05.12. für den Labortag, der Widerspruch ist im Repo nicht aufgelöst |
+| Testlabor | Labortag 05.12.2026 (verschoben vom 28.11.2026), Löschfrist nach der Verschiebung neu festzulegen (die Papiere nennen noch den 11.12.2026) | Mehrere Unterlagen im Repo (`docs/labor-restplan.md`, Runbook, Datenschutzentwurf) nennen noch den 28.11.2026 |
 | Persönliche Zugänge für Vercel, Supabase und weitere Konnektoren | Ausbaustufe nach dem Labortag | `docs/persoenliche-zugaenge.md` |
 
 ### Weiterführend
@@ -153,7 +162,7 @@ Die Liste stammt aus `README.md` und ist teilweise älter als der Code. Wo der C
 - [Benutzerhandbuch](benutzerhandbuch.md): Anleitung für Mitglieder
 - [Glossar](glossar.md)
 - [Recherche zur Sprechererkennung](../stimme-recherche-2026-11-18.md)
-- Bestehende Planpapiere: [Testlabor](../testlabor-wamo.md), [Office und Versand](../office-und-versand.md), [Ausrollen neuer Nutzer](../ausrollen-neue-nutzer.md), [Persönliche Zugänge](../persoenliche-zugaenge.md)
+- Bestehende Planpapiere: [Testlabor](../testlabor-wamo.md), [Office und Versand](../office-und-versand.md), [Ausrollen neuer Nutzer](../ausrollen-neue-nutzer.md), [Persönliche Zugänge](../persoenliche-zugaenge.md), [Aufträge an W.A.I.S. selbst](../selbstauftraege.md)
 
 ## Funktionskatalog W.A.I.S.
 
@@ -195,7 +204,7 @@ Steht nur „A, M“, gilt die Funktion nie im Labor. Die vollständige Matrix s
 | F-GES-06 | Darstellung wählen (Normal, Fokus, Zentrale, Nacht) und Hell oder Dunkel | A, M, L | Wahl je Gerät im Browser-Speicher | nein | `ui/src/components/kommando/DarstellungsWahl.tsx`, `ui/src/components/ThemaSchalter.tsx` |
 | F-GES-07 | Seitenleisten in der Breite ziehen | A, M | nur Oberfläche | nein | `ui/src/components/kommando/Seitengriff.tsx`, `ui/src/components/kommando/seitenbreite.ts` |
 | F-GES-08 | Mikrofon wählen, Pegelwarnung bei leisem Mikrofon | A, M, L | Mikrofon vorhanden und erlaubt | nein | `ui/src/components/MikrofonWahl.tsx`, `ui/src/lib/pegelWarnung.ts`, `ui/src/lib/mikrofon.ts` |
-| F-GES-09 | Mikrofontest (etwa 3 Sekunden Stille, 5 Sekunden Sprechen, Ampel mit Messwerten); läuft ein Gespräch, schweigt W.A.I.S. (Client-Nachricht `mikrofontest` unterbricht eine laufende Antwort) | A, M, L | Abschnitt „Sprache und Ton“, kein Gespräch nötig; im Labor ohne Unterbrechen und ohne gemerktes Ergebnis | nein | `ui/src/components/einstellungen/MikrofonTest.tsx`, `ui/src/lib/mikrofonTest.ts`, `voice-core/stimme_sitzung.py`, `voice-core/bot.py` |
+| F-GES-09 | Mikrofontest (etwa 3 Sekunden Stille, 5 Sekunden Sprechen, Ampel mit Messwerten); läuft ein Gespräch, schweigt W.A.I.S. (Client-Nachricht `mikrofontest` unterbricht eine laufende Antwort) | A, M, L | Abschnitt „Mikrofon und Sprache“ (Gruppe „Sprache und Stimme“), kein Gespräch nötig; im Labor ohne Unterbrechen und ohne gemerktes Ergebnis | nein | `ui/src/components/einstellungen/MikrofonTest.tsx`, `ui/src/lib/mikrofonTest.ts`, `voice-core/stimme_sitzung.py`, `voice-core/bot.py` |
 | F-GES-10 | Sprachwerkzeug `aktuelle_zeit` (Datum, Wochentag, Uhrzeit) | A, M, L | keine | nein | `voice-core/tools.py` |
 | F-GES-11 | Sprachwerkzeug `websuche` (aktuelle Infos aus dem Web) | A, M, L | `WAMO_SUCHE` (Standard Anthropic-Suche, alternativ SearXNG); im Labor Grenze je Sitzung | nein | `voice-core/tools.py`, `voice-core/suche.py`, `voice-core/labor_limit.py` |
 | F-GES-12 | Sprachwerkzeug `fehler_erklaeren` (warum etwas nicht ging) | A, M | nicht im Labor; Fehlerbuch nur im Speicher der Sitzung | nein | `voice-core/fehlerbuch.py` |
@@ -217,6 +226,7 @@ Steht nur „A, M“, gilt die Funktion nie im Labor. Die vollständige Matrix s
 | F-STI-05 | Nur die eigene Stimme hören und unterbrechen | A, M mit Abdruck | nur im Modus streng, `WAMO_STIMME_NUR_EIGEN` und `WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN` (Standard an) | nein | `voice-core/stimme_waechter.py` |
 | F-STI-06 | Pflichtstufe: gesprochene PC-Befehle von Mitgliedern nur mit eingelerntem Abdruck, sonst nur getippt; mit Abdruck entscheidet das Stimmurteil nur im Modus streng | M* | gilt in jedem Modus; im Modus aus oder ohne bereite Prüfung nur getippt, im Modus beobachten mit Abdruck erlaubt | nein | `voice-core/stimme_gate.py` (`pflicht_grund`), `voice-core/pc_mitglied.py` |
 | F-STI-07 | Zweites Sprechermodell im Schattenbetrieb (nur Messung im Log, kein Einfluss auf das Urteil) | Betrieb am Server | `WAMO_STIMME_SCHATTEN` (Standard aus), Einwilligung `stimme-2` oder neuer | ja (Einwilligung) | `voice-core/stimme_schatten.py` |
+| F-STI-08 | Mikrofonkette im Protokoll: Die Oberfläche meldet nach jedem Spurwechsel Echo- und Rauschunterdrückung, Verstärkung, Rate, Kanäle und eine grobe Klasse (eingebaut, Headset, Bluetooth, unbekannt), der Kern schreibt höchstens 50 Zeilen je Sitzung und hängt die Klasse an jede Urteilszeile | A, M | Stimmsitzung vorhanden, nie im Labor; nur Zahlen, nie Gerätename, nie Audio, nichts in der Datenbank, keine Wirkung auf das Urteil | nein | `voice-core/mikrofon_kette.py`, `ui/src/lib/mikrofonKette.ts` |
 
 ### 3. Gedächtnis (GED)
 
@@ -312,6 +322,7 @@ Alle Funktionen dieses Gebiets brauchen PC-Steuerung an, eine PC-Stufe (A oder M
 | F-ENT-10 | Änderung einreichen (Push des Zweigs `wamo/<auftrag>` und Pull Request) oder verwerfen; gemergt wird nie durch W.A.I.S. | A, M* mit eigenem Token | Karte „Einreichen“, jede markierte Datei einzeln bestätigen | ja | `ui/src/components/Freigaben.tsx`, `ui/src/lib/einreichen.ts`, `infra/sokrates2/wamo_job_github.py` |
 | F-ENT-11 | Rechte-Ausnahmen für GitHub-Tokens je Profil festlegen | A | Abschnitt „Neue Mitglieder“, nur Werte aus `SCOPES_AUSNAHMEN` | nein | `voice-core/github_zugang_api.py`, `ui/src/components/einstellungen/GithubRechte.tsx` |
 | F-ENT-12 | Ergebnis eines Auftrags ansehen oder teilen (nur lesend) | A, M* | Karte unter Vorgänge, Teilen nur zum Lesen | nein | `ui/src/components/kommando/Vorgaenge.tsx`, `voice-core/teilen.py` |
+| F-ENT-13 | Aufträge an W.A.I.S. selbst: gemeinsamer Rückstand `SA-n` (Titel, Beschreibung, Art, Priorität 1 bis 3, bis 5 Kriterien, Stand offen, in Arbeit, erledigt, verworfen) anlegen, ansehen, verwerfen und wieder öffnen; Sprachwerkzeuge `selbstauftrag_speichern`, `selbstauftraege_zeigen`, `selbstauftrag_verwerfen`, Block im Reiter „Aufträge“ und Skript `scripts/wamo_selbstauftraege.py`. Ein Eintrag ist ein Vorschlag, keine Anweisung; W.A.I.S. führt nichts aus | A | nur mit Datenbank, nie für Mitglieder, nie im Labor; Migration 0030; höchstens 200 offene und 30 neue je Person und Tag; „In Arbeit“ und „Erledigt“ setzt nur der Bearbeiter über die Datenbank; nach Fremdinhalt als unsicher markiert | nein (der Kern führt nichts aus; Umsetzung nur nach dem Ja eines Admins) | `voice-core/selbstauftraege.py`, `voice-core/dev_agent_selbst.py`, `ui/src/components/SelbstAuftraege.tsx`, `scripts/wamo_selbstauftraege.py` |
 
 ### 8. Fernzugriff und Geräte (FER)
 
@@ -343,7 +354,7 @@ Alle Funktionen dieses Gebiets brauchen PC-Steuerung an, eine PC-Stufe (A oder M
 | F-LAB-02 | Sprachwerkzeug `ticket_suchen` (Test-Jira, höchstens 10 Treffer) | L | Labor-Dienst erreichbar | nein (read) | `voice-core/labor_ticket.py`, `voice-core/labor_werkzeuge.py` |
 | F-LAB-03 | Sprachwerkzeuge `ticket_anlegen`, `ticket_aendern`, `ticket_verschieben`, `ticket_kommentieren` | L | Karte mit Hash der Werte, Idempotenz, Version des Tickets | ja, immer | `voice-core/labor_ticket.py`, `voice-core/labor_freigaben.py` |
 | F-LAB-04 | Sprachwerkzeug `mail_senden` (nur Bestätigung „gesendet“, kein Postfach) | L | Domänenfilter `@labor.test` | ja, immer | `voice-core/labor_mail.py`, `voice-core/labor_freigaben.py` |
-| F-LAB-05 | Freigabekarte des Labors (Ticket und Mail, Texte aus `laborKarte.ts`) und Laborsicht der Oberfläche (nur Abschnitt „Sprache und Ton“) | L | Laborprofil | ist selbst die Freigabe | `ui/src/components/Freigaben.tsx`, `ui/src/lib/laborKarte.ts`, `ui/src/lib/laborPlatz.ts` |
+| F-LAB-05 | Freigabekarte des Labors (Ticket und Mail, Texte aus `laborKarte.ts`) und Laborsicht der Oberfläche (nur Abschnitt „Mikrofon und Sprache“ mit der Mikrofonwahl) | L | Laborprofil | ist selbst die Freigabe | `ui/src/components/Freigaben.tsx`, `ui/src/lib/laborKarte.ts`, `ui/src/lib/laborPlatz.ts` |
 | F-LAB-06 | Platz-Skript für Laptops (einrichten, starten, prüfen, Rückweg; Kiosk-Konto, Chrome-Richtlinien) | Betreuer, A | Windows, Kiosk-Konto ohne Administrator | nein | `scripts/wamo_labor_platz.py`, `docs/labor-platz-einrichten.md` |
 | F-LAB-07 | Zweite Faktoren der Laborprofile automatisch einrichten (mit QR) | A | `scripts/wamo_labor_faktoren.py` | nein | `scripts/wamo_labor_faktoren.py` |
 | F-LAB-08 | Nachlauf: Sperren, Löschen der Laborkonten, Nachweis (Löschfrist 11.12.2026) | Betreuer, A | Bestätigungswort beim Löschlauf | ja (Bestätigungswort) | `scripts/wamo_labor_nachlauf.py`, `voice-core/labor_loeschliste.py`, `docs/labor-runbook.md` |
@@ -379,9 +390,10 @@ Alle Funktionen dieses Gebiets brauchen PC-Steuerung an, eine PC-Stufe (A oder M
 | F-KON-03 | Erstanmeldung: Startpasswort durch eigenes Passwort ersetzen (mindestens 12 Zeichen) | A, M | Stand „offen“, Frist; andere Sitzungen werden abgemeldet; nie für Laborprofile | nein | `voice-core/erstanmeldung_api.py`, `ui/src/components/erstanmeldung/PasswortSchritt.tsx` |
 | F-KON-04 | Prüfliste „Erste Schritte“ (Anmeldung, Kern, Passwort, App-Version, Gerät, Host-Umgebung, Tunnel, Mikrofon, Stimme, Gespräch, Entwicklung, Stimmabdruck, PC-Steuerung) | A, M | nie im Labor | nein | `voice-core/einrichtung_api.py`, `ui/src/lib/einrichtung.ts`, `ui/src/components/einstellungen/ErsteSchritte.tsx` |
 | F-KON-05 | Installer laden (`WAIS-Setup-<Version>.exe`) | A, M | nur im Browser, nie im Labor, höchstens begrenzte Abrufe | nein | `voice-core/verteilung_api.py`, `ui/src/components/einrichtung/InstallerDownload.tsx` |
-| F-KON-06 | App-Update prüfen und installieren (Ed25519-Signatur, steigende Version, SHA-256) | A, M | nur Desktop-App | ja (Rückfrage der App) | `desktop/update.js`, `desktop/update-schluessel.json`, `ui/src/lib/einrichtung.ts` |
+| F-KON-06 | App-Update prüfen und installieren (Ed25519-Signatur, steigende Version, SHA-256), im Abschnitt „Updates“ der Einstellungen (neu in 0.7.0; Zustände Aktuell, Update verfügbar, Wird installiert, Fehler, Prüfung nicht möglich; „Nach Updates suchen“ einmal je 10 Sekunden, „Update installieren“ nur bei von der App bestätigtem Angebot, im Browser nur ein Satz und der Installer). Die Prüfliste „Erste Schritte“ verweist nur noch mit „Zu den Updates“ dorthin | A, M | nur Desktop-App, nie in der Laborsicht | ja (Rückfrage der App) | `desktop/update.js`, `desktop/update-schluessel.json`, `ui/src/lib/einrichtung.ts` |
 | F-KON-07 | Abmelden (für Laborkonten mit Rückfrage „Ja, abmelden“ oder „Angemeldet bleiben“) | A, M, L | Laborkonten kommen ohne die Zugangsdaten des Platzes nicht wieder hinein | nein; nur Labor: ja (Rückfrage) | `ui/src/components/AbmeldenRueckfrage.tsx`, `ui/src/components/Kopfzeile.tsx` |
-| F-KON-08 | Einstellungsseite mit 15 Abschnitten (Konto, Erste Schritte, Modellzugang, GitHub-Zugang, Verbrauch, Sprache und Ton, Stimme, Gedächtnis, Neue Mitglieder, Darstellung, Geräte und PC, Fernzugriff, Änderungen, Teilen, Info) | A, M; je Abschnitt eingeschränkt | Abschnitte mit `nurAdmin` nur für Admins, Verbrauch auch mit Token; Laborsicht nur „Sprache und Ton“ | nein | `ui/src/lib/einstellungenAbschnitte.ts`, `ui/src/components/einstellungen/Abschnitte.tsx` |
+| F-KON-08 | Einstellungsseite in sechs Gruppen: Konto und Allgemeines (Konto, Erste Schritte, Darstellung, Updates, Info), Sprache und Stimme (Mikrofon und Sprache, Eigene Stimme), Modelle und Zugänge (Modellzugang, GitHub-Zugang, Verbrauch), Geräte und PC (Geräte und PC-Steuerung, Fernzugriff), Gedächtnis und Teilen (Gedächtnis, Teilen), Verwaltung (Neue Mitglieder, Änderungen); 16 Abschnitte. Die Adresse nennt eine Gruppe (`#einstellungen/zugaenge`) oder einen Abschnitt (`#einstellungen/stimme`), ein Abschnitt öffnet seine Gruppe | A, M; je Abschnitt eingeschränkt | Abschnitte mit `nurAdmin` nur für Admins (Mitglieder sehen fünf Gruppen), Verbrauch auch mit Token; Laborsicht nur „Mikrofon und Sprache“ (Mikrofonwahl) | nein | `ui/src/lib/einstellungenAbschnitte.ts`, `ui/src/components/einstellungen/Abschnitte.tsx`, `ui/src/components/einstellungen/Updates.tsx` |
+| F-KON-09 | Hinweis „Update verfügbar“ (schwebende Karte, wenn der Server eine neuere Version anbietet und die App das signierte Angebot bestätigt hat): Prüfung beim Start, alle 30 Minuten und beim Zurückkehren ins Fenster (dort höchstens alle 10 Minuten); Knöpfe „Jetzt aktualisieren“ (bei einem Fehler „Erneut versuchen“) und „Später“, dazu der Verweis „Zu den Updates“; „Später“ gilt je Version und Profil bis zum nächsten Start der App oder 24 Stunden, eine neuere Version zeigt die Karte sofort wieder; kein Fokusraub, kein Dialog, kein Ton; bei laufendem Gespräch der Satz, dass es beendet wird; im Abschnitt „Updates“ keine zweite Karte | A, M | nur Desktop-App und angemeldetes Profil, nie im Browser, nie im Labor; Stand und Installation teilt die Karte mit dem Abschnitt „Updates“, das Token holt erst der Klick; der Merker „Später“ liegt je Profil im lokalen Speicher des Geräts | ja (Rückfrage der App vor der Installation) | `ui/src/components/UpdateHinweis.tsx`, `ui/src/lib/updateHinweis.ts`, `ui/src/lib/updatesStore.ts` |
 
 ### 13. Administration (ADM)
 
@@ -397,7 +409,7 @@ Die Verwaltungsfunktionen, die schon in anderen Gebieten stehen, sind hier nur v
 
 ### Abdeckung und Grenzen
 
-- Der Katalog erfasst die Sprachwerkzeuge der Sitzung (`voice-core/tools.py`, `*_werkzeuge.py`, `screen.py`, `boss.py`, `dev_agent.py`, `fehlerbuch.py`, `geraete_werkzeuge.py`, `teilen_werkzeuge.py`, `labor_*`), die 19 Werkzeuge des Hosts in `LLM_TOOLS` und die Nutzerfunktionen der Oberfläche in `ui/src/components/` und `ui/src/lib/`. Reine Entwicklerfunktionen (Vorschaumodus, Messwerkzeuge, Lasttest) stehen nicht darin.
+- Der Katalog erfasst die Sprachwerkzeuge der Sitzung (`voice-core/tools.py`, `*_werkzeuge.py`, `screen.py`, `boss.py`, `dev_agent.py`, `selbstauftraege.py`, `fehlerbuch.py`, `geraete_werkzeuge.py`, `teilen_werkzeuge.py`, `labor_*`), die 19 Werkzeuge des Hosts in `LLM_TOOLS` und die Nutzerfunktionen der Oberfläche in `ui/src/components/` und `ui/src/lib/`. Reine Entwicklerfunktionen (Vorschaumodus, Messwerkzeuge, Lasttest) stehen nicht darin.
 - Welche Schalter am Server wirklich gesetzt sind, belegt das Repo nicht. Der Katalog nennt nur die Voraussetzung, nicht den Betriebszustand.
 - Die Funktionen der Selbstüberarbeitung (Anker, Release-Dienst) sind im Code angelegt, ihr Betriebszustand ist nicht belegt (`README.md`, Stand 20.10.2026).
 
@@ -497,6 +509,7 @@ Die Zeilen fassen Funktionen aus dem [Funktionskatalog](#funktionskatalog-wais) 
 | Jira-Story (JIR-01 bis 03) | ja, Büro und Schalter, Karte | nein | nein | nein | `voice-core/jira_werkzeuge.py` (`sitzung_bauen`) |
 | Entwicklungsaufträge (ENT-01 bis 12) | ja, Schalter, im Büro Profilliste | nein | ja, nur im Büro und mit Schalter (Abschnitt 7) | nein | `voice-core/entwicklung_betrieb.py`, `voice-core/bot.py` |
 | Persönlicher GitHub-Zugang (ENT-09) | ja, mit Zulassung | nein | ja, mit Zulassung | nein | `voice-core/github_zugang_api.py` |
+| Aufträge an W.A.I.S. selbst (ENT-13) | ja, mit Datenbank | nein | nein | nein | `voice-core/dev_agent_selbst.py`, `voice-core/selbstauftraege.py` |
 | GitHub-Rechte je Profil, Neue Mitglieder (ENT-11, ADM-01) | ja | nein | nein | nein | `voice-core/github_zugang_api.py`, `voice-core/mitglieder_admin_api.py` |
 | Fernzugriff auf die Sparks (FER-01, 02) | ja, Schalter | nein | nein | nein | `voice-core/rd_api.py` (403 ohne Admin) |
 | Geräteverwaltung, Änderungen (FER-04, ADM-02) | ja, frischer Code | nein | nein | nein | `voice-core/geraete_admin_api.py`, `voice-core/release_api.py` |
