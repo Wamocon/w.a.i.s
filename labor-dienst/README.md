@@ -31,7 +31,7 @@ Meldung ohne Werte.
 | `WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI` | Datei mit dem Betreuer-Token, muss ein anderer Wert sein | Pflicht |
 | `WAMO_LABOR_DIENST_DATEN` | Ordner für Datenbanken und Protokoll (im Container `/data`) | `/data` |
 | `WAMO_LABOR_DIENST_HOST`, `WAMO_LABOR_DIENST_PORT` | Adresse zum Lauschen (im Container `0.0.0.0`) | `127.0.0.1`, `8080` |
-| `WAMO_LABOR_DIENST_BIS` | Ende der Aufbewahrung (JJJJ-MM-TT, zwischen `2026-11-28` (Labortag) und `2026-12-11`, alles andere ist ein Konfigurationsfehler), danach löscht der Dienst alle Daten. Geht die Uhr des Rechners vor dem 12.11.2026, startet der Dienst nicht (Ausgang 2) | `2026-12-11` |
+| `WAMO_LABOR_DIENST_BIS` | Ende der Aufbewahrung (JJJJ-MM-TT, zwischen dem Labortag `2026-12-05` und `2026-12-18`, alles andere ist ein Konfigurationsfehler; beide Werte kommen aus `wamo_labor_dienst/frist.py`), danach löscht der Dienst alle Daten. Geht die Uhr des Rechners vor dem 12.11.2026, startet der Dienst nicht (Ausgang 2) | `2026-12-18` |
 | `WAMO_LABOR_DIENST_PLATZ_MB` | harte Obergrenze der Datenbankdatei je Platz (2 bis 64) | `16` |
 | `WAMO_LABOR_DIENST_PROXYS` | Adressen vertrauter Proxys (durch Komma getrennt, zum Beispiel die von Caddy im internen Netz). Nur von ihnen zählt `X-Forwarded-For` für die Zählung der Fehlversuche, sonst zählt die Adresse der Verbindung | leer |
 
@@ -101,7 +101,7 @@ Was der Dienst bewusst nicht löst und wer es lösen muss:
 
 * **Löschen nur auf SQLite-Ebene:** `daten-loeschen`, `zuruecksetzen` und die Aufbewahrung löschen in den Datenbanken (Zeilen überschrieben, Datei verkleinert,
   WAL-Datei zurückgeschrieben und geprüft). Dateisystemblöcke, Volume-Snapshots und Hostsicherungen liegen außerhalb des Dienstes. D10 verlangt, dass der Betrieb
-  dafür sorgt (keine Snapshots oder Sicherungen des Volumes über die Löschfrist hinaus `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`, sonst löschen). Der Code und die Einstellung `WAMO_LABOR_DIENST_BIS` tragen noch den 11.12.2026 und werden mit der Entscheidung angepasst.
+  dafür sorgt (keine Snapshots oder Sicherungen des Volumes über die Löschfrist 18.12.2026 hinaus, sonst löschen). Die Frist steht nur in `wamo_labor_dienst/frist.py`, die Einstellung `WAMO_LABOR_DIENST_BIS` darf sie nur vorziehen.
 * **Die Aufbewahrung greift nur bei laufendem Dienst:** Gelöscht wird beim Start und stündlich, solange der Dienst läuft. Nach der Löschfrist den Dienst
   weiterlaufen lassen (oder neu starten) oder das Volume löschen. Ein Dienst, der vorher abgeschaltet wird, löscht nichts mehr.
 * **Uhrabhängigkeit:** Aufbewahrung, Schreibrate, Gültigkeit der Idempotenzschlüssel, Anzeigezeit des neuen Tokens und die Zeitpunkte in den Tickets nutzen die

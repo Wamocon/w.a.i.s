@@ -45,7 +45,6 @@ RAUCHTEST_ATTRAPPE = SOKRATES2 / "wamo_labor_rauchtest_attrappe.py"
 SKRIPTE = [EINRICHTEN, RUECKWEG, LOESCHLAUF]
 FRIST_ENV = LABOR / "frist.env"  # die einzige Quelle der Daten am Server (erzeugt aus labor-dienst/wamo_labor_dienst/frist.py)
 FRIST = dict(re.findall(r"^(WAMO_LABOR_[A-Z_]+)=([0-9]{8})$", FRIST_ENV.read_text(encoding="utf-8"), flags=re.M))
-DATUM_DE = re.compile(r"\d{2}\.\d{2}\.\d{4}")
 
 
 def tag_de(jjjjmmtt: str) -> str:
@@ -1880,7 +1879,9 @@ class DokumentationTests(unittest.TestCase):
                      "allein an `wamo-firewall`", "systemctl stop wamo-firewall",
                      "WAMO_LABOR_URL", "WAMO_LABOR_TOKEN", "WAMO-FW-LABOR", "WAMO-FW-LABAUS", "wamo-labor.caddy"):
             self.assertIn(soll, zeile, soll)
-        self.assertTrue(DATUM_DE.search(zeile), "die Zeile nennt die Aufbewahrung mit einem Datum (welches, steht in frist.py)")
+        # die Aufbewahrung der Zeile ist die aus frist.env (Entscheidung von Niko am 20.11.2026: bis 18.12.2026, Löschlauf ab 19.12.2026)
+        self.assertIn("Aufbewahrung bis " + tag_de(FRIST["WAMO_LABOR_AUFBEWAHRUNG_BIS"]), zeile)
+        self.assertIn("Löschlauf ab " + tag_de(FRIST["WAMO_LABOR_LOESCHLAUF_AB"]), zeile)
         self.assertNotIn(chr(0x2014), zeile)
 
     def test_abschnitt_im_readme_von_sokrates2(self):
@@ -1892,6 +1893,8 @@ class DokumentationTests(unittest.TestCase):
                      "umschalten-kern", "Aufbewahrung", "stop wamo-firewall", "WAMO-FW-LABIN", "zwei Stufen", "am Server zu messen", "RFC 1918", "arm64", "Neuanlegen",
                      "Besucheradressen", "P19", "P20", "Betreuer-PCs", "wamo-firewall regeln", "Herkunft", "allein an `wamo-firewall`"):
             self.assertIn(soll, abschnitt, soll)
+        self.assertIn(tag_de(FRIST["WAMO_LABOR_AUFBEWAHRUNG_BIS"]), abschnitt)  # Frist des Löschlaufs im Abschnitt
+        self.assertIn(tag_de(FRIST["WAMO_LABOR_LOESCHLAUF_AB"]), abschnitt)
         for verboten in (chr(0x2014), chr(0x2013), *VERBOTENE_WOERTER):
             self.assertNotIn(verboten, abschnitt.lower() if verboten in VERBOTENE_WOERTER else abschnitt)
 

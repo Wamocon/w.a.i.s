@@ -30,7 +30,7 @@ und der Repo-Name heißen weiter `wamo`. In den technischen Abschnitten dieser D
 
 ### Testlabor 05.12.2026 (Betriebsunterlagen, Stand 13.11.2026)
 
-Der Labortag ist am 20.11.2026 vom Sa 28.11. auf Sa 05.12.2026 verschoben worden. Der Freeze bleibt Mo 23.11.2026 früh. Die Löschfrist der Labordaten ist nicht entschieden `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`. Die neuen Termine stehen im Restplan `docs/labor-restplan.md` (Nachtrag 20.11.2026).
+Der Labortag ist am 20.11.2026 vom Sa 28.11. auf Sa 05.12.2026 verschoben worden. Der Freeze bleibt Mo 23.11.2026 früh. Die Löschfrist der Labordaten ist am 20.11.2026 entschieden: Aufbewahrung bis 18.12.2026, Löschlauf des Dienstes ab 19.12.2026, die Laborkonten werden direkt nach dem Labortag gelöscht. Die neuen Termine stehen im Restplan `docs/labor-restplan.md` (Nachtrag 20.11.2026).
 
 Für den Labortag liegen drei Betriebsunterlagen vor: das Runbook für die Betreuer `docs/labor-runbook.md`, die Checkliste für Freitag und Samstag `docs/labor-morgencheckliste.md`
 und das Nachlauf-Skript `scripts/wamo_labor_nachlauf.py` (Sperren, Löschen, Nachweis). Dazu kommen der Restplan mit Terminen und offenen Entscheidungen `docs/labor-restplan.md` und der
