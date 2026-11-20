@@ -289,3 +289,9 @@ export const kartenPruefen = (): Promise<Pruefung> => anfrage("/karten/pruefen",
 export const freigabeKarteAnlegen = (): Promise<FreigabeKarte> => anfrage("/karten/karte", { methode: "POST", body: {}, lesen: alsFreigabeKarte });
 export const freigabeAusfuehren = (id: string): Promise<Veroeffentlicht> =>
   anfrage(`/karten/karte/${sichereId(id)}/ausfuehren`, { methode: "POST", body: {}, lesen: alsVeroeffentlicht });
+
+/** Das Fehlerbild zu einem beliebigen Fehler eines Aufrufs (Anzeige in der Oberfläche). */
+export function fehlerBildAus(e: unknown): FehlerBild {
+  if (e instanceof WerkstattFehler) return { code: e.code, text: e.message, status: e.status };
+  return eigenerFehler("netz");
+}

@@ -32,6 +32,8 @@ const fetchMock = vi.fn();
 function antwort(status: number, daten?: unknown): Response {
   return new Response(daten === undefined ? null : JSON.stringify(daten), { status });
 }
+/** Der Fehler, mit dem ein Aufruf endet (der Test erwartet einen). */
+const fange = (p: Promise<unknown>): Promise<WerkstattFehler> => p.then(() => { throw new Error("kein Fehler"); }, (e: unknown) => e as WerkstattFehler);
 const aufruf = (n = 0) => {
   const [adresse, init] = fetchMock.mock.calls[n] as [string, RequestInit];
   return { adresse, init, headers: new Headers(init.headers) };
@@ -112,11 +114,11 @@ describe("Token", () => {
 describe("Fehlerbilder", () => {
   it("jeder Fehler der Schnittstelle wird zu Code, Status und deutschem Satz", async () => {
     fetchMock.mockResolvedValue(antwort(410, { code: "karte_abgelaufen", text: "intern" }));
-    const f = await freigabeAusfuehren("k1").catch((e: unknown) => e as WerkstattFehler);
+    const f = await fange(freigabeAusfuehren("k1"));
     expect(f).toMatchObject({ code: "karte_abgelaufen", status: 410 });
     expect(f.message).toMatch(/Karte ist abgelaufen/);
     fetchMock.mockResolvedValue(antwort(422, { code: "ungueltig", text: "Titel ist zu lang" }));
-    const u = await kartenPruefen().catch((e: unknown) => e as WerkstattFehler);
+    const u = await fange(kartenPruefen());
     expect(u.message).toMatch(/nicht gültig\. Titel ist zu lang/);
   });
 
