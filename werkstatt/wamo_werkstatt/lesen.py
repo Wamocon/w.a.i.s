@@ -138,6 +138,8 @@ def labor_stand_zeilen(zeilen: Iterable[Mapping[str, Any]]) -> list[dict]:
 def _datei_lesen(pfad: Path, maximum: int, *, ende: bool) -> bytes | None:
     """Liest eine reguläre Datei ohne einem Link zu folgen (sonst None). ende=True liest höchstens das Ende, sonst die Datei ganz (zu groß: None)."""
     try:
+        if not stat.S_ISREG(os.lstat(pfad).st_mode):  # auch ein Link auf eine Datei zählt nicht (auf Linux zusätzlich O_NOFOLLOW)
+            return None
         fd = os.open(pfad, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
     except OSError:
         return None
