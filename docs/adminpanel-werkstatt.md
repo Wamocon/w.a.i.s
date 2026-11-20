@@ -2,6 +2,8 @@
 
 Stand: 20.11.2026. Status: Entwurf, die Entscheidungen in Abschnitt 7 sind offen. Anlass ist der Wunsch von Niko vom 20.11.2026 nach einem separat aufrufbaren Admin-Panel, in dem sich ein Labortag planen und konfigurieren lässt und das Dashboards und Protokolle enthält.
 
+Der Bauplan mit Arbeitspaketen, Schnittstelle, Datenmodell, Testplan und der Inventur der vorhandenen Schnittstellen steht in `docs/adminpanel-bauplan.md`.
+
 ## 1. Einschätzung
 
 Die Idee lohnt sich, aber erst nach dem Labortag am 05.12.2026 und nur als getrennter, schmaler Dienst. Der größte Nutzen: Stand, Protokolle und Laborvorbereitung liegen an einem Ort. Heute sind es über ein Dutzend Einstiegsskripte mit ssh (`docs/labor-runbook.md`, Abschnitte 9 und 10). Die größte Gefahr ist ein Generalschlüssel im Browser, der Profile freischaltet und Daten löscht und so die heutige Rechtetrennung aushebelt.
