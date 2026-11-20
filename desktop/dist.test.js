@@ -103,7 +103,7 @@ test("Bau-Konfiguration: Kennung, pro Benutzer ohne Admin, Fuses, Host ohne Test
   assert.equal(b.electronFuses.enableNodeCliInspectArguments, false);
   assert.equal(b.electronFuses.enableEmbeddedAsarIntegrityValidation, true);
   assert.equal(b.electronFuses.onlyLoadAppFromAsar, true);
-  // start.html und overlay.html kommen per file:// aus der asar; mit false scheitert das (ERR_FILE_NOT_FOUND, am gebauten Programm gemessen)
+  // start.html, overlay.html und livebild-hinweis.html kommen per file:// aus der asar; mit false scheitern alle drei (ERR_FILE_NOT_FOUND, am gebauten Programm und im Versuch mit Electron 44.10.1 gemessen)
   assert.equal(b.electronFuses.grantFileProtocolExtraPrivileges, true);
   const host = b.extraResources.find((e) => e.to === "host");
   assert.ok(host.filter.includes("!**/test_*.py") && host.filter.includes("!.venv/**") && host.filter.includes("uv.lock"));

@@ -360,8 +360,9 @@ keine `.env`.
   Installation ein Update mit dem neuen Fingerabdruck (`WAMO_CA_SHA256`, der Test vergleicht ihn mit `infra/sokrates2/wamo-ca.crt`).
 - **Electron-Fuses** (am gebauten Programm mit REA gelesen): `RunAsNode` aus, `EnableNodeOptionsEnvironmentVariable` aus,
   `EnableNodeCliInspectArguments` aus, `EnableCookieEncryption` an, `EnableEmbeddedAsarIntegrityValidation` an,
-  `OnlyLoadAppFromAsar` an. `GrantFileProtocolExtraPrivileges` bleibt an, weil `start.html` und `overlay.html` per `file://` aus der
-  asar geladen werden (mit „aus“ scheitert das am gebauten Programm mit `ERR_FILE_NOT_FOUND`).
+  `OnlyLoadAppFromAsar` an. `GrantFileProtocolExtraPrivileges` bleibt an, weil `start.html`, `overlay.html` und `livebild-hinweis.html`
+  per `file://` aus der asar geladen werden (mit „aus“ scheitern alle drei mit `ERR_FILE_NOT_FOUND`; am 20.11.2026 in einem echten
+  Electron 44.10.1 mit asar und den Fuses der Produktion gegengeprüft, mit „an“ laden alle drei samt Skript und Brücke).
 - **Autostart**: wie bisher nur über „Mit Windows starten“ im Tray, der Installer legt keinen Autostart an. Electron schreibt den
   Eintrag unter `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` mit dem Namen `de.wamocon.wamo` (AppUserModelId) und dem
   Pfad der `WAMO.exe`; er bleibt gültig, solange Ordner und Programmname gleich bleiben. Die Deinstallation
@@ -398,7 +399,9 @@ keine `.env`.
   danach das JSON (genau `v`, `produkt`, `version`, `datei`, `groesse`, `sha256`, `bauzeit`, `commit`), verlangt eine streng höhere
   Version, fragt im Hauptprozess nach (nur bei sichtbarem Fenster, nach „Abbrechen“ 10 Minuten Ruhe), baut die TLS-Verbindung zum
   Kern auf, prüft die Kette zur WAMO-CA und sendet erst danach das Token, lädt nach `%LOCALAPPDATA%\WAMO\updates`, vergleicht Größe
-  und SHA-256 im Strom und noch einmal auf der Platte und startet dann den Installer mit `--updated`. Ohne gültige Signatur fragt
+  und SHA-256 im Strom, noch einmal auf der Platte und ein drittes Mal unmittelbar vor dem Start (bei Abweichung wird die Datei
+  gelöscht und nichts gestartet; unter Windows bleibt nur das Zeitfenster bis zum Prozessstart, weil Node Dateien nicht sperren
+  kann) und startet dann den Installer mit `--updated`. Ohne gültige Signatur fragt
   und lädt die App nichts („Update vom Server nicht bestätigt, bitte Niko fragen.“). Signiert wird beim Bau:
   `node scripts\wamo-dist-signieren.cjs signieren desktop\dist\WAIS-Setup-<Version>.exe --schluessel <Datei>` (Übergang, Datei nur
   bei Niko außerhalb jedes Git-Arbeitsbaums) oder `--pkcs11-modul <ykcs11.dll> --pkcs11-id <hex>` (Hardware-Token). Das Skript
