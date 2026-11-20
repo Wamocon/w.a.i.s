@@ -1,0 +1,4 @@
+# W.A.I.S. Werkstatt: Erlaubnisliste (root:wamo-werkstatt 0640). Eine user_id (UUID) je Zeile, Kommentare mit #. Nur wer hier steht UND ein aktives Profil mit der
+# Rolle admin ohne Laborart hat UND mit zweitem Faktor (aal2) angemeldet ist, kommt in die Werkstatt. Entsteht beim Einrichten aus dieser Vorlage, nur wenn die Datei
+# fehlt; eine vorhandene bleibt unverändert. Ohne Einträge kommt niemand hinein. Die user_id steht in der Admin-Übersicht oder mit
+# python scripts/wamo_nutzer.py liste. Nach einer Änderung:  sudo systemctl restart wamo-werkstatt

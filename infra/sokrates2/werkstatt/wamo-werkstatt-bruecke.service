@@ -1,0 +1,51 @@
+# W.A.I.S. Werkstatt: Brücke vom Unix-Socket /run/wamo-werkstatt/werkstatt.sock (wamo-werkstatt-bruecke.socket) zum Dienst auf 127.0.0.1:18095.
+# systemd-socket-proxyd reicht nur Bytes durch und kennt weder Token noch Pfade; die Prüfung bleibt allein im Dienst. Startet mit der ersten Verbindung und
+# zieht den Dienst wamo-werkstatt.service nach. Läuft als derselbe Benutzer wie der Dienst (dessen Ausgangsregel wamo_werkstatt_ausgang erlaubt genau diesen Weg),
+# ohne Capability und mit dem Netz nur auf Loopback. Installiert durch wamo-werkstatt-einrichten.sh.
+[Unit]
+Description=W.A.I.S. Werkstatt: Brücke zum Dienst (127.0.0.1:18095)
+Requires=wamo-werkstatt.service wamo-werkstatt-bruecke.socket
+After=wamo-werkstatt.service wamo-werkstatt-bruecke.socket wamo-werkstatt-ausgang.service
+
+[Service]
+Type=simple
+User=wamo-werkstatt
+Group=wamo-werkstatt
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:18095
+SyslogIdentifier=wamo-werkstatt-bruecke
+Restart=on-failure
+RestartSec=2
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+InaccessiblePaths=-/etc/wamo -/etc/wamo-anker -/etc/wamo-freigabe -/etc/wamo-geraete -/etc/wamo-release -/etc/wamo-labor -/etc/wamo-haus-proxy -/etc/wamo-pruefer -/etc/wamo-werkstatt
+MemoryMax=64M
+TasksMax=16
+LimitNOFILE=1024

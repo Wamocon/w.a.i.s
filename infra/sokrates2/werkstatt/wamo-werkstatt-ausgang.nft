@@ -1,0 +1,20 @@
+# W.A.I.S. Werkstatt: Ausgang des Benutzers wamo-werkstatt nur zur Datenbank (Supavisor, Port 55322) und zum Schlüsselsatz von GoTrue (Caddy, Port 55443),
+# beide auf Sokrates-2 (192.168.178.136), dazu die zwei Wege auf Loopback, die der Dienst selbst braucht: die Brücke wamo-werkstatt-bruecke zum Port 18095 und die
+# Antworten des Dienstes darauf. Eigene Tabelle, fremde Tabellen und Regeln bleiben unberührt. Nur Pakete von Sockets des Benutzers wamo-werkstatt laufen in die
+# Kette; alles andere wird verworfen (auch IPv6, andere Loopback-Ports, LAN, Internet). Unix-Sockets sind kein Netzverkehr und bleiben unberührt. Docker setzt für
+# veröffentlichte Ports schon vor dieser Kette ein DNAT auf den Container; darum gilt für die zwei Ziele im LAN das ursprüngliche Ziel der Verbindung aus der
+# Verbindungsverfolgung (ct original), nicht die Adresse im Paket. Die Unit wamo-werkstatt.service verlangt diese Tabelle (Requires), der Dienst startet ohne sie nicht.
+table inet wamo_werkstatt_ausgang
+delete table inet wamo_werkstatt_ausgang
+table inet wamo_werkstatt_ausgang {
+	chain ausgang {
+		type filter hook output priority -10; policy accept;
+		meta skuid wamo-werkstatt jump wamo_werkstatt
+	}
+	chain wamo_werkstatt {
+		oifname "lo" ip daddr 127.0.0.1 tcp dport 18095 counter accept comment "Bruecke zum Dienst"
+		oifname "lo" ip saddr 127.0.0.1 tcp sport 18095 counter accept comment "Antworten des Dienstes"
+		ct original ip daddr 192.168.178.136 ct original proto-dst { 55322, 55443 } counter accept comment "nur Datenbank und Schluesselsatz"
+		counter drop comment "alles andere verworfen"
+	}
+}

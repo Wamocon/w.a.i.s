@@ -1,0 +1,50 @@
+# W.A.I.S. Werkstatt: Sammler (ein Lauf). Der Zeitgeber wamo-werkstatt-sammler.timer ruft ihn jede Minute auf. Installiert durch wamo-werkstatt-einrichten.sh nach
+# /etc/systemd/system/ (der Platzhalter __CADDY_DIR__ wird dort durch den Ordner von wamo-caddy ersetzt, Standard /home/wamocon/wamo-tls/caddy).
+#
+# Läuft als root, weil er Quellen liest, die nur root sieht (Journal, /etc/wamo/kernkanal.conf, /opt/wamo-core, Ordner von wamo-caddy). Er schreibt ausschließlich
+# nach /var/lib/wamo-werkstatt: betrieb.json (Stand des Betriebs) und protokolle/<marke>.jsonl (Zeilen nur aus einer festen Muster-Liste, nie Rohzeilen),
+# beide root:wamo-werkstatt 0640. Der Dienst wamo-werkstatt liest diese Dateien und gibt sie nur an Admins weiter.
+# Gehärtet, soweit journalctl, systemctl und der HTTPS-Abruf von 55445 und 55447 es zulassen: Das Dateisystem ist bis auf den Zustandsordner schreibgeschützt,
+# die Geheimnisse anderer Dienste sind unsichtbar (die Token des Labors, geheim.env und core.env), keine neuen Rechte, nur vier Fähigkeiten, nur Unix-Sockets
+# und IPv4, das Netz nur zum Server selbst. Der Code liegt root-eigen unter /opt/wamo-werkstatt/app, ExecStartPre prüft seine Prüfsummen (fail closed).
+[Unit]
+Description=W.A.I.S. Werkstatt: Betriebsstand und Protokolle sammeln
+After=docker.service
+ConditionPathExists=/opt/wamo-werkstatt/app/SHA256SUMS
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/wamo-werkstatt/app
+ExecStartPre=/usr/bin/sha256sum -c --quiet SHA256SUMS
+ExecStart=/usr/bin/python3 -I -B /opt/wamo-werkstatt/app/wamo_werkstatt_sammler.py --caddy-dir __CADDY_DIR__
+SyslogIdentifier=wamo-werkstatt-sammler
+TimeoutStartSec=50
+Nice=5
+UMask=0027
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/wamo-werkstatt
+InaccessiblePaths=-/etc/wamo/geheim.env -/etc/wamo/core.env -/etc/wamo-labor/kern-token -/etc/wamo-labor/betreuer-token -/etc/wamo-anker -/etc/wamo-freigabe -/etc/wamo-geraete -/etc/wamo-release -/etc/wamo-haus-proxy -/etc/wamo-werkstatt/db.zugang
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+IPAddressDeny=any
+IPAddressAllow=127.0.0.0/8 192.168.178.136/32 172.24.0.0/24
+MemoryMax=128M
+TasksMax=64
