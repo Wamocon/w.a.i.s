@@ -8,6 +8,7 @@ import pytest
 
 from wamo_labor_dienst.app import create_app
 from wamo_labor_dienst.datenbank import ZentralDB
+from wamo_labor_dienst.frist import LOESCHLAUF_AB
 from wamo_labor_dienst.sicherheit import token_hash
 
 PLATZ = 3
@@ -79,7 +80,7 @@ def test_aufbewahrung_und_vergabe_gleichzeitig_bleiben_einig(dienst, uhr):
     from datetime import UTC, datetime
 
     tokens = [_token(i) for i in range(1, 5)]
-    uhr.vor(datetime(2026, 12, 12, 12, tzinfo=UTC).timestamp() - uhr.t)
+    uhr.vor(datetime(LOESCHLAUF_AB.year, LOESCHLAUF_AB.month, LOESCHLAUF_AB.day, 12, tzinfo=UTC).timestamp() - uhr.t)
     start = threading.Barrier(2)
 
     def vergeben():

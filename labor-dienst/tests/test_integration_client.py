@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 from echter_dienst import laufender_dienst
-from hilfen import BETREUER_TOKEN, KERN_TOKEN, LABORTAG, Uhr, betreuer_kopf
+from hilfen import BETREUER_TOKEN, KERN_TOKEN, TESTUHR_START, Uhr, betreuer_kopf
 
 import labor_client
 import labor_vertrag
@@ -20,7 +20,7 @@ PLATZ = 5
 @pytest.fixture
 def adresse(tmp_path):
     konfig = Konfig(daten=tmp_path / "daten", kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN)
-    with laufender_dienst(create_app(konfig, uhr=Uhr(LABORTAG))) as url:
+    with laufender_dienst(create_app(konfig, uhr=Uhr(TESTUHR_START))) as url:
         yield url
 
 

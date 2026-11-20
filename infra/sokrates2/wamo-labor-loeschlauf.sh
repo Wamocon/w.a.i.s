@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Löschlauf des Labor-Dienstes auf Sokrates-2 nach der Aufbewahrung (Vertrag D10: höchstens bis 11.12.2026, 14 Tage nach dem Labortag).
+# Löschlauf des Labor-Dienstes auf Sokrates-2 nach der Aufbewahrung (Vertrag D10: höchstens bis zum Ende der Aufbewahrung, 13 Tage nach dem Labortag).
+# Die Daten (Labortag, Ende der Aufbewahrung, erster Löschtag) stehen nur in wamo-labor/frist.env neben diesem Skript (erzeugt aus frist.py, siehe dort).
 # Nur als root (sudo). Löscht Daten, Token, Container, Image und die Kern-Einstellungen und schreibt einen Nachweis mit der Liste, was
 # gelöscht wurde, ohne Inhalte (nur Namen, Größen und Zählungen):
 #   ssh sokrates2 "sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh"                                  # zeigt nur, was gelöscht würde (Ausgang 3)
-#   ssh sokrates2 "sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN"    # löscht (frühestens am 12.12.2026)
+#   ssh sokrates2 "sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN"    # löscht (frühestens am ersten Löschtag aus frist.env)
 #   ssh sokrates2 "sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN --trocken"
 #
 #   --bestaetigung WORT  ohne das Wort LABOR-LOESCHEN ändert das Skript nichts (ein falsches Wort ist ein Aufruffehler, Ausgang 2)
-#   --vor-der-frist      erlaubt den Lauf auch vor dem 12.12.2026 (zum Beispiel über wamo-labor-rueckweg.sh --daten-loeschen)
+#   --vor-der-frist      erlaubt den Lauf auch vor dem ersten Löschtag (zum Beispiel über wamo-labor-rueckweg.sh --daten-loeschen)
 #   --trocken            zeigt jeden Schritt nur an
 #
 # Reihenfolge: 1. Pfadkontrolle (feste Pfade, kein symbolischer Link), 2. Dienst stoppen (docker compose down, Container samt Protokollen und
@@ -19,7 +20,7 @@
 # (/var/backups/wamo-labor: Compose-, Firewall- und Caddy-Stand, keine Token, keine Daten) und der Nachweis.
 #
 # Was dieses Skript nicht kann: Dateisystemblöcke, Snapshots des Volumes und Sicherungen des Servers liegen außerhalb des Dienstes und dieses
-# Skripts. Der Betrieb sorgt dafür, dass es über den 11.12.2026 hinaus keine gibt, und prüft das von Hand (der Nachweis nennt es).
+# Skripts. Der Betrieb sorgt dafür, dass es über das Ende der Aufbewahrung hinaus keine gibt, und prüft das von Hand (der Nachweis nennt es).
 #
 # Ausgang: 0 gelöscht (oder nichts zu löschen), 1 Fehler (zum Beispiel ein Pfad ist nicht so, wie er sein muss), 2 Aufruf falsch, 3 nur
 # der Plan gezeigt oder die Aufbewahrung läuft noch.
@@ -39,7 +40,9 @@ CORE_ENV="$W/usr/local/sbin/wamo-core-env"
 TOKEN_NAMEN="kern-token betreuer-token"
 BILD_NAME=wamo-labor-dienst
 WORT_SOLL="LABOR-LOESCHEN"
-FRIST=20261211
+FRIST_DATEI="$HERE/wamo-labor/frist.env"   # die einzige Quelle der Daten am Server (erzeugt aus labor-dienst/wamo_labor_dienst/frist.py)
+FRIST=""            # JJJJMMTT: letzter Tag der Aufbewahrung
+LOESCHLAUF_AB=""    # JJJJMMTT: erster Tag, an dem gelöscht werden darf
 
 TROCKEN=nein
 WORT=""
@@ -81,6 +84,16 @@ pruefe_ordner() {
   done < <(stat -c '%u %a %n' "$(dirname "$ordner")"; find "$ordner" \( -type l -printf '%U 777 %p\n' \) -o -printf '%U %m %p\n')
 }
 
+# Ein Wert JJJJMMTT aus frist.env: nur die genaue Zeile NAME=JJJJMMTT zählt, die Datei wird nie als Skript ausgeführt
+frist_wert() {
+  local wert
+  wert="$(sed -n "s/^$1=\([0-9]\{8\}\)\$/\1/p" "$FRIST_DATEI" 2>/dev/null | head -n1)"
+  [ -n "$wert" ] || fehler "$FRIST_DATEI fehlt oder enthält $1 nicht (Zeile $1=JJJJMMTT). Neu erzeugen: python -m wamo_labor_dienst.frist --schreiben ..."
+  date -d "${wert:0:4}-${wert:4:2}-${wert:6:2}" +%Y%m%d >/dev/null 2>&1 || fehler "$FRIST_DATEI: $1=$wert ist kein gültiges Datum."
+  printf '%s' "$wert"
+}
+tag_de() { printf '%s.%s.%s' "${1:6:2}" "${1:4:2}" "${1:0:4}"; }   # JJJJMMTT -> TT.MM.JJJJ
+
 HEUTE="$(date +%Y%m%d)"
 if [ -n "$W" ]; then
   [[ "$W" =~ ^/[A-Za-z0-9/_.:~-]+$ ]] || fehler "WAMO_LABOR_WURZEL muss ein absoluter Ordner aus A-Z, a-z, 0-9 und / _ . : ~ - sein."
@@ -92,6 +105,9 @@ else
   pruefe_ordner "$HERE"
 fi
 [[ "$HEUTE" =~ ^[0-9]{8}$ ]] || fehler "Das Datum ist ungültig: $HEUTE"
+FRIST="$(frist_wert WAMO_LABOR_AUFBEWAHRUNG_BIS)"
+LOESCHLAUF_AB="$(frist_wert WAMO_LABOR_LOESCHLAUF_AB)"
+[ "$LOESCHLAUF_AB" -gt "$FRIST" ] || fehler "$FRIST_DATEI: WAMO_LABOR_LOESCHLAUF_AB muss nach WAMO_LABOR_AUFBEWAHRUNG_BIS liegen."
 if [ -n "$WORT" ] && [ "$WORT" != "$WORT_SOLL" ]; then
   echo "Falsches Bestätigungswort (verlangt: $WORT_SOLL). Es wurde nichts geändert." >&2
   exit 2
@@ -151,7 +167,7 @@ nachweis_text() {
   echo "  Container und verschwindet erst mit dem Neuanlegen von wamo-caddy. Das geschieht hier nicht (es legte 55443 bis 55446 lahm). Vorschlag: das nächste"
   echo "  ohnehin nötige Neuanlegen von wamo-caddy nach dem Labor nutzen (in einer ruhigen Minute, frühestens nach der Frist)."
   echo "Von Hand zu prüfen (liegt außerhalb des Dienstes, Vertrag D10): keine Snapshots oder Sicherungen von /var/lib/wamo-labor oder des ganzen"
-  echo "  Servers, die über den 11.12.2026 hinaus bestehen; auch Hostsicherungen und Datenträgerabbilder zählen."
+  echo "  Servers, die über den $(tag_de "$FRIST") hinaus bestehen; auch Hostsicherungen und Datenträgerabbilder zählen."
 }
 
 dienst_stoppen() {
@@ -200,11 +216,11 @@ fi
 if [ -z "$WORT" ]; then
   echo "== Plan (es wurde nichts geändert)"
   nachweis_text "$ANZAHL" "$BYTES"
-  echo "Zum Löschen dieselbe Zeile mit --bestaetigung $WORT_SOLL aufrufen (frühestens am 12.12.2026)."
+  echo "Zum Löschen dieselbe Zeile mit --bestaetigung $WORT_SOLL aufrufen (frühestens am $(tag_de "$LOESCHLAUF_AB"))."
   exit 3
 fi
 if [ "$HEUTE" -le "$FRIST" ] && [ "$VOR_FRIST" = nein ]; then
-  echo "Die Aufbewahrung läuft bis zum 11.12.2026 (heute ist $HEUTE). Löschen vorher nur mit --vor-der-frist." >&2
+  echo "Die Aufbewahrung läuft bis zum $(tag_de "$FRIST") (heute ist $HEUTE). Löschen vorher nur mit --vor-der-frist." >&2
   exit 3
 fi
 

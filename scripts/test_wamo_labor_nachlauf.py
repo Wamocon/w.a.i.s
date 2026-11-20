@@ -20,7 +20,7 @@ import threading
 import types
 import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import date
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -32,8 +32,9 @@ import wamo_labor_nachlauf as na  # noqa: E402
 WURZEL = Path(__file__).resolve().parent.parent
 QUELLE = Path(na.__file__)
 GEHEIM = "TOKEN-nie-ausgeben-0123456789abcdefghijklmnopqrstuvwxyz"
-NACH_LABORTAG = date(2026, 11, 29)
-VOR_LABORTAG = date(2026, 11, 27)
+NACH_LABORTAG = na.LABORTAG + timedelta(days=1)
+VOR_LABORTAG = na.LABORTAG - timedelta(days=1)
+FRIST = na.frist_quelle  # die einzige Quelle: labor-dienst/wamo_labor_dienst/frist.py
 
 
 @pytest.fixture(autouse=True)
@@ -322,7 +323,7 @@ def test_eine_unlesbare_antwort_des_dienstes_ist_ein_klarer_fehler(tmp_path):
 
 def test_ausfuehren_vor_dem_labortag_ist_gesperrt_ohne_den_ausdruecklichen_schalter(tmp_path):
     code, _, fehl, kern, dienst = lauf(["nachlauf", "--ausfuehren"], heute=VOR_LABORTAG, tmp_path=tmp_path)
-    assert code == 2 and "28.11.2026" in fehl and "--vor-dem-labortag" in fehl
+    assert code == 2 and FRIST.deutsch(FRIST.LABORTAG) in fehl and "--vor-dem-labortag" in fehl
     assert kern.aufrufe == [] and dienst.aufrufe == []
     code, _, _, kern, _ = lauf(["nachlauf", "--ausfuehren", "--vor-dem-labortag"], heute=VOR_LABORTAG, tmp_path=tmp_path)
     assert code == 0 and "sperren" in kern.aktionen
@@ -423,7 +424,7 @@ def test_erinnerungen_nennen_platz_skript_loeschlauf_und_frist_auch_beim_ausfueh
     for argv in (["nachlauf"], ["nachlauf", "--ausfuehren"]):
         _, aus, _, _, _ = lauf(argv, tmp_path=tmp_path)
         assert "wamo_labor_platz.py rueckweg --profil-loeschen" in aus
-        assert "wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN" in aus and "11.12.2026" in aus
+        assert "wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN" in aus and FRIST.deutsch(FRIST.AUFBEWAHRUNG_BIS) in aus and FRIST.deutsch(FRIST.LOESCHLAUF_AB) in aus
         assert "Umschlag-Datei" in aus
 
 
@@ -788,3 +789,17 @@ def test_quelle_hat_keine_gedankenstriche_und_bleibt_unter_den_grenzen():
     for knoten in ast.walk(ast.parse(text)):
         if isinstance(knoten, (ast.FunctionDef, ast.AsyncFunctionDef)):
             assert knoten.end_lineno - knoten.lineno + 1 <= 50, f"{knoten.name} ist länger als 50 Zeilen"
+
+
+def test_der_labortag_kommt_aus_der_einen_quelle_des_dienstes():
+    """Keine zweite Konstante im Skript: Ein weiteres Verschieben ändert nur labor-dienst/wamo_labor_dienst/frist.py."""
+    assert na.LABORTAG == FRIST.LABORTAG
+    quelle = QUELLE.read_text(encoding="utf-8")
+    assert "date(2026" not in quelle and not re.search(r"\b\d{2}\.\d{2}\.2026\b", quelle)
+
+
+@pytest.mark.parametrize("tag,gesperrt", [(FRIST.LABORTAG - timedelta(days=1), True), (FRIST.LABORTAG, False), (FRIST.LABORTAG + timedelta(days=1), False)])
+def test_sperre_gilt_bis_zum_tag_vor_dem_labortag(tmp_path, tag, gesperrt):
+    code, _, fehl, kern, dienst = lauf(["nachlauf", "--ausfuehren"], heute=tag, tmp_path=tmp_path)
+    assert (code == 2) is gesperrt
+    assert (kern.aufrufe == [] and dienst.aufrufe == []) is gesperrt

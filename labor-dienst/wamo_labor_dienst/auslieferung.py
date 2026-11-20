@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .frist import einsetzen_bytes
 from .regeln import DienstFehler
 from .sicherheit import fehler_http, fehlerfrei
 
@@ -45,7 +46,7 @@ KOEPFE = {
 def _laden() -> tuple[dict[str, bytes], dict[str, bytes]]:
     """Liest alle Dateien der Liste (fehlt eine, startet der Dienst nicht): Seiten nach Adresse, Dateien nach Name."""
     ordner = Path(WEB)
-    seiten = {adresse: (ordner / datei).read_bytes() for adresse, datei in SEITEN.items()}
+    seiten = {adresse: einsetzen_bytes((ordner / datei).read_bytes()) for adresse, datei in SEITEN.items()}  # das Datum der Aufbewahrung kommt aus frist.py
     dateien = {name: (ordner / name).read_bytes() for name in DATEIEN}
     return seiten, dateien
 

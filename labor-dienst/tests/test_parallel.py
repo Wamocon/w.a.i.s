@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from hilfen import LABORTAG, ANLEGEN, aufruf, inhalt
+from hilfen import TESTUHR_START, ANLEGEN, aufruf, inhalt
 
 from wamo_labor_dienst.datenbank import PlatzDB
 from wamo_labor_dienst.regeln import Suche
@@ -17,7 +17,7 @@ FAEDEN = 32
 class FeineUhr:
     """Eine Uhr, die wie echte Zeit weiterläuft: Jede Ablesung ist eine Millisekunde später (sicher für Fäden)."""
 
-    def __init__(self, start: float = LABORTAG, schritt: float = 0.001):
+    def __init__(self, start: float = TESTUHR_START, schritt: float = 0.001):
         self.t, self.schritt, self._sperre = start, schritt, threading.Lock()
 
     def __call__(self) -> float:
@@ -95,7 +95,7 @@ def test_geringes_zurueckspringen_der_uhr_zwischen_aufrufen_lockert_die_grenze_n
     def zitternde_uhr() -> float:
         with sperre:
             zaehler["n"] += 1
-            return LABORTAG + zaehler["n"] * 0.01 - (0.5 if zaehler["n"] % 3 == 0 else 0.0)
+            return TESTUHR_START + zaehler["n"] * 0.01 - (0.5 if zaehler["n"] % 3 == 0 else 0.0)
 
     db = _datenbank(tmp_path, zitternde_uhr)
     antworten = _parallel(db, _anlegen_aufrufe(db, 80))
@@ -106,7 +106,7 @@ class SchrittUhr:
     """Jede Ablesung ist 61 Sekunden später: Das Schreibfenster ist nie voll, die Mengenquoten werden allein geprüft."""
 
     def __init__(self):
-        self.t, self._sperre = LABORTAG, threading.Lock()
+        self.t, self._sperre = TESTUHR_START, threading.Lock()
 
     def __call__(self) -> float:
         with self._sperre:
@@ -174,7 +174,7 @@ def test_die_uhr_wird_erst_nach_der_schreibsperre_gelesen(tmp_path):
 
         def __call__(self) -> float:
             self.ablesungen.append(self.offen)
-            return LABORTAG
+            return TESTUHR_START
 
     beobachter = Beobachter()
     db = _datenbank(tmp_path, beobachter)

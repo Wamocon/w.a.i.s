@@ -1,4 +1,4 @@
-"""Tests für den Betrieb des Labor-Dienstes auf Sokrates-2 (Testlabor 28.11.2026), nur statische Prüfungen und Probeläufe mit Attrappen:
+"""Tests für den Betrieb des Labor-Dienstes auf Sokrates-2 (Testlabor), nur statische Prüfungen und Probeläufe mit Attrappen:
 
   infra/sokrates2/wamo-labor/docker-compose.yml          Container wamo-labor-dienst, Netze, Härtung
   infra/sokrates2/wamo-caddy/kern/wamo-labor.caddy       Site auf HTTPS 55447 (Vorlage mit Platzhalter für die Betreuer-Adressen)
@@ -43,6 +43,18 @@ SITE_BIB = SOKRATES2 / "wamo-labor-site.sh"  # gemeinsame Bausteine der Site (Ad
 RAUCHTEST = SOKRATES2 / "wamo_labor_rauchtest.py"
 RAUCHTEST_ATTRAPPE = SOKRATES2 / "wamo_labor_rauchtest_attrappe.py"
 SKRIPTE = [EINRICHTEN, RUECKWEG, LOESCHLAUF]
+FRIST_ENV = LABOR / "frist.env"  # die einzige Quelle der Daten am Server (erzeugt aus labor-dienst/wamo_labor_dienst/frist.py)
+FRIST = dict(re.findall(r"^(WAMO_LABOR_[A-Z_]+)=([0-9]{8})$", FRIST_ENV.read_text(encoding="utf-8"), flags=re.M))
+DATUM_DE = re.compile(r"\d{2}\.\d{2}\.\d{4}")
+
+
+def tag_de(jjjjmmtt: str) -> str:
+    return f"{jjjjmmtt[6:8]}.{jjjjmmtt[4:6]}.{jjjjmmtt[0:4]}"
+
+
+def tag_davor(jjjjmmtt: str) -> str:
+    from datetime import date, timedelta
+    return (date(int(jjjjmmtt[:4]), int(jjjjmmtt[4:6]), int(jjjjmmtt[6:])) - timedelta(days=1)).strftime("%Y%m%d")
 ALLE_DATEIEN = [LABOR / "docker-compose.yml", SITE, EINRICHTEN, SITE_BIB, RUECKWEG, LOESCHLAUF, RAUCHTEST, RAUCHTEST_ATTRAPPE, FIREWALL, CADDY / "docker-compose.yml"]
 # rückwärts geschrieben, damit die Wörter selbst nirgends im Repo stehen (keine Verweise auf andere Systeme)
 VERBOTENE_WOERTER = tuple(w[::-1] for w in ("ikeeein", "sivraj", "lortnoctpmorp", "nocimad"))
@@ -155,7 +167,7 @@ class ComposeDienstTests(unittest.TestCase):
         self.assertTrue(env)
         for name in env:
             self.assertIn(name, bekannt, name)
-        self.assertEqual(env["WAMO_LABOR_DIENST_BIS"], '"2026-12-11"')
+        self.assertNotIn("WAMO_LABOR_DIENST_BIS", env)  # das Ende der Aufbewahrung kommt aus dem Dienst (frist.py), nicht noch einmal aus der Compose-Datei
         self.assertEqual(env["WAMO_LABOR_DIENST_PROXYS"], "172.28.0.2")  # genau die Adresse von Caddy im Netz wamo-labor-netz
         self.assertEqual(env["WAMO_LABOR_DIENST_KERN_TOKEN_DATEI"], "/run/wamo-labor/kern-token")
         self.assertEqual(env["WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI"], "/run/wamo-labor/betreuer-token")
@@ -1472,7 +1484,8 @@ class RueckwegTests(BetriebsstandWerkstatt):
 
 @unittest.skipUnless(BASH, "keine Bash vorhanden")
 class LoeschlaufTests(BetriebsstandWerkstatt):
-    NACH_FRIST = "20261212"
+    NACH_FRIST = FRIST["WAMO_LABOR_LOESCHLAUF_AB"]  # erster Löschtag
+    LETZTER_TAG = FRIST["WAMO_LABOR_AUFBEWAHRUNG_BIS"]  # letzter Tag der Aufbewahrung
 
     def loeschen(self, *args, heute=NACH_FRIST):
         return self.lauf_skript(LOESCHLAUF, *args, heute=heute)
@@ -1539,17 +1552,44 @@ class LoeschlaufTests(BetriebsstandWerkstatt):
             self.assertIn(soll, r.stdout, soll)
         self.assertFalse([z for z in self.aufrufe() if z.startswith("docker compose up") or "wamo-caddy" in z and z.startswith("docker rm")])
 
+    def test_der_plan_nennt_den_ersten_loeschtag_und_das_ende_aus_frist_env(self):
+        r = self.loeschen()
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn(tag_de(self.NACH_FRIST), r.stdout)
+        self.assertIn(tag_de(self.LETZTER_TAG), r.stdout)
+
+    def test_ohne_oder_mit_kaputter_frist_env_loescht_nichts(self):
+        zeilen = lambda *z: "\n".join(z) + "\n"  # noqa: E731
+        for inhalt in (None, "", zeilen("WAMO_LABOR_AUFBEWAHRUNG_BIS=2026-12-18", "WAMO_LABOR_LOESCHLAUF_AB=20261219"),
+                       zeilen("WAMO_LABOR_AUFBEWAHRUNG_BIS=20261318", "WAMO_LABOR_LOESCHLAUF_AB=20261319"),
+                       zeilen("WAMO_LABOR_AUFBEWAHRUNG_BIS=20261218", "WAMO_LABOR_LOESCHLAUF_AB=20261218")):
+            with self.subTest(inhalt=inhalt):
+                ordner = Path(tempfile.mkdtemp(prefix="frist-"))
+                self.addCleanup(shutil.rmtree, ordner, ignore_errors=True)
+                skript = ordner / LOESCHLAUF.name
+                shutil.copyfile(LOESCHLAUF, skript)
+                if inhalt is not None:
+                    (ordner / "wamo-labor").mkdir()
+                    (ordner / "wamo-labor" / "frist.env").write_bytes(inhalt.encode("utf-8"))
+                r = self.lauf_skript(skript, "--bestaetigung", WORT, "--vor-der-frist", heute=self.NACH_FRIST)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("frist.env", r.stderr)
+                self.assertTrue(self.daten_da())
+
     def test_falsches_wort(self):
         r = self.loeschen("--bestaetigung", "loeschen")
         self.assertEqual(r.returncode, 2)
         self.assertTrue(self.daten_da())
 
     def test_vor_dem_ende_der_aufbewahrung_nur_mit_ausdruecklichem_schalter(self):
-        r = self.loeschen("--bestaetigung", WORT, heute="20261211")
+        r = self.loeschen("--bestaetigung", WORT, heute=self.LETZTER_TAG)
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
-        self.assertIn("11.12.2026", r.stdout + r.stderr)
+        self.assertIn(tag_de(self.LETZTER_TAG), r.stdout + r.stderr)
         self.assertTrue(self.daten_da())
-        r = self.loeschen("--bestaetigung", WORT, "--vor-der-frist", heute="20261211")
+        r = self.loeschen("--bestaetigung", WORT, heute=tag_davor(FRIST["WAMO_LABOR_LABORTAG"]))
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)  # vor dem Labortag erst recht nicht
+        self.assertTrue(self.daten_da())
+        r = self.loeschen("--bestaetigung", WORT, "--vor-der-frist", heute=self.LETZTER_TAG)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertFalse(self.daten_da())
 
@@ -1673,7 +1713,7 @@ class RauchtestTests(unittest.TestCase):
         "ca_falsch": "P10", "koepfe_fehlen": "P10", "kern_offen": "P11", "kern_variante_offen": "P11", "betreuer_offen": "P12",
         "betreuer_gegenprobe": "P12", "gesundheit_offen": "P13", "ausgang_internet": "P14", "ausgang_dns": "P14", "ausgang_kontrolle": "P14",
         "firewall_fehlt": "P15", "firewall_offen": "P15", "roundtrip_kaputt": "P16", "roundtrip_ohne_token": "P16", "env_url": "P17", "env_token": "P17",
-        "token_in_env": "P18", "ende_falsch": "P18", "arch_falsch": "P01", "labin_fehlt": "P15", "loopback_regel_fehlt": "P15",
+        "token_in_env": "P18", "ende_falsch": "P18", "image_veraltet": "P18", "arch_falsch": "P01", "labin_fehlt": "P15", "loopback_regel_fehlt": "P15",
         "fremd_dienst_offen": "P19", "fremd_ip_offen": "P19", "fremd_kontrolle": "P19", "bridge_host_offen": "P20", "bridge_kontrolle": "P20",
     }
 
@@ -1838,8 +1878,9 @@ class DokumentationTests(unittest.TestCase):
         for soll in ("wamo-labor-dienst", "wamo-labor-netz", "wamo-labor-lokal", "55447", "127.0.0.1:18765", "/etc/wamo-labor", "/var/lib/wamo-labor", "10001",
                      "wamo-labor-einrichten.sh", "wamo-labor-rueckweg.sh", "wamo-labor-loeschlauf.sh", "wamo_labor_rauchtest.py", "WAMO_LABOR_DIENST_*", "WAMO-FW-LABIN",
                      "allein an `wamo-firewall`", "systemctl stop wamo-firewall",
-                     "WAMO_LABOR_URL", "WAMO_LABOR_TOKEN", "WAMO-FW-LABOR", "WAMO-FW-LABAUS", "11.12.2026", "wamo-labor.caddy"):
+                     "WAMO_LABOR_URL", "WAMO_LABOR_TOKEN", "WAMO-FW-LABOR", "WAMO-FW-LABAUS", "wamo-labor.caddy"):
             self.assertIn(soll, zeile, soll)
+        self.assertTrue(DATUM_DE.search(zeile), "die Zeile nennt die Aufbewahrung mit einem Datum (welches, steht in frist.py)")
         self.assertNotIn(chr(0x2014), zeile)
 
     def test_abschnitt_im_readme_von_sokrates2(self):
@@ -1847,7 +1888,7 @@ class DokumentationTests(unittest.TestCase):
         self.assertIn("## 19. Labor-Dienst", text)
         abschnitt = text.split("## 19. Labor-Dienst", 1)[1]
         for soll in ("wamo-labor-einrichten.sh", "wamo-labor-rueckweg.sh", "wamo-labor-loeschlauf.sh", "wamo_labor_rauchtest.py", "--trocken", "Q13",
-                     "betreuer-adressen", "plaetze-adressen", "11.12.2026", "Digest", "Offene Punkte", "Image-Bau", "echten Secrets", "LABOR-LOESCHEN",
+                     "betreuer-adressen", "plaetze-adressen", "Digest", "Offene Punkte", "Image-Bau", "echten Secrets", "LABOR-LOESCHEN",
                      "umschalten-kern", "Aufbewahrung", "stop wamo-firewall", "WAMO-FW-LABIN", "zwei Stufen", "am Server zu messen", "RFC 1918", "arm64", "Neuanlegen",
                      "Besucheradressen", "P19", "P20", "Betreuer-PCs", "wamo-firewall regeln", "Herkunft", "allein an `wamo-firewall`"):
             self.assertIn(soll, abschnitt, soll)

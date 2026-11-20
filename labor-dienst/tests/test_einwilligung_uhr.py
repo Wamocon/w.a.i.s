@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +10,7 @@ from hilfen import BETREUER_TOKEN, KERN_TOKEN, Uhr, anlegen_http, betreuer_kopf,
 
 from wamo_labor_dienst.app import create_app
 from wamo_labor_dienst.datenbank import ZentralDB
+from wamo_labor_dienst.frist import AUFBEWAHRUNG_BIS, LABORTAG
 from wamo_labor_dienst.konfig import Konfig, KonfigFehler, aus_umgebung
 
 SENKEN = "/api/betreuer/einwilligung-minimum-setzen"
@@ -126,11 +127,17 @@ def _env(tmp_path, **extra):
     return {"WAMO_LABOR_DIENST_KERN_TOKEN_DATEI": str(kern), "WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI": str(betreuer), **extra}
 
 
-def test_bis_hat_die_untergrenze_labortag_28_11_2026(tmp_path):
-    assert aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS="2026-11-28")).bis == date(2026, 11, 28)
-    for zu_frueh in ("2026-11-27", "2026-11-12", "2020-01-01"):
-        with pytest.raises(KonfigFehler, match="WAMO_LABOR_DIENST_BIS.*2026-11-28.*2026-12-11"):
-            aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS=zu_frueh))
+def test_bis_hat_die_untergrenze_labortag(tmp_path):
+    assert aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS=LABORTAG.isoformat())).bis == LABORTAG
+    for zu_frueh in (LABORTAG - timedelta(days=1), LABORTAG - timedelta(days=7), date(2026, 11, 12), date(2020, 1, 1)):
+        with pytest.raises(KonfigFehler, match=f"WAMO_LABOR_DIENST_BIS.*{LABORTAG.isoformat()}.*{AUFBEWAHRUNG_BIS.isoformat()}"):
+            aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS=zu_frueh.isoformat()))
+
+
+def _ende(tage: int, stunde: int, minute: int = 0) -> datetime:
+    """Ein Zeitpunkt relativ zum letzten Tag der Aufbewahrung (tage = 0 ist dieser Tag)."""
+    tag = AUFBEWAHRUNG_BIS + timedelta(days=tage)
+    return datetime(tag.year, tag.month, tag.day, stunde, minute, tzinfo=UTC)
 
 
 # ---------- (b) Uhrsprung vor der Löschung ----------
@@ -167,7 +174,7 @@ def _noch_da(dienst) -> bool:
 
 
 def test_ein_uhrsprung_nach_vorn_leert_keine_plaetze(konfig):
-    wand = Wand(datetime(2026, 12, 10, 12, tzinfo=UTC))
+    wand = Wand(_ende(-1, 12))
     _, dienst = _dienst(konfig, wand)
     wand.vor(3600)
     wand.springen(5 * 86400)  # die Wanduhr springt fünf Tage, die monotone Uhr nicht: Das ist kein echter Zeitablauf
@@ -178,34 +185,34 @@ def test_ein_uhrsprung_nach_vorn_leert_keine_plaetze(konfig):
 
 
 def test_echter_zeitablauf_leert_nach_dem_ende_der_aufbewahrung(konfig):
-    wand = Wand(datetime(2026, 12, 10, 12, tzinfo=UTC))
+    wand = Wand(_ende(-1, 12))
     _, dienst = _dienst(konfig, wand)
-    wand.vor(3 * 86400)  # drei Tage laufen wirklich ab: der 13.12. liegt nach dem 11.12.
+    wand.vor(3 * 86400)  # drei Tage laufen wirklich ab: der zweite Tag danach liegt nach dem Ende der Aufbewahrung
     assert dienst.aufbewahrung_pruefen() is True
     assert not dienst.zentral.hat_token(3) and dienst.plaetze[3].zustand()["tickets"] == 0
 
 
 @pytest.mark.parametrize("sprung,geleert", [(86400, True), (86401, False), (-100, True)])
 def test_ein_sprung_bis_zu_einem_tag_ist_plausibel(konfig, sprung, geleert):
-    wand = Wand(datetime(2026, 12, 11, 12, tzinfo=UTC))  # der letzte Tag der Aufbewahrung
+    wand = Wand(_ende(0, 12))  # der letzte Tag der Aufbewahrung
     _, dienst = _dienst(konfig, wand)
-    wand.vor(13 * 3600)  # 01:00 am 12.12.: nach dem Ende
+    wand.vor(13 * 3600)  # 01:00 am Tag danach: nach dem Ende
     wand.springen(sprung)
     assert dienst.aufbewahrung_pruefen() is geleert
     assert _noch_da(dienst) is (not geleert)
 
 
 def test_ohne_ende_der_aufbewahrung_wird_nie_geleert_auch_nicht_nach_einem_sprung(konfig):
-    wand = Wand(datetime(2026, 11, 28, 9, 30, tzinfo=UTC))
+    wand = Wand(datetime(LABORTAG.year, LABORTAG.month, LABORTAG.day, 9, 30, tzinfo=UTC))
     _, dienst = _dienst(konfig, wand)
     wand.springen(-3 * 86400)
     assert dienst.aufbewahrung_pruefen() is False and _noch_da(dienst)
 
 
 def test_ein_neustart_nach_dem_ende_leert_wie_bisher(konfig):
-    wand = Wand(datetime(2026, 11, 28, 9, 30, tzinfo=UTC))
+    wand = Wand(datetime(LABORTAG.year, LABORTAG.month, LABORTAG.day, 9, 30, tzinfo=UTC))
     _, dienst = _dienst(konfig, wand)
-    spaeter = Wand(datetime(2026, 12, 20, 12, tzinfo=UTC))  # der Dienst wird nach dem Ende neu gestartet: Die Uhr gilt ab diesem Start
+    spaeter = Wand(_ende(2, 12))  # der Dienst wird nach dem Ende neu gestartet: Die Uhr gilt ab diesem Start
     app2 = create_app(konfig, uhr=spaeter.uhr, monotonic=spaeter.monotonic)
     assert app2.state.dienst.plaetze[3].zustand()["tickets"] == 0 and not app2.state.dienst.zentral.hat_token(3)
 
@@ -215,7 +222,7 @@ def test_die_stuendliche_pruefung_nutzt_dieselbe_regel(konfig, monkeypatch):
 
     from wamo_labor_dienst.app import _aufraeumen_schleife
 
-    wand = Wand(datetime(2026, 12, 10, 12, tzinfo=UTC))
+    wand = Wand(_ende(-1, 12))
     _, dienst = _dienst(konfig, wand)
     wand.springen(10 * 86400)
     pausen = []

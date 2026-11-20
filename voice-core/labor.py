@@ -1,4 +1,4 @@
-"""Politik der Laborprofile (Testlabor 28.11.2026): alle Listen und Prüfungen an einer Stelle, ohne Abhängigkeit von bot.py.
+"""Politik der Laborprofile (Testlabor, Labortag in labor-dienst/wamo_labor_dienst/frist.py): alle Listen und Prüfungen an einer Stelle, ohne Abhängigkeit von bot.py.
 
 Ein Laborprofil ist ein Profil mit labor_art (platz oder schaufenster), Rolle mitglied und aktiv = false. Wirksam freigeschaltet ist es
 nur über labor_aktiv; ältere Kerne kennen die Spalte nicht, sehen aktiv = false und lehnen es mit 403 ab. Jede Einschränkung ist eine

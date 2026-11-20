@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -E -s
-"""Laborkonten löschen und ihre Sitzungen widerrufen (Testlabor, Entscheidung Q11, Befund 11, Löschfrist E12: spätestens Fr 11.12.2026).
+"""Laborkonten löschen und ihre Sitzungen widerrufen (Testlabor, Entscheidung Q11, Befund 11, Löschfrist E12: spätestens am Ende der Aufbewahrung, siehe labor-dienst/wamo_labor_dienst/frist.py).
 
 Nur Standardbibliothek, eine Datei. Läuft auf Sokrates-2 als Benutzer wamocon (ohne sudo), wie labor_tokentest.py. Der Ordner liegt wie
 immer unter ~/wamo-infra (infra/sokrates2/README.md, Abschnitt 0, "Ablage der Skripte").

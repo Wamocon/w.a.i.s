@@ -27,8 +27,8 @@ Aufrufe (im Repo-Hauptordner):
   python scripts/wamo_labor.py aktivieren --kennung labor-01 --ausfuehren
   python scripts/wamo_labor.py sperren --alle --ausfuehren
   python scripts/wamo_labor.py status
-  python scripts/wamo_labor.py loeschen --alle --ausfuehren               # alle Texte (Frist 11.12.2026), prüft danach auf null
-  python scripts/wamo_labor.py loeschen --kennung labor-03 --ab 2026-11-28T09:00:00+01:00 --bis 2026-11-28T09:30:00+01:00 --ausfuehren
+  python scripts/wamo_labor.py loeschen --alle --ausfuehren               # alle Texte (Aufbewahrung: frist.py), prüft danach auf null
+  python scripts/wamo_labor.py loeschen --kennung labor-03 --ab JJJJ-MM-TTT09:00:00+01:00 --bis JJJJ-MM-TTT09:30:00+01:00 --ausfuehren
 Optionen: --schema wamo_dev|wamo_test|wamo_prod (Standard wamo_dev), --host wamo-sokrates2
 Reihenfolge vor dem Löschen: erst sperren (labor_aktiv = false), dann die Sitzung beenden lassen, dann löschen (die Sperrfrist
 von 3 Minuten wartet das Skript selbst ab).
@@ -367,7 +367,7 @@ def _zeit(text: str, name: str) -> datetime:
     try:
         wert = datetime.fromisoformat(text)
     except ValueError:
-        raise Fehler(f"{name}: kein gültiger Zeitpunkt (erwartet ISO 8601 mit Zeitzone, zum Beispiel 2026-11-28T09:00:00+01:00)")
+        raise Fehler(f"{name}: kein gültiger Zeitpunkt (erwartet ISO 8601 mit Zeitzone, zum Beispiel JJJJ-MM-TTT09:00:00+01:00)")
     if wert.tzinfo is None:
         raise Fehler(f"{name}: die Zeitzone fehlt (zum Beispiel +01:00)")
     return wert

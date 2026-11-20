@@ -1,4 +1,4 @@
-"""Löschliste der Laborprofile (Testlabor 28.11.2026): jeder Ort in der Datenbank, an dem Text oder Spuren eines Laborprofils landen.
+"""Löschliste der Laborprofile (Testlabor, Labortag in labor-dienst/wamo_labor_dienst/frist.py): jeder Ort in der Datenbank, an dem Text oder Spuren eines Laborprofils landen.
 
 Die Liste ist die einzige Quelle für drei Dinge, die zusammenpassen müssen:
   * die SQL-Funktionen labor_loeschen und labor_zaehlen in supabase/migrations/0018_labor_profile.sql (sie löschen und

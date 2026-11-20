@@ -1,4 +1,4 @@
-# Labor-Dienst auf Sokrates-2 (Test-Jira des Testlabors am 28.11.2026, Container wamo-labor-dienst, eigenes Compose-Projekt, getrennt von
+# Labor-Dienst auf Sokrates-2 (Test-Jira des Testlabors, Container wamo-labor-dienst, eigenes Compose-Projekt, getrennt von
 # supabase-wamo, wamo-caddy, wamo-ui und wamo-rd). Der Dienst liegt im Repo unter labor-dienst/ (Vertrag docs/labor-dienst-vertrag.md).
 # Eingerichtet durch infra/sokrates2/wamo-labor-einrichten.sh, auf dem Server in /opt/wamo-labor.
 #
@@ -26,7 +26,8 @@
 # Die Token erzeugt das Einrichtungsskript beim ersten Lauf. Sie stehen nie in dieser Datei, nie in der Umgebung des Containers und nie in
 # docker inspect, nur als Datei. Der Dienst liest sie beim Start und prüft Besitzer und Modus selbst.
 #
-# Aufbewahrung (D10): WAMO_LABOR_DIENST_BIS ist der 11.12.2026. Danach löscht der Dienst alle Daten, solange er läuft. Die Container-Protokolle
+# Aufbewahrung (D10): Das Ende kommt aus dem Dienst selbst (wamo_labor_dienst/frist.py, Labortag plus 13 Tage, hier bewusst nicht noch einmal eingetragen:
+# ein zweites Datum würde bei einer Verschiebung veralten). WAMO_LABOR_DIENST_BIS darf es nur vorziehen. Danach löscht der Dienst alle Daten, solange er läuft. Die Container-Protokolle
 # (uvicorn schreibt je 503 eine Warnzeile) sind auf 3 Dateien zu 10 MB begrenzt und verschwinden mit dem Container. Löschlauf:
 # wamo-labor-loeschlauf.sh.
 #
@@ -76,7 +77,6 @@ services:
     environment:
       WAMO_LABOR_DIENST_KERN_TOKEN_DATEI: /run/wamo-labor/kern-token
       WAMO_LABOR_DIENST_BETREUER_TOKEN_DATEI: /run/wamo-labor/betreuer-token
-      WAMO_LABOR_DIENST_BIS: "2026-12-11"
       WAMO_LABOR_DIENST_PROXYS: 172.28.0.2
     volumes:
       - type: bind

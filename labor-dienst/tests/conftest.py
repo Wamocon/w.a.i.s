@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import shutil
 import sys
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -19,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from wamo_labor_dienst.app import create_app  # noqa: E402
 from wamo_labor_dienst.datenbank import PlatzDB, ZentralDB  # noqa: E402
+from wamo_labor_dienst.frist import AUFBEWAHRUNG_BIS  # noqa: E402
 from wamo_labor_dienst.konfig import Konfig  # noqa: E402
 
 
@@ -59,7 +59,7 @@ def datenvorlage(tmp_path_factory) -> Path:
 def konfig(tmp_path, datenvorlage) -> Konfig:
     daten = tmp_path / "daten"
     shutil.copytree(datenvorlage, daten)
-    return Konfig(daten=daten, kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN, host="127.0.0.1", port=0, bis=date(2026, 12, 11), platz_mb=16)
+    return Konfig(daten=daten, kern_token=KERN_TOKEN, betreuer_token=BETREUER_TOKEN, host="127.0.0.1", port=0, bis=AUFBEWAHRUNG_BIS, platz_mb=16)
 
 
 @pytest.fixture

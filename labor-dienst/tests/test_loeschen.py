@@ -8,6 +8,7 @@ from hilfen import anlegen, betreuer_kopf, inhalt, kommentieren, oeffnen
 
 from wamo_labor_dienst import datenbank
 from wamo_labor_dienst.datenbank import NichtBereinigt, PlatzDB
+from wamo_labor_dienst.frist import LOESCHLAUF_AB
 
 MARKE = "MARKE-GEHEIM-4711-Ärger"
 PLATZ = 3
@@ -96,7 +97,7 @@ def test_aufbewahrung_meldet_nie_erfolg_wenn_die_bereinigung_scheiterte_und_wied
     dienst.plaetze[PLATZ].neuer_durchlauf(1)
     _markierte_daten(dienst.plaetze[PLATZ])
     leser = _leser(dienst.plaetze[PLATZ].pfad)
-    uhr.vor(datetime(2026, 12, 12, 12, tzinfo=UTC).timestamp() - uhr.t)
+    uhr.vor(datetime(LOESCHLAUF_AB.year, LOESCHLAUF_AB.month, LOESCHLAUF_AB.day, 12, tzinfo=UTC).timestamp() - uhr.t)
     try:
         assert dienst.aufbewahrung_pruefen() is False  # nicht vollständig bereinigt: keine Erfolgsmeldung
     finally:

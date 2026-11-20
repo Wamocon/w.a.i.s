@@ -1,12 +1,13 @@
 """Konfiguration nur über Umgebungsvariablen und Dateien (Auftrag Punkt 7)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
 from hilfen import token_datei
+from wamo_labor_dienst.frist import AUFBEWAHRUNG_BIS, LABORTAG
 from wamo_labor_dienst.konfig import KonfigFehler, Konfig, aus_umgebung, token_aus_datei
 
 KERN = "kT9mQ2vLx7RpD4sWn8BcYfH6jGaZ1eU5oXiN0tVrMqA3"
@@ -26,7 +27,7 @@ def test_standardwerte(tmp_path):
     assert k.daten == Path("/data")
     assert k.host == "127.0.0.1"
     assert k.port == 8080
-    assert k.bis == date(2026, 12, 11)
+    assert k.bis == AUFBEWAHRUNG_BIS
     assert k.platz_mb == 16
     assert k.kern_token == KERN
     assert k.betreuer_token == BETREUER
@@ -34,8 +35,8 @@ def test_standardwerte(tmp_path):
 
 def test_werte_aus_der_umgebung(tmp_path):
     k = aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_DATEN=str(tmp_path / "d"), WAMO_LABOR_DIENST_HOST="0.0.0.0",
-                          WAMO_LABOR_DIENST_PORT="9100", WAMO_LABOR_DIENST_BIS="2026-12-01", WAMO_LABOR_DIENST_PLATZ_MB="8"))
-    assert (k.daten, k.host, k.port, k.bis, k.platz_mb) == (tmp_path / "d", "0.0.0.0", 9100, date(2026, 12, 1), 8)
+                          WAMO_LABOR_DIENST_PORT="9100", WAMO_LABOR_DIENST_BIS=(LABORTAG + timedelta(days=2)).isoformat(), WAMO_LABOR_DIENST_PLATZ_MB="8"))
+    assert (k.daten, k.host, k.port, k.bis, k.platz_mb) == (tmp_path / "d", "0.0.0.0", 9100, LABORTAG + timedelta(days=2), 8)
 
 
 def test_token_aus_datei_streift_leerraum_und_bom(tmp_path):
@@ -76,7 +77,7 @@ def test_gleicher_token_fuer_kern_und_betreuer_wird_abgelehnt(tmp_path):
 
 
 @pytest.mark.parametrize("name,wert", [("WAMO_LABOR_DIENST_PORT", "0"), ("WAMO_LABOR_DIENST_PORT", "70000"), ("WAMO_LABOR_DIENST_PORT", "abc"),
-                                       ("WAMO_LABOR_DIENST_BIS", "11.12.2026"), ("WAMO_LABOR_DIENST_BIS", "2026-13-01"),
+                                       ("WAMO_LABOR_DIENST_BIS", "18.12.2026"), ("WAMO_LABOR_DIENST_BIS", "2026-13-01"),
                                        ("WAMO_LABOR_DIENST_PLATZ_MB", "1"), ("WAMO_LABOR_DIENST_PLATZ_MB", "65"), ("WAMO_LABOR_DIENST_PLATZ_MB", "x"),
                                        ("WAMO_LABOR_DIENST_HOST", "")])
 def test_ungueltige_werte_nennen_die_variable(tmp_path, name, wert):
@@ -91,12 +92,13 @@ def test_repr_verraet_keinen_token(tmp_path):
 
 
 # ---------- Aufbewahrung und Uhr (Befund 6 des Sicherheitsreviews) ----------
-def test_bis_darf_hoechstens_der_11_12_2026_sein(tmp_path):
-    assert aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS="2026-12-11")).bis == date(2026, 12, 11)
-    assert aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS="2026-11-30")).bis == date(2026, 11, 30)
-    for zu_spaet in ("2026-12-12", "2027-01-01", "2099-12-31"):
-        with pytest.raises(KonfigFehler, match="WAMO_LABOR_DIENST_BIS.*2026-12-11"):
-            aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS=zu_spaet))
+def test_bis_darf_hoechstens_das_ende_der_aufbewahrung_sein(tmp_path):
+    assert aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS=AUFBEWAHRUNG_BIS.isoformat())).bis == AUFBEWAHRUNG_BIS
+    frueher = AUFBEWAHRUNG_BIS - timedelta(days=5)
+    assert aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS=frueher.isoformat())).bis == frueher
+    for zu_spaet in (AUFBEWAHRUNG_BIS + timedelta(days=1), date(2027, 1, 1), date(2099, 12, 31)):
+        with pytest.raises(KonfigFehler, match=f"WAMO_LABOR_DIENST_BIS.*{AUFBEWAHRUNG_BIS.isoformat()}"):
+            aus_umgebung(_env(tmp_path, WAMO_LABOR_DIENST_BIS=zu_spaet.isoformat()))
 
 
 def test_uhr_vor_dem_12_11_2026_ist_ein_konfigurationsfehler(konfig):
