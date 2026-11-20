@@ -4,7 +4,7 @@ Planpapier, Stand 14.11.2026, Basis `origin/main` 4e32e61 (Zweig `docs/office-ve
 beiden Gedächtniseinträge vom 14.11.2026 und seine Entscheidungen zu Outlook, Teams, Jira und Office. Kennzeichnung wie in den anderen Planpapieren: **B** belegt
 (Datei:Zeile), **A** abgeleitet, **V** vermutet oder nur am Gerät, am Server oder in Jira prüfbar. Nichts wurde am Server, an der Datenbank, am Laptop oder in Jira berührt.
 Pfade gelten relativ zur Repo-Wurzel, Bezeichner stehen in ASCII. Im Text heißt der Assistent W.A.I.S., technisch bleibt alles `wamo` (`README.md:1` bis `:17`).
-Das Testlabor am 28.11.2026 hat Vorrang: Die Entwicklung für das Labor endet am So 15.11.2026, danach gilt der Freeze für Kern, Migration und Oberfläche
+Das Testlabor am 05.12.2026 (verschoben vom 28.11.2026, Stand 20.11.2026) hat Vorrang: Die Entwicklung für das Labor endet am So 15.11.2026, danach gilt der Freeze für Kern, Migration und Oberfläche
 (`docs/testlabor-wamo.md:34`, Entscheidung E14). Dieses Paket beginnt deshalb erst nach dem Labortag.
 
 ## Entscheidungen und Kurzfassung
@@ -39,7 +39,7 @@ eine User Story in Jira anlegen können oder per Outlook eine Email oder per Tea
    Automatisierung hat (2.3, Q1). (c) `W.A.I.S.` als Ordnername verliert unter Windows den Schlusspunkt, empfohlen ist `Dokumente\WAIS` (2.5, Q3). (d) Der Installer
    nimmt aus `host/` nur `.py`, `pyproject.toml` und `uv.lock` mit, ein Logo für die Dateien braucht eine Filteränderung (`desktop/package.json:48` bis `:62`).
    (e) Die Freigabekarte zeigt heute höchstens rund 1800 Zeichen; längere Mails, Seiten und Stories brauchen die "lange Karte" aus Paket 2 oder gehen als Anhang.
-5. **Aufwand 151 Stunden in fünf Paketen** (Abschnitt 10), Start nach dem Labortag am Mo 30.11.2026. Mit zwei Strängen (Strang 1: Prüfauftrag, Dateien, Outlook;
+5. **Aufwand 151 Stunden in fünf Paketen** (Abschnitt 10), Start nach dem Labortag (bisher am Mo 30.11.2026, mit dem Labortag Sa 05.12.2026 nicht neu gerechnet `[offen: Niko]`). Mit zwei Strängen (Strang 1: Prüfauftrag, Dateien, Outlook;
    Strang 2: Jira, danach Teams und OneNote) rund 16 Arbeitstage (A), also bis etwa Mo 21.12.2026; mit einem Strang rund 25 Arbeitstage bis in den Januar.
 
 **IQ:** Jede Grenze sitzt dort, wo sie sich nicht umgehen lässt: der Inhalt im Kern aus der Datenbank, die Prüfung und das Ausführen im Host, die Entscheidung im Klick.
@@ -477,7 +477,7 @@ Reviews: `python-reviewer` für Kern und Host, `security-reviewer` für alle Ver
 | Doku | README, Namensvertrag, CHANGELOG | 3 | je Paket |
 | **Summe** | | **151** (plus 6 optional) | |
 
-**Kalender (A).** Bis zum Labortag nichts, auch kein Prüfauftrag (Nikos Zeit gehört dem Labor). Ab Mo 30.11. bei etwa 6 Stunden je Tag: Strang 1 P0, P1, P2 (88 Stunden,
+**Kalender (A).** Bis zum Labortag nichts, auch kein Prüfauftrag (Nikos Zeit gehört dem Labor). Nach dem Labortag (bisher ab Mo 30.11., Folgetermin `[offen: Niko]`) bei etwa 6 Stunden je Tag: Strang 1 P0, P1, P2 (88 Stunden,
 rund 15 Arbeitstage); Strang 2 zuerst P3 (31 Stunden, nach Q2), dann der OneNote-Teil von P4, sobald P1 steht, zuletzt der Teams-Teil nach P2. Ende rund 16 Arbeitstage
 nach dem Start, also etwa Mo 21.12.2026. Mit einem Strang rund 25 Arbeitstage, dann liegt P4 im Januar. Streichreihenfolge bei Zeitnot: P1-M, dann OneNote, dann die
 lange Karte (Mails und Stories bleiben dann bei 1800 Zeichen).
@@ -495,7 +495,7 @@ erst mit dem nächsten Kern-Release.
 | P3 | 1. Technischen Benutzer anlegen, Rechte nur in den Projekten aus Q2, Token mit Ablauf. 2. `WAMO_JIRA_*` per `wamo-core-env`, `WAMO_JIRA=aus`. 3. Kern-Release, Oberfläche. 4. `WAMO_JIRA=an`, Rauchtest | sofort: Token unter id.atlassian.com widerrufen; dann `WAMO_JIRA=aus`, `rueckweg-kern` |
 | P4 | wie P2, `WAMO_OFFICE` um `teams` und `onenote` | wie P2 |
 
-Keine Migration, also kein Datenbank-Rückweg. Das Labor bleibt unberührt: kein Laborprofil bekommt die Werkzeuge, keine Laborliste ändert sich, und vor dem 28.11.
+Keine Migration, also kein Datenbank-Rückweg. Das Labor bleibt unberührt: kein Laborprofil bekommt die Werkzeuge, keine Laborliste ändert sich, und vor dem 05.12.
 wird nichts ausgerollt.
 
 ## 12. Offene Fragen an Niko
@@ -507,7 +507,7 @@ Nur echte Entscheidungen; ohne Antwort gilt die Empfehlung. Nikos Hände sind mi
 | Q1 | Nutzt du das klassische Outlook oder das neue Outlook? Senden per COM geht nur mit dem klassischen | Für W.A.I.S. das klassische Outlook. Bleibt es beim neuen: W.A.I.S. öffnet nur einen fertigen Entwurf ohne Anhang, du sendest selbst | vor P2 |
 | Q2 | Jira-Zugang: Der Zugang am Server ist nur lesend und gehört den Entwicklungsaufträgen. Einverstanden mit einem zweiten technischen Benutzer nur für W.A.I.S. (Browse und Create Issues)? Welche Projekte außer `WMCNL`? Ersteller ist dann dieser Benutzer, du stehst als Bearbeiter drin | Ja, zweiter Benutzer; Projekte nur auf Zuruf erweitern | vor P3 |
 | Q3 | Ablage und Speichern: Ordner `Dokumente\WAIS` statt `Dokumente\W.A.I.S.` (Windows streicht den Schlusspunkt)? Und Dateien ohne Karte speichern und öffnen, weil nichts den PC verlässt? | Beides ja | vor P1 |
-| Q4 | **N:** eine Stunde am PC für den Prüfauftrag P0 (Outlook, Teams, OneNote, Word) | Mo 30.11. oder Di 1.12. | Mo 30.11. |
+| Q4 | **N:** eine Stunde am PC für den Prüfauftrag P0 (Outlook, Teams, OneNote, Word) | nach dem Labortag (bisher Mo 30.11. oder Di 1.12., Folgetermin `[offen: Niko]`) | nach dem Labortag |
 | Q5 | Mail: Sendeverzögerung von 30 Sekunden mit "Zurückholen" in W.A.I.S., und Signatur aus Outlook anhängen? | Verzögerung ja, wenn P0 sie am Gerät belegt; Signatur ja | vor P2 |
 | Q6 | OneNote: In welches Notizbuch sollen die Seiten? | entschieden: eigenes Notizbuch `W.A.I.S.` im OneDrive der Firma, Abschnitt `W.A.I.S` (4.4) | vor P4 |
 

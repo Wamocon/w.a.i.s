@@ -37,7 +37,7 @@ Durchreiche für die gestreamte Sprachausgabe (`general_settings.pass_through_en
   1. Der Gesundheitsweg des Gateways antwortet (`/health`).
   2. `/v1/models` mit dem Kern-Schlüssel zeigt `wamo-stt-haus` und `wamo-tts-haus`. Den Schlüssel aus der Umgebung des Kerns übergeben, nie in den Befehl schreiben.
   3. Eine gestreamte Probe an `/wamo-tts-haus/v1/audio/speech` (mit `stream` gesetzt) liefert Status 200 und die Kopfzeile `X-Stream: 1`. Die ersten Bytes kommen nach rund 0,15 Sekunden. Ein Schlüssel ohne den Eintrag bekommt 403.
-- **Regel: kein Neustart des Gateways am Labortag.** Die Sperre gilt von Fr 27.11.2026 um 12:00 bis Sa 28.11.2026 abends (Restplan, N10).
+- **Regel: kein Neustart des Gateways am Labortag.** Die Sperre gilt von Fr 04.12.2026 um 12:00 bis Sa 05.12.2026 abends (Restplan, N10; verschoben auf 05.12.2026, Stand 20.11.2026, vorher Fr 27.11. bis Sa 28.11.).
 
 ## 5. Rückweg je Eintrag
 

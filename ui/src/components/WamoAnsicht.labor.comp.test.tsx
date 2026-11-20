@@ -375,6 +375,21 @@ describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
     expect(await screen.findByRole("region", { name: "Update verfügbar" })).toBeTruthy();
   });
 
+  it("der Update-Hinweis steht im Fluss der Meldungen in der Mitte, nie als fester Anhang über Freigaben, Eingabe oder Gesprächsknöpfen", async () => {
+    appMitUpdate(ADMIN);
+    zeige(ADMIN);
+    const band = await screen.findByRole("region", { name: "Update verfügbar" });
+    // im Platz "meldungen" des Rahmens (Mitte, über dem Kern), innerhalb von main und damit im normalen Dokumentfluss
+    const meldungen = band.closest(".kz-meldungen");
+    expect(meldungen).not.toBeNull();
+    expect(meldungen?.closest("main.kz-main")).not.toBeNull();
+    // weder Freigaben noch Eingabe noch Gesprächsknöpfe liegen im Band, und das Band hängt nicht als Geschwister an der Wurzel (Platz "anhang")
+    for (const sperre of ["#kz-p-auftraege", ".kz-bedienung", ".kz-aktionen", ".actions"]) {
+      expect(band.closest(sperre), sperre).toBeNull();
+    }
+    expect(document.querySelector(".kz > .uh-rahmen")).toBeNull(); // die CSS-Regeln (keine feste Position) prüft updateHinweisCss.test.ts
+  });
+
   it("zeigt Wortmarke, Reiter Vorgänge und Büro, Verlauf und die Zeile zum Modellzugang", async () => {
     zeige(ADMIN);
     await ruhe();

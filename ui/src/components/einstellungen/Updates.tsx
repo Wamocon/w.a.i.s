@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef } from "react";
-import { InstallerDownload } from "@/components/einrichtung/InstallerDownload";
+import { EinstellungenLink } from "@/components/einstellungen/EinstellungenLink";
 import { useDesktopApp } from "@/lib/geraet";
 import { uhrzeitText } from "@/lib/einrichtung";
 import { appVersion } from "@/lib/installer";
@@ -17,12 +17,22 @@ import { useUpdates } from "./useUpdates";
  * und "Nach Updates suchen" (einmal je 10 Sekunden, nie während einer Installation). Die Logik steht in lib/updates.ts und
  * lib/einrichtung.ts, der Ablauf in useUpdates.ts: Das Token holt erst der Klick und geht nur an die App.
  *
- * Im Browser gibt es nichts zu aktualisieren: ein ruhiger Satz und der Installer für Windows (InstallerDownload), kein Update-Knopf.
- * Bei einer älteren App, die Updates nicht selbst prüfen kann, kommt ebenfalls der Installer als Weg dazu.
+ * Im Browser gibt es nichts zu aktualisieren: ein ruhiger Satz und ein Verweis auf den Installer für Windows in den Ersten Schritten
+ * (Abschnitt start), kein Update-Knopf. Der Download steht auf der Seite nur dort (InstallerDownload in den Ersten Schritten), damit es
+ * ihn nie doppelt gibt. Bei einer älteren App, die Updates nicht selbst prüfen kann, ist der Installer der Weg: auch dort nur der Verweis.
  */
 
 /** Zeichen je Zustand; wo nichts steht, zeigt die Stufe das Symbol (Haken, Ausrufezeichen oder i). */
 const FORM: Partial<Record<UpdateZustand, Form>> = { verfuegbar: "pfeil", installiert: "punkte", laedt: "punkte" };
+
+/** Verweis auf den einen Download in den Ersten Schritten (Abschnitt start). */
+function InstallerVerweis() {
+  return (
+    <p className="es-verweis">
+      <EinstellungenLink abschnitt="start">Installer in den Ersten Schritten herunterladen</EinstellungenLink>
+    </p>
+  );
+}
 
 function Zustand({ ansicht }: { ansicht: UpdateAnsicht }) {
   return (
@@ -94,7 +104,7 @@ function AppUpdates() {
       </Block>
       {ansicht.installerAnbieten && (
         <Block titel="Installer">
-          <InstallerDownload />
+          <InstallerVerweis />
         </Block>
       )}
     </>
@@ -106,9 +116,7 @@ function BrowserUpdates() {
     <>
       <Block titel="Im Browser">
         <p className="ez-text">{BROWSER_SATZ}</p>
-      </Block>
-      <Block titel="Installer">
-        <InstallerDownload />
+        <InstallerVerweis />
       </Block>
     </>
   );
