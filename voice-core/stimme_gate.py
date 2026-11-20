@@ -117,7 +117,8 @@ def stand_nachricht(modus: str, status: str) -> dict:
 
 
 def pruefmodus(wert: str | None = None) -> str:
-    """Modus aus WAMO_STIMME_PRUEFUNG (oder wert). Leer oder unbekannt heißt streng, ein unbekannter Wert wird einmal gewarnt."""
+    """Modus aus WAMO_STIMME_PRUEFUNG (oder wert). Leer oder unbekannt heißt der Standard beobachten (seit 18.11.2026 abends sperrt die
+    Stimme nichts), ein unbekannter Wert wird einmal gewarnt. streng gilt nur mit ausdrücklich WAMO_STIMME_PRUEFUNG=streng."""
     roh = ((os.getenv("WAMO_STIMME_PRUEFUNG") if wert is None else wert) or "").strip().lower()
     if not roh:
         return STANDARD_MODUS
