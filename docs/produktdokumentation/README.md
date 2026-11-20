@@ -5,12 +5,24 @@
 | Zweck | Einstieg in die gesamte Dokumentation von W.A.I.S.: fachlich, architektonisch, technisch, im Betrieb und in der Nutzung. |
 | Zielgruppe | Alle, die W.A.I.S. nutzen, betreiben, weiterentwickeln oder bewerten |
 | Dokumentart | Erklärung (Landkarte) |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce, Produktversion 0.6.0 |
+| Stand | 20.11.2026, geprüft gegen Commit 7caf977, Produktversion 0.7.0 |
 | Quellen | `CLAUDE.md`, `README.md` und `CHANGELOG.md` im Wurzelordner, der Code der Teile, `docs/` |
 
 ## Was W.A.I.S. ist
 
 W.A.I.S. (WAMOCON's Artificial Intelligence System) ist der Sprachassistent der WAMOCON GmbH. Mitglieder sprechen mit ihm, er merkt sich Wissen, zeigt Ergebnisse in einer Arbeitsfläche (Canvas), bedient auf Wunsch und nach Freigabe den PC, erstellt Office-Dateien und führt Entwicklungsaufträge aus. Das Produkt besteht aus einer Web-Oberfläche, einer Desktop-App, einem PC-Host, dem Voice-Core (Kern) und einer Datenbank auf eigenen Servern. Kennungen im Code heißen `wamo`, der Anzeigename ist `W.A.I.S.`. Einen Überblick mit Leistungsumfang und Stand gibt das Kapitel [Produktübersicht](fachkonzept.md#produktübersicht-wais).
+
+## Stand der Produktversion 0.7.0
+
+Diese Dokumentation beschreibt Version 0.7.0 (20.11.2026). Die wichtigsten Änderungen gegenüber 0.6.0:
+
+- **Stimme:** Die Stimmerkennung sperrt nichts mehr. Der Standard ist `beobachten`, die Sperre gibt es nur mit ausdrücklich `WAMO_STIMME_PRUEFUNG=streng`. Mitglieder brauchen für gesprochene PC-Befehle weiter einen eingelernten Abdruck. Es gibt einen Abdruck je Mikrofon (höchstens drei je Person), einen Mikrofontest ohne dass W.A.I.S. spricht, einen Hinweis beim Gerätewechsel und die Mikrofonkette im Protokoll. Ein zweites Sprechermodell läuft nur im Schattenbetrieb.
+- **Einstellungen:** Sechs Gruppen statt einer langen Liste: Konto und Allgemeines, Sprache und Stimme, Modelle und Zugänge, Geräte und PC, Gedächtnis und Teilen, Verwaltung (nur für Admins).
+- **Entwicklungsaufträge:** Persönliche GitHub-Zugänge (Plan C, Dispatcher 10), alle 14 Auftragsarten im Kern-Kanal, Aufträge für später speichern, Rückstand für Aufträge an W.A.I.S. selbst (nur Admins, ein Eintrag ist ein Vorschlag und keine Anweisung).
+- **Gespräch und Canvas:** W.A.I.S. erklärt auf Nachfrage, warum etwas nicht ging (Fehlerbuch). Canvas-Reiter lassen sich schließen, dazu kommen Historie, Bilder und Dateien.
+- **Release:** Version 0.7.0 in allen vier Teilen (Oberfläche, Desktop-App, Kern, Host). Die neueste Migration ist 0030.
+
+Ausführlich steht das im [Changelog](../../CHANGELOG.md), Abschnitt 0.7.0.
 
 ## Wähle deinen Weg
 
@@ -65,7 +77,7 @@ Diese Planpapiere, Anleitungen und Berichte bleiben unverändert und sind die Qu
 | Thema | Unterlagen |
 |---|---|
 | Ausrollen und Zugänge | [Ausrollen für neue Nutzer](../ausrollen-neue-nutzer.md), [Persönliche Zugänge](../persoenliche-zugaenge.md), [Jira-Benutzer einrichten](../jira-benutzer-einrichten.md), [Eigener Runner](../runner-einrichten.md) |
-| Entwicklungsaufträge | [Entwicklung im Betrieb](../entwicklung-im-betrieb.md), [Arbeitsliste](../entwicklung-im-betrieb-arbeitsliste.md), [Folgepaket 1](../folgepaket-1.md), [Selbstüberarbeitung (nur Konzept)](../selbstueberarbeitung.md) |
+| Entwicklungsaufträge | [Entwicklung im Betrieb](../entwicklung-im-betrieb.md), [Arbeitsliste](../entwicklung-im-betrieb-arbeitsliste.md), [Folgepaket 1](../folgepaket-1.md), [Aufträge an W.A.I.S. selbst (Rückstand)](../selbstauftraege.md), [Selbstüberarbeitung (nur Konzept)](../selbstueberarbeitung.md) |
 | Modelle, Sprache, Gespräch | [Hausmodelle für W.A.I.S. (Sokrates)](../hausmodelle-und-kikollege.md), [Sprache: Soniox oder ElevenLabs](../sprache-elevenlabs-soniox.md), [Gespräch natürlicher machen](../gespraech-optimierung.md), [Recherche zur Stimmerkennung](../stimme-recherche-2026-11-18.md) |
 | Office, Komfort, Fernzugriff | [Office und Versand](../office-und-versand.md), [Komfort-Paket](../komfort-paket.md), [Remote Desktop](../remote-desktop.md) |
 | Testlabor | [Planpapier](../testlabor-wamo.md), [Runbook](../labor-runbook.md), [Morgencheckliste](../labor-morgencheckliste.md), [Restplan](../labor-restplan.md), [Platz einrichten](../labor-platz-einrichten.md), [Dienst-Vertrag](../labor-dienst-vertrag.md), [Messrunde 1](../labor-messrunde-1.md), [Lasttest](../labor-lasttest.md), [Datenschutzhinweis (Entwurf)](../labor-datenschutz-entwurf.md) |

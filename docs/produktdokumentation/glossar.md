@@ -5,7 +5,7 @@
 | Zweck | Erklärt die Begriffe, die in der Produktdokumentation und im Repo von W.A.I.S. vorkommen. |
 | Zielgruppe | Alle Leser, besonders neue Mitglieder und Entwickler |
 | Dokumentart | Referenz |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce |
+| Stand | 20.11.2026, geprüft gegen Commit 7caf977, Produktversion 0.7.0 |
 | Quellen | `CLAUDE.md` (Namensvertrag), `README.md`, `docs/*.md`, die genannten Module |
 
 Einträge stehen alphabetisch. Wo ein Begriff ein Modul oder einen Dienst bezeichnet, steht der Pfad dabei. Namen und Pfade des Namensvertrags bleiben `wamo`, auch wenn der Anzeigename "W.A.I.S." heißt.
@@ -13,11 +13,13 @@ Einträge stehen alphabetisch. Wo ein Begriff ein Modul oder einen Dienst bezeic
 | Begriff | Bedeutung |
 |---|---|
 | aal2 | Anmeldestufe mit zweitem Faktor (Authenticator-App). Zugang zu W.A.I.S. gibt es nur mit aktivem Profil und aal2. |
+| Abdruck je Mikrofon | Jede Person lernt jedes ihrer Mikrofone einmal ein, höchstens drei Abdrücke je Person (Migration 0029, Einwilligung `stimme-3`). Die Prüfung nimmt den besten Wert über alle Abdrücke. Siehe Stimmabdruck. |
 | Abnahme (Entwicklungsaufträge) | Prüfung eines Entwicklungsauftrags gegen ein prüfbares Ziel in mehreren Runden (`README.md`, Abschnitt "Abnahme: prüfbares Ziel mit Runden"). |
 | Admin | Rolle `admin`: darf zusätzlich zu den Rechten eines Mitglieds Nutzer verwalten, PC-Werkzeuge und Entwicklungsaufträge nutzen (nach Schaltern und Freigaben). Details in `fachkonzept.md`, Kapitel "Rollen und Rechte". |
 | Notanker (Anker) | Dienst `wamo-anker` auf dem Server, läuft als root, nur über einen Unix-Socket erreichbar, Code außerhalb von `/opt/wamo*`. Er kann nur zurückführen (Rückweg), sperren und prüfen. Teil der Selbstüberarbeitung, deren Betriebszustand laut README nicht belegt ist. |
 | Anzeigename | `W.A.I.S.` mit Schlusspunkt. Gesprochen "Wais" wie englisch "ways". Die Langform ist "WAMOCON's Artificial Intelligence System". |
 | Audit | Protokoll sicherheitsrelevanter Aktionen. Der PC-Host schreibt `host/wamo_audit.jsonl`, der Kern führt Aktionen in der Tabelle `actions`. |
+| Beobachten | Standardmodus der Stimmprüfung (`WAMO_STIMME_PRUEFUNG=beobachten`): Das Urteil wird gemessen, angezeigt und protokolliert, sperrt aber nichts. Gegenstück ist der Modus "streng". Seit 18.11.2026 abends der Standard. |
 | Betriebsart | "Büro" (Kern auf Sokrates-2, PC-Werkzeuge per Tunnel) oder "Unterwegs" (Kern auf dem eigenen PC, Host per stdio). |
 | Blau/Grün | Zwei Container der Oberfläche (`wamo-ui-blau`, `wamo-ui-gruen`). Ein Skript schaltet zwischen ihnen um, damit ein Wechsel ohne Ausfall möglich ist. |
 | Boss | Regelwerk im Kern (`voice-core/boss.py`), das je Aufgabe das Modell wählt, auf Grundlage der gemessenen Modellkarte. |
@@ -26,27 +28,32 @@ Einträge stehen alphabetisch. Wo ein Begriff ein Modul oder einen Dienst bezeic
 | Canvas | Arbeitsfläche neben dem Gespräch, in der W.A.I.S. Texte, Diagramme, Bilder und Dokumente zeigt. Inhalte lassen sich schließen, aus der Historie öffnen und exportieren. |
 | Desktop-App | Electron-Programm `desktop/` mit Hauptfenster, Tray, Markierung am Zielfenster, Updater. Installiert als `WAMO.exe`, Produktname W.A.I.S. |
 | DevAgent | Teil des Kerns (`voice-core/dev_agent.py`), der Entwicklungsaufträge vorbereitet, per Karte freigeben lässt und an den Dispatcher übergibt. |
-| Dispatcher | Dienst auf Sokrates-2 (`infra/sokrates2/wamo_job_dispatch.py`), der Entwicklungsaufträge in einer abgeschotteten Umgebung ausführt. |
+| Dispatcher | Dienst auf Sokrates-2 (`infra/sokrates2/wamo_job_dispatch.py`, Version 10), der Entwicklungsaufträge in einer abgeschotteten Umgebung ausführt. Er prüft die Regeln des Kern-Kanals, vergibt Plätze und führt im persönlichen GitHub-Weg Einreichen und Verwerfen aus. |
 | ECC | Sammlung von Skills und Agenten für Claude Code (Plugin `ecc`), im Projekt für Planung, Prüfung und Dokumentation genutzt. |
-| Entwicklungsauftrag | Auftrag an W.A.I.S., Code in einer Sandbox zu ändern. Nur mit Zulassung und Freigabe, nie für Laborprofile. |
+| Einstellungen | Seite der Oberfläche in sechs Gruppen: Konto und Allgemeines, Sprache und Stimme, Modelle und Zugänge, Geräte und PC, Gedächtnis und Teilen, Verwaltung (nur für Admins). Im Labor gibt es nur die Abschnitte, die für das Labor gelten. |
+| Entwicklungsauftrag | Auftrag an W.A.I.S., Code in einer Sandbox zu ändern, in einer von 14 Auftragsarten. Nur mit Zulassung und Freigabe, nie für Laborprofile. |
+| Entwurf (Auftrag für später) | Ein Entwicklungsauftrag, den die Person mit "Für später speichern" ablegt (Tabelle `auftrag_entwuerfe`, Migration 0026, höchstens 50 je Person, 90 Tage). Beim Laden laufen alle Prüfungen erneut, gestartet wird nur per Klick. |
 | Erstanmeldung | Erste Anmeldung eines Kontos mit Startpasswort. Danach ist ein Passwortwechsel Pflicht. |
 | Fehlerbuch | Kurzzeitspeicher der Sitzung (`voice-core/fehlerbuch.py`), der erklärt, warum etwas nicht ging. Nie in der Datenbank. |
 | Freigabe, Freigabekarte | Bestätigung durch die Person in der Oberfläche vor einer riskanten Aktion. Ohne Klick geschieht nichts. |
 | Gate (Stimm-Gate) | Prüfstufe (`voice-core/stimme_gate.py`), die entscheidet, ob eine Äußerung zählt, zum Beispiel nur die eigene Stimme. |
 | Gedächtnis | Gespeichertes Wissen. Persönlich gehört genau einem Profil, gemeinsam gilt für alle und wirkt erst im Status "aktiv". Inhalte gelten als Daten, nie als Anweisungen. |
 | Gerät | Eintrag im Geräteregister (`devices`). Laptops heißen `pc-<name>`. |
+| GitHub-Zugang, persönlich | Eigenes GitHub-Token einer Person für Entwicklungsaufträge (Plan C, live seit 18.11.2026, Schalter `WAMO_ENTWICKLUNG_GITHUB`). Das Token bleibt außerhalb der Sandbox, geschrieben wird nur auf den Zweig `wamo/<auftrag>`, Push und Pull Request erst nach dem Klick auf "Einreichen". |
 | Hausmodelle | Sprachmodelle auf den eigenen Servern, erreichbar nur über LiteLLM. Gegenstück zu Claude. |
 | Haus-Proxy | Dienst `wamo-haus-proxy`, der Entwicklungsaufträge mit Hausmodellen an LiteLLM weiterleitet. |
 | Host (PC-Host) | Werkzeugserver am PC (`host/wamo_host.py`, MCP). Führt Fenster-, Office- und Bildschirmaktionen nach Risikoklasse aus. |
 | Kern, Voice-Core | Python-Dienst `voice-core/` mit Sprachpipeline, Rechten, Gedächtnis, Werkzeugen und API. |
 | Kern-Kanal | Weg vom Kern zum Dispatcher über SSH für Entwicklungsaufträge im Büro. |
 | Kern-Slot | Zwei Instanzen des Kerns (`wamo-core@a`, `wamo-core@b`), zwischen denen ohne Ausfall umgeschaltet wird. |
-| Labor, Testlabor | Veranstaltung am 28.11.2026 mit eigenen Laborprofilen, Test-Jira (Labor-Dienst) und Betreuern. Laborprofile haben bewusst eingeschränkte Rechte. |
+| Labor, Testlabor | Veranstaltung am 05.12.2026 (verschoben vom 28.11.2026) mit eigenen Laborprofilen, Test-Jira (Labor-Dienst) und Betreuern. Laborprofile haben bewusst eingeschränkte Rechte. |
 | Labor-Dienst | Dienst `labor-dienst/`, das Test-Jira des Testlabors (FastAPI, SQLite). |
 | LiteLLM | Gateway für Modelle. Hausmodelle sind nur darüber erreichbar. |
 | Live-Bild | Bild des Bildschirms am Laptop, das W.A.I.S. mit Einwilligung sieht (`host/live_bild.py`, `desktop/livebild.js`). |
 | Markierung (Overlay) | Lichtrahmen ums Zielfenster und Welle am Klickpunkt, wenn W.A.I.S. am Bildschirm handelt. |
 | MCP | Model Context Protocol. Der PC-Host ist ein MCP-Server (Version 1). |
+| Mikrofonkette | Wie das Mikrofon gerade aufnimmt: Klasse (eingebaut, Headset, Bluetooth oder unbekannt), Echo- und Rauschunterdrückung, Verstärkung, Abtastrate. Die Oberfläche meldet sie bei jedem Wechsel (`mikrofon_info`), der Kern schreibt eine Zeile `Mikrofonkette:` ins Protokoll und hängt die Klasse an die Urteilszeilen der Stimmprüfung (`voice-core/mikrofon_kette.py`). Nur Zahlen und eine grobe Klasse, nie ein Gerätename, nie Audio, nur im Speicher der Sitzung. |
+| Mikrofontest | Test in den Einstellungen, ob das Mikrofon Sprache und Ton sauber liefert, ohne dass W.A.I.S. spricht (Client-Nachricht `mikrofontest`). Spricht W.A.I.S. trotzdem, ist der Test ungültig. Das Ergebnis je Gerät bleibt nur im Browser. |
 | Mitglied | Rolle `mitglied`: normale Nutzerin oder normaler Nutzer. PC-Steuerung und Entwicklungsaufträge nur nach Freischaltung. |
 | Modellkarte | Datentabelle (`voice-core/modellkarte.py`) mit gemessenen Fähigkeiten, Latenzklasse, Datenschutz und Status je Modell. |
 | Namensvertrag | Verbindliche Tabelle in `CLAUDE.md` mit allen Namen, Pfaden, Diensten und Schaltern. |
@@ -60,12 +67,16 @@ Einträge stehen alphabetisch. Wo ein Begriff ein Modul oder einen Dienst bezeic
 | Release-Dienst | Dienst `wamo-release` (ohne root) für die Selbstüberarbeitung: nimmt Anfragen eines aktiven Admins entgegen (`anfordern`, `abbrechen`, `zurueck`). Die Freigabe selbst nimmt der getrennte Freigabe-Dienst `wamo-freigabe` an. |
 | REA | Reverse Engineer Anything: Werkzeug zur Analyse ausgelieferter Programme, im Projekt für die Desktop-App genutzt. |
 | RLS | Row Level Security: Zeilenschutz in der Datenbank. Jede neue Tabelle braucht ihn. |
+| Rückstand (Selbstaufträge) | Gemeinsame Liste von Aufträgen an W.A.I.S. selbst für Admins (Tabelle `selbstauftraege`, Migration 0030, Stände offen, in Arbeit, erledigt, verworfen). Gefüllt per Sprache, in der Oberfläche (Reiter "Aufträge") oder mit `scripts/wamo_selbstauftraege.py`. Siehe Selbstauftrag. |
+| Schattenbetrieb | Zweites Sprechermodell (WeSpeaker), das neben dem ersten läuft und nur eine Logzeile `Stimmschatten:` schreibt, das Urteil bleibt beim ersten Modell. Schalter `WAMO_STIMME_SCHATTEN`, Standard aus, Einwilligung `stimme-2` oder höher (Migration 0028). |
 | Schema (Datenbank) | `wamo_dev`, `wamo_test`, `wamo_prod`: getrennte Umgebungen in derselben Datenbank. |
+| Selbstauftrag | Eintrag im Rückstand mit Nummer `SA-n`: ein Wunsch an W.A.I.S. selbst. Ein Eintrag ist ein Vorschlag und keine Anweisung und wird nur nach dem ausdrücklichen Ja eines Admins umgesetzt. Nur Admins legen Einträge an, nie Mitglieder oder Laborprofile. Dass W.A.I.S. Einträge selbst umsetzt, ist noch nicht gebaut. |
 | Sokrates-1, Sokrates-2 | Server im Büro-LAN. Sokrates-2 hostet Datenbank, Kern und Oberfläche. |
 | Soniox | Anbieter für Spracherkennung und Sprachausgabe (Standard), Alternative sind Hausmodelle. |
 | Sparks | Rechner mit den Hausmodellen. Zugriff nur über LiteLLM. |
-| Stimmabdruck | Biometrisches Merkmal der eigenen Stimme, nach Einwilligung eingelernt, je Mikrofon einer (höchstens drei je Person). Die Stimmprüfung misst und zeigt im Standard nur ("beobachten"), sie sperrt erst im Modus "streng". |
+| Stimmabdruck | Biometrisches Merkmal der eigenen Stimme (192 Zahlen, nie eine Aufnahme), nach Einwilligung eingelernt, je Mikrofon einer (höchstens drei je Person, siehe Abdruck je Mikrofon). Die Stimmprüfung misst und zeigt im Standard nur ("beobachten"), sie sperrt erst im Modus "streng". Mitglieder brauchen für gesprochene PC-Befehle einen eingelernten Abdruck. |
 | Stimmwächter | Logik im Kern (`voice-core/stimme_waechter.py`), die fremde Stimmen erkennt. Verwerfen und Sperren gelten nur im Prüfmodus "streng", der Standard ist "beobachten". |
+| Streng (Prüfmodus) | Nur mit ausdrücklichem `WAMO_STIMME_PRUEFUNG=streng`: Nur die eingelernte Stimme erreicht das Sprachmodell und nur sie unterbricht. Im Standard sperrt die Stimme nichts. |
 | Supabase | Datenbank und Anmeldedienst, eigener Stack auf Sokrates-2. |
 | Tunnel | SSH-Rücktunnel vom Laptop zum Server, damit der Kern den Host am Laptop steuern kann. Je Laptop ein Benutzer `wamo-t-NN`. |
 | TOTP | Zeitbasiertes Einmalpasswort der Authenticator-App (zweiter Faktor). |

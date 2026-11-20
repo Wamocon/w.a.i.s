@@ -5,7 +5,7 @@
 | Zweck | Betrieb von W.A.I.S.: Topologie, Dienste, Störungen und Rückwege, der Weg von der Änderung zur Produktion und die Aufgaben der Administration. |
 | Zielgruppe | Administration, Betrieb, Release-Verantwortliche |
 | Dokumentart | Referenz und Anleitung |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce |
+| Stand | 20.11.2026, Version 0.7.0, geprüft gegen Commit 7caf977 (`main`) |
 | Quellen | Die Kopftabelle jedes Kapitels nennt die Quellen |
 
 ## Inhalt
@@ -230,6 +230,7 @@ Der Kern meldet sich außerdem in der Oberfläche über die Betriebsmeldung. Kom
 | Marken im Journal (`logger -t`) | `wamo-nutzer`, `wamo-auth`, `wamo-verteilung`, `wamo-job-kern`, `wamo-labor-geraete`, `wamo-labor-loeschen`, `wais-deploy` | `journalctl -t <Marke>`; Passwörter und Token stehen nie darin |
 | Aufträge (Dispatcher) | `/srv/wamo/logs/auftraege.log`, Zähler `/srv/wamo/logs/kernkanal.jsonl` | `gh_app_token`, `start`, `gh_app_widerruf`, nie ein Token |
 | Bedienspur Kern-Kanal | `/var/log/wamo-job-kern/aktionen.jsonl` | jede Handlung als Zeile ohne Werte |
+| Mikrofonkette und Stimmurteil | Journal des Kerns, Zeilen `Mikrofonkette:` und `Stimmschatten:` (Urteilszeilen des Prüfers tragen am Ende die Klasse, zum Beispiel `Kette bluetooth`) | nur Zahlen und eine grobe Klasse (eingebaut, headset, bluetooth, unbekannt), nie ein Gerätename, nie Audio; höchstens 50 Zeilen je Sitzung; der Stand lebt nur im Arbeitsspeicher der Sitzung, nie in der Datenbank, nie in Laborsitzungen (`voice-core/mikrofon_kette.py`) |
 | Ausrollen | `/var/log/wais-deploy/protokoll.log` | jeder Aufruf mit Befehl, Commit, Ausgabe, Rückgabe |
 | Notanker | `/var/log/wamo-anker/audit.jsonl` (Hashkette, `chattr +a`, 32 MiB) | `wamo-anker status` zeigt Füllgrad und Kette |
 | Release-Dienst | `/var/log/wamo-release/audit.jsonl` (Hashkette, 32 MiB) | zugleich Write-Ahead-Log |
@@ -322,7 +323,7 @@ Jede Zeile nennt Prüfschritt und Behebung. Nur Fälle, die im Repo beschrieben 
 Regeln für Eingriffe:
 
 - Kein Neustart von GoTrue in der Labor-Woche und immer vor einer Kernfreigabe (`docs/ausrollen-neue-nutzer.md`, Abschnitt 9).
-- Kein Neustart des LiteLLM-Gateways am Labortag (Sperre vom 27.11.2026 12:00 bis 28.11.2026 abends laut `infra/sokrates1/gateway-wamo.md`).
+- Kein Neustart des LiteLLM-Gateways am Labortag (Sperre vom 27.11.2026 12:00 bis 28.11.2026 abends laut `infra/sokrates1/gateway-wamo.md`, beim verschobenen Labortag am 05.12.2026 anzupassen).
 - Beim Labor-Dienst hängt der Ausgang allein an `wamo-firewall`: vor `systemctl stop wamo-firewall` den Dienst stoppen.
 - `sudo systemctl restart wamo-core` nie im Slot-Betrieb.
 
@@ -476,9 +477,23 @@ Reihenfolge wie im Runner: Kern zuerst, dann Oberfläche, beim Rückweg umgekehr
 | Schalter | Schalter des Kerns stehen im Drop-in `wamo-entwicklung-buero.conf` oder in `core.env`, geschrieben nur von `wamo-job-kern-einrichten.sh schalter` bzw. `wamo-core-env` | `CLAUDE.md` |
 | GoTrue | Kein Neustart in der Labor-Woche, immer vor der Kernfreigabe | `docs/ausrollen-neue-nutzer.md` 9 |
 
+#### 6.4 Rezept für ein Release (Stand 0.7.0)
+
+So lief die Auslieferung von Version 0.7.0 am 20.11.2026, Schritt für Schritt von Hand vom PC. Die Befehle stehen in den Abschnitten 6.2, 7 und 8, jeder mit `--trocken` zuerst. Der Server-Zustand ist aus dem Repo nicht lesbar: Der Stand unten beruht auf der Angabe des Release-Ablaufs und ist am Server mit den `status`-Befehlen zu prüfen.
+
+1. **Versions-Pull-Request.** `python scripts/wamo_version.py anwenden X.Y.Z` setzt die Versionsdateien und den CHANGELOG, `pruefen` bestätigt sie; der Pull Request (0.7.0: PR 234) wird nach grünen Prüfungen gemergt.
+2. **Kern verteilen und das Kern-Release bauen.** `python scripts/wamo_kern_sokrates2.py verteilen`, dann `wamo-core-slots.sh release v<version>-<commit7>` (0.7.0: `v0.7.0-41ecf4c`).
+3. **Kette am Kern.** Schalter setzen, wenn sich welche geändert haben (Abschnitt 11, Punkt 5), dann `umschalten-kern`, `bewaehren 30` und `ausleiten` (Abschnitt 6.2). Bei 0.7.0 lief der Kern danach im Slot `a`.
+4. **Oberfläche.** `python scripts/wamo_ui_sokrates2.py verteilen` (der Kern-Schritt hat `~/wamo-infra` geleert), bauen, `umschalten --trocken`, `umschalten`. Bei 0.7.0 ist die Farbe blau aktiv.
+5. **Labor-Rauchtest.** `wamo_labor_rauchtest.py` mit 20 Proben (Betriebshandbuch, Abschnitt 9) und `wais-deploy rauchtest` bestätigen aktiven Slot, live Farbe und Labor-Dienst.
+6. **Installer bauen** (Abschnitt 8, Schritte 2 bis 4), **signieren** (Schritt 5, Ed25519) und **verteilen** (Schritte 6 bis 8). Bei 0.7.0 liegt der signierte Installer 0.7.0 unter `/var/lib/wamo-verteilung`.
+7. **GitHub-Release abschließen.** Release `v<version>` (bei 0.7.0: `v0.7.0`) mit dem Installer, dann die Dokumentation prüfen (Dokumentationskonzept, Prüfliste vor einem Versionssprung).
+
+Termine nach dem Stand vom 20.11.2026: Freeze für Kern, Migration, Oberfläche und Dienste ab Montag 23.11.2026, Testlabor am 05.12.2026 (verschoben, die Labor-Unterlagen im Repo nennen noch den 28.11.2026). Der Freeze gilt für Kern, Migration, Oberfläche und Dienste am Server (`docs/hausmodelle-und-kikollege.md`).
+
 ### 7. Versionsschema und CHANGELOG
 
-Es gibt **eine** Version für das ganze Monorepo, aktuell 0.6.0 (`desktop/package.json`, `ui/package.json`). Quelle der Regeln ist `scripts/wamo_version.py` (Tests: `scripts/test_wamo_version.py`, CI-Job "Version").
+Es gibt **eine** Version für das ganze Monorepo, aktuell 0.7.0 (`desktop/package.json`, `ui/package.json`, CHANGELOG-Abschnitt vom 19.11.2026). Quelle der Regeln ist `scripts/wamo_version.py` (Tests: `scripts/test_wamo_version.py`, CI-Job "Version").
 
 | Regel | Wert |
 | --- | --- |
@@ -574,7 +589,7 @@ Die Stufe test baut die Oberfläche in die freie Farbe und ersetzt damit die bis
 | Zweck | Führt Administratorinnen und Administratoren Schritt für Schritt durch die wiederkehrenden Aufgaben: Nutzer, Geräte, Zugänge, Schalter, Freischaltungen, Labor, Installer. |
 | Zielgruppe | Personen mit der Rolle `admin` und Zugang zu Sokrates-2 (SSH-Alias `wamo-sokrates2`, Benutzer `wamocon`) |
 | Dokumentart | Anleitung |
-| Quellen | `README.md`, `scripts/wamo_nutzer.py`, `voice-core/wamo_admin.py`, `scripts/wamo_labor.py`, `docs/ausrollen-neue-nutzer.md`, `docs/persoenliche-zugaenge.md`, `docs/jira-benutzer-einrichten.md`, `infra/sokrates2/README.md`, `infra/sokrates2/wamo-job-kern-einrichten.sh`, `infra/sokrates2/wamo_core_env.py` |
+| Quellen | `README.md`, `scripts/wamo_nutzer.py`, `voice-core/wamo_admin.py`, `scripts/wamo_labor.py`, `docs/ausrollen-neue-nutzer.md`, `docs/persoenliche-zugaenge.md`, `docs/jira-benutzer-einrichten.md`, `infra/sokrates2/README.md`, `infra/sokrates2/wamo-job-kern-einrichten.sh`, `infra/sokrates2/wamo_core_env.py`, `docs/selbstauftraege.md`, `scripts/wamo_selbstauftraege.py`, `ui/src/lib/einstellungenAbschnitte.ts` |
 
 ### 0. Vor dem Start
 
@@ -600,6 +615,17 @@ Die Stufe test baut die Oberfläche in die freie Farbe und ersetzt damit die bis
 | `admin` | Server-Verwaltung in der Oberfläche (Geräte, Gedächtnis, Neue Mitglieder, Fernzugriff), PC-Steuerung und Entwicklungsaufträge |
 | `mitglied` | PC-Steuerung und Entwicklungsaufträge nur mit Freischaltung je Person (Abschnitte 10 und 11) |
 | Laborprofil (`labor_art`, Kennung `labor-01` bis `labor-16`, `labor-schau`) | hat immer die Rolle `mitglied`, bleibt dauerhaft `aktiv = false` und wird nur über `labor_aktiv` freigeschaltet; bekommt keine der Mitglieder-Funktionen |
+
+**Wo steht was in den Einstellungen** (seit 0.7.0 in sechs Gruppen, Namen wörtlich nach `ui/src/lib/einstellungenAbschnitte.ts`; ein Hash wie `#einstellungen/stimme` öffnet weiter die Gruppe des Abschnitts)
+
+| Gruppe | Abschnitte | Wer sieht sie |
+| --- | --- | --- |
+| Konto und Allgemeines | "Konto", "Erste Schritte" (Modellzugang, Installer, Prüfliste und Updates), "Darstellung", "Info" | alle, "Erste Schritte" nie in der Laborsicht |
+| Sprache und Stimme | "Mikrofon und Sprache", "Eigene Stimme" | alle, in der Laborsicht nur "Mikrofon und Sprache" |
+| Modelle und Zugänge | "Modellzugang", "GitHub-Zugang", "Verbrauch" | alle, "Verbrauch" nur Admins oder Profile mit eigenem Claude-Code-Token |
+| Geräte und PC | "Geräte und PC-Steuerung", "Fernzugriff" | alle, "Fernzugriff" nur Admins |
+| Gedächtnis und Teilen | "Gedächtnis" (Vorschläge für alle prüfen), "Teilen" | "Gedächtnis" nur Admins |
+| Verwaltung | "Neue Mitglieder", "Änderungen" (Stand der Selbstüberarbeitung) | nur Admins |
 
 ### 1. Neuen Nutzer anlegen und freischalten
 
@@ -634,7 +660,7 @@ Voraussetzungen für den Ablauf auf der Serverseite: Schema `wamo_auth` ist eing
 
 ### 2. Einrichtungsstand neuer Mitglieder prüfen
 
-1. Menü: Einstellungen, "Neue Mitglieder" (nur Admins).
+1. Menü: Einstellungen, Gruppe "Verwaltung", Abschnitt "Neue Mitglieder" (nur Admins).
 2. Je Profil der letzten 90 Tage (ohne Laborprofile) zeigt die Übersicht als Datum, nie als Uhrzeit: angemeldet, zweiter Faktor, Passwort gewechselt, Laptop eingerichtet, Stimmabdruck, Modellzugang als Art (eigener Token, eigener Schlüssel, Hausmodelle) und einen Satz zum nächsten Schritt.
 3. Die Daten kommen aus der Funktion `<schema>.neue_mitglieder(p_admin)` (Migration `0022`), sie liefert nie E-Mail, Schlüssel, Token oder Stimmvektor. Route `GET /wamo/api/admin/neue-mitglieder`, 30 Abrufe je Minute.
 4. Dieselbe Seite enthält den Block "Rechte der GitHub-Zugänge" (Abschnitt 14.3).
@@ -665,7 +691,7 @@ Jeder persönliche Laptop hat ein eigenes Gerät im Register, einen Schlüssel u
 
 **Gerät freigeben oder ablehnen**
 
-1. Menü: Einstellungen, "Geräte und PC", Karte "Geräteverwaltung" (nur Admins). Wartende Geräte stehen oben mit Kennung, Rechnername, Profil und Fingerabdruck in Vierergruppen.
+1. Menü: Einstellungen, Gruppe "Geräte und PC", Abschnitt "Geräte und PC-Steuerung", Karte "Geräteverwaltung" (nur Admins). Wartende Geräte stehen oben mit Kennung, Rechnername, Profil und Fingerabdruck in Vierergruppen.
 2. Aktion wählen: freigeben, ablehnen oder widerrufen (endgültig, Grund Pflicht), sperren (Grund Pflicht), entsperren.
 3. Im Dialog den Fingerabdruck mit dem Fingerabdruck am Laptop vergleichen und den Vergleich ausdrücklich bestätigen (Freigeben und Entsperren).
 4. Den Code der Authenticator-App eingeben. Der Kern nimmt ändernde Aktionen nur an, wenn der letzte TOTP-Zeitstempel höchstens 120 Sekunden alt ist.
@@ -696,7 +722,7 @@ Jedes Profil hat genau einen von zwei Modellzugängen: eigener Claude-Schlüssel
 
 | Wo | Was | Einstellen |
 | --- | --- | --- |
-| Einstellungen, "Verbrauch" (nur Admin) | zeigt das Kontingent des Max-Abos (Sitzungslimit, Wochenlimit, modellbezogenes Limit) aus dem Lauf des Profils; Datenformat laut README noch an keinem echten Token bestätigt | nur Anzeige |
+| Einstellungen, Gruppe "Modelle und Zugänge", Abschnitt "Verbrauch" (Admins und Profile mit eigenem Claude-Code-Token) | zeigt das Kontingent des Max-Abos (Sitzungslimit, Wochenlimit, modellbezogenes Limit) aus dem Lauf des Profils; Datenformat laut README noch an keinem echten Token bestätigt | nur Anzeige |
 | Entwicklungsaufträge, Kosten | `--kosten-auftrag` und `--kosten-tag` (US-Dollar), im Büro Pflicht; fehlend heißt aus | `wamo-job-kern-einrichten.sh schalter ...` (Abschnitt 11) |
 | Entwicklungsaufträge, Kanal | `--max-start-stunde`, `--max-start-tag`, `--max-laufzeit-tag-s`, `--max-versuch-stunde`, je Profil `--max-neu-stunde-profil`, `--max-neu-tag-profil`, `--max-versuch-stunde-profil`, `--max-laufzeit-tag-s-profil` | `wamo-job-kern-einrichten.sh kanal ...` |
 | Gleichzeitige Aufträge | `--max-parallel` (1 bis 6, Standard 6), `--max-parallel-profil` (1 bis 6, Standard 3) | `kanal --max-parallel N --max-parallel-profil N`; 1 und 1 heißt einer gleichzeitig |
@@ -732,7 +758,8 @@ Häufige Schalter (Name, Standard, Quelle):
 | `WAMO_JIRA` und `WAMO_JIRA_*` | Jira-Stories (Abschnitt 14.1) | `docs/jira-benutzer-einrichten.md` |
 | `WAMO_RD_AKTIV` | Fernzugriff (`ja`), erst nach `wamo-rd-einrichten.sh` | `README.md` Fernzugriff |
 | `WAMO_STIMME_PRUEFUNG` | Prüfmodus der Stimme: `aus`, `beobachten` (Standard seit 18.11.2026, die Stimme sperrt nichts) oder `streng` (nur auf ausdrücklichen Wunsch) | `voice-core/stimme_gate.py`, `CLAUDE.md` |
-| `WAMO_STIMME_SCHATTEN`, `WAMO_STIMME_NUR_EIGEN`, `WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN` | Stimmwächter (die beiden letzten gelten nur im Modus `streng`) | `CLAUDE.md` |
+| `WAMO_STIMME_SCHATTEN` | zweites Sprechermodell (WeSpeaker) im Schattenbetrieb: je Äußerung nur eine Logzeile `Stimmschatten:`, das Urteil bleibt beim ersten Modell; Standard aus; mit Schalter gilt für das Einlernen die Einwilligung `stimme-2` (Migration 0028) | `voice-core/stimme_schatten.py`, `CLAUDE.md` |
+| `WAMO_STIMME_NUR_EIGEN`, `WAMO_STIMME_UNTERBRECHEN_NUR_EIGEN` | Regeln des Stimmwächters, gelten nur im Modus `streng` | `CLAUDE.md` |
 | `WAMO_TTS_HAUS_STREAM` | gestreamte Sprachausgabe im Haus, `an` oder `aus` | `CLAUDE.md` |
 | `WAMO_LABOR_URL`, `WAMO_LABOR_TOKEN`, `WAMO_LABOR_DATEN` | Labor-Dienst und Labor-Daten | `CLAUDE.md` |
 
@@ -777,6 +804,8 @@ Entwicklungsaufträge starten im Büro über den Kern-Kanal des Dispatchers. All
 
 Voraussetzung je Person: eigener Claude-Zugang oder (mit `--haus an`) Hausmodelle, Zulassung über `--profil` (die Liste landet in `WAMO_ENTWICKLUNG_PROFILE`). Mitglieder bekommen keine Repos, solange keine Liste je Person festgelegt ist (laut Abschnitt 18.1). Quelle: `infra/sokrates2/README.md` 18 bis 18.3, `CLAUDE.md`.
 
+**Seit 0.7.0 zusätzlich.** Es gibt 14 Auftragsarten (`AUFTRAGSARTEN` in `voice-core/werkzeugkarte.py`); `kanal --arten ...` legt fest, welche davon der Kanal annimmt, und der Kern prüft die Art schon vor der Karte gegen `kernkanal.arten` aus dem ping. Entwicklungsaufträge lassen sich "für später speichern" (Tabelle `auftrag_entwuerfe`, Migration 0026, höchstens 50 je Person, 90 Tage; ein Start braucht weiter den Klick auf der Karte). Der Dispatcher steht auf Version 10 (persönlicher GitHub-Weg, Abschnitt 14.3; die Sandbox-Modi `klon`, `ausgabe` und `pruefung` laufen immer ohne Netz), der Kern auf `SCHRANKEN_VERSION` 4. Für Aufträge an W.A.I.S. selbst siehe Abschnitt 18.
+
 ### 12. Haus-Proxy für Aufträge mit Hausmodellen
 
 1. Proxy einrichten: `sudo bash ~/wamo-infra/wamo-haus-proxy-einrichten.sh einrichten --trocken`, dann ohne `--trocken`.
@@ -789,7 +818,7 @@ Voraussetzung je Person: eigener Claude-Zugang oder (mit `--haus an`) Hausmodell
 
 Gemeinsame Gedächtnis-Einträge wirken erst nach Freigabe durch einen Admin. Persönliche Einträge gehören nur der Person.
 
-1. Menü: Einstellungen, "Gedächtnis" (nur Admins). Offene Vorschläge zeigen vollen Text, Art, Autor und Zeit.
+1. Menü: Einstellungen, Gruppe "Gedächtnis und Teilen", Abschnitt "Gedächtnis" (nur Admins). Offene Vorschläge zeigen vollen Text, Art, Autor und Zeit.
 2. "Für alle freigeben" oder "Ablehnen" wählen (gleich gewichtet). Ein freigegebener Eintrag gilt in allen Sitzungen, die danach beginnen.
 3. Alternativ auf der Kommandozeile: `cd voice-core && uv run python wamo_admin.py vorschlaege`, dann `freigeben <id> --admin <uuid>` oder `ablehnen <id> --admin <uuid>`.
 4. Die Entscheidung läuft über die Datenbankfunktion `gedaechtnis_vorschlag_entscheiden`, die den Admin noch einmal prüft (Migration `0020`).
@@ -830,7 +859,7 @@ Jede Person hinterlegt in den Einstellungen unter "GitHub-Zugang" ein eigenes To
 
 ### 15. Labor einrichten und löschen
 
-Der Labortag am 28.11.2026 hat eigene Unterlagen. Dieser Abschnitt nennt nur die Verwaltungsbefehle, die Abläufe stehen im Runbook.
+Der Labortag hat eigene Unterlagen. Er ist auf den 05.12.2026 verschoben (Stand 20.11.2026); `docs/labor-runbook.md`, `docs/labor-datenschutz-entwurf.md` und die Server-README nennen noch den 28.11.2026 und eine Löschfrist am 11.12.2026. Beides ist vor dem Labortag abzugleichen. Dieser Abschnitt nennt nur die Verwaltungsbefehle, die Abläufe stehen im Runbook.
 
 **Profile** (`scripts/wamo_labor.py`, Standard ist der Trockenlauf, ändern nur mit `--ausfuehren`)
 
@@ -848,7 +877,7 @@ Der Labortag am 28.11.2026 hat eigene Unterlagen. Dieser Abschnitt nennt nur die
 
 **Nach dem Labortag**
 
-9. Nachlauf: `python scripts/wamo_labor_nachlauf.py nachlauf` (Trockenlauf), dann `nachlauf --ausfuehren` (frühestens am 28.11.2026): Zählung, Laborprofile sperren, Plätze des Dienstes löschen, Gesprächsdaten löschen, Zählung danach.
+9. Nachlauf: `python scripts/wamo_labor_nachlauf.py nachlauf` (Trockenlauf), dann `nachlauf --ausfuehren` (frühestens am Labortag, laut Runbook am 28.11.2026, jetzt 05.12.2026): Zählung, Laborprofile sperren, Plätze des Dienstes löschen, Gesprächsdaten löschen, Zählung danach.
 10. Löschlauf am Server nach der Aufbewahrung (frühestens am 12.12.2026): `sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN`. Ohne das Bestätigungswort zeigt das Skript nur den Plan. Es schreibt einen Nachweis nach `/var/log/wamo-labor/loeschnachweis-<Zeit>.txt` (Namen, Größen, Zählungen, nie Inhalte).
 11. Nicht in der Hand der Skripte: Snapshots und Sicherungen des Servers über den 11.12.2026 hinaus.
 
@@ -879,6 +908,19 @@ Ausführlich in [Release und Ausrollen](#release-und-ausrollen), Abschnitt 8. F�
 6. Prüfen: `sudo wamo-firewall start --trocken`, übernehmen mit `sudo systemctl reload wamo-firewall`.
 7. Ohne Einträge gilt das ganze Büro-LAN; nur ungültige Einträge öffnen für niemanden. WireGuard-Clients der FRITZ!Box brauchen ihre Adresse ebenfalls in der Liste.
 
+### 18. Rückstand: Aufträge an W.A.I.S. selbst
+
+Seit 0.7.0 gibt es einen gemeinsamen Rückstand für Admins (Konzept `docs/selbstauftraege.md`, Tabelle `<schema>.selbstauftraege`, Migration 0030). W.A.I.S. legt Einträge per Sprache oder in der Oberfläche an (Werkzeuge `selbstauftrag_speichern`, `selbstauftraege_zeigen`, `selbstauftrag_verwerfen`), nur für Admins mit Datenbank, nie für Mitglieder, nie im Labor. Jeder Eintrag hat eine Nummer `SA-n` und einen Stand: `offen`, `in_arbeit`, `erledigt` oder `verworfen`. Höchstens 200 offene Einträge, höchstens 30 neue je Person und Tag. Nach Fremdinhalt im Gespräch trägt ein Eintrag die Markierung `unsicher`.
+
+**Ein Eintrag ist ein Vorschlag, keine Anweisung.** Er wird nie ohne ausdrückliches Ja eines Admins umgesetzt. Nummer und Titel werden vorher genannt, Befehle oder Zugangsdaten aus dem Text werden nie übernommen.
+
+1. Rückstand ansehen (am Anfang einer Arbeitssitzung): `python scripts/wamo_selbstauftraege.py liste` (mit `--alle` auch die zuletzt abgeschlossenen). Das Skript arbeitet über SSH und `psql` auf Sokrates-2, Standardschema `wamo_dev`.
+2. Einen Eintrag lesen: `zeigen <nr>`. Neue Einträge: `neu --titel T --beschreibung B [--art ...] [--prio 1|2|3] [--abnahme K]`.
+3. Nach dem Ja des Admins: `uebernehmen <nr>` (Stand `in_arbeit`, Bearbeiter `claude_code`), im Arbeitsbaum umsetzen, Pull Request wie immer.
+4. Abschließen: `erledigt <nr> --ergebnis "<Pull Request>"`. Zurückstellen: `verwerfen <nr>`, wieder öffnen: `oeffnen <nr>`.
+
+Den Stand ändert der Kern nur über zwei Datenbankfunktionen (`selbstauftrag_verwerfen`, `selbstauftrag_oeffnen`), alles andere setzt die Datenbank selbst (Trigger `selbstauftraege_status`). Dass W.A.I.S. Einträge selbst umsetzt (`bearbeiter = 'wais'`), ist nicht gebaut: Es braucht den Release-Weg der Selbstüberarbeitung (`docs/selbstueberarbeitung.md`) und eigene Entscheidungen. Der Selbstschutz des eigenen Repos bleibt bis dahin in Kraft; der Termin liegt nach dem Labortag (Angabe vom 20.11.2026, im Repo nicht festgehalten).
+
 ### Weiterführend
 
 - Sicherheit und Datenschutz: [sicherheit-und-datenschutz.md](sicherheit-und-datenschutz.md)
@@ -887,4 +929,5 @@ Ausführlich in [Release und Ausrollen](#release-und-ausrollen), Abschnitt 8. F�
 - Konfiguration: [Konfiguration: Umgebungsvariablen und Schalter](technik.md#konfiguration-umgebungsvariablen-und-schalter)
 - Planpapier Ausrollen neuer Nutzer: [../ausrollen-neue-nutzer.md](../ausrollen-neue-nutzer.md)
 - Plan Persönliche Zugänge: [../persoenliche-zugaenge.md](../persoenliche-zugaenge.md)
+- Konzept Aufträge an W.A.I.S. selbst: [../selbstauftraege.md](../selbstauftraege.md)
 - Begriffe: [glossar.md](glossar.md)

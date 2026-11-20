@@ -5,8 +5,8 @@
 | Zweck | Führt Mitglieder Schritt für Schritt von der Anmeldung bis zur täglichen Arbeit mit W.A.I.S. und hilft bei den häufigsten Meldungen. |
 | Zielgruppe | Mitglieder und Administratoren ohne technische Vorkenntnisse |
 | Dokumentart | Anleitung und Lernpfad |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce |
-| Quellen | `ui/src/components/`, `ui/src/lib/`, `voice-core/einrichtung_api.py`, `voice-core/erstanmeldung_api.py`, `README.md`, `docs/komfort-paket.md` |
+| Stand | 20.11.2026, geprüft gegen Commit 7caf977, Produktversion 0.7.0 |
+| Quellen | `ui/src/components/`, `ui/src/lib/`, `voice-core/einrichtung_api.py`, `voice-core/erstanmeldung_api.py`, `README.md`, `docs/komfort-paket.md`, `docs/selbstauftraege.md` |
 
 ## So benutzt du dieses Handbuch
 
@@ -32,7 +32,7 @@ Kapitel 10 hilft bei Meldungen und Störungen.
 Du brauchst einen Windows-Laptop. Die Desktop-App heißt „W.A.I.S.“ und wird pro Benutzer installiert, ohne Administratorrechte.
 
 1. Öffne W.A.I.S. im Browser. Die Adresse für das Büro steht auf deinem Willkommensblatt (laut `README.md` im Büronetz oder über WireGuard erreichbar).
-2. Melde dich an (Abschnitt 1.2) und öffne in den Einstellungen den Abschnitt „Erste Schritte“. Dort bietet die Seite den Installer `WAIS-Setup-<Version>.exe` zum Laden an. Den Installer gibt es nur im Browser.
+2. Melde dich an (Abschnitt 1.2) und öffne in den Einstellungen die Gruppe „Konto und Allgemeines“ mit dem Abschnitt „Erste Schritte“. Dort bietet die Seite den Installer `WAIS-Setup-<Version>.exe` zum Laden an. Den Installer gibt es nur im Browser.
 3. Starte die geladene Datei. Zeigt Windows SmartScreen eine Warnung, wähle „Weitere Informationen“ und dann „Trotzdem ausführen“. Das passiert, solange der Installer noch nicht mit einem Firmenzertifikat signiert ist.
 4. Starte „W.A.I.S.“ aus dem Startmenü.
 5. Warte beim ersten Start etwa eine halbe bis eine Minute. Die App richtet im Hintergrund die Umgebung für die PC-Steuerung ein und braucht dafür einmal Netz.
@@ -73,10 +73,10 @@ Quellen: `voice-core/erstanmeldung_api.py`, `ui/src/components/erstanmeldung/Pas
 
 ### 1.5 Prüfliste „Erste Schritte“ ansehen
 
-1. Öffne Einstellungen, dann „Erste Schritte“.
+1. Öffne Einstellungen, dann die Gruppe „Konto und Allgemeines“ und den Abschnitt „Erste Schritte“.
 2. Lies die Punkte: Anmeldung, Kern, Passwort, App-Version, Gerät, Host-Umgebung, Tunnel, Mikrofon, Stimme, Gespräch, Entwicklungsaufträge, Stimmabdruck, PC-Steuerung. Jeder Punkt zeigt „Bereit“, „Offen“ oder „Hinweis“ als Wort, nicht nur als Farbe.
 3. Behebe, was „Offen“ ist. Danach wähle „Erneut prüfen“ (höchstens alle zehn Sekunden).
-4. Zeigt die Liste „Update auf Version … verfügbar“, wähle „Update installieren“. Die App fragt vorher nach und startet danach neu.
+4. Zeigt die Liste „Update auf Version … verfügbar“, wähle „Update installieren“. Die App fragt vorher nach und startet danach neu. Seit Version 0.7.0 gibt es dafür auch den eigenen Abschnitt „Updates“ (Gruppe „Konto und Allgemeines“): Dort suchst du nach Updates der Desktop-App und installierst sie.
 
 Steht beim Laptop „Dein Laptop wartet auf die Freigabe durch einen Admin“, gib deinem Admin Bescheid. Ein Mitglied, das noch kein Gerät hatte, wird beim ersten Binden sofort freigegeben, bei einem Gerätewechsel entscheidet ein Admin.
 
@@ -85,7 +85,7 @@ Quellen: `voice-core/einrichtung_api.py`, `ui/src/lib/einrichtung.ts`, `ui/src/c
 ### 1.6 Mikrofon prüfen
 
 1. Erlaube Windows das Mikrofon für W.A.I.S. (Windows, Einstellungen, Datenschutz und Sicherheit, Mikrofon). Im Browser erlaubst du es für die Seite.
-2. Öffne Einstellungen, dann „Sprache und Ton“ und wähle dein Mikrofon.
+2. Öffne Einstellungen, dann die Gruppe „Sprache und Stimme“ und den Abschnitt „Mikrofon und Sprache“ und wähle dein Mikrofon.
 3. Wähle „Mikrofon testen“. Du brauchst dafür kein Gespräch.
 4. Sei etwa drei Sekunden still, solange W.A.I.S. die Geräusche im Raum misst („Bitte still sein, ich messe die Geräusche im Raum“).
 5. Sprich dann etwa fünf Sekunden, zum Beispiel: „Eins, zwei, drei, ich teste mein Mikrofon.“
@@ -100,7 +100,7 @@ Quellen: `ui/src/components/einstellungen/MikrofonTest.tsx`, `ui/src/lib/mikrofo
 Mit einem Stimmabdruck kann W.A.I.S. deine Stimme von anderen unterscheiden. Es speichert dafür nur Zahlen, nie eine Aufnahme. Ohne Abdruck nutzt du W.A.I.S. ohne Nachteil weiter, nur gesprochene PC-Befehle sind für Mitglieder dann nicht möglich, sondern nur getippte.
 
 1. Starte ein Gespräch (Kapitel 2). Das Einlernen geht nur während eines Gesprächs.
-2. Öffne Einstellungen, dann „Stimme“, und wähle „Stimme einlernen“.
+2. Öffne Einstellungen, dann die Gruppe „Sprache und Stimme“ und den Abschnitt „Eigene Stimme“, und wähle „Stimme einlernen“.
 3. Lies die Einwilligung und setze den Haken bei „Ich habe den Text gelesen und willige ein.“
 4. W.A.I.S. sagt kurz, worum es geht. Lies danach den Text „Der Nordwind und die Sonne“ laut vor. Pausen sind kein Problem. Ein Balken zeigt, wie viele von etwa 20 Sekunden Sprache schon da sind.
 5. Warte auf „Fertig. W.A.I.S. erkennt jetzt deine Stimme.“
@@ -127,9 +127,9 @@ Was W.A.I.S. sagt, ist kurz und ohne Aufzählungen, denn es liest vor. Seinen Na
 
 Weitere Möglichkeiten:
 
-- **Still starten beim Tippen:** In den Einstellungen (Sprache und Ton) lässt sich ein Schalter „Still starten beim Tippen“ je Gerät einschalten. Dann startet der erste Tastendruck eine Sitzung ohne Mikrofon, und die Antworten kommen als Text. Mit „Gespräch starten“ wird daraus ein Sprachgespräch.
-- **Darstellung:** Über dem Kern wählst du Normal, Fokus, Zentrale oder Nacht. Hell oder Dunkel stellst du mit dem Schalter in der Kopfzeile oder unter Darstellung ein.
-- **Untertitel:** Sie sind standardmäßig aus. Du schaltest sie in den Einstellungen unter Darstellung ein.
+- **Still starten beim Tippen:** In den Einstellungen (Abschnitt „Mikrofon und Sprache“) lässt sich ein Schalter „Still starten beim Tippen“ je Gerät einschalten. Dann startet der erste Tastendruck eine Sitzung ohne Mikrofon, und die Antworten kommen als Text. Mit „Gespräch starten“ wird daraus ein Sprachgespräch.
+- **Darstellung:** Über dem Kern wählst du Normal, Fokus, Zentrale oder Nacht. Hell oder Dunkel stellst du mit dem Schalter in der Kopfzeile oder im Abschnitt „Darstellung“ ein.
+- **Untertitel:** Sie sind standardmäßig aus. Du schaltest sie in den Einstellungen im Abschnitt „Darstellung“ (Gruppe „Konto und Allgemeines“) ein.
 - **Warum ging etwas nicht?** Frag W.A.I.S. einfach: „Warum hat das nicht geklappt?“ Es nennt den Grund und was du tun kannst.
 - **Eine Sitzung je Profil:** Meldest du dich auf einem zweiten Gerät an, übernimmt die neue Sitzung, und die alte zeigt „Sitzung beendet: Eine neue Sitzung dieses Profils hat übernommen.“
 - **Hinweise:** Oben in der linken Spalte erscheinen höchstens drei Karten, zum Beispiel wenn jemand Arbeit mit dir geteilt hat.
@@ -172,7 +172,7 @@ Mit der PC-Steuerung arbeitet W.A.I.S. an deinem Laptop: Programme und Webseiten
 Voraussetzungen: Dein Laptop ist mit der Desktop-App eingerichtet und freigegeben, der Tunnel steht (Prüfliste „Tunnel“ ist bereit), und der Bildschirm ist nicht gesperrt.
 
 1. Starte ein Gespräch (oder lass den Schalter ohne Gespräch still starten, wenn „Still starten beim Tippen“ an ist).
-2. Öffne Einstellungen, „Geräte und PC“, und schalte „PC-Steuerung“ ein. Admins kommen auch über das Modul „PC-Steuerung“ in der Kopfzeile dorthin.
+2. Öffne Einstellungen, Gruppe „Geräte und PC“, Abschnitt „Geräte und PC-Steuerung“, und schalte „PC-Steuerung“ ein. Admins kommen auch über das Modul „PC-Steuerung“ in der Kopfzeile dorthin.
 3. Prüfe die Kopfzeile: Das Modul „PC-Steuerung“ zeigt „an“.
 
 Die PC-Steuerung ist je Sitzung standardmäßig aus. Es steuert immer nur eine Sitzung deinen Laptop („Eine andere Sitzung steuert diesen PC gerade“). In der Desktop-App zeigt ein Lichtrahmen das Fenster, in dem W.A.I.S. gerade handelt, im Browser gibt es den Rahmen nicht. Den Schalter „PC-Steuerung beim Start automatisch einschalten (dieses Gerät)“ nutze nur, wenn du allein bist: Ohne Sprecherprüfung reagiert W.A.I.S. dann auf jede Stimme im Raum.
@@ -250,7 +250,7 @@ W.A.I.S. merkt sich, was für deine Arbeit nützlich ist.
 3. Mit „Rückgängig“ im Hinweis vergisst W.A.I.S. den Eintrag wieder.
 4. Sag keine Passwörter, Zugangsdaten, Konto- oder Gesundheitsdaten. W.A.I.S. speichert sie nicht.
 
-Admins prüfen Vorschläge unter Einstellungen, Gedächtnis: „Für alle freigeben“ oder „Ablehnen“. Ein Admin, der ausdrücklich „für alle“ sagt, macht einen Eintrag sofort gültig, außer im selben Zug kamen Inhalte von außen vor. Persönliches merkt sich W.A.I.S. nach Inhalten von außen nur, wenn du es ausdrücklich sagst.
+Admins prüfen Vorschläge unter Einstellungen, Gruppe „Gedächtnis und Teilen“, Abschnitt „Gedächtnis“: „Für alle freigeben“ oder „Ablehnen“. Ein Admin, der ausdrücklich „für alle“ sagt, macht einen Eintrag sofort gültig, außer im selben Zug kamen Inhalte von außen vor. Persönliches merkt sich W.A.I.S. nach Inhalten von außen nur, wenn du es ausdrücklich sagst.
 
 Quellen: `voice-core/tools.py`, `voice-core/gedaechtnis_api.py`, `ui/src/components/GemerktHinweis.tsx`, `ui/src/components/einstellungen/Gedaechtnis.tsx`.
 
@@ -258,27 +258,32 @@ Quellen: `voice-core/tools.py`, `voice-core/gedaechtnis_api.py`, `ui/src/compone
 
 Die Einstellungen sind eine eigene Ansicht der Hauptseite (Adresse mit `#einstellungen`). Ein laufendes Gespräch bleibt dabei bestehen.
 
-| Abschnitt | Wofür | Wer sieht ihn |
-|---|---|---|
-| Konto und Profil | E-Mail, Rolle, Abmelden | alle |
-| Erste Schritte | Prüfliste, Installer, Updates | alle |
-| Modellzugang | API-Schlüssel, Claude-Code-Token, Modus, Modelle, Stimme | alle |
-| GitHub-Zugang | eigenes Token für Entwicklungsaufträge | alle, nutzbar nur mit Zulassung |
-| Verbrauch | Kontingent deines Claude-Abos | Admins und Profile mit eigenem Claude-Code-Token |
-| Sprache und Ton | Mikrofon, Mikrofontest, Hören und Stimme | alle |
-| Stimme | Stimmabdruck einlernen oder löschen | alle |
-| Gedächtnis | Vorschläge prüfen | nur Admins |
-| Neue Mitglieder | Einrichtungsstand je Person, GitHub-Rechte | nur Admins |
-| Darstellung | Ansicht, Helligkeit, Untertitel | alle |
-| Geräte und PC | Verbindungen, PC-Steuerung, Betriebsart, Gerät einrichten | alle, Geräteverwaltung nur Admins |
-| Fernzugriff | Desktop der Sparks unterwegs bedienen | nur Admins |
-| Änderungen | Stand der Selbstüberarbeitung | nur Admins |
-| Teilen | Geteilte Dokumente und Dateien | alle |
-| Info | Version, Kern und Hinweise | alle |
+Seit Version 0.7.0 gliedern sechs Gruppen die Seite. Links steht die Gliederung mit den Gruppen, rechts stehen die Abschnitte der gewählten Gruppe untereinander. Hat eine Gruppe mehr als zwei Abschnitte, hilft oben eine Sprungleiste. Auf einem schmalen Bildschirm zeigt die Seite zuerst die Liste der Gruppen. „Zurück“ und die Taste Escape führen zum Gespräch zurück, am Handy aus einer Gruppe zuerst zur Liste. Du siehst nur, was für deine Rolle gilt: Mitglieder sehen fünf Gruppen, Admins sechs, Laborkonten nur die Mikrofonwahl in „Sprache und Stimme“.
+
+| Gruppe | Abschnitt | Wofür | Wer sieht ihn |
+|---|---|---|---|
+| Konto und Allgemeines | Konto | E-Mail, Profil, Rolle, Abmelden | alle |
+| | Erste Schritte | Modellzugang in Schritten, Installer, Prüfliste | alle |
+| | Darstellung | Ansicht, Helligkeit, Untertitel | alle |
+| | Info | Version, Kern und Hinweise | alle, Hinweise nur Admins |
+| | Updates | nach Updates der Desktop-App suchen und sie installieren (neu in 0.7.0) | alle |
+| Sprache und Stimme | Mikrofon und Sprache | Mikrofon wählen und testen, „Still starten beim Tippen“, Hören und Sprechen (Soniox oder im Haus) | alle, Laborkonten nur die Mikrofonwahl |
+| | Eigene Stimme | Stimmabdruck einlernen oder löschen | alle, nicht im Labor |
+| Modelle und Zugänge | Modellzugang | API-Schlüssel, Claude-Code-Token, Modus, Modelle je Aufgabe | alle |
+| | GitHub-Zugang | eigenes Token für Entwicklungsaufträge | alle, nutzbar nur mit Zulassung |
+| | Verbrauch | Kontingent deines Claude-Abos | Admins und Profile mit eigenem Claude-Code-Token |
+| Geräte und PC | Geräte und PC-Steuerung | Verbindungen, PC-Steuerung, Betriebsart, Gerät einrichten | alle, Geräteverwaltung nur Admins |
+| | Fernzugriff | Desktop der Sparks unterwegs bedienen | nur Admins |
+| Gedächtnis und Teilen | Gedächtnis | Vorschläge prüfen | nur Admins |
+| | Teilen | Geteilte Dokumente und Dateien | alle |
+| Verwaltung | Neue Mitglieder | Einrichtungsstand je Person, GitHub-Rechte | nur Admins |
+| | Änderungen | Stand der Selbstüberarbeitung | nur Admins |
+
+Ältere Adressen mit einem Abschnittsnamen, zum Beispiel `#einstellungen/stimme`, öffnen weiter die richtige Gruppe und springen zum Abschnitt.
 
 ### 7.1 Modelle einstellen
 
-1. Öffne Einstellungen, dann „Modellzugang“.
+1. Öffne Einstellungen, dann die Gruppe „Modelle und Zugänge“ und den Abschnitt „Modellzugang“.
 2. Hinterlege auf Wunsch deinen eigenen API-Schlüssel („Claude mit eigenem Schlüssel“) oder deinen Claude-Code-Token. Tippe oder sprich den Schlüssel nie im Gespräch, sondern nur im Formular. Ein Schlüssel im Gesagten wird entfernt.
 3. Wähle den Modus. „Automatisch“ lässt W.A.I.S. das beste Modell wählen, „Nur Hausmodelle“ lässt nichts an Anthropic gehen. Hat ein Admin dein Profil auf Hausmodelle festgelegt, ist der eigene Schlüssel gesperrt.
 4. Wähle unter „Modelle je Aufgabe“ für Gespräch, Bilder und Hintergrund ein Modell oder „Automatisch (Standard)“.
@@ -286,7 +291,7 @@ Die Einstellungen sind eine eigene Ansicht der Hauptseite (Adresse mit `#einstel
 
 ### 7.2 Hören und Stimme einstellen
 
-1. Öffne Einstellungen, „Sprache und Ton“.
+1. Öffne Einstellungen, Gruppe „Sprache und Stimme“, Abschnitt „Mikrofon und Sprache“, Block „Hören und Sprechen“.
 2. Wähle bei Hören und bei Stimme „Soniox (Standard)“ oder „Im Haus (Datenschutz)“. Im Haus bleiben Sprache und Ton auf den Servern der Firma.
 3. Wähle bei „Im Haus“ eine der angebotenen Stimmen.
 
@@ -318,12 +323,22 @@ Aufträge mit Abnahmekriterien arbeiten in Runden, bis das Ziel erreicht ist. Is
 
 ### 9.2 Änderungen einreichen (eigener GitHub-Zugang)
 
-1. Hinterlege unter Einstellungen, „GitHub-Zugang“ dein eigenes Token. Es wird verschlüsselt gespeichert, du siehst danach nur Konto, Art und Ablauf.
+1. Hinterlege unter Einstellungen, Gruppe „Modelle und Zugänge“, Abschnitt „GitHub-Zugang“ dein eigenes Token. Es wird verschlüsselt gespeichert, du siehst danach nur Konto, Art und Ablauf.
 2. Nach einem Auftrag am Repository erscheint die Karte „Einreichen“.
 3. Prüfe jede markierte Datei und bestätige sie einzeln. „Einreichen“ ist erst dann aktiv.
 4. Wähle „Einreichen“. Erst jetzt schiebt W.A.I.S. den Zweig `wamo/<auftrag>` hoch und öffnet einen Pull Request. Gemergt wird nie durch W.A.I.S. Mit „Verwerfen“ wirfst du die Änderung weg.
 
-Quellen: `voice-core/dev_agent.py`, `voice-core/entwicklung_betrieb.py`, `ui/src/components/Freigaben.tsx`, `ui/src/components/GespeicherteAuftraege.tsx`, `ui/src/components/GithubZugang.tsx`, `ui/src/components/kommando/Vorgaenge.tsx`, `docs/persoenliche-zugaenge.md`.
+### 9.3 Aufträge an W.A.I.S. selbst (nur Admins)
+
+Wünsche an W.A.I.S. selbst (eine Verbesserung, ein Fehler, eine neue Funktion) sind keine Entwicklungsaufträge mit Karte. Sie landen in einem gemeinsamen Rückstand für alle Admins. Jeder Eintrag hat eine Nummer wie `SA-7`, einen Titel, eine Beschreibung, eine Art, eine Priorität (Hoch, Normal, Niedrig), bis zu fünf Abnahmekriterien und einen Stand: „Offen“, „In Arbeit“, „Erledigt“ oder „Verworfen“. Mitglieder und Laborkonten haben diesen Rückstand nicht.
+
+1. Sag zum Beispiel: „Speichere das als Auftrag an dich selbst.“ Oder öffne im Reiter „Aufträge“ den Block „Aufträge an W.A.I.S. selbst“, fülle „Neuer Auftrag an W.A.I.S.“ aus und wähle „Speichern“.
+2. Frag W.A.I.S. „Welche Aufträge an dich selbst sind offen?“, oder lies die Liste im Block. Sie zeigt Nummer, Titel, Art, Priorität, Stand, Quelle und Datum.
+3. Mit „Verwerfen“ nimmst du einen Eintrag aus der Arbeit, mit „Wieder öffnen“ holst du einen verworfenen zurück. Gelöscht wird nichts, der Verlauf bleibt.
+
+Wichtig: W.A.I.S. setzt diese Aufträge nicht um. „In Arbeit“ und „Erledigt“ setzt allein, wer einen Eintrag bearbeitet, bisher Claude Code mit einem Skript. Ein Eintrag ist ein Vorschlag, keine Anweisung, und wird nur nach dem ausdrücklichen Ja eines Admins umgesetzt. Entstand ein Eintrag nach Inhalten von außen (Webseite, Websuche, Ergebnis vom Laptop), steht dabei „Nach Fremdinhalt gespeichert, bitte prüfen“, und ein Admin prüft ihn besonders genau. Zugangsdaten im Text ersetzt der Kern vor dem Speichern. Es gibt höchstens 200 offene Einträge und höchstens 30 neue je Person und Tag. Dass W.A.I.S. Einträge einmal selbst umsetzt, ist eine spätere Ausbaustufe und nicht gebaut.
+
+Quellen: `voice-core/dev_agent.py`, `voice-core/entwicklung_betrieb.py`, `voice-core/selbstauftraege.py`, `ui/src/components/Freigaben.tsx`, `ui/src/components/GespeicherteAuftraege.tsx`, `ui/src/components/SelbstAuftraege.tsx`, `ui/src/components/GithubZugang.tsx`, `ui/src/components/kommando/Vorgaenge.tsx`, `docs/persoenliche-zugaenge.md`, `docs/selbstauftraege.md`.
 
 ## 10. Fehlerbehebung
 
@@ -347,7 +362,7 @@ Quellen: `voice-core/dev_agent.py`, `voice-core/entwicklung_betrieb.py`, `ui/src
 | Meldung oder Beobachtung | Ursache | Was du tust |
 |---|---|---|
 | „Mikrofon gesperrt: bitte in den Windows-Einstellungen für diese App freigeben.“ | Windows blockiert das Mikrofon | Windows, Einstellungen, Datenschutz und Sicherheit, Mikrofon: Zugriff für Desktop-Apps erlauben, im Browser für die Seite |
-| „Es kommt keine Mikrofonspur an, W.A.I.S. hört dich nicht.“ | falsches oder stummes Gerät | Unter „Sprache und Ton“ ein Mikrofon wählen, Kabel und Stummschaltung prüfen, Test wiederholen |
+| „Es kommt keine Mikrofonspur an, W.A.I.S. hört dich nicht.“ | falsches oder stummes Gerät | Unter „Mikrofon und Sprache“ ein Mikrofon wählen, Kabel und Stummschaltung prüfen, Test wiederholen |
 | „Dein Mikrofon ist sehr leise. Ist das richtige Gerät gewählt?“ | geringer Pegel | Näher sprechen oder Gerät wechseln |
 | Das Mikrofon lässt sich nicht öffnen | ein anderes Programm (Teams, Zoom) nutzt es | Das Programm schließen oder ein anderes Mikrofon wählen |
 | „Die Wiedergabe wurde vom Browser blockiert. Bitte einmal in die Seite klicken.“ | Browser blockiert Ton | Einmal in die Seite klicken |
@@ -379,7 +394,7 @@ Quellen: `voice-core/dev_agent.py`, `voice-core/entwicklung_betrieb.py`, `ui/src
 | „Entwicklungsaufträge sind für dein Profil noch nicht freigeschaltet.“ oder „... am Server ausgeschaltet.“ | Freischaltung oder Schalter fehlt | Admin fragen |
 | „Für Entwicklungsaufträge fehlt dein eigener Zugang zu Claude Code (Karte Modellzugang).“ | Kein Token und kein Schlüssel | Unter Modellzugang hinterlegen oder Admin nach Hausmodellen fragen |
 | „Dieses Bild lässt sich nicht anzeigen.“ | Fremdes Bild wird nie von W.A.I.S. geladen | Verweis öffnen, wenn du der Quelle traust |
-| Menüpunkt fehlt (zum Beispiel Gedächtnis, Fernzugriff, Änderungen) | Der Abschnitt ist nur für Admins | Admin fragen |
+| Abschnitt oder Gruppe fehlt (zum Beispiel Gedächtnis, Fernzugriff, Änderungen, die Gruppe „Verwaltung“) | Der Abschnitt ist nur für Admins | Admin fragen |
 
 Hilft nichts davon, nenne deinem Admin die genaue Meldung und frage W.A.I.S. im Gespräch: „Warum ging das nicht?“ Es erklärt den Grund aus dem Verlauf der Sitzung.
 

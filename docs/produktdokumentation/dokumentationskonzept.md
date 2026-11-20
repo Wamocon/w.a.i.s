@@ -5,15 +5,20 @@
 | Zweck | Begründet Struktur und Inhalt der Produktdokumentation aus einer Recherche und legt fest, wie sie aktuell bleibt. |
 | Zielgruppe | Wer die Dokumentation pflegt oder bewertet: Produktverantwortliche, Entwickler, Datenschutz |
 | Dokumentart | Erklärung |
-| Stand | 19.11.2026, geprüft gegen Commit 497e3ce |
+| Stand | 20.11.2026, Version 0.7.0, geprüft gegen Commit 7caf977 (`main`) |
 | Quellen | Recherche im Internet (Quellenliste unten), ECC-Skill `docs-governance`, REA, Bestand in `docs/` |
 
 ## Ergebnis in Kürze
 
 Eine Produktdokumentation besteht nicht aus einem großen Text, sondern aus mehreren Dokumentarten für verschiedene Leser. Die Recherche liefert dafür drei Ordnungsrahmen: Diátaxis ordnet nach dem Bedarf der Leser (lernen, tun, nachschlagen, verstehen), arc42 mit den C4-Diagrammen beschreibt die Architektur, und Normen und Gesetze (ISO/IEC/IEEE 26514, DSGVO, KI-Verordnung) bestimmen, was für Anwender und für Datenschutz mindestens dazugehört.
 
-W.A.I.S. hatte bisher viel Wissen, aber verteilt: ein 1800 Zeilen langes README, ein sehr dichter Namensvertrag in `CLAUDE.md` und 25 Planpapiere, Runbooks und Berichte in `docs/`. Es fehlte die geordnete Sicht pro Leser. Die neue Produktdokumentation unter `docs/produktdokumentation/` schließt diese Lücke und verweist auf den Bestand, statt ihn zu kopieren.
+W.A.I.S. hatte bisher viel Wissen, aber verteilt: ein 1800 Zeilen langes README, ein sehr dichter Namensvertrag in `CLAUDE.md` und 26 Planpapiere, Runbooks und Berichte in `docs/`. Es fehlte die geordnete Sicht pro Leser. Die neue Produktdokumentation unter `docs/produktdokumentation/` schließt diese Lücke und verweist auf den Bestand, statt ihn zu kopieren.
 
+## Stand der Dokumentation: Version 0.7.0
+
+Die Produktdokumentation (zehn Markdown-Dateien, PDFs in `final/`) beschreibt den Stand von Version 0.7.0 (`main` bei Commit 7caf977, 20.11.2026). Seit dem ersten Stand vom 19.11.2026 sind nachgezogen: die Stimmerkennung (sperrt nichts mehr, Abdruck je Mikrofon, zweites Modell im Schattenbetrieb, Mikrofonkette im Protokoll, Risiko S9 neu bewertet), die persönlichen GitHub-Zugänge (Dispatcher 10), das Speichern von Aufträgen für später, der Rückstand für Aufträge an W.A.I.S. selbst, die sechs Gruppen der Einstellungen und das Rezept für ein Release.
+
+**Die Dokumentation wird bei jedem Release geprüft.** Das Release-Rezept (`betrieb.md`, Kapitel "Release und Ausrollen", Abschnitt 6.4) endet mit dem GitHub-Release und der Prüfung der Dokumentation gegen die Prüfliste vor einem Versionssprung (unten): erst Versions-Pull-Request, Kern verteilen und bauen, Kette aus Schalter, Bewähren und Ausleiten, Oberfläche verteilen und umschalten, Labor-Rauchtest, Installer bauen, signieren und verteilen, dann Release und Dokumentation.
 ## Recherche: Was gehört in eine Produktdokumentation?
 
 | Rahmen | Kernidee | Was W.A.I.S. übernimmt |
@@ -80,11 +85,11 @@ Der Einstieg für alle ist `README.md` in diesem Ordner mit der Dokumentenlandka
 
 ## Der Bestand in docs/ und seine Rolle
 
-Die 25 Dateien in `docs/` (Stand 19.11.2026) bleiben unverändert. Sie sind Entscheidungsgrundlagen, Pläne und Betriebsunterlagen. Die neue Produktdokumentation beschreibt den geprüften Ist-Stand und verlinkt sie.
+Die 26 Dateien in `docs/` (Stand 20.11.2026, neu seit 19.11.: `selbstauftraege.md`) bleiben unverändert. Sie sind Entscheidungsgrundlagen, Pläne und Betriebsunterlagen. Die neue Produktdokumentation beschreibt den geprüften Ist-Stand und verlinkt sie.
 
 | Art | Dateien | Umgang |
 |---|---|---|
-| Planpapiere und Konzepte (Stand je Papier, teils überholt oder nur Plan) | `ausrollen-neue-nutzer.md`, `entwicklung-im-betrieb.md`, `entwicklung-im-betrieb-arbeitsliste.md`, `folgepaket-1.md`, `hausmodelle-und-kikollege.md`, `komfort-paket.md`, `office-und-versand.md`, `persoenliche-zugaenge.md`, `testlabor-wamo.md`, `remote-desktop.md`, `selbstueberarbeitung.md` | Verlinken. Der Kopf jedes Papiers nennt seinen Stand. `selbstueberarbeitung.md` beschreibt laut eigenem Kopf ein Konzept, nichts davon ist gebaut. |
+| Planpapiere und Konzepte (Stand je Papier, teils überholt oder nur Plan) | `ausrollen-neue-nutzer.md`, `entwicklung-im-betrieb.md`, `entwicklung-im-betrieb-arbeitsliste.md`, `folgepaket-1.md`, `hausmodelle-und-kikollege.md`, `komfort-paket.md`, `office-und-versand.md`, `persoenliche-zugaenge.md`, `testlabor-wamo.md`, `remote-desktop.md`, `selbstauftraege.md`, `selbstueberarbeitung.md` | Verlinken. Der Kopf jedes Papiers nennt seinen Stand. `selbstueberarbeitung.md` beschreibt laut eigenem Kopf ein Konzept, nichts davon ist gebaut. `selbstauftraege.md` beschreibt den gebauten Rückstand (Sammeln und Abarbeiten durch Claude Code), die Selbstumsetzung durch W.A.I.S. ist dort eine nicht gebaute Ausbaustufe. |
 | Recherchen und Entscheidungsgrundlagen | `gespraech-optimierung.md`, `sprache-elevenlabs-soniox.md`, `stimme-recherche-2026-11-18.md` | Verlinken, Zahlen daraus nur mit Datum übernehmen. |
 | Anleitungen und Runbooks | `jira-benutzer-einrichten.md`, `runner-einrichten.md`, `labor-platz-einrichten.md`, `labor-runbook.md`, `labor-morgencheckliste.md` | Verlinken aus Administrations- und Betriebshandbuch. |
 | Vertrag | `labor-dienst-vertrag.md` | Kanonischer Besitzer der Schnittstelle des Labor-Dienstes. |
@@ -110,7 +115,7 @@ Die Rollen der Wurzeldateien nach dem ECC-Rollenvertrag:
 1. **Code gilt vor Prosa.** Widersprechen sich Dokument und Code, gilt der Code, und das Dokument wird korrigiert. Jedes Dokument nennt seine Quellen und den geprüften Commit im Kopfblock.
 2. **Ein Fakt, ein Besitzer.** Wer einen Fakt braucht, verlinkt auf den Besitzer, statt ihn zu kopieren. Zahlen mit Datum wandern nicht in mehrere Dokumente.
 3. **Änderung und Dokument gehören in denselben Pull Request.** Die Tabelle zeigt, wo nachzuziehen ist.
-4. **Vor jedem Versionssprung** gilt die Prüfliste unten.
+4. **Vor jedem Versionssprung, und damit bei jedem Release,** gilt die Prüfliste unten. Sie ist der letzte Schritt des Release-Rezepts in `betrieb.md`, Abschnitt 6.4.
 5. **Keine Geheimnisse, keine Fremdverweise.** Keine Zugangsdaten in Dokumenten. Keine Verweise auf andere Systeme oder Vorgängerprojekte (siehe `CLAUDE.md`).
 6. **Text- und Formregeln.** Deutsch mit echten Umlauten, keine Gedankenstriche im Fließtext, Anzeigename "W.A.I.S.".
 7. **PDF-Export aktuell halten.** Der Ordner `final/` enthält die fertigen Dokumente als PDF im WAMOCON-Design. Nach jeder inhaltlichen Änderung an einem Dokument werden sein PDF und das Gesamtdokument neu erzeugt, die Markdown-Quelle bleibt maßgeblich.
@@ -124,6 +129,9 @@ Die Rollen der Wurzeldateien nach dem ECC-Rollenvertrag:
 | neuer Dienst, Port oder Host | `betrieb.md`, Kapitel "Betriebshandbuch" und "C4-Diagramme von W.A.I.S." |
 | Architekturentscheidung | `architektur.md`, Kapitel "Entscheidungsregister", bei Strukturwirkung `architektur.md`, Kapitel "Architekturdokumentation nach arc42" |
 | neue Datenart oder neuer Dienstleister | `sicherheit-und-datenschutz.md` |
+| geänderte Regel der Stimmerkennung (Modus, Einwilligungsversion, Abdruck, Protokoll) | `sicherheit-und-datenschutz.md` (Abschnitte 1.3, 2, 3 und 5.3), `benutzerhandbuch.md`, bei Schaltern `betrieb.md`, Kapitel "Administrationshandbuch" |
+| geänderte Gruppen oder Abschnitte der Einstellungen | `benutzerhandbuch.md`, `betrieb.md`, Kapitel "Administrationshandbuch" (Tabelle "Wo steht was in den Einstellungen"), Quelle `ui/src/lib/einstellungenAbschnitte.ts` |
+| geänderter Release-Ablauf | `betrieb.md`, Kapitel "Release und Ausrollen" (Abschnitt 6.4) |
 | neuer Versionssprung der Desktop-App | `technik.md`, Kapitel "Befunde der ausgelieferten Desktop-App (REA)" (Befunde und Hashes erneuern), `CHANGELOG.md` |
 
 ### Prüfliste vor einem Versionssprung
@@ -132,7 +140,7 @@ Die Rollen der Wurzeldateien nach dem ECC-Rollenvertrag:
 2. Funktionskatalog und Rechtematrix passen zu den neuen Funktionen.
 3. Schnittstellen- und Konfigurationsreferenz enthalten alles Neue.
 4. REA-Befunde am gebauten Installer erneuert (zwei Befehle, siehe `technik.md`, Kapitel "Befunde der ausgelieferten Desktop-App (REA)").
-5. Kopfblöcke der geänderten Dokumente zeigen den neuen geprüften Commit.
+5. Kopfblöcke der geänderten Dokumente zeigen den neuen geprüften Commit. Zahlen mit Stand (Version, letzte Migration, Version des Dispatchers, `SCHRANKEN_VERSION`, Gruppen der Einstellungen, Zahl der Dateien in `docs/`) sind gegen den Code erneuert.
 6. Formprüfung der Dokumente bestanden (siehe unten).
 7. PDFs im Ordner `final/` aus den geänderten Quellen neu erzeugt.
 
