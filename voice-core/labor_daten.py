@@ -117,6 +117,9 @@ def _zeichen_ok(text: str) -> bool:
     return all(ch in "\n\t " or unicodedata.category(ch)[0] in _ERLAUBTE_KATEGORIEN for ch in text)
 
 
+zeichen_ok = _zeichen_ok  # dieselbe Prüfung für labor_karten_db.py (Texte aus der Datenbank gelten nach denselben Regeln wie die Dateien)
+
+
 def _lesen(pfad: str, richtlinie: Richtlinie) -> tuple[bytes | None, str | None]:
     """Roher Inhalt oder der Typ des Verstoßes. Die Prüfung gilt vor dem Öffnen (lstat) und nach dem Öffnen (fstat) derselben Datei."""
     try:

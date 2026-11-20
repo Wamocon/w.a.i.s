@@ -83,6 +83,11 @@ Jira-Stories aus dem Canvas (jira_client.py, jira_werkzeuge.py, seit 14.11.2026;
   WAMO_JIRA_TOKEN              dessen API-Token (Geheimnis, nur per stdin an wamo-core-env, nie in Logs)
   WAMO_JIRA_PROJEKTE           Erlaubnisliste der Projektschlüssel, durch Komma getrennt (Standard WMCNL)
   WAMO_JIRA_STANDARD_PROJEKT   Projekt ohne Angabe (Standard WMCNL, muss in der Liste stehen)
+Werkstatt (labor_karten_db.py, Stufe 1, seit 20.11.2026; nur vom Server über wamo-core-env, nie aus der .env des PCs):
+  WAMO_LABOR_KARTEN_NACHLADEN  an oder aus, Standard aus (ein Tippfehler bleibt aus): Laborsitzungen laden die Wissenstexte der veröffentlichten
+                               Karten aus der Datenbank nach (Ansichten labor_karten_aktive_version und labor_wissen_aktiv), höchstens alle
+                               30 s je Prozess, als eigener Abschnitt "Wissen aus dem Katalog" mit den Texten als Daten. Aus: der Kern liest
+                               nichts und verhält sich wie vorher
 Zahlen und Werte ohne Schalterform (Stimme, Tempo, Pausen): SONIOX_VOICE, SONIOX_SPEED (0,7 bis 1,3) und
 SONIOX_REDUCE_SILENCE (an/aus); leer lässt die Standardeinstellung von Soniox (soniox_tts.stimme_einstellung)."""
 

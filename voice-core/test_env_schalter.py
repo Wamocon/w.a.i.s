@@ -257,6 +257,8 @@ LABOR_NAMEN = (  # die neun Einstellungen des Testlabors und die sechs der Raten
     # Ratenbegrenzung (labor_limit.py)
     "WAMO_LABOR_TEXT_ABSTAND_SECS", "WAMO_LABOR_TEXT_MAX_ZEICHEN", "WAMO_LABOR_SUCHEN_MAX", "WAMO_LABOR_ANFRAGEN_MAX",
     "WAMO_LABOR_KLICK_ABSTAND_SECS", "WAMO_LABOR_KLICK_MAX",
+    # Werkstatt: Karten im Betrieb nachladen (labor_karten_db.py)
+    "WAMO_LABOR_KARTEN_NACHLADEN",
 )
 
 
