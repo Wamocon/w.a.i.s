@@ -183,12 +183,22 @@ test("Vertrag mit dem Server: Beispieldatei testdaten/update ist gültig signier
 });
 
 // ---------- Ablauf: prüfen, Rückfrage, laden, starten ----------
+// Echte Installer-Datei mit den Testbytes: die Nachprüfung vor dem Start liest sie von der Platte.
+function installerDatei(inhalt = INHALT) {
+  const ordner = fs.mkdtempSync(path.join(os.tmpdir(), "wais-update-"));
+  const datei = path.join(ordner, "WAIS-Setup-0.3.0.exe");
+  fs.writeFileSync(datei, inhalt);
+  return datei;
+}
+
 function ablauf(opt = {}) {
   const spur = [];
+  const dateien = [];
   const updater = erzeugeUpdater({
     schluessel: SCHLUESSEL,
     version: opt.version ?? "0.2.0",
     installiert: opt.installiert ?? true,
+    fs: opt.fs,
     fragen: async (m) => {
       spur.push(`fragen ${m.version}`);
       return opt.antwort ?? true;
@@ -196,13 +206,16 @@ function ablauf(opt = {}) {
     laden: async ({ manifest, token }) => {
       spur.push(`laden ${manifest.version} ${token === TOKEN ? "token" : "?"}`);
       if (opt.ladeFehler) throw opt.ladeFehler;
-      return "C:\\x\\WAIS-Setup-0.3.0.exe";
+      const datei = installerDatei();
+      dateien.push(datei);
+      opt.nachLaden?.(datei); // Zwischenraum zwischen Prüfung beim Laden und Start: hier greift ein Angreifer an
+      return datei;
     },
     starten: async (datei) => spur.push(`starten ${datei}`),
     beenden: () => spur.push("beenden"),
     log: (t) => spur.push(`log ${t}`),
   });
-  return { updater, spur, aktionen: () => spur.filter((s) => !s.startsWith("log ")) };
+  return { updater, spur, dateien, aktionen: () => spur.filter((s) => !s.startsWith("log ")) };
 }
 
 test("pruefen: liefert nur Version und neuer, nie Inhalte; Fehler mit festem Satz", () => {
@@ -213,9 +226,88 @@ test("pruefen: liefert nur Version und neuer, nie Inhalte; Fehler mit festem Sat
 });
 
 test("installieren: gültig, Rückfrage ja, laden, starten, beenden", async () => {
-  const { updater, aktionen } = ablauf();
+  const { updater, aktionen, dateien } = ablauf();
   assert.deepEqual(await updater.installieren({ ...angebot(), token: TOKEN }), { ok: true });
-  assert.deepEqual(aktionen(), ["fragen 0.3.0", "laden 0.3.0 token", "starten C:\\x\\WAIS-Setup-0.3.0.exe", "beenden"]);
+  assert.deepEqual(aktionen(), ["fragen 0.3.0", "laden 0.3.0 token", `starten ${dateien[0]}`, "beenden"]);
+  assert.deepEqual(fs.readFileSync(dateien[0]), INHALT); // der Normalfall lässt die geprüfte Datei unberührt
+});
+
+// ---------- Nachprüfung unmittelbar vor dem Start (REA-Befund: Rechte des Update-Ordners erbt der Benutzer) ----------
+test("Datei zwischen Prüfung und Start verändert: kein Start, kein Beenden, Datei weg, fester Satz", async () => {
+  const faelle = {
+    "gleiche Länge, anderer Inhalt": (d) => fs.writeFileSync(d, Buffer.alloc(INHALT.length, 0x41)),
+    "angehängte Bytes": (d) => fs.appendFileSync(d, "x"),
+    "abgeschnitten": (d) => fs.truncateSync(d, 3),
+    "leer": (d) => fs.writeFileSync(d, ""),
+    "gelöscht": (d) => fs.rmSync(d),
+  };
+  for (const [name, aendern] of Object.entries(faelle)) {
+    const { updater, aktionen, dateien, spur } = ablauf({ nachLaden: aendern });
+    const e = await updater.installieren({ ...angebot(), token: TOKEN });
+    assert.deepEqual(e, { ok: false, text: TEXT.pruefsumme }, name);
+    assert.deepEqual(aktionen(), ["fragen 0.3.0", "laden 0.3.0 token"], name); // weder starten noch beenden
+    assert.equal(fs.existsSync(dateien[0]), false, `${name}: die veränderte Datei bleibt nicht liegen`);
+    assert.ok(spur.some((s) => s.startsWith("log Update fehlgeschlagen")), name);
+  }
+});
+
+test("Nach einer fehlgeschlagenen Nachprüfung ist ein neuer Versuch möglich", async () => {
+  let versuch = 0;
+  const { updater, aktionen } = ablauf({ nachLaden: (d) => versuch++ === 0 && fs.appendFileSync(d, "x") });
+  assert.deepEqual(await updater.installieren({ ...angebot(), token: TOKEN }), { ok: false, text: TEXT.pruefsumme });
+  assert.deepEqual(await updater.installieren({ ...angebot(), token: TOKEN }), { ok: true });
+  assert.equal(aktionen().filter((s) => s.startsWith("starten ")).length, 1);
+});
+
+test("Nachprüfung liest die Datei von der Platte (eingespeistes fs), nicht aus dem Gedächtnis", async () => {
+  const gelesen = [];
+  const { Readable } = require("node:stream");
+  const mitSpur = {
+    ...fs,
+    createReadStream: (pfad, ...rest) => (gelesen.push(pfad), fs.createReadStream(pfad, ...rest)),
+  };
+  const { updater, dateien } = ablauf({ fs: mitSpur });
+  assert.deepEqual(await updater.installieren({ ...angebot(), token: TOKEN }), { ok: true });
+  assert.deepEqual(gelesen, [dateien[0]]);
+  const anders = ablauf({ fs: { ...fs, createReadStream: () => Readable.from([Buffer.from("anders")]) } });
+  assert.deepEqual(await anders.updater.installieren({ ...angebot(), token: TOKEN }), { ok: false, text: TEXT.pruefsumme });
+  assert.ok(!anders.aktionen().some((s) => s.startsWith("starten ")));
+});
+
+test("Ablauf mit echtem ladeInstaller: Austausch nach dem Laden wird vor dem Start erkannt", async () => {
+  for (const tausch of [false, true]) {
+    const ordner = fs.mkdtempSync(path.join(os.tmpdir(), "wais-update-"));
+    const gestartet = [];
+    const updater = erzeugeUpdater({
+      schluessel: SCHLUESSEL,
+      version: "0.2.0",
+      installiert: true,
+      fragen: async () => true,
+      laden: async ({ manifest, token }) => {
+        const datei = await ladeInstaller({
+          manifest,
+          token,
+          kernUrl: "https://192.168.178.136:55444",
+          ordner,
+          verbinden: async () => ({ destroy: () => {} }),
+          anfragen: async () => antwort({ laenge: INHALT.length }),
+        });
+        if (tausch) fs.writeFileSync(datei, Buffer.alloc(INHALT.length, 0x42)); // Angreifer tauscht nach der Prüfung des Ladens aus
+        return datei;
+      },
+      starten: async (datei) => gestartet.push(datei),
+      beenden: () => {},
+    });
+    const e = await updater.installieren({ ...angebot(), token: TOKEN });
+    if (tausch) {
+      assert.deepEqual(e, { ok: false, text: TEXT.pruefsumme });
+      assert.deepEqual(gestartet, []);
+      assert.deepEqual(fs.readdirSync(ordner), []);
+    } else {
+      assert.deepEqual(e, { ok: true });
+      assert.deepEqual(gestartet, [path.join(ordner, "WAIS-Setup-0.3.0.exe")]);
+    }
+  }
 });
 
 test("Abbruch ohne Rückfrage: falsche Signatur, fremder Schlüssel oder alte Version fragen nie und laden nichts", async () => {
@@ -478,7 +570,7 @@ test("Nach Abbrechen fragt die App 10 Minuten nicht erneut, auch wenn die Seite 
 });
 
 test("Rückfrage wirft: gilt als Abbruch; Startfehler: eigener Satz", async () => {
-  const basis = { schluessel: SCHLUESSEL, version: "0.2.0", installiert: true, laden: async () => "x", beenden: () => {} };
+  const basis = { schluessel: SCHLUESSEL, version: "0.2.0", installiert: true, laden: async () => installerDatei(), beenden: () => {} };
   const wirft = erzeugeUpdater({
     ...basis,
     fragen: async () => {

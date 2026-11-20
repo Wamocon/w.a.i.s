@@ -255,6 +255,26 @@ async function pruefeDatei(datei, m, dsys) {
 }
 
 /**
+ * Letzte Prüfung unmittelbar vor dem Start des Installers: dieselbe Prüfung wie nach dem Laden (Größe und SHA-256 gegen das
+ * signierte Manifest), erneut von der Platte. Der Update-Ordner gehört dem Benutzer (die Rechte vererben sich, 0o600 wirkt unter
+ * Windows nicht), also kann ein Prozess des Benutzers die Datei zwischen Laden und Start austauschen. Bei Abweichung, auch
+ * bei fehlender oder nicht lesbarer Datei, wird sie entfernt und es gibt keinen Start. Ein Rest bleibt: Node kann unter Windows
+ * keine Datei sperren, das Fenster ist aber nur noch die Zeit zwischen Ende des Lesens und Start des Prozesses.
+ */
+async function pruefeVorStart(datei, m, dsys = fs) {
+  try {
+    await pruefeDatei(datei, m, dsys);
+  } catch (err) {
+    try {
+      dsys.rmSync(datei, { force: true });
+    } catch {
+      // eine gesperrte Datei wird nie gestartet, das Aufräumen beim nächsten Update räumt sie weg
+    }
+    throw err instanceof UpdateFehler ? err : new UpdateFehler(TEXT.pruefsumme, err?.message);
+  }
+}
+
+/**
  * Lädt genau die Datei aus dem geprüften Manifest nach ordner. Optionen: manifest (aus pruefeManifest), token, kernUrl,
  * ordner, verbinden(ziel) (geprüfter Socket), anfragen(ziel, socket, kopf), fs, frist. Liefert den Pfad der fertigen Datei;
  * bei jedem Fehler bleibt keine Teildatei liegen.
@@ -313,7 +333,8 @@ const sauber = (text, token) => {
 /**
  * Der Updater der App. Optionen: schluessel (aus schluesselAusListe), version (app.getVersion()), installiert (nur die
  * installierte App aktualisiert sich), fragen(manifest) -> Promise<boolean> (Rückfrage im Hauptprozess), laden({manifest,
- * token}) -> Promise<Pfad>, starten(pfad) -> Promise, beenden(), log(text).
+ * token}) -> Promise<Pfad>, starten(pfad) -> Promise, beenden(), log(text), fs (nur für die Nachprüfung vor dem Start, Standard
+ * node:fs). Vor dem Start wird die geladene Datei noch einmal gegen das Manifest geprüft (pruefeVorStart).
  */
 function erzeugeUpdater(opt) {
   const log = opt.log ?? (() => {});
@@ -350,6 +371,7 @@ function erzeugeUpdater(opt) {
         return { ok: false, abgebrochen: true, text: TEXT.abgebrochen };
       }
       const datei = await opt.laden({ manifest: e.manifest, token: auftrag.token });
+      await pruefeVorStart(datei, e.manifest, opt.fs ?? fs); // zweite Prüfung, direkt vor dem Start
       log(`Installer ${e.manifest.version} geladen und geprüft, Start`);
       try {
         await opt.starten(datei);
@@ -382,6 +404,7 @@ module.exports = {
   ladeInstaller,
   manifestFehler,
   pruefeManifest,
+  pruefeVorStart,
   schluesselAusListe,
   verbindeGeprueft,
   vergleicheVersionen,
