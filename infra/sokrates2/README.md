@@ -1583,7 +1583,7 @@ schlösse den Kanal bei den neuen Schlüsseln), dann `wamo-job-rueckweg.sh`.
 
 Der Dienst selbst liegt im Repo unter `labor-dienst/` (Vertrag `docs/labor-dienst-vertrag.md`, Umgebung `WAMO_LABOR_DIENST_*`, Weboberflächen `/board`, `/betreuer` und
 `/datenschutz`, Schnittstellen `/api/kern/`, `/api/browser/`, `/api/betreuer/`, `/gesundheit`). Dieser Abschnitt beschreibt nur seinen Betrieb auf Sokrates-2
-für das Testlabor am 28.11.2026. Alles läuft als root (sudo), nach dem Muster des Remote-Desktop-Gateways (Abschnitt 16): feste Namen, feste Adressen,
+für das Testlabor am 05.12.2026 (verschoben vom 28.11.2026, Stand 20.11.2026). Alles läuft als root (sudo), nach dem Muster des Remote-Desktop-Gateways (Abschnitt 16): feste Namen, feste Adressen,
 Probelauf mit `--trocken`, Sicherung vor jeder Änderung, Rückweg, Rauchtest.
 
 ```text
@@ -1669,13 +1669,13 @@ die älteste Sicherung der Firewall ohne Labor-Kette wieder ein (danach werden d
 Port 55447 und das Netz im Compose von `wamo-caddy` bleiben (ohne Site lauscht Caddy dort nicht), ebenso `WAMO_LABOR_URL` und `WAMO_LABOR_TOKEN` in `core.env`
 (`wamo-core-env loeschen WAMO_LABOR_URL WAMO_LABOR_TOKEN`, wirkt mit dem nächsten Kern-Release).
 
-**Aufbewahrung und Löschlauf (Vertrag D10).** Der Dienst löscht seine Daten ab dem 11.12.2026 selbst, solange er läuft. Die Container-Protokolle sind auf 3 Dateien zu
-10 MB begrenzt und verschwinden mit dem Container. Nach der Frist (frühestens am 12.12.2026) löscht
+**Aufbewahrung und Löschlauf (Vertrag D10).** Der Dienst löscht seine Daten nach der Aufbewahrung selbst, solange er läuft. Die Löschfrist ist nicht entschieden `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`. Im Dienst (`WAMO_LABOR_DIENST_BIS` in `wamo-labor/docker-compose.yml`, die Grenzen in `labor-dienst/wamo_labor_dienst/konfig.py`) und im Löschlauf stehen noch der 11.12.2026 und der 12.12.2026, sie werden mit der Entscheidung angepasst. Die Container-Protokolle sind auf 3 Dateien zu
+10 MB begrenzt und verschwinden mit dem Container. Nach der Frist (das Skript lässt den Lauf derzeit erst ab dem 12.12.2026 zu) löscht
 `sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN` Container, Daten (nach Kontrolle der festen Pfade, kein symbolischer Link), Token, alle Tags
 des Images und die Kern-Einstellungen und schreibt einen Nachweis nach `/var/log/wamo-labor/loeschnachweis-<Zeit>.txt`: Namen, Größen und Zählungen, nie Inhalte. Ohne das
 Bestätigungswort zeigt das Skript nur den Plan (Ausgang 3). Dieselbe Löschung vor der Frist: `wamo-labor-rueckweg.sh --daten-loeschen --bestaetigung LABOR-LOESCHEN`. Die
-Sicherungen des Einrichtens (`/var/backups/wamo-labor`) enthalten weder Token noch Daten. Nicht in der Hand des Skripts: Snapshots und Sicherungen des Servers über den
-11.12.2026 hinaus (der Nachweis nennt es, der Betrieb prüft es von Hand).
+Sicherungen des Einrichtens (`/var/backups/wamo-labor`) enthalten weder Token noch Daten. Nicht in der Hand des Skripts: Snapshots und Sicherungen des Servers über die
+Löschfrist hinaus (der Nachweis nennt es, der Betrieb prüft es von Hand).
 
 **Offene Punkte (vor dem Labortag).**
 
@@ -1695,7 +1695,7 @@ Sicherungen des Einrichtens (`/var/backups/wamo-labor`) enthalten weder Token no
    notiert man sie beim ersten Lauf, gibt es erstmals eine belastbare Zahl.
 7. **Protokoll von `wamo-caddy` (Restrisiko).** `docker logs wamo-caddy` kann bei Fehlern Besucheradressen enthalten und ist an die Container-ID gebunden. Es verschwindet erst, wenn der Container
    neu angelegt wird. Der Löschlauf tut das bewusst nicht (es legte 55443 bis 55446 lahm) und nennt es im Nachweis. Vorschlag: das nächste ohnehin nötige Neuanlegen von `wamo-caddy` nach dem Labor
-   (zum Beispiel mit dem nächsten Compose-Update, in einer ruhigen Minute, frühestens nach dem 11.12.2026) dafür nutzen.
+   (zum Beispiel mit dem nächsten Compose-Update, in einer ruhigen Minute, frühestens nach der Löschfrist) dafür nutzen.
 8. **Der Ausgang hängt allein an `wamo-firewall`.** Es gibt keine zweite Schicht außer der abgeschalteten Maskierung. Bei `systemctl stop wamo-firewall` ist er offen (siehe oben): vorher den Dienst stoppen.
 
 ### 19.1 Betreuer-Geräte über den Gerätenamen zulassen (vorbereitet am 13.11.2026, nicht ausgerollt)
@@ -1817,7 +1817,7 @@ Zeit, bis ein aufgewachter PC wieder zugelassen ist (höchstens eine Minute plus
 
 ## 20. Labor-Daten des Testlabors (vorbereitet am 13.11.2026, nicht ausgerollt)
 
-Regeln, Kontakte, Vorlagen, Fachwissen und Schlusstext des Testlabors vom 28.11.2026 liegen als Dateien in `infra/sokrates2/labor-daten/` (Zweck, Zuständigkeiten und Freigabeablauf: dortige `README.md`) und
+Regeln, Kontakte, Vorlagen, Fachwissen und Schlusstext des Testlabors vom 05.12.2026 liegen als Dateien in `infra/sokrates2/labor-daten/` (Zweck, Zuständigkeiten und Freigabeablauf: dortige `README.md`) und
 auf dem Server unter `/etc/wamo-labor/daten/`. Der Kern liest sie bei jedem Sitzungsstart (`voice-core/labor_daten.py`), eine Änderung braucht kein Release und keinen Neustart.
 Der Ort ist nicht `/etc/wamo`: Der Benutzer `wamo-core` kann `/etc/wamo` (root:wamo 0750, dort liegen die Geheimnisse) nicht durchqueren und könnte darunter nichts lesen (der Lader meldete bei allen
 Dateien `nicht_lesbar`). Eine ACL oder Rechteänderung an `/etc/wamo` gibt es dafür nicht. `/etc/wamo-labor` legt `wamo-labor-einrichten.sh` (Abschnitt 19) als root:root 0755 an, der Kern kann ihn durchqueren.

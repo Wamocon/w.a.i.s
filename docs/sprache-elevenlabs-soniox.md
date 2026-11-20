@@ -10,7 +10,7 @@ Das Papier ist reine Recherche. Am Code, an den Diensten und an den Konten wurde
 - **Kontingent:** 131.000 Credits gehören zu keinem Tarif genau. Am nächsten liegt Creator (22 USD im Monat, 121.000 Credits, ungenutzte Credits bleiben bis zu zwei Monate erhalten). Das Kontingent reicht höchstens für den heutigen Betrieb, in dem praktisch nur Niko spricht. Für 8 Personen reicht es nicht und nicht einmal für den Labortag allein.
 - **Technik:** Ein Umstieg ist machbar, denn Pipecat 1.12 bringt beide Dienste mit. Die Sprechertrennung fiele aber weg, die Füllwörter müssten neu aufgenommen werden, und die Unterbrechungslogik ist auf Soniox eingestellt. Latenz und deutsche Erkennung müssten neu gemessen werden. Der mögliche Latenzgewinn liegt nach Herstellerangaben bei höchstens 50 bis 100 ms, die Antwortzeit insgesamt liegt bei etwa 1,7 s.
 - **Datenschutz:** Soniox verarbeitet und speichert in der EU, speichert Echtzeit-Audio nicht und trainiert nie mit Kundendaten. ElevenLabs speichert ohne Enterprise-Vertrag in den USA. Zero Retention und EU-Datenresidenz gibt es dort nur mit Enterprise, und das Training mit Kundendaten muss man selbst abwählen.
-- **Empfehlung:** Nicht umsteigen, Soniox bleibt für Hören und Stimme. Erst nach dem Testlabor lohnt sich die Frage, ob die Stimme (nur TTS) über ElevenLabs als wählbare Option hinter einem Schalter kommt. Das setzt voraus, dass eine Hörprobe klar besser ausfällt und die Mehrkosten gewollt sind. Vor dem 28.11. ändert sich nichts am Kern.
+- **Empfehlung:** Nicht umsteigen, Soniox bleibt für Hören und Stimme. Erst nach dem Testlabor lohnt sich die Frage, ob die Stimme (nur TTS) über ElevenLabs als wählbare Option hinter einem Schalter kommt. Das setzt voraus, dass eine Hörprobe klar besser ausfällt und die Mehrkosten gewollt sind. Vor dem 05.12. ändert sich nichts am Kern.
 
 ## 1. Ausgangslage
 
@@ -115,7 +115,7 @@ Annahmen:
 | S1 heute (praktisch nur Niko) | Messung auf 30 Tage hochgerechnet | 21,9 h | 259.000 Zeichen |
 | S2 8 Personen normal | 21 Arbeitstage, je Person und Tag der Mittelwert (22,3 min, 8.042 Zeichen) | 62,4 h | 1,35 Mio. Zeichen |
 | S3 8 Personen intensiv | wie S2, aber jeder Tag wie der p90-Tag (61,4 min, 14.788 Zeichen) | 171,9 h | 2,48 Mio. Zeichen |
-| S4 Labortag 28.11. (ein Tag, Obergrenze) | 8 Plätze 6 Stunden verbunden, 360 Zeichen je Minute | 48 h | 1,04 Mio. Zeichen |
+| S4 Labortag 05.12. (ein Tag, Obergrenze) | 8 Plätze 6 Stunden verbunden, 360 Zeichen je Minute | 48 h | 1,04 Mio. Zeichen |
 
 Gerechnet wird mit diesen Preisen: Soniox 0,12 USD je Stunde Hören und 0,70 USD je Stunde Stimme (1.000 Zeichen je Minute). ElevenLabs 0,30 USD je Stunde Hören (0,22 USD Realtime plus 0,08 USD Fachbegriffe, denn W.A.I.S. nutzt Fachbegriffe) und 0,04 USD je 1.000 Zeichen Stimme (Flash).
 
@@ -233,14 +233,14 @@ Risiken:
 
 ## 9. Was vor dem Testlabor nicht passieren darf
 
-Für den Kern gilt ab dem 20.11.2026 der Freeze, das Testlabor findet am 28.11.2026 statt. Bis dahin gilt:
+Für den Kern gilt ab dem 20.11.2026 der Freeze, das Testlabor findet am 05.12.2026 statt (verschoben vom 28.11.2026, Stand 20.11.2026). Bis dahin gilt:
 
 - Kein Wechsel des Anbieters im Kern, kein neues Pipecat-Extra, kein neuer Schlüssel in `core.env`, keine Migration an `model_access`.
 - Keine Änderung an Unterbrechungswerten, VAD, Füllwörtern oder Stimme. Die Werte sind am 14.11. an Soniox eingestellt und für den Labortag die Grundlage.
 - Kein Austausch des Datenschutzhinweises für Besucher. Er nennt Soniox, ein anderer Anbieter bräuchte neuen Text und eine neue AVV.
 - Keine Testaufrufe mit Gesprächsinhalten über das ElevenLabs-Konto, solange DPA, Abwahl des Trainings und Verlauf nicht geklärt sind.
 
-Erlaubt und sinnvoll vor dem 28.11.: Klärungen im ElevenLabs-Konto (Paket 0), eine Anfrage zu Enterprise und vorrangig die Umstellung des Soniox-Kontos auf die GmbH samt AVV.
+Erlaubt und sinnvoll vor dem 05.12.: Klärungen im ElevenLabs-Konto (Paket 0), eine Anfrage zu Enterprise und vorrangig die Umstellung des Soniox-Kontos auf die GmbH samt AVV.
 
 ## 10. Bewertung und Entscheidung
 

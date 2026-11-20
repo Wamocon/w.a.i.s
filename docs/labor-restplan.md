@@ -1,6 +1,26 @@
-# Testlabor 28.11.2026: Restplan ab Montag, 16.11.2026
+# Testlabor 05.12.2026: Restplan ab Montag, 16.11.2026
 
-## Nachtrag 17.11.2026: Live-Stand, Risiken und Fahrplan bis 11.12.
+## Nachtrag 20.11.2026: Labortag verschoben auf Sa 05.12.2026
+
+**Stand:** 20.11.2026. Der Labortag ist vom Sa 28.11.2026 auf Sa 05.12.2026 verschoben. Der Freeze bleibt Mo 23.11.2026 früh, der Freeze-Kandidat wird So 22.11. abends ausgerollt. Alle Termine, die am Labortag hängen, rücken um 7 Tage (gleiche Wochentage). Was heute (Fr 20.11.), am Sa 21.11. und am So 22.11. geplant ist, bleibt unverändert. Die Fahrpläne weiter unten (Nachtrag 17.11. und Abschnitt 4) tragen die neuen Termine. Die Tabellen und Beschlüsse mit Datum vom 16. und 17.11. bleiben als Protokoll stehen.
+
+| Termin | bisher | jetzt |
+| --- | --- | --- |
+| Kartensatz drucken | Di 24.11. | Di 01.12. |
+| Betreuer-Token übergeben, Namen und Telefonnummern eintragen | Mi 25.11. | Mi 02.12. |
+| Generalprobe | Do 26.11. | Do 03.12. |
+| Daten-Freeze 12:00, Rückwegübung, Einweisung der Betreuer | Fr 27.11. | Fr 04.12. |
+| Gateway ohne Neustart (N10) | Fr 27.11. 12:00 bis Sa 28.11. abends | Fr 04.12. 12:00 bis Sa 05.12. abends |
+| Labortag | Sa 28.11. | Sa 05.12. |
+| Nachlauf, Kern-Kanal wieder öffnen | ab Mo 30.11. | ab Mo 07.12. |
+| Laborkonten löschen, Sitzungen widerrufen | Mo 30.11. bis Fr 04.12. | Mo 07.12. bis Fr 11.12. |
+| Aufbewahrung und Löschlauf des Dienstes | bis Fr 11.12., Löschlauf ab Sa 12.12. | `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]` |
+
+**Löschfrist.** Bisher galt die Aufbewahrung bis Fr 11.12.2026 und der Löschlauf ab Sa 12.12.2026 (Labortag plus 13 und plus 14 Tage). Mit gleichem Abstand wäre es Fr 18.12.2026 und Sa 19.12.2026. Entschieden ist das nicht. In allen Unterlagen steht dafür der einheitliche Wortlaut `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`. Code, Skripte und Einstellungen am Server tragen noch den 11.12. und den 12.12.2026. Sie werden erst mit der Entscheidung angepasst.
+
+**Weiterhin offen:** Kiosk-Test des Platz-Skripts auf einem echten Platz-Laptop und einem Ersatzgerät, vor dem Freeze `[offen: Niko]`.
+
+## Nachtrag 17.11.2026: Live-Stand, Risiken und Fahrplan bis zur Löschfrist
 
 **Stand:** 17.11.2026. Dieser Nachtrag steht über dem Plan vom 16.11. und ersetzt dessen Fahrplan (Abschnitt 4) ab Di 17.11. Die Abschnitte 1 bis 6 vom 16.11. bleiben als Grundlage stehen. Was offen ist, steht mit `[offen: ...]` im Text.
 
@@ -66,7 +86,7 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | R12 | Betreuer-Geräte flatterten: mDNS lieferte abwechselnd tote Adressen, jede abweichende Antwort entzog die zugelassene sofort (492 Paare in 24 h, je ein Caddy-Reload, `/betreuer` je eine Minute gesperrt) | behoben mit #186 (ersetzte Adresse bleibt 15 Minuten, Adresse nur aus mDNS erst nach ARP-Nachweis per UDP-Probe), eingespielt 17.11., danach kein Flattern mehr |
 | R13 | Besucher löscht mit aal2 den eigenen bestätigten zweiten Faktor (Token-Test am 17.11.). Ein Besucher kann so sein Profil unbrauchbar machen | Restrisiko. Abhilfe im Betrieb: Reserveprofile `labor-05` bis `labor-08` (Runbook 6.7), Entwicklerwerkzeuge im Kiosk gesperrt. Zuordnung Reserveprofil zu Laptop `[offen: Generalprobe]` |
 
-### N.4 Fahrplan Di 17.11. bis Fr 11.12.
+### N.4 Fahrplan Di 17.11. bis zur Löschfrist (Termine ab Di 24.11. mit dem Labortag um 7 Tage verschoben, Stand 20.11.2026)
 
 | Wann | Was | Wer | Bedingung |
 | --- | --- | --- | --- |
@@ -81,18 +101,18 @@ Seit dem Restplan vom 16.11. am Nachmittag sind live:
 | Sa 21.11. | Letzte Freischaltungen der Mitglieder (E4). Puffer für Befunde aus dem Lasttest | Niko, W.A.I.S. | E4 |
 | So 22.11. abends | Freeze-Kandidat ist ausgerollt: Kern mit Bewährung, Oberfläche, Labor-Rauchtest, Lasttest-Probelauf mit einer Sitzung. Ab hier nur noch Sicherheitskorrekturen mit Nikos Ja | W.A.I.S. | E1 |
 | Mo 23.11. früh | **Freeze** (E1): Etikett `labor-freeze` auf den ausgerollten Stand. Kiosk-Test des Platz-Skripts auf einem echten Platz-Laptop im Kiosk-Konto und auf einem Ersatzgerät (`einrichten`, CA, `pruefen`, Board), Termin `[offen: Niko]`, muss vor dem Freeze liegen | W.A.I.S., Niko, Kollegen | Geräte da |
-| Di 24.11. | Kartensatz drucken, Zahlen aus dem Lasttest ins Runbook | W.A.I.S., Niko | Lasttest-Ergebnis, W1, W2 |
-| Mi 25.11. | Betreuer-Token persönlich übergeben, Namen und Telefonnummern eintragen | Niko | N6, N7 |
-| Do 26.11. | Generalprobe, drei Stunden, vier Kollegen als Besucher an den Plätzen 1 bis 4, zwei Betreuer, Reserve-Laptop (Platz 9) | alle | Kartensatz gedruckt |
-| Fr 27.11. | Daten-Freeze 12:00. Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer. Ab 12:00 kein Neustart des Gateways bis Sa 28.11. abends (N10) | W.A.I.S., Betreuer, Niko | Morgencheckliste Teil A |
-| Sa 28.11. | Labortag. Kern-Kanal morgens sperren, kein Neustart des Gateways | alle | Morgencheckliste Teil B |
-| ab Mo 30.11. | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`). Messungen H0 und M3 (`docs/hausmodelle-und-kikollege.md`) | W.A.I.S. | Runbook Abschnitt 10 |
-| Mo 30.11. bis Fr 04.12. | Laborkonten löschen und Sitzungen widerrufen, nach dem Nachlauf. Das Werkzeug liegt vor: `infra/sokrates2/wamo_labor_konten_loeschen.py` (Trockenlauf als Standard, Bestätigungswort, Höchstgrenze 12, Nachweis). Ablauf: Trockenlauf `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py"`, dann ein Reservekonto mit `--kennung labor-09 --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN`, dann alle mit `--ausfuehren --bestaetigung LABORKONTEN-LOESCHEN` | W.A.I.S., Niko | Nachlauf gelaufen, Ja von Niko, Runbook Abschnitt 10, Punkt 6 |
-| bis Fr 11.12. | Nachweis "verbliebene Laborkonten: 0" (Ausgang 0, Zeile in `journalctl -t wamo-labor-loeschen`), Umschlag-Datei und Sicherungen löschen. Ab 12.12. Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
+| Di 01.12. (vorher Di 24.11.) | Kartensatz drucken, Zahlen aus dem Lasttest ins Runbook | W.A.I.S., Niko | Lasttest-Ergebnis, W1, W2 |
+| Mi 02.12. (vorher Mi 25.11.) | Betreuer-Token persönlich übergeben, Namen und Telefonnummern eintragen | Niko | N6, N7 |
+| Do 03.12. (vorher Do 26.11.) | Generalprobe, drei Stunden, vier Kollegen als Besucher an den Plätzen 1 bis 4, zwei Betreuer, Reserve-Laptop (Platz 9) | alle | Kartensatz gedruckt |
+| Fr 04.12. (vorher Fr 27.11.) | Daten-Freeze 12:00. Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer. Ab 12:00 kein Neustart des Gateways bis Sa 05.12. abends (N10) | W.A.I.S., Betreuer, Niko | Morgencheckliste Teil A |
+| Sa 05.12. (vorher Sa 28.11.) | Labortag. Kern-Kanal morgens sperren, kein Neustart des Gateways | alle | Morgencheckliste Teil B |
+| ab Mo 07.12. (vorher Mo 30.11.) | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`). Messungen H0 und M3 (`docs/hausmodelle-und-kikollege.md`) | W.A.I.S. | Runbook Abschnitt 10 |
+| Mo 07.12. bis Fr 11.12. (vorher Mo 30.11. bis Fr 04.12.) | Laborkonten löschen und Sitzungen widerrufen, nach dem Nachlauf. Das Werkzeug liegt vor: `infra/sokrates2/wamo_labor_konten_loeschen.py` (Trockenlauf als Standard, Bestätigungswort, Höchstgrenze 12, Nachweis). Ablauf: Trockenlauf `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py"`, dann ein Reservekonto mit `--kennung labor-09 --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN`, dann alle mit `--ausfuehren --bestaetigung LABORKONTEN-LOESCHEN` | W.A.I.S., Niko | Nachlauf gelaufen, Ja von Niko, Runbook Abschnitt 10, Punkt 6 |
+| bis zur Löschfrist `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]` (vorher bis Fr 11.12., Löschlauf ab 12.12.) | Nachweis "verbliebene Laborkonten: 0" (Ausgang 0, Zeile in `journalctl -t wamo-labor-loeschen`), Umschlag-Datei und Sicherungen löschen. Danach Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko, Entscheidung zur Löschfrist |
 
 ### N.5 Offene Lieferungen
 
-Stand am 17.11.2026, Nachmittag: N3 bis N5 erledigt. Datenschutz: Fassung 1 des Hinweises am 17.11. von Niko freigegeben, die finale Datenschutzrichtlinie liefern die Betreuer (N11, Fassung 2 nur bis Fr 20.11.). Offen sind N6 bis N8, N10 und N11 (Abschnitt 5). N10 ist neu: Gateway ohne Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut das Gateway selbst (`infra/sokrates1/gateway-wamo.md`).
+Stand am 17.11.2026, Nachmittag: N3 bis N5 erledigt. Datenschutz: Fassung 1 des Hinweises am 17.11. von Niko freigegeben, die finale Datenschutzrichtlinie liefern die Betreuer (N11, Fassung 2 nur bis Fr 20.11.). Offen sind N6 bis N8, N10 und N11 (Abschnitt 5). N10 ist neu: Gateway ohne Neustart von Fr 04.12. 12:00 bis Sa 05.12. abends (verschoben auf 05.12.2026, Stand 20.11.2026; vorher Fr 27.11. bis Sa 28.11.). Niko betreut das Gateway selbst (`infra/sokrates1/gateway-wamo.md`).
 
 ---
 
@@ -127,13 +147,13 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 
 | Nr | Entscheidung |
 | --- | --- |
-| E1 | **Freeze Mo 23.11. früh.** Bis So 22.11. abends darf Code gemergt und ausgerollt werden, danach nur Sicherheitskorrekturen mit Nikos Ja. Daten-Freeze Fr 27.11., 12:00 bleibt |
+| E1 | **Freeze Mo 23.11. früh.** Bis So 22.11. abends darf Code gemergt und ausgerollt werden, danach nur Sicherheitskorrekturen mit Nikos Ja. Daten-Freeze Fr 04.12., 12:00 (verschoben auf 05.12.2026, Stand 20.11.2026; vorher Fr 27.11.) |
 | E2 | Zweite Faktoren der Laborprofile neu auf die Betreuer-Geräte am **Fr 20.11. nach dem Lasttest**, damit gilt die Regel „keine Änderung an der Anmeldung in der Laborwoche“ |
 | E3 | Messrunde auf 0.4.1 wiederholt (erledigt, Ergebnis in Abschnitt 2) |
-| E4 | **Mitglieder bis Sa 21.11.** freigeschaltet und mit gewechseltem Passwort, wer es nicht schafft, kommt ab Mo 30.11. dran |
+| E4 | **Mitglieder bis Sa 21.11.** freigeschaltet und mit gewechseltem Passwort, wer es nicht schafft, kommt nach dem Labortag dran, ab Mo 07.12. (verschoben auf 05.12.2026, Stand 20.11.2026; vorher ab Mo 30.11.) |
 | E6 | Rückweg-Ziel des Kerns ist immer ein Release mit Erstanmeldung (ab 0.3.0), nie `c751d04` oder älter. Ein solcher Kern kennt `wamo_auth` nicht und ließe Mitglieder mit offenem Passwortwechsel in die App |
 
-## 4. Fahrplan (Stand 16.11.; ab Di 17.11. gilt Nachtrag N.4)
+## 4. Fahrplan (Stand 16.11.; ab Di 17.11. gilt Nachtrag N.4; die Termine ab Di 24.11. sind mit dem Labortag um 7 Tage verschoben, Stand 20.11.2026)
 
 | Wann | Was | Wer | Bedingung |
 | --- | --- | --- | --- |
@@ -146,14 +166,14 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | Sa 21.11. | Letzte Freischaltungen der Mitglieder (E4). Puffer für Befunde aus dem Lasttest | Niko, W.A.I.S. | E4 |
 | So 22.11. abends | Freeze-Kandidat ist ausgerollt (Kern mit Bewährung, Oberfläche, Labor-Rauchtest, Lasttest-Probelauf mit 1 Sitzung) | W.A.I.S. | E1 |
 | Mo 23.11. früh | **Freeze** (E1): Etikett `labor-freeze` auf den ausgerollten Stand. Platz-Skript auf einem echten Laptop im Kiosk-Konto und einem Ersatzgerät (`einrichten`, CA, `pruefen`, Board) | W.A.I.S., Niko, Kollegen | Geräte da |
-| Di 24.11. | Kartensatz drucken, Zahlen aus dem Lasttest ins Runbook | W.A.I.S., Niko | W1, W2 |
-| Mi 25.11. | Betreuer-Token persönlich übergeben, Namen und Telefonnummern eintragen | Niko | N6, N7 |
-| Do 26.11. | Generalprobe, drei Stunden, vier Kollegen als Besucher, zwei Betreuer, acht Geräte | alle | Kartensatz gedruckt |
-| Fr 27.11. | Daten-Freeze 12:00, Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer | W.A.I.S., Betreuer | Morgencheckliste Teil A |
-| Sa 28.11. | Labortag. Kern-Kanal morgens sperren (`notaus`) | alle | Morgencheckliste Teil B |
-| Mo 30.11. | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`) | W.A.I.S. | Runbook Abschnitt 10 |
-| Mo 30.11. bis Fr 04.12. | Skript zum Löschen der Laborkonten und Widerrufen der Sitzungen (Trockenlauf als Standard, Bestätigungswort, Nachweis), mit Review | W.A.I.S. | Lücke 1 |
-| bis Fr 11.12. | Skript ausführen, Umschlag-Datei und Sicherungen löschen. Ab 12.12. Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
+| Di 01.12. (vorher Di 24.11.) | Kartensatz drucken, Zahlen aus dem Lasttest ins Runbook | W.A.I.S., Niko | W1, W2 |
+| Mi 02.12. (vorher Mi 25.11.) | Betreuer-Token persönlich übergeben, Namen und Telefonnummern eintragen | Niko | N6, N7 |
+| Do 03.12. (vorher Do 26.11.) | Generalprobe, drei Stunden, vier Kollegen als Besucher, zwei Betreuer, acht Geräte | alle | Kartensatz gedruckt |
+| Fr 04.12. (vorher Fr 27.11.) | Daten-Freeze 12:00, Rückwegübung mit dem Ziel aus E6, Einweisung der Betreuer | W.A.I.S., Betreuer | Morgencheckliste Teil A |
+| Sa 05.12. (vorher Sa 28.11.) | Labortag. Kern-Kanal morgens sperren (`notaus`) | alle | Morgencheckliste Teil B |
+| Mo 07.12. (vorher Mo 30.11.) | Nachlauf `wamo_labor_nachlauf.py nachlauf --ausfuehren`, Kern-Kanal wieder öffnen (`notaus-aufheben`, `schluessel`) | W.A.I.S. | Runbook Abschnitt 10 |
+| Mo 07.12. bis Fr 11.12. (vorher Mo 30.11. bis Fr 04.12.) | Skript zum Löschen der Laborkonten und Widerrufen der Sitzungen (Trockenlauf als Standard, Bestätigungswort, Nachweis), mit Review | W.A.I.S. | Lücke 1 |
+| bis zur Löschfrist `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]` (vorher bis Fr 11.12., Löschlauf ab 12.12.) | Skript ausführen, Umschlag-Datei und Sicherungen löschen. Danach Löschlauf des Dienstes | W.A.I.S., Niko | Ja von Niko |
 
 ## 5. Was Niko noch entscheiden oder liefern muss
 
@@ -163,15 +183,15 @@ Der Kern hat sich seit dem Labor-Release in 66 Dateien geändert (rund 8 900 Zei
 | N4 | Q6: Fassung der Regeln | Mi 18.11. | erledigt 17.11.: Standard bestätigt |
 | N5 | Q13: Büro-Adressen für 55446, 55322 und 56543 in `LAN_PORTS_ADMIN` (Liste `/etc/wamo/admin-quellen`, PR #185, `infra/sokrates2/README.md` 6.1) | Mi 18.11. | erledigt 17.11.: Liste mit dem Laptop des Admins (WLAN und feste WireGuard-Adresse), eingespielt mit `--trocken` und Rauchtests |
 | N6 | Weg des Betreuer-Tokens | Mi 18.11. | Persönliche Übergabe am Gerät, nie Chat, Mail oder Ausdruck |
-| N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 25.11. | vor der Generalprobe |
-| N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über den 11.12. | Do 19.11. | wie in der Morgencheckliste; Entwurf mit Musterantworten an den verantwortlichen Trainer am 17.11., Seminar-Angaben sind kein Muss (`ausgang.md` verweist sonst auf den Stand) |
-| N10 | Gateway (zentrales LiteLLM auf Sokrates-1): kein Neustart von Fr 27.11. 12:00 bis Sa 28.11. abends. Niko betreut es selbst, Betriebsnotiz `infra/sokrates1/gateway-wamo.md` | Fr 27.11. 12:00 | Keine Änderung am Gateway in dieser Zeit |
+| N7 | Namen, Telefonnummern, Raum, Zeiten (Runbook Abschnitt 8 und 11) | Mi 02.12. (vorher Mi 25.11.) | vor der Generalprobe |
+| N8 | W1 und W2 vom Trainer, Seminar-Angaben, Soniox-Vertragspartner GmbH, Aufbewahrung über die Löschfrist hinaus (Frist offen, siehe Nachtrag 20.11.) | Do 19.11. | wie in der Morgencheckliste; Entwurf mit Musterantworten an den verantwortlichen Trainer am 17.11., Seminar-Angaben sind kein Muss (`ausgang.md` verweist sonst auf den Stand) |
+| N10 | Gateway (zentrales LiteLLM auf Sokrates-1): kein Neustart von Fr 04.12. 12:00 bis Sa 05.12. abends (vorher Fr 27.11. bis Sa 28.11.). Niko betreut es selbst, Betriebsnotiz `infra/sokrates1/gateway-wamo.md` | Fr 04.12. 12:00 | Keine Änderung am Gateway in dieser Zeit |
 | N11 | Datenschutz: finale Datenschutzrichtlinie der Betreuer. Fassung 1 des Hinweises ist am 17.11. von Niko freigegeben (`docs/labor-datenschutz-entwurf.md`, Dienst `labor-dienst/wamo_labor_dienst/web/datenschutz.html`) | Fr 20.11. für Fassung 2, sonst gilt am Labortag Fassung 1 | Kommt sie bis Fr 20.11., wird sie als Fassung 2 vor dem Freeze eingebaut: neuer Text im Dienst, Versionsnummer 2 auf der Betreuer-Seite, `WAMO_LABOR_EINWILLIGUNG_MIN=2` am Kern mit dem Freeze-Kandidaten So 22.11. |
 | E5 | Kern-Kanal während Lasttest und Labortag sperren | Fr 20.11. | Ja. Der Grund Schaufenster entfällt (17.11.), der gemeinsame Server bleibt (Abschnitt 6, Punkt 4) |
 
 ## 6. Lücken und Risiken
 
-1. **Laborkonten löschen und Sitzungen widerrufen:** Das Werkzeug liegt vor (`infra/sokrates2/wamo_labor_konten_loeschen.py`, Runbook Abschnitt 10, Punkt 6). Offen ist der Lauf am Server nach dem Nachlauf, spätestens Fr 11.12. Erst der Lauf zeigt, ob die Rolle postgres die Tabellen im Schema auth lesen und dort löschen darf.
+1. **Laborkonten löschen und Sitzungen widerrufen:** Das Werkzeug liegt vor (`infra/sokrates2/wamo_labor_konten_loeschen.py`, Runbook Abschnitt 10, Punkt 6). Offen ist der Lauf am Server nach dem Nachlauf, im Fenster Mo 07.12. bis Fr 11.12. Erst der Lauf zeigt, ob die Rolle postgres die Tabellen im Schema auth lesen und dort löschen darf.
 2. **Marker bei w2:** Bis zur Korrektur schweigt W.A.I.S. bei der Wissensfrage zur CTFL-Prüfung. Ob der Büro-Prompt betroffen ist, klärt die Ursachenanalyse.
 3. **CPU des Kerns:** schon bei 1 Sitzung p95 43,5 Prozent eines Kerns. Erst der volle Lasttest zeigt, ob 4 Sitzungen (Betrieb) und 8 Sitzungen (Reserve) unter 70 Prozent bleiben.
 4. **Gemeinsamer Server:** Entwicklungsaufträge (bis 6) und das Hausmodell teilen sich Sokrates-2 mit dem Kern und dem Labor-Dienst. Darum sperrt der Kern-Kanal während Lasttest und Labortag.

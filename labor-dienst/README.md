@@ -1,6 +1,6 @@
 # W.A.I.S. Labor-Dienst
 
-Das Test-Jira des Testlabors am 28.11.2026. Bis zu acht Besucher legen an je einem Platz mit dem Assistenten W.A.I.S. Fehler als Ticket an, ändern,
+Das Test-Jira des Testlabors am 05.12.2026 (verschoben vom 28.11.2026, Stand 20.11.2026). Bis zu acht Besucher legen an je einem Platz mit dem Assistenten W.A.I.S. Fehler als Ticket an, ändern,
 verschieben und kommentieren Tickets. Der Dienst setzt den Vertrag Version 1 um (`docs/labor-dienst-vertrag.md`, Quelle der Wahrheit) und
 ist ein eigener Teil des Monorepos: Paket `wamo-labor-dienst`, Python 3.11 oder neuer, FastAPI, uvicorn und SQLite aus der Standardbibliothek.
 Dieser Stand ist der API-Teil mit Speicher und Betreuer-Funktionen. Die Webseiten (Board und Betreuer-Seite) kommen als zweiter Schritt.
@@ -101,12 +101,12 @@ Was der Dienst bewusst nicht löst und wer es lösen muss:
 
 * **Löschen nur auf SQLite-Ebene:** `daten-loeschen`, `zuruecksetzen` und die Aufbewahrung löschen in den Datenbanken (Zeilen überschrieben, Datei verkleinert,
   WAL-Datei zurückgeschrieben und geprüft). Dateisystemblöcke, Volume-Snapshots und Hostsicherungen liegen außerhalb des Dienstes. D10 verlangt, dass der Betrieb
-  dafür sorgt (keine Snapshots oder Sicherungen des Volumes über den 11.12.2026 hinaus, sonst löschen).
-* **Die Aufbewahrung greift nur bei laufendem Dienst:** Gelöscht wird beim Start und stündlich, solange der Dienst läuft. Nach dem 11.12.2026 den Dienst
+  dafür sorgt (keine Snapshots oder Sicherungen des Volumes über die Löschfrist hinaus `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`, sonst löschen). Der Code und die Einstellung `WAMO_LABOR_DIENST_BIS` tragen noch den 11.12.2026 und werden mit der Entscheidung angepasst.
+* **Die Aufbewahrung greift nur bei laufendem Dienst:** Gelöscht wird beim Start und stündlich, solange der Dienst läuft. Nach der Löschfrist den Dienst
   weiterlaufen lassen (oder neu starten) oder das Volume löschen. Ein Dienst, der vorher abgeschaltet wird, löscht nichts mehr.
 * **Uhrabhängigkeit:** Aufbewahrung, Schreibrate, Gültigkeit der Idempotenzschlüssel, Anzeigezeit des neuen Tokens und die Zeitpunkte in den Tickets nutzen die
   Uhr des Rechners. Der Dienst prüft sie beim Start (nicht vor dem 12.11.2026) und löscht nie nach einem Sprung der Wanduhr von mehr als einem Tag gegen die
-  monotone Uhr. Eine dauerhaft falsche Uhr, die schon beim Start nach dem 11.12.2026 steht, löscht trotzdem (es lässt sich nicht von einem Neustart danach
+  monotone Uhr. Eine dauerhaft falsche Uhr, die schon beim Start nach der Löschfrist steht, löscht trotzdem (es lässt sich nicht von einem Neustart danach
   unterscheiden), und ein Rechner, der länger als einen Tag ruht (Suspend), verschiebt die Wanduhr gegen die monotone Uhr: Dann löscht die Aufbewahrung nicht,
   bis der Dienst neu gestartet wird.
 * **Einwilligungsmaximum und Rücksetzweg:** Die Version des Datenschutzhinweises darf nur wachsen (1 bis 1000). Ein falsch erfasstes Maximum lässt sich nur mit

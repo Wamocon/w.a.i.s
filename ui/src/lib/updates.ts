@@ -45,7 +45,7 @@ export type UpdateAnsicht = Readonly<{
 }>;
 
 export const BROWSER_SATZ =
-  "Im Browser gibt es nichts zu aktualisieren. Updates installiert die Desktop-App selbst, den Installer für Windows findest du unten.";
+  "Im Browser gibt es nichts zu aktualisieren. Updates installiert die Desktop-App selbst. Den Installer für Windows findest du in den Ersten Schritten.";
 
 const T_LAEDT = "Die App fragt den Server, ob es ein Update gibt.";
 const T_AKTUELL = "Du nutzt die neueste Version.";
