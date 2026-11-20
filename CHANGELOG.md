@@ -6,6 +6,21 @@ Die Abschnitte der Versionen entstehen mit `scripts/wamo_version.py` aus den Com
 
 ## [Unveröffentlicht]
 
+## [0.7.1] - 2026-11-20
+
+### Hinzugefügt
+
+- Eigener Punkt Updates in den Einstellungen
+- Labortag und Löschfrist aus einer Quelle, Vorschlag 05.12. und 18.12.2026
+- Löschfrist und Besuchertext bestätigt (18.12. und 19.12.2026), Unterlagen und Tests angepasst
+- Versionsregel vor 1.0.0 (Patch für Verbesserungen, Minor für Meilensteine, 1.0.0 bestätigt)
+
+### Behoben
+
+- Update-Pop-up überdeckt nichts, Installer-Download nur einmal
+- Installer vor dem Start erneut prüfen, Fuse für file-Protokoll bleibt an (REA-Befunde)
+- Besuchertext mit der Anrede du, Deine Daten werden unmittelbar nach der Veranstaltung gelöscht
+
 ## [0.7.0] - 2026-11-19
 
 ### Hinzugefügt
@@ -898,7 +913,8 @@ Erstes Release: der Stand, auf dem alle Pakete (`ui`, `desktop`, `voice-core`, `
   Migration 0013 für Anfragen und Freigaben mit Vier-Augen-Regel, Versionsskript sowie die Oberfläche in zwei Farben
   (blau und grün) mit Umschalten ohne Lücke und Rückweg. Notanker und Release-Dienst sind noch nicht in Betrieb.
 
-[Unveröffentlicht]: https://github.com/Wamocon/wamo/compare/v0.7.0...HEAD
+[Unveröffentlicht]: https://github.com/Wamocon/wamo/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/Wamocon/wamo/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Wamocon/wamo/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Wamocon/wamo/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Wamocon/wamo/compare/v0.4.1...v0.5.0
