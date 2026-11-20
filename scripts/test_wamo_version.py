@@ -126,13 +126,13 @@ def test_erhoehen_setzt_kleinere_stellen_zurueck():
 
 
 def test_versionssprung_rueckwaerts_wird_abgelehnt():
-    vor = wv.vorschlag((0, 5, 0), wv.berechne([c("feat: x")]))          # Vorschlag 0.6.0
-    wv.pruefe_wahl((0, 6, 0), (0, 5, 0), vor)                            # gleich dem Vorschlag
-    wv.pruefe_wahl((0, 6, 3), (0, 5, 0), vor)                            # Erhöhen ist erlaubt
-    wv.pruefe_wahl((0, 9, 0), (0, 5, 0), vor)
-    for zu_niedrig in ((0, 5, 0), (0, 4, 9), (0, 5, 9)):                 # gleich dem Tag, darunter, unter dem Vorschlag
+    vor = wv.vorschlag((1, 5, 0), wv.berechne([c("feat: x")]))          # Vorschlag 1.6.0 (ab 1.0.0 ist feat Minor)
+    wv.pruefe_wahl((1, 6, 0), (1, 5, 0), vor)                            # gleich dem Vorschlag
+    wv.pruefe_wahl((1, 6, 3), (1, 5, 0), vor)                            # Erhöhen ist erlaubt
+    wv.pruefe_wahl((1, 9, 0), (1, 5, 0), vor)
+    for zu_niedrig in ((1, 5, 0), (1, 4, 9), (1, 5, 9)):                 # gleich dem Tag, darunter, unter dem Vorschlag
         with pytest.raises(wv.VersionsFehler, match="Senken ist nicht erlaubt"):
-            wv.pruefe_wahl(zu_niedrig, (0, 5, 0), vor)
+            wv.pruefe_wahl(zu_niedrig, (1, 5, 0), vor)
     # Patch-Vorschlag darf auf Minor oder Major erhöht werden, nicht darunter
     patch = wv.vorschlag((1, 0, 0), wv.berechne([c("fix: x")]))
     wv.pruefe_wahl((1, 1, 0), (1, 0, 0), patch)
@@ -147,14 +147,33 @@ def test_ohne_aenderungen_kein_release_und_der_sprung_auf_1_0_0_braucht_bestaeti
     with pytest.raises(wv.VersionsFehler, match="nichts zu veröffentlichen"):
         wv.pruefe_wahl((0, 1, 1), (0, 1, 0), keine)
     bruch = wv.vorschlag((0, 4, 2), wv.berechne([c("feat!: Bruch")]))
-    assert bruch.version == (1, 0, 0) and bruch.braucht_bestaetigung
-    with pytest.raises(wv.VersionsFehler, match="Bestätigung"):
+    assert bruch.version == (0, 5, 0) and not bruch.braucht_bestaetigung      # vor 1.0.0 ist ein Bruch Minor
+    with pytest.raises(wv.VersionsFehler, match="Bestätigung"):             # 1.0.0 wählt der Admin selbst und bestätigt es
         wv.pruefe_wahl((1, 0, 0), (0, 4, 2), bruch)
     wv.pruefe_wahl((1, 0, 0), (0, 4, 2), bruch, major_bestaetigt=True)
-    # ab 1.0.0 ist ein Major-Sprung ohne weitere Bestätigung möglich; vor 1.0.0 gilt dieselbe Abbildung wie danach
-    assert not wv.vorschlag((1, 4, 2), wv.berechne([c("feat!: Bruch")])).braucht_bestaetigung
-    assert wv.vorschlag((0, 4, 2), wv.berechne([c("feat: x")])).version == (0, 5, 0)
-    assert wv.vorschlag((0, 4, 2), wv.berechne([c("fix: x")])).version == (0, 4, 3)
+    # ab 1.0.0 gilt die übliche Abbildung: Bruch Major, feat Minor, fix Patch
+    ab_eins = wv.vorschlag((1, 4, 2), wv.berechne([c("feat!: Bruch")]))
+    assert ab_eins.version == (2, 0, 0) and not ab_eins.braucht_bestaetigung
+    assert wv.vorschlag((1, 4, 2), wv.berechne([c("feat: x")])).version == (1, 5, 0)
+    assert wv.vorschlag((1, 4, 2), wv.berechne([c("fix: x")])).version == (1, 4, 3)
+
+
+def test_vor_1_0_sind_funktionen_und_korrekturen_patch_und_brueche_minor():
+    """Entscheidung von Niko (20.11.2026): Patch für Verbesserungen, Minor für Meilensteine, Major (1.0.0) später und bestätigt."""
+    feat = wv.vorschlag((0, 7, 0), wv.berechne([c("feat: Neue Funktion")]))
+    assert feat.version == (0, 7, 1) and feat.stufe == "patch" and not feat.braucht_bestaetigung
+    fix = wv.vorschlag((0, 7, 0), wv.berechne([c("fix: Fehler")]))
+    assert fix.version == (0, 7, 1) and fix.stufe == "patch"
+    bruch = wv.vorschlag((0, 7, 0), wv.berechne([c("fix!: Bruch im Protokoll")]))
+    assert bruch.version == (0, 8, 0) and bruch.stufe == "minor" and not bruch.braucht_bestaetigung
+    gemischt = wv.vorschlag((0, 7, 0), wv.berechne([c("fix: a"), c("feat: b"), c("docs: c")]))
+    assert gemischt.version == (0, 7, 1)
+    # Ein Meilenstein ist eine bewusste Wahl über dem Vorschlag: Minor 0.8.0 ist erlaubt, 1.0.0 nur bestätigt
+    wv.pruefe_wahl((0, 8, 0), (0, 7, 0), feat)
+    with pytest.raises(wv.VersionsFehler, match="Bestätigung"):
+        wv.pruefe_wahl((1, 0, 0), (0, 7, 0), feat)
+    wv.pruefe_wahl((1, 0, 0), (0, 7, 0), feat, major_bestaetigt=True)
+    assert wv.stufe_vor_1_0("minor") == "patch" and wv.stufe_vor_1_0("major") == "minor" and wv.stufe_vor_1_0("patch") == "patch"
 
 
 # ---------- Changelog ----------
@@ -360,7 +379,7 @@ def git_repo(tmp_path):
 def test_ohne_tag_gilt_die_version_der_dateien(git_repo):
     stand = wv.lade_stand(git_repo)
     assert stand.tag is None and stand.basis == (0, 1, 0) and len(stand.commits) == 1 and stand.hinweise
-    assert wv.vorschlag(stand.basis, wv.berechne(stand.commits, stand.pfade)).version == (0, 2, 0)
+    assert wv.vorschlag(stand.basis, wv.berechne(stand.commits, stand.pfade)).version == (0, 1, 1)
 
 
 def test_mit_tag_zaehlen_nur_die_commits_seitdem_und_keine_merges(git_repo):
@@ -404,7 +423,7 @@ def test_vorschlag_json_und_anwenden_im_trockenlauf(git_repo, capsys):
     commit(git_repo, "Titel ohne Typ", "scripts/a.py")
     assert wv.main(["--wurzel", str(git_repo), "vorschlag", "--json"]) == 0
     daten = json.loads(capsys.readouterr().out)
-    assert daten["version"] == "0.2.0" and daten["tag"] == "v0.2.0" and daten["stufe"] == "minor"
+    assert daten["version"] == "0.1.1" and daten["tag"] == "v0.1.1" and daten["stufe"] == "patch"      # vor 1.0.0 ist feat Patch
     assert daten["basis_tag"] == "v0.1.0" and len(daten["warnungen"]) == 1
     vorher = {p: p.read_bytes() for p in git_repo.rglob("*") if p.is_file() and ".git" not in p.parts}
     assert wv.main(["--wurzel", str(git_repo), "anwenden", "0.2.0", "--trocken", "--datum", "2026-11-01"]) == 0
@@ -430,7 +449,7 @@ def test_anwenden_lehnt_senken_ab_und_aendert_dann_nichts(git_repo, capsys):
     git(git_repo, "tag", "-a", "v0.1.0", "-m", "x")
     commit(git_repo, "feat: neu", "a.txt")
     vorher = {p: p.read_bytes() for p in git_repo.rglob("*") if p.is_file() and ".git" not in p.parts}
-    for version in ("0.1.0", "0.0.9", "0.1.5"):                    # Tag, darunter, unter dem Vorschlag 0.2.0
+    for version in ("0.1.0", "0.0.9"):                             # Tag und darunter (der Vorschlag 0.1.1 liegt direkt über dem Tag)
         assert wv.main(["--wurzel", str(git_repo), "anwenden", version]) == 1
         assert "Senken ist nicht erlaubt" in capsys.readouterr().err
     assert wv.main(["--wurzel", str(git_repo), "anwenden", "v0.2.0"]) == 1          # falsches Format
@@ -467,7 +486,7 @@ def test_changelog_befehl_gibt_den_abschnitt_aus(git_repo, capsys):
     commit(git_repo, "fix(host): Absturz", "host/a.txt")
     assert wv.main(["--wurzel", str(git_repo), "changelog", "--datum", "2026-11-01"]) == 0
     ausgabe = capsys.readouterr().out
-    assert ausgabe.startswith("## [0.2.0] - 2026-11-01") and "### Behoben" in ausgabe and "**host:** Absturz" in ausgabe
+    assert ausgabe.startswith("## [0.1.1] - 2026-11-01") and "### Behoben" in ausgabe and "**host:** Absturz" in ausgabe
 
 
 # ---------- Das echte Repo ----------

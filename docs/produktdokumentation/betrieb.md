@@ -499,7 +499,7 @@ Es gibt **eine** Version für das ganze Monorepo, aktuell 0.7.0 (`desktop/packag
 | --- | --- |
 | Schreibweise | Dateien `X.Y.Z`, Tags `vX.Y.Z`, keine Vorabversionen, keine führenden Nullen |
 | Basis | das höchste Tag `vX.Y.Z`; ohne Tag die Version der Dateien und die ganze Historie |
-| Stufe aus Commits | `fix`, `perf`, `revert` ergeben Patch; `feat` Minor; `!` oder `BREAKING CHANGE:` Major; `docs`, `chore`, `ci`, `test`, `style`, `refactor`, `build` heben nicht an (liegen Änderungen außerhalb `docs/` vor, gilt mindestens Patch); nicht konventionelle Titel zählen als Patch und erscheinen als Warnung |
+| Stufe aus Commits | Ab 1.0.0: `fix`, `perf`, `revert` ergeben Patch; `feat` Minor; `!` oder `BREAKING CHANGE:` Major. Vor 1.0.0 (Entscheidung vom 20.11.2026) liegt jede Stufe eins tiefer: `feat`, `fix`, `perf`, `revert` ergeben Patch, `!` oder `BREAKING CHANGE:` Minor; Minor vor 1.0.0 ist ein Meilenstein, den der Admin bewusst höher wählt (zum Beispiel 0.8.0), 1.0.0 nur mit `--major-bestaetigt`; `docs`, `chore`, `ci`, `test`, `style`, `refactor`, `build` heben nicht an (liegen Änderungen außerhalb `docs/` vor, gilt mindestens Patch); nicht konventionelle Titel zählen als Patch und erscheinen als Warnung |
 | Merge-Commits | zählen nicht; bei Squash zählt der Titel |
 | Revert | hebt den ursprünglichen Commit auf, wenn er im selben Bereich liegt |
 | Nie senken | die Wahl liegt über dem letzten Tag und nicht unter dem Vorschlag; der Sprung von 0.y.z auf 1.0.0 oder höher braucht `--major-bestaetigt` |

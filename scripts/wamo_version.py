@@ -11,9 +11,12 @@ Der Schalter --pruefen gilt wie der Unterbefehl pruefen.
 
 Regeln (Konzept F):
   * Basis ist das höchste Tag vX.Y.Z (keine Vorabversionen). Ohne Tag gilt die Version der Dateien und die ganze Historie.
-  * Merge-Commits zählen nicht, bei Squash zählt der Titel. fix, perf und revert ergeben Patch, feat Minor, "!" oder
-    "BREAKING CHANGE" Major. docs, chore, ci, test, style, refactor und build heben nicht an; liegen Änderungen außerhalb
-    von docs/ vor, gilt mindestens Patch. Nicht konventionelle Titel zählen als Patch und erscheinen als Warnung.
+  * Merge-Commits zählen nicht, bei Squash zählt der Titel. Ab 1.0.0: fix, perf und revert ergeben Patch, feat Minor, "!" oder
+    "BREAKING CHANGE" Major. Vor 1.0.0 (Entscheidung von Niko, 20.11.2026) verschiebt sich jede Stufe um eins nach unten:
+    feat, fix, perf und revert ergeben Patch, "!" oder "BREAKING CHANGE" Minor. Minor vor 1.0.0 ist damit ein Meilenstein,
+    den der Admin bewusst über dem Vorschlag wählt (zum Beispiel 0.8.0), und Major (1.0.0) kommt nur mit --major-bestaetigt.
+    docs, chore, ci, test, style, refactor und build heben nicht an; liegen Änderungen außerhalb von docs/ vor, gilt
+    mindestens Patch. Nicht konventionelle Titel zählen als Patch und erscheinen als Warnung.
   * Ein Revert hebt den ursprünglichen Commit auf, wenn dieser im selben Bereich liegt (beide zählen dann nicht).
   * Erhöhen ist erlaubt, Senken nie: die Wahl liegt über dem letzten Tag und nicht unter dem Vorschlag. Der Sprung von
     0.y.z auf 1.0.0 oder höher braucht die ausdrückliche Bestätigung (--major-bestaetigt).
@@ -190,11 +193,18 @@ def berechne(commits: Sequence[Commit], pfade: Sequence[str] | None = None) -> E
     return Ergebnis(stufe, uebrig, warnungen, len(aufgehoben))
 
 
+def stufe_vor_1_0(stufe: str) -> str:
+    """Vor 1.0.0 liegt jede Stufe eins tiefer: Funktionen (feat) sind Patch, Brüche Minor. Minor ist dort ein Meilenstein,
+    den der Admin selbst höher wählt, und Major (1.0.0) braucht die ausdrückliche Bestätigung."""
+    return {"major": "minor", "minor": "patch"}.get(stufe, stufe)
+
+
 def vorschlag(basis: Version, ergebnis: Ergebnis) -> Vorschlag:
     if ergebnis.stufe == "keine":
         return Vorschlag(None, "keine", False, ergebnis.warnungen)
-    neu = erhoehen(basis, ergebnis.stufe)
-    return Vorschlag(neu, ergebnis.stufe, basis[0] == 0 and neu[0] >= 1, ergebnis.warnungen)
+    stufe = stufe_vor_1_0(ergebnis.stufe) if basis[0] == 0 else ergebnis.stufe
+    neu = erhoehen(basis, stufe)
+    return Vorschlag(neu, stufe, basis[0] == 0 and neu[0] >= 1, ergebnis.warnungen)
 
 
 def pruefe_wahl(gewaehlt: Version, basis: Version, vorschlag_: Vorschlag, major_bestaetigt: bool = False) -> None:

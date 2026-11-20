@@ -337,11 +337,13 @@ Unterbefehlen `vorschlag`, `anwenden <version>` und `pruefen`. Es gibt eine Vers
    gilt der Start unten.
 2. **Commits** zwischen Basis und Kopf ohne Merge-Commits; bei Squash zählt der Titel. Lesart nach Conventional Commits:
    `Typ(Bereich)!: Text` und Fußzeile `BREAKING CHANGE:`.
-3. **Stufe:** `fix` und `perf` ergeben Patch, `feat` Minor, `!` oder `BREAKING CHANGE` Major. `docs`, `chore`, `ci`, `test`,
+3. **Stufe:** Ab 1.0.0 ergeben `fix` und `perf` Patch, `feat` Minor, `!` oder `BREAKING CHANGE` Major. Vor 1.0.0 liegt jede Stufe eins tiefer
+   (Entscheidung von Niko, 20.11.2026): `feat`, `fix` und `perf` ergeben Patch, `!` oder `BREAKING CHANGE` Minor. Minor vor 1.0.0 ist ein
+   Meilenstein, den der Admin bewusst über dem Vorschlag wählt (zum Beispiel 0.8.0 für ein größeres Paket). `docs`, `chore`, `ci`, `test`,
    `style`, `refactor`, `build` heben nicht an; enthält das Release Änderungen außerhalb von `docs/`, gilt mindestens Patch.
    Nicht konventionelle Titel (heute etwa der von PR #5) zählen als Patch und erscheinen als Warnung mit dem Hinweis, den
    Titel konventionell zu schreiben. Der Major-Sprung von 0.y.z auf 1.0.0 braucht eine ausdrückliche Bestätigung des Admins.
-4. **Vorschlag und Wahl:** Der Vorschlag steht in der Karte. Der Admin darf Patch auf Minor oder Major erhöhen, nie unter den
+4. **Vorschlag und Wahl:** Der Vorschlag steht in der Karte. Der Admin darf Patch auf Minor erhöhen (Meilenstein), 1.0.0 nur mit Bestätigung, nie unter den
    Vorschlag senken und nie unter das letzte Tag; `anwenden` und der Dienst lehnen es ab.
 5. **Versionsdateien** (müssen übereinstimmen, `pruefen` meldet jeden Unterschied): `ui/package.json` und `package-lock.json`
    (Wurzel und `packages[""]`), `desktop/package.json` mit Lock, `voice-core/pyproject.toml`, `host/pyproject.toml`,
