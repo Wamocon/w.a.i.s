@@ -1,6 +1,6 @@
 # Admin-Panel "Werkstatt" für W.A.I.S.: Konzeptentwurf
 
-Stand: 20.11.2026. Status: Entwurf, die Entscheidungen in Abschnitt 7 sind offen. Anlass ist der Wunsch von Niko vom 20.11.2026 nach einem separat aufrufbaren Admin-Panel, in dem sich ein Labortag planen und konfigurieren lässt und das Dashboards und Protokolle enthält.
+Stand: 20.11.2026. Status: Die fünf Entscheidungen in Abschnitt 7 hat Niko am 20.11.2026 getroffen. Anlass ist der Wunsch von Niko vom 20.11.2026 nach einem separat aufrufbaren Admin-Panel, in dem sich ein Labortag planen und konfigurieren lässt und das Dashboards und Protokolle enthält.
 
 Der Bauplan mit Arbeitspaketen, Schnittstelle, Datenmodell, Testplan und der Inventur der vorhandenen Schnittstellen steht in `docs/adminpanel-bauplan.md`.
 
@@ -62,13 +62,13 @@ Hinweise aus der Prüfung:
 - Runbook und Datenschutzentwurf nannten zum Zeitpunkt der Prüfung noch den 28.11. (`betrieb.md`, Abschnitt 15); sie werden mit der Verschiebung auf den 05.12. angepasst.
 - Das Ende des Freezes steht nirgends. Angenommen wird, dass er bis zum Labortag gilt.
 
-## 7. Offene Entscheidungen
+## 7. Entscheidungen (Niko, 20.11.2026)
 
-1. **Variante:** Empfehlung B (eigener schmaler Dienst).
-2. **Zugang:** Empfehlung Admin plus Erlaubnisliste, nur aus den Admin-Quellen.
-3. **Schreibumfang:** Empfehlung nur Freischalten, Sperren, Zählen und Löschwunsch. Alles mit Passwörtern, Seeds, Dienstschlüssel oder root bleibt Skript.
-4. **Datenhaltung:** Empfehlung verdichtete Kennzahlen mit Löschfrist (Vorschlag 90 Tage) statt Rohprotokollen.
-5. **Vorrang nach dem 05.12.** gegenüber Plan C (67 bis 87 Stunden, `docs/persoenliche-zugaenge.md`, Abschnitt 4.3): Empfehlung Phase 1 parallel dazu, Phase 2 vor dem nächsten Labortag.
+1. **Variante:** B, eigener schmaler Dienst.
+2. **Zugang:** Admins mit Erlaubnisliste, nur aus den Admin-Quellen.
+3. **Schreibumfang:** Alles, stufenweise, beginnend mit Laborkonfiguration und Laborerstellung (Termine, Plätze, Fristen, Checkliste, Laborprofile anlegen). Geheimnisse (Startpasswörter, zweite Faktoren mit QR und Seeds, Dienstschlüssel) erscheinen nie im Browser: Ein kleiner Helfer am Server erzeugt sie und übergibt sie nur an die Betreuer.
+4. **Datenhaltung:** verdichtete Kennzahlen mit 30 Tagen Löschfrist statt Rohprotokollen.
+5. **Vorrang nach dem 05.12.** gegenüber Plan C (67 bis 87 Stunden, `docs/persoenliche-zugaenge.md`, Abschnitt 4.3): Phase 1 läuft parallel dazu, Phase 2 ist vor dem nächsten Labortag fertig.
 
 ## 8. Risiken
 
