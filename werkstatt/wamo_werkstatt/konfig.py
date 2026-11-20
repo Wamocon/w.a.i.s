@@ -152,7 +152,7 @@ def aus_umgebung(env: Mapping[str, str] | None = None) -> Konfig:
     aussteller = (env.get("WAMO_WERKSTATT_ISS") or "").strip().rstrip("/") or f"{url}/auth/v1"
     zielgruppe = (env.get("WAMO_WERKSTATT_AUD") or "").strip() or "authenticated"
     host = (env.get("WAMO_WERKSTATT_HOST") or "127.0.0.1").strip()
-    if not (_loopback(host) or host in ("0.0.0.0", "::")):  # nur Loopback, sonst eine Adresse, die der Betreiber bewusst wählt
+    if host != "localhost":
         try:
             ipaddress.ip_address(host)
         except ValueError:
