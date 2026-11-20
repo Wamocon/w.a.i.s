@@ -9,7 +9,7 @@
 # Wiederholbar: Jeder Lauf legt eine neue Sicherung an (iptables-save und ip6tables-save mit Zeitstempel in
 # /var/backups/wamo-firewall, dazu /etc/wamo/admin-quellen, falls vorhanden), aktualisiert Skript und Unit und übernimmt
 # die Regeln per "systemctl reload" (atomar, ohne Lücke). Der Wert in /etc/wamo/firewall.conf (Stufe 1 oder 2) bleibt erhalten.
-# Fehlt /etc/wamo/admin-quellen (Quellen für die Admin-Ports 55446, 55322 und 56543, Entscheidung Q13), legt der Lauf die
+# Fehlt /etc/wamo/admin-quellen (Quellen für die Admin-Ports 55446, 55322, 56543 und 55448, Entscheidung Q13), legt der Lauf die
 # Vorlage wamo-admin-quellen.beispiel an. Sie hat nur Kommentare, deshalb gilt danach weiter das ganze Büro-LAN; eine
 # vorhandene Datei bleibt unverändert.
 #

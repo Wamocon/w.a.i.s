@@ -222,7 +222,7 @@ class ComposeCaddyTests(unittest.TestCase):
 
     def test_port_55447_und_netz_wamo_labor_netz(self):
         self.assertIn('"0.0.0.0:55447:55447"', self.code)
-        self.assertEqual(len(re.findall(r'"0\.0\.0\.0:\d+:\d+"', self.code)), 5)
+        self.assertEqual(len(re.findall(r'"0\.0\.0\.0:\d+:\d+"', self.code)), 6)  # 55443 bis 55447 und seit der Werkstatt 55448 (test_werkstatt_skripte.py)
         self.assertRegex(self.code, r"labor:\n\s+name: wamo-labor-netz\n\s+internal: true\n\s+driver_opts:\n\s+com\.docker\.network\.bridge\.inhibit_ipv4: \"true\""
                                     r"\n\s+ipam:\n\s+config:\n\s+- subnet: 172\.28\.0\.0/24")
         self.assertRegex(self.code, r"labor:\n\s+(#[^\n]*\n\s+)*ipv4_address: 172\.28\.0\.2")  # feste Adresse von Caddy, nur ihr vertraut der Dienst
@@ -438,7 +438,7 @@ class FirewallLaborTests(unittest.TestCase):
             self.assertIn(f":{kette} - [0:0]", out)
         for port in (55443, 55444, 55445):
             self.assertIn(f"-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport {port} -j WAMO-FW-LAN", out)
-        for port in (55446, 55322, 56543):  # Admin-Ports (Q13), eigene Kette, siehe FirewallAdminTests
+        for port in (55446, 55322, 56543, 55448):  # Admin-Ports (Q13, seit der Werkstatt auch 55448), eigene Kette, siehe FirewallAdminTests
             self.assertIn(f"-A WAMO-FW -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport {port} -j WAMO-FW-ADMIN", out)
         self.assertIn("--ctorigdstport 55321 -j WAMO-FW-HTTP", out)
         self.assertNotIn("--ctorigdstport 55447 -j WAMO-FW-LAN", out)  # eigene Kette: Die Adressliste der Plätze ist austauschbar (Frage Q13)
@@ -556,7 +556,7 @@ class FirewallLaborTests(unittest.TestCase):
 FW_EINRICHTEN = SOKRATES2 / "wamo-firewall-einrichten.sh"
 FW_RUECKWEG = SOKRATES2 / "wamo-firewall-rueckweg.sh"
 ADMIN_VORLAGE = SOKRATES2 / "wamo-admin-quellen.beispiel"
-ADMIN_PORTS = (55446, 55322, 56543)
+ADMIN_PORTS = (55446, 55322, 56543, 55448)
 OFFENE_LAN_PORTS = (55443, 55444, 55445)
 
 
@@ -615,7 +615,7 @@ class FirewallAdminTests(unittest.TestCase):
     def test_variablen_und_kette(self):
         text = code(FIREWALL)
         self.assertRegex(text, r'(?m)^LAN_PORTS="55443 55444 55445" ')
-        self.assertRegex(text, r'(?m)^LAN_PORTS_ADMIN="55446 55322 56543" ')
+        self.assertRegex(text, r'(?m)^LAN_PORTS_ADMIN="55446 55322 56543 55448" ')
         self.assertRegex(text, r"(?m)^KETTE_ADMIN=WAMO-FW-ADMIN ")
         self.assertIn('ADMIN_QUELLEN_DATEI="${WAMO_FW_ADMIN_QUELLEN:-/etc/wamo/admin-quellen}"', text)
 
@@ -699,7 +699,7 @@ class FirewallAdminTests(unittest.TestCase):
             zeilen = r.stdout.splitlines()
             self.assertEqual(len(zeilen), 1, r.stdout)
             self.assertTrue(zeilen[0].startswith("WAMO-Firewall trocken (nichts gesetzt): HTTP 55321 nur intern: nein; LAN-Ports 55443 55444 55445; "), zeilen[0])
-            self.assertIn(f"Admin-Ports 55446 55322 56543 {erwartet}", zeilen[0])
+            self.assertIn(f"Admin-Ports 55446 55322 56543 55448 {erwartet}", zeilen[0])
             self.assertIn("Labor-Dienst 55447 aus: 192.168.178.0/24", zeilen[0])
         self.assertEqual(self.aufrufe(), "")
         r = self.lauf(FIREWALL, "start", "--weiss-nicht")
@@ -770,7 +770,7 @@ class FirewallAdminTests(unittest.TestCase):
         r = self.lauf(hier / FW_EINRICHTEN.name, "--trocken", env=env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         out = r.stdout
-        self.assertIn("Admin-Ports 55446 55322 56543 aus: 192.168.178.10 192.168.178.11/32;", out)
+        self.assertIn("Admin-Ports 55446 55322 56543 55448 aus: 192.168.178.10 192.168.178.11/32;", out)
         self.assertIn("Quelle '300.1.1.1'", r.stderr)
         self.assertIn("/etc/wamo/admin-quellen", out)
         self.assertIn("--ctorigdstport 55446 -j WAMO-FW-ADMIN", out)  # Regeln der neuen Fassung (als Liste oder als Unterschied)
