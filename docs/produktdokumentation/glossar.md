@@ -81,6 +81,8 @@ Einträge stehen alphabetisch. Wo ein Begriff ein Modul oder einen Dienst bezeic
 | Tunnel | SSH-Rücktunnel vom Laptop zum Server, damit der Kern den Host am Laptop steuern kann. Je Laptop ein Benutzer `wamo-t-NN`. |
 | TOTP | Zeitbasiertes Einmalpasswort der Authenticator-App (zweiter Faktor). |
 | Unterwegs | Betriebsart ohne Büro-Server, siehe Betriebsart. |
+| Update-Hinweis | Pop-up "Update verfügbar" unten rechts mit "Jetzt aktualisieren" und "Später" (`ui/src/components/UpdateHinweis.tsx`). Es erscheint nur in der Desktop-App, mit angemeldetem Profil und nach einem vom Server angebotenen, von der App bestätigten Update, nie in der Laborsicht. "Später" blendet es für diese Version aus (dieselbe Version erst nach dem nächsten Start oder nach 24 Stunden). |
+| Updates (Einstellungsabschnitt) | Abschnitt in der Gruppe "Konto und Allgemeines" der Einstellungen: zeigt installierte und angebotene Version, "Update installieren" und "Nach Updates suchen" (einmal je 10 Sekunden). Im Browser steht dort nur ein Hinweis mit dem Installer für Windows. |
 | Vorgang | Laufender oder beendeter Auftrag in der Tafel "Vorgänge" der Oberfläche. |
 | Weckwort | "Hey WAMO", vorgesehen für später (Datenbankstandard `wake_word = 'wamo'`). |
 | WMC | WAMOCON. WMC-Rot `#F40E0E` ist die Hauptfarbe des Designs. |

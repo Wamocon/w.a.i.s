@@ -140,7 +140,7 @@ Quellen: `README.md` (Tabelle der Ordner), `CLAUDE.md`, Ordnerstruktur des Repos
 
 | Baustein | Aufgabe | Technik | Läuft auf | Tiefe |
 |---|---|---|---|---|
-| `ui/` | Oberfläche: Präsenzkern, Untertitel, Stimmlinie, Werkzeug-Zeitleiste, Canvas, Freigabekarten, Anmeldung mit zweitem Faktor, Einstellungen in sechs Gruppen (Konto und Allgemeines, Sprache und Stimme, Modelle und Zugänge, Geräte und PC, Gedächtnis und Teilen, Verwaltung nur für Admins) | Next.js 16, React 19 | als Container `wamo-ui` auf dem Server (Browser), in der Desktop-App eingebettet | [Oberfläche: Aufbau der Next.js-Anwendung](technik.md#oberfläche-aufbau-der-nextjs-anwendung) |
+| `ui/` | Oberfläche: Präsenzkern, Untertitel, Stimmlinie, Werkzeug-Zeitleiste, Canvas, Freigabekarten, Anmeldung mit zweitem Faktor, Einstellungen in sechs Gruppen (Konto und Allgemeines mit dem Abschnitt Updates, Sprache und Stimme, Modelle und Zugänge, Geräte und PC, Gedächtnis und Teilen, Verwaltung nur für Admins), Pop-up "Update verfügbar" | Next.js 16, React 19 | als Container `wamo-ui` auf dem Server (Browser), in der Desktop-App eingebettet | [Oberfläche: Aufbau der Next.js-Anwendung](technik.md#oberfläche-aufbau-der-nextjs-anwendung) |
 | `desktop/` | App-Fenster, Markierung am Zielfenster, Tray, Autostart, Update, Host-Umgebung, Live-Bild | Electron 44 | Windows-PC | [PC-Host und Desktop-App](technik.md#pc-host-und-desktop-app) |
 | `host/` | Werkzeuge am Windows-PC mit Risikoklassen und Audit-Log | Python, MCP (FastMCP) | Windows-PC | [PC-Host und Desktop-App](technik.md#pc-host-und-desktop-app) |
 | `voice-core/` | Gespräch, Zugangskontrolle, Rechte, Werkzeuge, Gedächtnis, Entwicklungsaufträge, HTTP-Schnittstellen | Python, Pipecat | Server (Büro) oder PC (Unterwegs) | [Voice-Core: Aufbau des Python-Kerns](technik.md#voice-core-aufbau-des-python-kerns) |
@@ -175,7 +175,7 @@ Der Kern ist der größte Baustein. Die Gruppen unten fassen die Module in `voic
 |---|---|---|
 | Oberfläche | `ui/src/app` (Seiten und `version.json`), `ui/src/components` (Karten, Canvas, Formulare), `ui/src/lib` (Zustand, Nachrichten, Schnittstellen) | Zentrale Zustandsverwaltung und Verbindung in `ui/src/lib/useWamo.ts`, Nachrichtenformate in `ui/src/lib/nachrichten.ts` |
 | Host | `host/wamo_host.py` (Werkzeuge), `windows_control.py`, `uia_control.py` (UI Automation), `office_*.py`, `live_bild.py`, `host_http.py` | Der Host erzwingt Klassen und Freigaben selbst |
-| Desktop | `desktop/main.js`, `preload.js`, `geraet.js`, `host-umgebung.js`, `update.js`, `livebild.js`, `markierung.js` | Brücke `window.wamoDesktop` zwischen Oberfläche und Rechner |
+| Desktop | `desktop/main.js`, `preload.js`, `geraet.js`, `host-umgebung.js`, `update.js`, `livebild.js`, `markierung.js` | Brücke `window.wamoDesktop` zwischen Oberfläche und Rechner. Der Weg des Updates steht in Abschnitt 6.6 |
 | Dienste auf dem Server | Dispatcher mit Kern-Kanal, Release-Dienst, Anker, Freigabe-Dienst, Prüfer-Sandbox, Haus-Proxy, Gerätedienst, Gateway für Fernzugriff, Labor-Dienst | Namen, Pfade und Schalter stehen in der Tabelle "Namensvertrag" in `CLAUDE.md` |
 
 ### 6. Laufzeitsicht
@@ -217,6 +217,16 @@ Quellen: `voice-core/bot.py`, `voice-core/auth_gate.py`, `voice-core/pc_freigabe
 1. Ein Laborprofil durchläuft dieselbe Zugangskontrolle, danach gilt eine feste Pfadliste.
 2. Vor `/start` und jedem Angebot prüft der Kern beim Labor-Dienst Durchlauf und Einwilligung. Fehlt eine von beiden, endet es mit 403, ist der Dienst nicht erreichbar, mit 503.
 3. Die Sitzung kennt nur Zeit, Websuche, Canvas und Ticket-Werkzeuge. Der Betreuer beendet den Durchlauf, die Oberfläche lädt neu.
+
+#### 6.6 Update der Desktop-App
+
+Quellen: `desktop/update.js`, `ui/src/lib/updates.ts`, `ui/src/lib/updatesStore.ts`, `ui/src/lib/updateHinweis.ts`, `ui/src/components/UpdateHinweis.tsx`, `ui/src/components/einstellungen/Updates.tsx`.
+
+1. Der Server hält ein signiertes Manifest bereit (Ablage der Installer-Verteilung, ausgeliefert über `GET /wamo/api/installer`). Die Desktop-App bestätigt Signatur und steigende Version, erst dann gibt es ein Angebot. Die Oberfläche liest das Manifest nie selbst, sie reicht es nur an die App weiter.
+2. Die Oberfläche fragt beim Start, danach alle 30 Minuten und beim Wiederöffnen des Fensters, wenn die letzte Prüfung älter als 10 Minuten ist. Gibt es ein bestätigtes Angebot, erscheint unten rechts das Pop-up "Update verfügbar" mit "Jetzt aktualisieren", "Später" und einem Verweis auf den Abschnitt Updates. Es nimmt keinen Fokus, öffnet keinen Dialog und hält keinen Ton an. Läuft ein Gespräch, sagt der Satz, dass das Update es beendet.
+3. "Später" blendet die Karte für diese Version aus (je Profil gemerkt): dieselbe Version kommt erst nach dem nächsten Start oder nach 24 Stunden wieder, eine neuere sofort.
+4. Der Klick auf "Jetzt aktualisieren" oder im Abschnitt Updates auf "Update installieren" holt erst das Token und gibt es nur an die App. Die App fragt im eigenen Fenster nach, lädt den Installer, prüft ihn und startet danach neu. Es läuft höchstens eine Installation zugleich.
+5. Das Pop-up und die Installation gibt es nur in der Desktop-App und nur mit angemeldetem Profil, nie in der Laborsicht. Im Browser zeigt der Abschnitt Updates einen ruhigen Satz und den Installer für Windows zum Herunterladen.
 
 ### 7. Verteilungssicht
 

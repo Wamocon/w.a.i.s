@@ -486,7 +486,7 @@ So lief die Auslieferung von Version 0.7.0 am 20.11.2026, Schritt für Schritt v
 3. **Kette am Kern.** Schalter setzen, wenn sich welche geändert haben (Abschnitt 11, Punkt 5), dann `umschalten-kern`, `bewaehren 30` und `ausleiten` (Abschnitt 6.2). Bei 0.7.0 lief der Kern danach im Slot `a`.
 4. **Oberfläche.** `python scripts/wamo_ui_sokrates2.py verteilen` (der Kern-Schritt hat `~/wamo-infra` geleert), bauen, `umschalten --trocken`, `umschalten`. Bei 0.7.0 ist die Farbe blau aktiv.
 5. **Labor-Rauchtest.** `wamo_labor_rauchtest.py` mit 20 Proben (Betriebshandbuch, Abschnitt 9) und `wais-deploy rauchtest` bestätigen aktiven Slot, live Farbe und Labor-Dienst.
-6. **Installer bauen** (Abschnitt 8, Schritte 2 bis 4), **signieren** (Schritt 5, Ed25519) und **verteilen** (Schritte 6 bis 8). Bei 0.7.0 liegt der signierte Installer 0.7.0 unter `/var/lib/wamo-verteilung`.
+6. **Installer bauen** (Abschnitt 8, Schritte 2 bis 4), **signieren** (Schritt 5, Ed25519) und **verteilen** (Schritte 6 bis 8). Bei 0.7.0 liegt der signierte Installer 0.7.0 unter `/var/lib/wamo-verteilung`. Danach erkennen die Desktop-Apps das neue Manifest selbst und bieten das Update per Pop-up an (Abschnitt 8, "Updates in der App").
 7. **GitHub-Release abschließen.** Release `v<version>` (bei 0.7.0: `v0.7.0`) mit dem Installer, dann die Dokumentation prüfen (Dokumentationskonzept, Prüfliste vor einem Versionssprung).
 
 Termine nach dem Stand vom 20.11.2026: Freeze für Kern, Migration, Oberfläche und Dienste ab Montag 23.11.2026, Testlabor am 05.12.2026 (verschoben, die Labor-Unterlagen im Repo nennen noch den 28.11.2026). Der Freeze gilt für Kern, Migration, Oberfläche und Dienste am Server (`docs/hausmodelle-und-kikollege.md`).
@@ -536,6 +536,8 @@ Ein Laptop bekommt W.A.I.S. ohne Klonen: `WAIS-Setup-<Version>.exe` (NSIS, pro B
 **Auslieferung.** Der Kern liefert den Installer nur angemeldet aus (`GET /wamo/api/installer`, `GET /wamo/api/installer/datei`): zweiter Faktor, aktives Profil, nie für Laborprofile, höchstens drei ganze Downloads je Stunde und Profil. Die Oberfläche zeigt ihn im Abschnitt "Erste Schritte" (nur im Browser). Die Ablage hält höchstens drei Stände mit Links `aktuell` und `vorher`.
 
 **Updates in der App.** Ab 0.3.0 prüft die App das Manifest des Kerns gegen die fest eingebauten öffentlichen Schlüssel (`desktop/update-schluessel.json`), verlangt eine streng höhere Version und prüft Größe und SHA-256 vor dem Start des Installers (`desktop/update.js`). Liegt am Server eine Schlüsselliste (`/etc/wamo-verteilung/update-schluessel.json`), ist eine gültige Signatur Pflicht. Ein Schlüsselwechsel ist zweistufig: Die nächste Version bringt den neuen öffentlichen Schlüssel mit und wird noch mit dem alten signiert.
+
+**Die App erkennt ein eingesetztes Update selbst (PR 237).** Ist am Server ein neues Manifest eingesetzt (Abschnitt 8, Schritt 7), fragt die Desktop-App danach: beim Start, danach alle 30 Minuten und beim Wiederöffnen des Fensters, wenn die letzte Prüfung älter als 10 Minuten ist. Hat die App Signatur und steigende Version bestätigt, erscheint unten rechts das Pop-up "Update verfügbar" mit "Jetzt aktualisieren" und "Später". "Später" blendet es für diese Version bis zum nächsten Start der App oder 24 Stunden aus, eine neuere Version erscheint sofort. Dasselbe lässt sich in den Einstellungen unter "Konto und Allgemeines", Abschnitt "Updates", von Hand suchen und installieren (Quellen: `ui/src/components/UpdateHinweis.tsx`, `ui/src/lib/updateHinweis.ts`, `ui/src/lib/updatesStore.ts`, `ui/src/components/einstellungen/Updates.tsx`). Im Browser und in der Laborsicht gibt es kein Pop-up. Für die Auslieferung heißt das: Nach `einsetzen` am Server muss niemand die Mitglieder anschreiben, die App meldet sich innerhalb von etwa 30 Minuten, solange ihr Fenster offen ist.
 
 Hinweis: Wechselt die CA, braucht jede Installation ein Update mit dem neuen Fingerabdruck (`WAMO_CA_SHA256` in `desktop/zertifikat.js`).
 
@@ -620,7 +622,7 @@ Die Stufe test baut die Oberfläche in die freie Farbe und ersetzt damit die bis
 
 | Gruppe | Abschnitte | Wer sieht sie |
 | --- | --- | --- |
-| Konto und Allgemeines | "Konto", "Erste Schritte" (Modellzugang, Installer, Prüfliste und Updates), "Darstellung", "Info" | alle, "Erste Schritte" nie in der Laborsicht |
+| Konto und Allgemeines | "Konto", "Erste Schritte" (Modellzugang, Installer und Prüfliste), "Darstellung", "Updates" (neue Version der Desktop-App suchen und installieren, PR 237), "Info" | alle, "Erste Schritte" und "Updates" nie in der Laborsicht; im Browser erklärt "Updates" nur, dass die Desktop-App sich selbst aktualisiert, und bietet den Installer an |
 | Sprache und Stimme | "Mikrofon und Sprache", "Eigene Stimme" | alle, in der Laborsicht nur "Mikrofon und Sprache" |
 | Modelle und Zugänge | "Modellzugang", "GitHub-Zugang", "Verbrauch" | alle, "Verbrauch" nur Admins oder Profile mit eigenem Claude-Code-Token |
 | Geräte und PC | "Geräte und PC-Steuerung", "Fernzugriff" | alle, "Fernzugriff" nur Admins |
@@ -892,6 +894,7 @@ Ausführlich in [Release und Ausrollen](#release-und-ausrollen), Abschnitt 8. F�
 3. `python scripts/wamo_installer_sokrates2.py status` zeigt die Ablage.
 4. Zurück: `python scripts/wamo_installer_sokrates2.py rueckweg --trocken`, dann ohne `--trocken`.
 5. Laborprofile bekommen keinen Download (403 `installer_labor`), je Profil höchstens drei ganze Downloads je Stunde.
+6. Die Desktop-Apps der Mitglieder melden das neue Manifest selbst (Pop-up "Update verfügbar" mit "Jetzt aktualisieren", Prüfung beim Start und alle 30 Minuten, "Später" 24 Stunden je Version). Ob eine App es schon sieht, zeigt Einstellungen, Gruppe "Konto und Allgemeines", Abschnitt "Updates".
 
 ### 17. Fernzugriff und Firewall-Quellen
 

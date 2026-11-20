@@ -17,7 +17,7 @@ W.A.I.S. (WAMOCON's Artificial Intelligence System) ist der Sprachassistent der 
 Diese Dokumentation beschreibt Version 0.7.0 (20.11.2026). Die wichtigsten Änderungen gegenüber 0.6.0:
 
 - **Stimme:** Die Stimmerkennung sperrt nichts mehr. Der Standard ist `beobachten`, die Sperre gibt es nur mit ausdrücklich `WAMO_STIMME_PRUEFUNG=streng`. Mitglieder brauchen für gesprochene PC-Befehle weiter einen eingelernten Abdruck. Es gibt einen Abdruck je Mikrofon (höchstens drei je Person), einen Mikrofontest ohne dass W.A.I.S. spricht, einen Hinweis beim Gerätewechsel und die Mikrofonkette im Protokoll. Ein zweites Sprechermodell läuft nur im Schattenbetrieb.
-- **Einstellungen:** Sechs Gruppen statt einer langen Liste: Konto und Allgemeines, Sprache und Stimme, Modelle und Zugänge, Geräte und PC, Gedächtnis und Teilen, Verwaltung (nur für Admins).
+- **Einstellungen:** Sechs Gruppen statt einer langen Liste: Konto und Allgemeines, Sprache und Stimme, Modelle und Zugänge, Geräte und PC, Gedächtnis und Teilen, Verwaltung (nur für Admins). Neu ist der Abschnitt Updates (in Konto und Allgemeines) und in der Desktop-App das Pop-up "Update verfügbar" (Pull Request 237, beim Stand dieses Dokuments noch nicht gemergt).
 - **Entwicklungsaufträge:** Persönliche GitHub-Zugänge (Plan C, Dispatcher 10), alle 14 Auftragsarten im Kern-Kanal, Aufträge für später speichern, Rückstand für Aufträge an W.A.I.S. selbst (nur Admins, ein Eintrag ist ein Vorschlag und keine Anweisung).
 - **Gespräch und Canvas:** W.A.I.S. erklärt auf Nachfrage, warum etwas nicht ging (Fehlerbuch). Canvas-Reiter lassen sich schließen, dazu kommen Historie, Bilder und Dateien.
 - **Release:** Version 0.7.0 in allen vier Teilen (Oberfläche, Desktop-App, Kern, Host). Die neueste Migration ist 0030.

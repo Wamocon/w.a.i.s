@@ -76,7 +76,7 @@ Quellen: `voice-core/erstanmeldung_api.py`, `ui/src/components/erstanmeldung/Pas
 1. Öffne Einstellungen, dann die Gruppe „Konto und Allgemeines“ und den Abschnitt „Erste Schritte“.
 2. Lies die Punkte: Anmeldung, Kern, Passwort, App-Version, Gerät, Host-Umgebung, Tunnel, Mikrofon, Stimme, Gespräch, Entwicklungsaufträge, Stimmabdruck, PC-Steuerung. Jeder Punkt zeigt „Bereit“, „Offen“ oder „Hinweis“ als Wort, nicht nur als Farbe.
 3. Behebe, was „Offen“ ist. Danach wähle „Erneut prüfen“ (höchstens alle zehn Sekunden).
-4. Zeigt die Liste „Update auf Version … verfügbar“, wähle „Update installieren“. Die App fragt vorher nach und startet danach neu. Seit Version 0.7.0 gibt es dafür auch den eigenen Abschnitt „Updates“ (Gruppe „Konto und Allgemeines“): Dort suchst du nach Updates der Desktop-App und installierst sie.
+4. Hat die App ein neueres Update bestätigt, steht beim Punkt „App-Version“ der Verweis „Zu den Updates“. Installiert wird nicht in dieser Liste, sondern im Abschnitt „Updates“ (siehe 7.3).
 
 Steht beim Laptop „Dein Laptop wartet auf die Freigabe durch einen Admin“, gib deinem Admin Bescheid. Ein Mitglied, das noch kein Gerät hatte, wird beim ersten Binden sofort freigegeben, bei einem Gerätewechsel entscheidet ein Admin.
 
@@ -265,8 +265,8 @@ Seit Version 0.7.0 gliedern sechs Gruppen die Seite. Links steht die Gliederung 
 | Konto und Allgemeines | Konto | E-Mail, Profil, Rolle, Abmelden | alle |
 | | Erste Schritte | Modellzugang in Schritten, Installer, Prüfliste | alle |
 | | Darstellung | Ansicht, Helligkeit, Untertitel | alle |
-| | Info | Version, Kern und Hinweise | alle, Hinweise nur Admins |
-| | Updates | nach Updates der Desktop-App suchen und sie installieren (neu in 0.7.0) | alle |
+| | Updates | nach Updates der Desktop-App suchen und sie installieren (neu in 0.7.0) | alle, nie in der Laborsicht |
+| | Info | Version der Oberfläche, Kern und Hinweise | alle, Hinweise nur Admins |
 | Sprache und Stimme | Mikrofon und Sprache | Mikrofon wählen und testen, „Still starten beim Tippen“, Hören und Sprechen (Soniox oder im Haus) | alle, Laborkonten nur die Mikrofonwahl |
 | | Eigene Stimme | Stimmabdruck einlernen oder löschen | alle, nicht im Labor |
 | Modelle und Zugänge | Modellzugang | API-Schlüssel, Claude-Code-Token, Modus, Modelle je Aufgabe | alle |
@@ -297,7 +297,26 @@ Seit Version 0.7.0 gliedern sechs Gruppen die Seite. Links steht die Gliederung 
 
 Ist „Im Haus“ am Server nicht eingerichtet, zeigt die Seite einen Satz dazu, und W.A.I.S. nutzt Soniox.
 
-Quellen: `ui/src/lib/einstellungenAbschnitte.ts`, `ui/src/components/ModellZugang.tsx`, `ui/src/components/ModellAuswahl.tsx`, `ui/src/components/SprachWahl.tsx`, `voice-core/modellzugang.py`.
+### 7.3 Updates der Desktop-App
+
+Der Abschnitt „Updates“ (Gruppe „Konto und Allgemeines“, vor „Info“, Adresse `#einstellungen/updates`) ersetzt die Installation, die früher in der Prüfliste „Erste Schritte“ stand. Er ist für alle Rollen da, nur Laborkonten sehen ihn nicht.
+
+1. Öffne den Abschnitt „Updates“. Er zeigt „Installiert“ (Version dieser App) und „Auf dem Server“ (angebotene Version) und darunter den Zustand als Wort mit Zeichen: „Aktuell“, „Update verfügbar (Version …)“, „Wird installiert“, „Fehler“ oder „Prüfung nicht möglich“.
+2. Wähle „Nach Updates suchen“, um neu zu prüfen. Das geht einmal je zehn Sekunden und nicht während einer Installation. Die Zeile darunter nennt die Uhrzeit der letzten Prüfung.
+3. Gibt es ein Update, wähle „Update installieren“. Den Knopf gibt es nur, wenn die App das signierte Angebot des Servers bestätigt hat. Bestätige danach die Rückfrage im Fenster der App. Die App lädt den Installer, prüft ihn und startet neu.
+4. Scheitert die Installation, steht der Grund unter „Fehler“. Suche noch einmal mit „Nach Updates suchen“, um es erneut zu versuchen.
+5. Im Browser gibt es nichts zu aktualisieren: Der Abschnitt sagt das in einem Satz und bietet den Installer für Windows zum Laden an. Dasselbe gilt für eine ältere App, die Updates nicht selbst prüfen kann („Prüfung nicht möglich“): Installiere dann einmal den aktuellen Installer von Hand.
+
+Im Abschnitt „Info“ heißt die Zeile jetzt „Version der Oberfläche“. Sie zeigt die Version der Oberfläche (auch im Browser), die installierte App und ihre Updates stehen unter „Updates“.
+
+**Hinweis „Update verfügbar“.** In der Desktop-App erscheint bei einem angemeldeten Profil eine schwebende Karte „Update verfügbar“, sobald der Server eine neuere Version anbietet und die App das Angebot bestätigt hat (nicht im Browser, nie im Labor). Sie nimmt dir nie den Fokus, öffnet keinen Dialog und hält keinen Ton an. W.A.I.S. prüft beim Start, danach alle 30 Minuten und beim Zurückkehren ins Fenster (dort höchstens alle zehn Minuten).
+
+- „Jetzt aktualisieren“ startet die Installation wie im Abschnitt „Updates“ (mit Rückfrage der App). Scheitert sie, bietet die Karte „Erneut versuchen“.
+- „Später“ blendet die Karte für diese Version aus, je Profil, bis zum nächsten Start der App oder für 24 Stunden. Eine neuere Version zeigt die Karte sofort wieder. Auch Escape in der Karte wirkt wie „Später“.
+- Läuft gerade ein Gespräch, steht auf der Karte, dass das Update es beendet.
+- „Zu den Updates“ in der Karte führt zum Abschnitt „Updates“. Ist er offen, zeigt die Seite keine zweite Karte darüber.
+
+Quellen: `ui/src/lib/einstellungenAbschnitte.ts`, `ui/src/components/ModellZugang.tsx`, `ui/src/components/ModellAuswahl.tsx`, `ui/src/components/SprachWahl.tsx`, `voice-core/modellzugang.py`, `ui/src/components/einstellungen/Updates.tsx`, `ui/src/components/UpdateHinweis.tsx`, `ui/src/lib/updates.ts`, `ui/src/lib/updateHinweis.ts`.
 
 ## 8. Büro-Karte und Geräte
 

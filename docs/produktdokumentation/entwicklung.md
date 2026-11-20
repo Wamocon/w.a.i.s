@@ -183,7 +183,7 @@ Die Zahlen sind statisch gezählt (Testdateien und Testfunktionen im Repo, ohne 
 | Skripte `scripts/` | pytest | 33 | 1060 |
 | Infra `infra/` | pytest | 4 | 124 |
 | Gerätedienst `geraete/` | pytest | 11 | 136 |
-| Oberfläche `ui/src/` | `node --test` (Logik) und vitest mit jsdom (Komponenten) | 159 | 1977 (Aufrufe von `it` und `test`) |
+| Oberfläche `ui/src/` | `node --test` (Logik) und vitest mit jsdom (Komponenten) | 163 | 2071 (Aufrufe von `it` und `test`, mit den Tests des Update-Punkts aus Pull Request 237) |
 | Desktop `desktop/` | `node --test` | 17 | 237 (Aufrufe von `it` und `test`) |
 | Datenbank `supabase/tests/` | SQL-Skripte je Migration, von Hand gegen das Schema `wamo_test` | 20 | nicht gezählt, das Ergebnis steht laut README in der letzten Zeile (zum Beispiel "0013 OK") |
 

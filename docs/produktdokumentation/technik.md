@@ -359,7 +359,8 @@ Die Einstellungen sind keine eigene Route. Der Hash (`#einstellungen`, `#einstel
 | `ui/src/lib/erstanmeldung.ts` | Reine Logik der Erstanmeldung: Stand `keine`, `offen`, `abgelaufen`, `erledigt` von `GET /wamo/api/erstanmeldung`. Jede andere Antwort heißt `keine`, durchgesetzt wird im Kern. Passwörter stehen nie in Meldungen oder Speichern. |
 | `ui/src/components/erstanmeldung/` | Geführter Ablauf: `Erstanmeldung.tsx` (Leiste der Schritte), `schritte.tsx` (Liste `ERSTANMELDUNG_SCHRITTE`), `PasswortSchritt.tsx`, `typen.ts`. Merker im `sessionStorage` (`wamo-erstanmeldung-<user_id>`). |
 | `ui/src/components/einrichtung/` | Geführte Einrichtung beim Ausrollen: `EinrichtungsAblauf.tsx`, Schritte Token, API-Schlüssel, Zusammenfassung, Installer (`InstallerDownload.tsx`), Anbindung `fuerErstanmeldung.tsx`. |
-| `ui/src/lib/einrichtung.ts`, `einrichtungSchritte.ts`, `installer.ts`, `installerApi.ts` | Prüfliste (`GET /wamo/api/einrichtung/stand`), Schritteliste, Installer-Download, Updates der App über die Brücke. |
+| `ui/src/lib/einrichtung.ts`, `einrichtungSchritte.ts`, `installer.ts`, `installerApi.ts` | Prüfliste (`GET /wamo/api/einrichtung/stand`), Schritteliste, Installer-Download. In `einrichtung.ts` liegen auch die Bausteine für das Update der App über die Brücke (`updateStandLaden`, `updateInstallieren`), die der Abschnitt Updates und das Pop-up nutzen. |
+| `ui/src/lib/updates.ts`, `updatesStore.ts`, `updateHinweis.ts`, `ui/src/components/einstellungen/Updates.tsx`, `useUpdates.ts`, `useSperre.ts`, `Zeichen.tsx` | Updates der Desktop-App: reine Logik der Ansicht (Zustand, Titel, Satz, Angebot), der gemeinsame Speicher (Stand, Suche, Installation), Logik des Pop-ups, Abschnitt Updates der Einstellungen, Sperre "einmal je 10 Sekunden" und das Zeichen vor einem Zustand (Haken, Ausrufezeichen, Hinweis, Pfeil, Punkte). |
 
 ### 5. Kommandozentrale (Hauptansicht)
 
@@ -368,6 +369,7 @@ Die Hauptansicht setzt `components/WamoAnsicht.tsx` zusammen, den Rahmen mit Rei
 | Pfad (unter `ui/src/components/`) | Aufgabe |
 |---|---|
 | `WamoAnsicht.tsx`, `kommando/Rahmen.tsx`, `kommando/Reiter.tsx` | Zusammenbau, Reiter, Hauptschaltfläche |
+| `UpdateHinweis.tsx` | Pop-up "Update verfügbar" (schwebende Karte unten rechts, am Handy unten über die Breite), eingehängt in `WamoAnsicht.tsx`, nur in der Desktop-App und nie in der Laborsicht. Siehe Abschnitt 7 und 3.4. |
 | `Kopfzeile.tsx`, `Statusleiste.tsx`, `ProfilChip.tsx`, `kommando/Statusanzeige.tsx`, `kommando/ZentraleStatus.tsx` | Wortmarke, Profil, Verbindung, Betriebsart, Modelle, PC-Host, Mikrofon, Uhrzeit, Zahnrad zu den Einstellungen |
 | `kommando/PraesenzKern.tsx`, `Orb.tsx`, `kommando/KernRinge.tsx`, `kommando/Kernbereich.tsx` | Lichtkugel (WebGL, ein Fragment-Shader) in HUD-Ringen (SVG). Fehlt WebGL, zeigt das Stylesheet eine Kugel aus einem Farbverlauf. |
 | `VoiceLine.tsx`, `kommando/Gespraech.tsx`, `LiveCaption.tsx`, `Verlauf.tsx` | Stimmlinie, Block Gespräch, Live-Untertitel, Verlauf (`role="log"`, nur fertige Züge) |
@@ -402,9 +404,10 @@ Die Adresse steht im Hash. Gruppen und Abschnitte haben getrennte Kennungen (`al
 | Gruppe (ID) | Abschnitt (ID) | Titel | Sichtbar | Komponente oder Logik |
 |---|---|---|---|---|
 | Konto und Allgemeines (`allgemein`) | `konto` | Konto | alle | `KontoAbschnitt` in `Abschnitte.tsx` |
-| | `start` | Erste Schritte | alle, nie in der Laborsicht | `ErsteSchritte.tsx`, `einrichtung/` (Modellzugang, Installer, Prüfliste und Updates der App) |
+| | `start` | Erste Schritte | alle, nie in der Laborsicht | `ErsteSchritte.tsx`, `einrichtung/` (Modellzugang, Installer und Prüfliste). Die Zeile "App-Version" der Prüfliste hat keinen Installier-Knopf mehr, sie verweist nur auf den Abschnitt Updates. |
 | | `darstellung` | Darstellung | alle | `DarstellungAbschnitt` in `Abschnitte.tsx`, `kommando/darstellung.ts` |
-| | `info` | Info | alle | `InfoAbschnitt` in `Abschnitte.tsx` (Version aus `WAMO_VERSION`) |
+| | `updates` | Updates | alle, nie in der Laborsicht | `Updates.tsx` (`UpdatesAbschnitt`), `useUpdates.ts`, `lib/updates.ts`, `lib/updatesStore.ts`. In der Desktop-App: installierte Version, Version auf dem Server, Zustand mit Zeichen, Titel und Satz, "Update installieren" (nur nach Bestätigung durch die App) und "Nach Updates suchen". Im Browser: ein Satz, dass die Desktop-App selbst aktualisiert, und der Installer für Windows. |
+| | `info` | Info | alle | `InfoAbschnitt` in `Abschnitte.tsx` (Zeile "Version der Oberfläche" aus `WAMO_VERSION`, auch im Browser; die installierte App steht im Abschnitt Updates) |
 | Sprache und Stimme (`sprache-stimme`) | `sprache` | Mikrofon und Sprache | alle, auch Laborsicht (dort nur Mikrofon wählen) | `SpracheAbschnitt` in `Abschnitte.tsx`, `MikrofonTest.tsx` (Mikrofontest in Sprache und Ton ohne W.A.I.S., Ergebnis je Gerät und Person im Browser), `SprachWahl.tsx` |
 | | `stimme` | Eigene Stimme | alle | `StimmeAbschnitt.tsx`: Liste der eingelernten Mikrofone (ein Abdruck je Mikrofon, höchstens drei), Einlernen, Löschen einzeln oder alle |
 | Modelle und Zugänge (`zugaenge`) | `modellzugang` | Modellzugang | alle | `ModellZugang.tsx` mit `ModellWahl.tsx`, `ModellAuswahl.tsx`, `SprachWahl.tsx`, `SchluesselFormular.tsx` |
@@ -417,7 +420,16 @@ Die Adresse steht im Hash. Gruppen und Abschnitte haben getrennte Kennungen (`al
 | Verwaltung (`verwaltung`) | `mitglieder` | Neue Mitglieder | nur Admins | `NeueMitglieder.tsx`, `GithubRechte.tsx`, `lib/mitgliederUebersicht.ts` |
 | | `aenderungen` | Änderungen | nur Admins | `Aenderungen.tsx`, `AenderungenFreigabe.tsx`, `lib/aenderungen.ts` |
 
-Ein weiterer Abschnitt "Updates" (Updates der Desktop-App suchen und installieren) in der Gruppe Konto und Allgemeines gehört zu 0.7.0, liegt zum Stand dieser Dokumentation aber noch als offener Pull Request vor. Er steht deshalb nicht in der Liste `ABSCHNITT_IDS` von `main`. Die Brücke dafür, `window.wamoDesktop.version` und `update`, gibt es bereits (Abschnitt 3.4), bisher bedient sie der Schritt Installer in "Erste Schritte".
+Der Abschnitt `updates` (Updates der Desktop-App suchen und installieren) steht in der Gruppe Konto und Allgemeines vor `info`. Er kam mit dem Pull Request 237 und ist zum Stand dieser Dokumentation noch nicht in `main`. Vorher war das Update nur ein Punkt der Prüfliste in "Erste Schritte".
+
+Stand, Suche und Installation liegen in einem gemeinsamen Speicher des Fensters (`ui/src/lib/updatesStore.ts`). Ihn teilen sich der Abschnitt Updates und das Pop-up `UpdateHinweis` (`ui/src/components/UpdateHinweis.tsx`), damit es nur eine Quelle, höchstens eine Suche und höchstens eine Installation zugleich gibt. Ablauf und Schutzregeln:
+
+- Eine Brücke gibt es nur in der Desktop-App (`window.wamoDesktop.update`). Die Oberfläche holt das signierte Manifest beim Kern und reicht es nur an die App weiter, sie liest es nie selbst. Ein Angebot gibt es erst, wenn die App Signatur und steigende Version bestätigt hat (`angebotAus` in `lib/updates.ts`).
+- Das Token holt erst der Klick auf "Update installieren" und es geht nur an die App. Es steht in keinem Zustand, in keinem Satz und in keinem Speicher.
+- Nach einem gestarteten Update läuft nichts mehr: keine weitere Suche, keine zweite Installation, denn die App beendet sich. Eine neue Suche löscht den Fehler der letzten Installation. "Nach Updates suchen" geht einmal je 10 Sekunden.
+- Das Pop-up "Update verfügbar" hängt in `WamoAnsicht.tsx`, nur in der Desktop-App, nur mit angemeldetem Profil und nie in der Laborsicht. Es nimmt keinen Fokus, öffnet keinen Dialog und hält keinen Ton an. Läuft ein Gespräch, sagt der Satz, dass das Update es beendet. Im Abschnitt Updates selbst erscheint keine zweite Karte.
+- Prüftakt des Pop-ups: beim Start, danach alle 30 Minuten (der Takt überspringt eine Prüfung, wenn die letzte jünger als 15 Minuten ist) und bei Rückkehr ins Fenster, wenn die letzte Prüfung älter als 10 Minuten ist. Eine Störung bei einer Prüfung im Hintergrund lässt ein bestätigtes Angebot nicht verschwinden.
+- "Später" blendet das Pop-up für diese Version aus. Gemerkt wird es je Profil im `localStorage` (Schlüssel `wamo.update.spaeter.<user_id>`, ein Eintrag mit Version, Zeitpunkt und Kennung des App-Starts). Dieselbe Version erscheint erst nach dem nächsten Start der App oder nach 24 Stunden wieder, eine neuere sofort. Fehlt der Speicher oder wirft er, gilt ein Rückfall im Arbeitsspeicher und das Pop-up erscheint nach dem nächsten Start wieder.
 
 ### 8. Logik unter `ui/src/lib/` nach Themen
 
@@ -470,8 +482,8 @@ In der Desktop-App gibt es `window.wamoDesktop` (Typ in `ui/src/lib/useWamo.ts`)
 | `npm run dev` | Entwicklungsserver |
 | `npm run build`, `npm start` | Produktions-Build und Start |
 | `npm run lint` | ESLint 9 mit `eslint-config-next` |
-| `npm test` | Logiktests: `node --test "src/**/*.test.ts"` (Node lädt TypeScript selbst, kein DOM). 88 Dateien. |
-| `npm run test:komponenten` | `vitest run` in jsdom für `*.comp.test.tsx` (Testing Library, user-event). 71 Dateien. |
+| `npm test` | Logiktests: `node --test "src/**/*.test.ts"` (Node lädt TypeScript selbst, kein DOM). 90 Dateien (mit Pull Request 237). |
+| `npm run test:komponenten` | `vitest run` in jsdom für `*.comp.test.tsx` (Testing Library, user-event). 73 Dateien (mit Pull Request 237). |
 
 Zwei getrennte Systeme, damit sich beide nicht stören (Begründung im Kopf von `ui/vitest.config.ts`). Testdateien liegen neben dem Code und gehören nie zum Build. Strategie insgesamt: [Qualität und Tests](entwicklung.md#qualität-und-tests).
 
@@ -672,7 +684,7 @@ Das Live-Bild lässt sich ausdrücklich nicht über die Brücke schalten: nur Tr
 
 `desktop/update.js` (nur installierte App):
 
-1. Die Oberfläche holt beim Kern das Manifest (`GET /wamo/api/installer`) und gibt Text und Signatur an die App.
+1. Die Oberfläche holt beim Kern das Manifest (`GET /wamo/api/installer`) und gibt Text und Signatur an die App. Das geschieht im Abschnitt Updates der Einstellungen und im Pop-up "Update verfügbar" (Abschnitt 7 der Oberfläche), nicht mehr in der Prüfliste der Ersten Schritte.
 2. Die App vertraut dem Kern nicht. Sie prüft die Ed25519-Signatur über die exakten Bytes des Manifests gegen die fest eingebauten öffentlichen Schlüssel (`desktop/update-schluessel.json`), erst danach liest sie das JSON.
 3. Ein Update gibt es nur bei streng steigender Version, nach einer Rückfrage im Hauptprozess, über eine Verbindung, deren Kette vor dem ersten gesendeten Byte zur WAMO-CA geprüft ist, und nur, wenn Größe und SHA-256 der geladenen Datei genau zum signierten Manifest passen. Dann startet der Installer.
 4. Manifest `aktuell.json`: genau die Felder `v` (1), `produkt` (`wais-desktop`), `version`, `datei`, `groesse`, `sha256`, `bauzeit`, `commit`; höchstens 4 KB, UTF-8 ohne BOM. Signatur `aktuell.json.sig`: eine Zeile Base64 über 64 Byte.
