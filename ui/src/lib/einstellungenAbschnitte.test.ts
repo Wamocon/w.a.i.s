@@ -48,7 +48,7 @@ test("sechs Gruppen, jeder Abschnitt steht in genau einer, in der vorgesehenen R
   assert.deepEqual(
     GRUPPEN.map((g) => [g.id, g.abschnitte]),
     [
-      ["allgemein", ["konto", "start", "darstellung", "info"]],
+      ["allgemein", ["konto", "start", "darstellung", "updates", "info"]],
       ["sprache-stimme", ["sprache", "stimme"]],
       ["zugaenge", ["modellzugang", "github", "verbrauch"]],
       ["geraete-pc", ["geraete", "fernzugriff"]],
@@ -83,7 +83,7 @@ test("Mitglied und unbekannte Rolle: fünf Gruppen ohne Verwaltung, nur die offe
     assert.deepEqual(abschnittIds("zugaenge", { rolle }), ["modellzugang", "github"], `Rolle ${rolle}`);
     assert.deepEqual(abschnittIds("geraete-pc", { rolle }), ["geraete"], `Rolle ${rolle}`);
     assert.deepEqual(abschnittIds("inhalte", { rolle }), ["teilen"], `Rolle ${rolle}`);
-    assert.deepEqual(ids(rolle), ["konto", "start", "darstellung", "info", "sprache", "stimme", "modellzugang", "github", "geraete", "teilen"]);
+    assert.deepEqual(ids(rolle), ["konto", "start", "darstellung", "updates", "info", "sprache", "stimme", "modellzugang", "github", "geraete", "teilen"]);
   }
 });
 
@@ -355,7 +355,7 @@ test("Laborsicht aus (oder nicht angegeben): die Gruppen und Abschnitte je Rolle
 
 test("Laborsicht: ein Hash auf eine gesperrte Gruppe oder einen gesperrten Abschnitt führt zur Mikrofonwahl oder zur Liste", () => {
   const erlaubt = gruppenFuer({ rolle: "mitglied", labor: true });
-  const gesperrt = ["modellzugang", "geraete", "konto", "info", "start", "stimme", "zugaenge", "geraete-pc", "allgemein", "verwaltung"];
+  const gesperrt = ["modellzugang", "geraete", "konto", "info", "start", "updates", "stimme", "zugaenge", "geraete-pc", "allgemein", "verwaltung"];
   for (const ziel of gesperrt) {
     const hash = `#einstellungen/${ziel}`;
     assert.equal(wirksameGruppe(parseHash(hash), erlaubt, true), "sprache-stimme", hash);
@@ -390,7 +390,8 @@ test("Abschnitt Erste Schritte: direkt nach Konto, für jede Rolle, nie in der L
     assert.equal(liste.indexOf("start"), liste.indexOf("konto") + 1, `Rolle ${rolle}`);
   }
   const start = ABSCHNITTE.find((a) => a.id === "start");
-  assert.deepEqual({ titel: start?.titel, kurz: start?.kurz }, { titel: "Erste Schritte", kurz: "Modellzugang, Installer, Prüfliste und Updates" });
+  // die Updates haben einen eigenen Abschnitt (siehe unten), die Ersten Schritte nennen sie nicht mehr als ihren Inhalt
+  assert.deepEqual({ titel: start?.titel, kurz: start?.kurz }, { titel: "Erste Schritte", kurz: "Modellzugang, Installer und Prüfliste" });
   assert.equal(start?.nurAdmin, undefined);
   assert.equal(start?.laborSicht, undefined);
   for (const rolle of ["admin", "mitglied", null] as const) {
@@ -401,6 +402,39 @@ test("Abschnitt Erste Schritte: direkt nach Konto, für jede Rolle, nie in der L
   assert.equal(wirksameGruppe(parseHash("#einstellungen/start"), gruppenFuer({ rolle: "mitglied", labor: true }), true), "sprache-stimme");
   // ohne Ziel in der Adresse bleibt Konto und Allgemeines die erste Gruppe
   assert.equal(wirksameGruppe({ offen: true, gruppe: null, abschnitt: null }, gruppenFuer({ rolle: "mitglied" }), true), "allgemein");
+});
+
+test("Abschnitt Updates: für jede Rolle und mit oder ohne Token zwischen Darstellung und Info, nie in der Laborsicht, mit eigenem Hash", () => {
+  for (const o of [{ rolle: "admin" }, { rolle: "mitglied" }, { rolle: null }, { rolle: "mitglied", token: true }] as const) {
+    const liste = abschnittIds("allgemein", o) ?? [];
+    assert.equal(liste.indexOf("updates"), liste.indexOf("darstellung") + 1, JSON.stringify(o));
+    assert.equal(liste.indexOf("info"), liste.indexOf("updates") + 1, JSON.stringify(o));
+  }
+  const updates = ABSCHNITTE.find((a) => a.id === "updates");
+  assert.deepEqual({ titel: updates?.titel, kurz: updates?.kurz }, { titel: "Updates", kurz: "Neue Version der Desktop-App suchen und installieren" });
+  assert.equal(updates?.nurAdmin, undefined);
+  assert.equal(updates?.auchMitToken, undefined);
+  assert.equal(updates?.laborSicht, undefined);
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    assert.ok(!abschnitteFuer({ rolle, labor: true }).some((a) => a.id === "updates"), `Laborsicht ${rolle}`);
+  }
+  assert.deepEqual(gruppenIds({ rolle: "mitglied", labor: true }), ["sprache-stimme"]);
+  assert.deepEqual(parseHash("#einstellungen/updates"), { offen: true, gruppe: "allgemein", abschnitt: "updates" });
+  assert.deepEqual(parseHash("#Einstellungen/Updates/"), { offen: true, gruppe: "allgemein", abschnitt: "updates" });
+  assert.equal(hashFuer("updates"), "#einstellungen/updates");
+  // die alte Adresse der Ersten Schritte bleibt gültig und führt nicht zu den Updates
+  assert.deepEqual(parseHash("#einstellungen/start"), { offen: true, gruppe: "allgemein", abschnitt: "start" });
+  // im Labor führt ein Hash auf "updates" nie in den Abschnitt
+  assert.equal(wirksameGruppe(parseHash("#einstellungen/updates"), gruppenFuer({ rolle: "admin", labor: true }), true), "sprache-stimme");
+  assert.equal(wirksameGruppe(parseHash("#einstellungen/updates"), gruppenFuer({ rolle: "mitglied" }), false), "allgemein");
+  assert.equal(sprungAbschnitt(parseHash("#einstellungen/updates"), gruppenFuer({ rolle: "mitglied" }).find((g) => g.id === "allgemein")), "updates");
+});
+
+test("Kurzzeile von Konto und Allgemeines nennt die Updates, für jede Rolle", () => {
+  for (const rolle of ["admin", "mitglied", null] as const) {
+    const kurz = gruppenFuer({ rolle }).find((g) => g.id === "allgemein")?.kurz;
+    assert.equal(kurz, "Konto, erste Schritte, Darstellung, Updates, Version und Hinweise", `Rolle ${rolle}`);
+  }
 });
 
 test("Abschnitt Eigene Stimme: für jede Rolle da, in der Laborsicht nicht, mit eigenem Hash", () => {

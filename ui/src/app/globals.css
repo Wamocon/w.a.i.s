@@ -23,6 +23,7 @@
 @import "../components/einrichtung/einrichtung.css"; /* Geführter Ablauf beim Ausrollen und Installer: Regeln mit Präfix .ea- */
 @import "../components/kommando/bueroKarte.css"; /* Büro-Karte (Radialansicht der Bürogeräte): Regeln mit Präfix .bk- */
 @import "../components/abmeldenRueckfrage.css"; /* Rückfrage vor dem Abmelden (Laborkonten): Regeln mit Präfix .ab- */
+@import "../components/updateHinweis.css"; /* Pop-up "Update verfügbar" der Desktop-App: Regeln mit Präfix .uh- */
 
 /* =====================================================================
    WAMO Kommandozentrale im WMC-Corporate-Design (WAMOCON GmbH)

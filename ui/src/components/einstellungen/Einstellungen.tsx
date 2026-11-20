@@ -39,6 +39,7 @@ import { GedaechtnisAbschnitt } from "./Gedaechtnis";
 import { NeueMitglieder } from "./NeueMitglieder";
 import { GithubRechte } from "./GithubRechte";
 import { ErsteSchritteAbschnitt } from "./ErsteSchritte";
+import { UpdatesAbschnitt } from "./Updates";
 
 /**
  * Die Einstellungsseite: eine Ansicht der Hauptseite, kein eigener Pfad (siehe lib/einstellungenAbschnitte.ts). Sechs Gruppen
@@ -137,6 +138,8 @@ function AbschnittInhalt({ id, aktionen, email, onAbmelden, labor, admin }: Inha
       return <ErsteSchritteAbschnitt />;
     case "darstellung":
       return <DarstellungAbschnitt />;
+    case "updates":
+      return <UpdatesAbschnitt />;
     case "info":
       return <InfoAbschnitt admin={admin} />;
     case "sprache":

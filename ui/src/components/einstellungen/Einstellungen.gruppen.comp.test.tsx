@@ -10,6 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 vi.mock("@/lib/supabase", () => ({ getSupabase: () => null, accessToken: async () => null }));
 vi.mock("./ErsteSchritte", () => ({ ErsteSchritteAbschnitt: () => <p>Platzhalter Erste Schritte</p> }));
+vi.mock("./Updates", () => ({ UpdatesAbschnitt: () => <p>Platzhalter Updates</p> }));
 vi.mock("./Geraete", () => ({ GeraeteAbschnitt: () => <p>Platzhalter Geräte</p> }));
 vi.mock("./Fernzugriff", () => ({ Fernzugriff: () => <p>Platzhalter Fernzugriff</p> }));
 vi.mock("./Gedaechtnis", () => ({ GedaechtnisAbschnitt: () => <p>Platzhalter Gedächtnis</p> }));
@@ -93,6 +94,7 @@ describe("Gliederung: nur die Gruppen", () => {
       "Verwaltung",
     ]);
     const kurz = (name: string) => gruppenLinks().find((l) => l.textContent?.startsWith(name))?.querySelector(".ez-nav-kurz")?.textContent;
+    expect(kurz("Konto und Allgemeines")).toBe("Konto, erste Schritte, Darstellung, Updates, Version und Hinweise");
     expect(kurz("Sprache und Stimme")).toBe("Mikrofon, Hören und Sprechen, eigene Stimme");
     expect(kurz("Modelle und Zugänge")).toBe("Schlüssel und Modelle, GitHub-Zugang, Verbrauch");
     expect(kurz("Verwaltung")).toBe("Neue Mitglieder und GitHub-Rechte, Änderungen an W.A.I.S.");
@@ -103,6 +105,7 @@ describe("Gliederung: nur die Gruppen", () => {
     await geladen();
     const titel = gruppenLinks().map((l) => l.querySelector(".ez-nav-titel")?.textContent);
     expect(titel).toEqual(["Konto und Allgemeines", "Sprache und Stimme", "Modelle und Zugänge", "Geräte und PC", "Gedächtnis und Teilen"]);
+    expect(gruppenLinks()[0].querySelector(".ez-nav-kurz")?.textContent).toBe("Konto, erste Schritte, Darstellung, Updates, Version und Hinweise");
     expect(gruppenLinks()[2].querySelector(".ez-nav-kurz")?.textContent).toBe("Schlüssel und Modelle, GitHub-Zugang");
     expect(gruppenLinks()[4].querySelector(".ez-nav-kurz")?.textContent).toBe("Geteilte Dokumente");
   });
@@ -172,7 +175,7 @@ describe("Eine Gruppe: Überschriften und Bereiche", () => {
     await geladen();
     expect(ueberschrift(2, "Einstellungen")).toBeTruthy();
     expect(ueberschrift(3, "Konto und Allgemeines")).toBeTruthy();
-    for (const abschnitt of ["Konto", "Erste Schritte", "Darstellung", "Info"]) expect(ueberschrift(4, abschnitt)).toBeTruthy();
+    for (const abschnitt of ["Konto", "Erste Schritte", "Darstellung", "Updates", "Info"]) expect(ueberschrift(4, abschnitt)).toBeTruthy();
     // Blöcke der Abschnitte tragen eine Stufe mehr als der Abschnitt
     for (const block of ["Angemeldet", "Helligkeit", "Ansicht", "Untertitel", "Diese Version", "Kern"]) expect(ueberschrift(5, block)).toBeTruthy();
     // genau eine Überschrift der Stufe 3 in der Gruppe, nie eine übersprungene Stufe
@@ -183,7 +186,7 @@ describe("Eine Gruppe: Überschriften und Bereiche", () => {
   it("jeder Abschnitt ist ein eigener Bereich, benannt nach seiner Überschrift", async () => {
     zeige("#einstellungen/allgemein");
     await geladen();
-    for (const abschnitt of ["Konto", "Erste Schritte", "Darstellung", "Info"]) {
+    for (const abschnitt of ["Konto", "Erste Schritte", "Darstellung", "Updates", "Info"]) {
       expect(screen.getByRole("region", { name: abschnitt })).toBeTruthy();
     }
     expect(screen.getByRole("region", { name: "Konto und Allgemeines" })).toBeTruthy();
@@ -199,6 +202,33 @@ describe("Eine Gruppe: Überschriften und Bereiche", () => {
       "Eigenes Token für Entwicklungsaufträge",
       "Kontingent deines Claude-Abos",
     ]);
+  });
+
+  it.each([
+    ["Mitglied", false],
+    ["Admin", true],
+  ])("%s: der Abschnitt Updates steht zwischen Darstellung und Info, mit seiner Kurzzeile", async (_rolle, admin) => {
+    zeige("#einstellungen/allgemein", { admin });
+    await geladen();
+    expect(Array.from(document.querySelectorAll(".ez-abschnitt-titel")).map((h) => h.textContent)).toEqual([
+      "Konto",
+      "Erste Schritte",
+      "Darstellung",
+      "Updates",
+      "Info",
+    ]);
+    expect(within(screen.getByRole("region", { name: "Updates" })).getByText("Platzhalter Updates")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Updates" }).querySelector(".ez-abschnitt-kurz")?.textContent).toBe(
+      "Neue Version der Desktop-App suchen und installieren",
+    );
+  });
+
+  it("Info nennt die Version der Oberfläche, die installierte App steht nur bei den Updates", async () => {
+    zeige("#einstellungen/allgemein");
+    await geladen();
+    const info = within(screen.getByRole("region", { name: "Info" }));
+    expect(info.getByText("Version der Oberfläche", { selector: "dt" })).toBeTruthy();
+    expect(info.queryByText("Installiert")).toBeNull();
   });
 
   it("zeigt nur die Abschnitte, die diese Rolle sieht: kein Verbrauch ohne Admin und ohne Token", async () => {
@@ -244,6 +274,7 @@ describe("Alte Adressen der Abschnitte", () => {
     ["github", "zugaenge", "Modelle und Zugänge", "GitHub-Zugang"],
     ["darstellung", "allgemein", "Konto und Allgemeines", "Darstellung"],
     ["info", "allgemein", "Konto und Allgemeines", "Info"],
+    ["updates", "allgemein", "Konto und Allgemeines", "Updates"],
     ["teilen", "inhalte", "Gedächtnis und Teilen", "Teilen"],
   ])("#einstellungen/%s öffnet die Gruppe %s und setzt den Fokus auf die Überschrift des Abschnitts", async (abschnitt, gruppe, gruppenTitel, abschnittsTitel) => {
     zeige(`#einstellungen/${abschnitt}`);
@@ -295,16 +326,17 @@ describe("Alte Adressen der Abschnitte", () => {
 });
 
 describe("Sprungleiste", () => {
-  it("steht in einer Gruppe mit vier Abschnitten, benannt nach der Gruppe, und führt zu jedem", async () => {
+  it("steht in einer Gruppe mit fünf Abschnitten, benannt nach der Gruppe, und führt zu jedem", async () => {
     zeige("#einstellungen/allgemein");
     await geladen();
     const leiste = screen.getByRole("navigation", { name: "Abschnitte in Konto und Allgemeines" });
     const links = within(leiste).getAllByRole("link");
-    expect(links.map((l) => l.textContent)).toEqual(["Konto", "Erste Schritte", "Darstellung", "Info"]);
+    expect(links.map((l) => l.textContent)).toEqual(["Konto", "Erste Schritte", "Darstellung", "Updates", "Info"]);
     expect(links.map((l) => l.getAttribute("href"))).toEqual([
       "#einstellungen/konto",
       "#einstellungen/start",
       "#einstellungen/darstellung",
+      "#einstellungen/updates",
       "#einstellungen/info",
     ]);
   });

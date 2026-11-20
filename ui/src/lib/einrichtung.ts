@@ -18,6 +18,10 @@ import type { KernJson, TunnelZustand } from "./geraet.ts";
 // weiter. Ein Update-Angebot entsteht ausschließlich, wenn die App Signatur und steigende Version bestätigt hat (ok und neuer).
 // Alles, was von Kern und App kommt, wird streng gelesen; angezeigt wird nur Text, ohne Steuerzeichen, höchstens 300 Zeichen.
 
+const UHRZEIT = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
+/** Uhrzeit der letzten Prüfung, deutsch (14:05); für die Zeile unter "Erneut prüfen" und "Nach Updates suchen". */
+export const uhrzeitText = (zeit: Date): string => UHRZEIT.format(zeit);
+
 export const PRUEF_ABSTAND_MS = 10_000; // "Erneut prüfen" höchstens einmal je 10 Sekunden
 export const TEXT_MAX = 300;
 export const FRIST_BRUECKE_MS = 15_000; // so lange wartet die Prüfliste auf eine Antwort der App
@@ -265,14 +269,9 @@ export function erneutWartezeit(letzte: number | null, jetzt: number): number {
   return letzte === null ? 0 : drosselWartezeit(jetzt - letzte, PRUEF_ABSTAND_MS);
 }
 
-/** Punkt App-Version nach dem Versuch zu installieren: abgebrochen bleibt alles, sonst kein Knopf mehr. */
-export function nachInstallation(alt: Punkt, erg: UpdateInstallation): Punkt {
-  if (!erg.ok && erg.abgebrochen) return alt;
-  if (erg.ok) return punkt(alt.id, "hinweis", "Die App installiert das Update und startet danach neu.");
-  return punkt(alt.id, "rot", erg.text);
-}
-
-/** Update starten. Das Token wird erst hier geholt und geht nur an die App, nie in ein Ergebnis. Wirft nie. */
+/**
+ * Update starten (im Abschnitt Updates, lib/updates.ts und components/einstellungen/Updates.tsx; die Prüfliste der Ersten Schritte
+ * verweist nur dorthin). Das Token wird erst hier geholt und geht nur an die App, nie in ein Ergebnis. Wirft nie. */
 export async function updateInstallieren(o: {
   update: UpdateBruecke | undefined;
   angebot: UpdateAngebot;
@@ -338,6 +337,14 @@ async function updateStandHolen(b: PrueflisteBruecke, kernJson: KernJson, frist:
   const anfrage = { manifest: manifest.manifest, signatur: manifest.signatur };
   const ergebnis = pruefeUpdatePruefung(await mitFrist(() => update.pruefen(anfrage), frist));
   return { art: "geprueft", manifest, ergebnis };
+}
+
+/**
+ * Nur der Stand der Updates, für den Abschnitt Updates der Einstellungen: dieselbe Quelle und dieselbe Bestätigung durch die App
+ * wie der Punkt App-Version der Prüfliste. Wirft nie; was nicht antwortet, steht als Stand "unbekannt" oder als abgelehntes Ergebnis da.
+ */
+export function updateStandLaden(o: { kernJson: KernJson; bruecke: PrueflisteBruecke; fristMs?: number }): Promise<UpdateStand> {
+  return updateStandHolen(o.bruecke, o.kernJson, o.fristMs ?? FRIST_BRUECKE_MS);
 }
 
 async function appStandHolen(b: PrueflisteBruecke, kernJson: KernJson, frist: number): Promise<AppStand> {

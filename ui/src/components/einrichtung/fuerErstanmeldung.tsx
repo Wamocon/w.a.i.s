@@ -16,8 +16,8 @@ import { EINRICHTUNG_SCHRITTE, type EinrichtungsSchritt } from "./schritte";
  *   token, api        nur wenn schrittSichtbar es erlaubt (nicht bei Admin-Zwang auf Hausmodelle) und noch nichts hinterlegt ist,
  *                     damit ein Neuladen mitten im Ablauf nicht noch einmal fragt. Ist der Stand nicht lesbar: zeigen.
  *   zusammenfassung   immer.
- *   installer         nur im Browser; in der Desktop-App ist W.A.I.S. schon installiert, Updates kommen dort über die Prüfliste
- *                     in "Erste Schritte".
+ *   installer         nur im Browser; in der Desktop-App ist W.A.I.S. schon installiert, Updates kommen dort über den Abschnitt
+ *                     "Updates" der Einstellungen.
  * Laborprofile sehen den Ablauf nie (die Tür fragt für sie keine Erstanmeldung ab, components/LoginGate.tsx).
  *
  * Nach Abmelden oder in einem neuen Tab läuft der Ablauf nicht weiter (der Merker gilt nur im selben Tab): Alle Schritte bleiben in

@@ -374,6 +374,8 @@ export const DarstellungAbschnitt = memo(function DarstellungAbschnitt() {
 });
 
 // ---------- Info ----------
+// Die Version hier ist die der Oberfläche (Build, auch im Browser). Die installierte Desktop-App und ihre Updates stehen im Abschnitt
+// Updates (Updates.tsx), damit dieselbe Zahl nicht an zwei Stellen unter demselben Namen steht.
 export const InfoAbschnitt = memo(function InfoAbschnitt({ admin }: { admin: boolean }) {
   const gewaehlt = useBetriebsart();
   const betrieb = useSelect(wamo, (s) => s.betrieb);
@@ -387,7 +389,7 @@ export const InfoAbschnitt = memo(function InfoAbschnitt({ admin }: { admin: boo
       <Block titel="Diese Version">
         <Daten
           zeilen={[
-            { name: "Version", wert: <span className="num">{VERSION}</span> },
+            { name: "Version der Oberfläche", wert: <span className="num">{VERSION}</span> },
             { name: "Gerät", wert: desktop ? "Desktop-App" : serverBrowser ? "Browser auf Sokrates-2" : "Browser" },
           ]}
         />

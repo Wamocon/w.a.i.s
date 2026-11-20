@@ -3,12 +3,14 @@
 // nichts beim Kern ab, hat in den Einstellungen nur die Mikrofonwahl und meldet erst nach Rückfrage ab. Freigaben bleiben sichtbar (dort
 // entscheidet der Besucher). Das normale Admin-Konto sieht alles wie bisher. Nur Darstellung: der Kern sperrt weiter selbst.
 // Ausführen im Ordner ui/:  npm run test:komponenten
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { WamoAnsicht } from "@/components/WamoAnsicht";
 import { geraeteAnzeige } from "@/lib/geraeteAnzeige";
 import { KernFehler } from "@/lib/kernApi";
+import { nutzerSetzen } from "@/lib/nutzer";
+import { updatesZuruecksetzen } from "@/lib/updatesStore";
 import type { WamoAktionen } from "@/lib/useWamo";
 import { resetWamo, wamo, type Approval } from "@/lib/wamo";
 
@@ -68,7 +70,24 @@ beforeEach(() => {
 
 afterEach(() => {
   history.replaceState(null, "", "#");
+  delete window.wamoDesktop;
+  nutzerSetzen({ id: null, email: null });
+  updatesZuruecksetzen();
 });
+
+/** Desktop-App 0.7.0 mit Angebot auf 0.8.0; der Kern liefert dazu das Manifest unter /installer (sonst wie oben). */
+function appMitUpdate(email: string) {
+  const signatur = `${"B".repeat(86)}==`;
+  const normal = attrappe.kernJson.getMockImplementation() as (pfad: string) => Promise<unknown>;
+  attrappe.kernJson.mockImplementation(async (pfad: string) => (pfad === "/installer" ? { manifest: '{"version":"0.8.0"}', signatur, version: "0.8.0" } : normal(pfad)));
+  window.wamoDesktop = {
+    isDesktop: true,
+    levels: () => undefined,
+    version: "0.7.0",
+    update: { pruefen: vi.fn().mockResolvedValue({ ok: true, version: "0.8.0", neuer: true }), installieren: vi.fn() },
+  } as unknown as Window["wamoDesktop"];
+  nutzerSetzen({ id: HINWEIS_ID, email });
+}
 
 function aktionen(): WamoAktionen {
   return {
@@ -145,6 +164,17 @@ describe("Hauptansicht eines Laborkontos: was fehlt", () => {
     expect(screen.queryByText(/Noch keine Vorgänge/)).toBeNull();
     // ohne Verlauf kürzt der Block Gespräch lange Antworten nicht
     expect(document.querySelector(".kz-gespraech")?.hasAttribute("data-verlauf")).toBe(false);
+  });
+
+  it("zeigt nie das Pop-up Update verfügbar und fragt das Update nicht ab, auch in der Desktop-App mit Angebot", async () => {
+    appMitUpdate(PLATZ);
+    zeige(PLATZ);
+    await ruhe();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(screen.queryByRole("region", { name: "Update verfügbar" })).toBeNull();
+    expect(pfade()).not.toContain("/installer");
   });
 
   it("nennt in der Reiterleiste nur die Reiter, die es gibt", async () => {
@@ -270,7 +300,7 @@ describe("Hauptansicht eines Laborkontos: Einstellungen nur mit Mikrofon", () =>
   });
 
   it("ein Link auf eine gesperrte Gruppe oder einen gesperrten Abschnitt zeigt sie nicht, auch Konto mit Abmelden nicht", async () => {
-    for (const abschnitt of ["modellzugang", "konto", "start", "geraete", "info", "fernzugriff", "verbrauch", "stimme", "zugaenge", "allgemein", "verwaltung"]) {
+    for (const abschnitt of ["modellzugang", "konto", "start", "updates", "geraete", "info", "fernzugriff", "verbrauch", "stimme", "zugaenge", "allgemein", "verwaltung"]) {
       const { unmount } = zeige(PLATZ, { hash: `#einstellungen/${abschnitt}` });
       await ruhe();
       const seite = document.querySelector<HTMLElement>(".ez");
@@ -335,6 +365,16 @@ describe("Hauptansicht eines Laborkontos: Abmelden fragt nach", () => {
 });
 
 describe("Hauptansicht eines normalen Admin-Kontos: unverändert alles", () => {
+  it("zeigt in der Desktop-App mit Angebot das Pop-up Update verfügbar, im Browser nicht", async () => {
+    zeige(ADMIN);
+    await ruhe();
+    expect(screen.queryByRole("region", { name: "Update verfügbar" })).toBeNull(); // Browser: keine Brücke
+    cleanup();
+    appMitUpdate(ADMIN);
+    zeige(ADMIN);
+    expect(await screen.findByRole("region", { name: "Update verfügbar" })).toBeTruthy();
+  });
+
   it("zeigt Wortmarke, Reiter Vorgänge und Büro, Verlauf und die Zeile zum Modellzugang", async () => {
     zeige(ADMIN);
     await ruhe();
