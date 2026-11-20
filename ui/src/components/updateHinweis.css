@@ -1,0 +1,31 @@
+/* Pop-up "Update verfügbar" der Desktop-App (components/UpdateHinweis.tsx), Regeln mit Präfix .uh-. Eine schwebende Karte unten rechts, am Handy
+   unten über die Breite, über der Eingabeleiste (68 px, kommando.css). Der Rahmen ist eine höfliche Live-Region und fängt keine Klicks ab, nur die
+   Karte selbst. Wie die übrigen Meldungen: Karte mit roter Kante links, kein Blau, keine Farbe allein (Pfeil und Wörter tragen den Inhalt).
+   Hell und dunkel folgen den Farbwerten der Seite. */
+.uh-rahmen { position: fixed; z-index: 40; right: 16px; bottom: 16px; width: min(380px, calc(100vw - 32px)); pointer-events: none; }
+.uh {
+  pointer-events: auto; display: grid; gap: 10px; padding: 14px 16px 12px;
+  border: 1px solid var(--kante); border-left: 2px solid var(--core); border-radius: 10px;
+  background: var(--panel); color: var(--ink); box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.5);
+  animation: hud-auf 0.35s ease-out both;
+}
+.uh-kopf { display: flex; align-items: center; gap: 10px; }
+.uh .es-zeichen { margin-top: 0; background: var(--core); box-shadow: none; flex: none; }
+.uh .es-zeichen svg { stroke: var(--on-accent); stroke-width: 2.4; }
+.uh-titel { margin: 0; font: 700 17px/1.3 var(--font-wmc); }
+.uh-satz, .uh-fehler { margin: 0; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.uh-fehler { padding-left: 10px; border-left: 4px solid var(--accent); font-weight: 700; }
+.uh-balken { width: 100%; height: 10px; accent-color: var(--accent); }
+.uh-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; }
+.uh-knoepfe button[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.uh-link { margin: 0; font-size: 14px; }
+.uh-link a {
+  display: inline-block; padding: 6px 0; color: var(--ink);
+  text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 4px;
+}
+@media (max-width: 1099.98px) { /* wo die Eingabeleiste unten festsitzt (kommando.css) */
+  .uh-rahmen { left: 12px; right: 12px; width: auto; bottom: calc(68px + 12px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .uh { animation: none; }
+}

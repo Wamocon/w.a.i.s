@@ -29,6 +29,7 @@ import type { Sitzung } from "@/components/LoginGate";
 import { SelbstAuftraege } from "@/components/SelbstAuftraege";
 import { FehlerAnzeige } from "@/components/FehlerAnzeige";
 import { StillAktionen, UebernehmenHinweis } from "@/components/StillStart";
+import { UpdateHinweis } from "@/components/UpdateHinweis";
 import { Verlauf } from "@/components/Verlauf";
 import { HISTORIE_QUELLE } from "@/lib/canvasOeffnen";
 import { einstellungenSchliessen, oeffnerFuerFokus, useEinstellungenZiel } from "@/lib/einstellungenHash";
@@ -240,6 +241,8 @@ export function WamoAnsicht({ aktionen, sitzung }: { aktionen: WamoAktionen; sit
           {ansicht.verlauf && <Verlauf offen={verlaufOffen} onSchliessen={schliesseVerlauf} />}
           <Ansage />
           {ansicht.stimme && <StimmeIgnoriertHinweis />}
+          {/* Pop-up "Update verfügbar": nur in der Desktop-App, nie in der Laborsicht (components/UpdateHinweis.tsx) */}
+          {!ansicht.labor && <UpdateHinweis />}
         </>
       }
       einstellungen={

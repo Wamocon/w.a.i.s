@@ -190,34 +190,43 @@
 
 /* Erste Schritte: Prüfliste (components/einstellungen/ErsteSchritte.tsx), Regeln mit Präfix .es-. Der Zustand steht als Zeichen und als
    Wort (für Screenreader), nie nur als Farbe: bereit ist ein Haken in Tinte, offen ein Ausrufezeichen auf Rot mit roter Linie, ein Hinweis
-   ein i in Grau. Kein Blau und kein Grün, Rot nur für Flächen und Linien. */
+   ein i in Grau. Kein Blau und kein Grün, Rot nur für Flächen und Linien. Der Abschnitt Updates (Updates.tsx, Präfix .up-) zeigt seinen
+   Zustand mit denselben Zeichen und Farben (.es-zeichen, .es-inhalt, .es-titel, .es-text), dazu ein Pfeil nach oben für ein Update und
+   drei Punkte für "wird geprüft" und "wird installiert". */
 .es-zusammenfassung { margin: 0; font: 700 18px/1.3 var(--font-wmc); }
 .es-zusammenfassung[data-offen] { padding-left: 10px; border-left: 4px solid var(--accent); }
 .es-liste { list-style: none; margin: 0; padding: 0; display: grid; }
-.es-punkt {
+.es-punkt, .up-zustand {
   display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; gap: 12px;
-  padding: 10px 0 10px 10px; border-top: 1px solid var(--rule); box-shadow: inset 3px 0 0 transparent;
+  padding: 10px 0 10px 10px; box-shadow: inset 3px 0 0 transparent;
 }
+.es-punkt { border-top: 1px solid var(--rule); }
 .es-punkt:first-child { border-top: 0; }
-.es-punkt[data-stufe="rot"] { box-shadow: inset 3px 0 0 var(--accent); }
+.es-punkt[data-stufe="rot"], .up-zustand[data-stufe="rot"] { box-shadow: inset 3px 0 0 var(--accent); }
 .es-zeichen {
   width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   box-shadow: inset 0 0 0 1.5px var(--ink);
 }
 .es-zeichen svg { width: 14px; height: 14px; fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.es-punkt[data-stufe="rot"] .es-zeichen { background: var(--core); box-shadow: none; }
-.es-punkt[data-stufe="rot"] .es-zeichen svg { stroke: var(--on-accent); stroke-width: 2.4; }
-.es-punkt[data-stufe="hinweis"] .es-zeichen { box-shadow: inset 0 0 0 1.5px var(--ink-soft); }
-.es-punkt[data-stufe="hinweis"] .es-zeichen svg { stroke: var(--ink-soft); }
+.es-punkt[data-stufe="rot"] .es-zeichen, .up-zustand[data-stufe="rot"] .es-zeichen { background: var(--core); box-shadow: none; }
+.es-punkt[data-stufe="rot"] .es-zeichen svg, .up-zustand[data-stufe="rot"] .es-zeichen svg { stroke: var(--on-accent); stroke-width: 2.4; }
+.es-punkt[data-stufe="hinweis"] .es-zeichen, .up-zustand[data-stufe="hinweis"] .es-zeichen { box-shadow: inset 0 0 0 1.5px var(--ink-soft); }
+.es-punkt[data-stufe="hinweis"] .es-zeichen svg, .up-zustand[data-stufe="hinweis"] .es-zeichen svg { stroke: var(--ink-soft); }
 .es-inhalt { display: grid; gap: 2px; min-width: 0; }
 .es-titel { margin: 0; font: 700 16px/1.3 var(--font-wmc); }
 .es-text { margin: 0; font-size: 15px; line-height: 1.4; color: var(--ink-soft); overflow-wrap: anywhere; }
-.es-punkt[data-stufe="rot"] .es-text { color: var(--ink); }
-.es-update { margin-top: 8px; }
+.es-punkt[data-stufe="rot"] .es-text, .up-zustand[data-stufe="rot"] .es-text { color: var(--ink); }
+.es-verweis { margin: 6px 0 0; font-size: 15px; }
+.es-verweis a {
+  display: inline-block; padding: 4px 0; color: var(--ink);
+  text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 4px;
+}
 .es-aktionen { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.es-knopf[aria-disabled="true"], .es-update[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.es-knopf[aria-disabled="true"], .up-installieren[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
 .es-knopf[aria-disabled="true"]:hover { background: transparent; color: var(--ink-soft); border-color: var(--steuer-rand); }
+
+/* Updates (components/einstellungen/Updates.tsx): der Zustand (.up-zustand) ist eine Zeile der Prüfliste ohne Trennlinie darüber */
 
 /* Hinweise an Admins (Info) */
 .ez .hinweise { gap: 10px; }

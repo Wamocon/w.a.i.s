@@ -1,5 +1,6 @@
 // Komponententest des Abschnitts "Erste Schritte" (components/einstellungen/ErsteSchritte.tsx): Prüfliste aus Kern und App, Reihenfolge,
-// Zustand als Text, Update nur nach Bestätigung durch die App, Token nur an die App, "Erneut prüfen" einmal je 10 Sekunden.
+// Zustand als Text, bei einem von der App bestätigten Update nur der Verweis "Zu den Updates" (installiert wird im Abschnitt Updates,
+// Updates.comp.test.tsx), "Erneut prüfen" einmal je 10 Sekunden.
 // Kern (lib/kernApi.ts) und Anmeldung (lib/supabase.ts) sind Attrappen, die Desktop-Brücke ist ein falsches window.wamoDesktop.
 // Ausführen im Ordner ui/:  npm run test:komponenten
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -86,6 +87,7 @@ describe("ErsteSchritteAbschnitt", () => {
     expect(screen.getByText("Punkt stimme ist bereit.")).toBeTruthy();
     expect(vi.mocked(kernJson).mock.calls.map((c) => c[0])).toEqual(["/einrichtung/stand"]);
     expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Zu den Updates" })).toBeNull();
   });
 
   it("zuerst Modellzugang, dann Installer, zuletzt die Prüfliste", async () => {
@@ -136,71 +138,48 @@ describe("ErsteSchritteAbschnitt", () => {
     expect(zusammenfassung().textContent).toBe("Noch 2 Punkte offen.");
   });
 
-  it("Update erst nach Bestätigung der App; der Knopf gibt Manifest, Signatur und Token nur an die App", async () => {
+  it("Update erst nach Bestätigung der App; die Zeile verweist auf die Updates, einen Installier-Knopf gibt es hier nicht mehr", async () => {
     kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
     const update = appSetzen();
     update.pruefen.mockResolvedValue({ ok: true, version: "0.4.0", neuer: true });
-    update.installieren.mockResolvedValue({ ok: false, text: "Abgebrochen.", abgebrochen: true });
-    const user = await zeige();
+    await zeige();
     expect(update.pruefen).toHaveBeenCalledWith({ manifest: MANIFEST.manifest, signatur: SIGNATUR });
     expect(zeile("App-Version").getByText("Update auf Version 0.4.0 verfügbar.")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Update installieren" }));
-    expect(update.installieren).toHaveBeenCalledWith({ manifest: MANIFEST.manifest, signatur: SIGNATUR, token: TOKEN });
-    // abgebrochen: still zurück, der Knopf bleibt, kein Fehlertext
-    expect(await screen.findByRole("button", { name: "Update installieren" })).toBeTruthy();
-    expect(screen.queryByText("Abgebrochen.")).toBeNull();
+    const verweis = zeile("App-Version").getByRole("link", { name: "Zu den Updates" });
+    expect(verweis.getAttribute("href")).toBe("#einstellungen/updates");
+    expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
+    // installiert wird nur im Abschnitt Updates: hier ruft nichts die App und holt kein Token
+    expect(update.installieren).not.toHaveBeenCalled();
+    expect(accessToken).not.toHaveBeenCalled();
     expect(document.body.innerHTML).not.toContain(TOKEN);
   });
 
-  it("lehnt die App das Manifest ab: ihr Satz und nie ein Update-Knopf", async () => {
+  it("der Verweis Zu den Updates öffnet den Abschnitt Updates", async () => {
+    window.history.replaceState(null, "", "/#einstellungen/start");
+    kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
+    appSetzen().pruefen.mockResolvedValue({ ok: true, version: "0.4.0", neuer: true });
+    const user = await zeige();
+    await user.click(screen.getByRole("link", { name: "Zu den Updates" }));
+    expect(window.location.hash).toBe("#einstellungen/updates");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("lehnt die App das Manifest ab: ihr Satz, weder Update-Knopf noch Verweis", async () => {
     kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
     const update = appSetzen();
     update.pruefen.mockResolvedValue({ ok: false, text: "Update vom Server nicht bestätigt." });
     await zeige();
     expect(zeile("App-Version").getByText("Update vom Server nicht bestätigt.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Zu den Updates" })).toBeNull();
   });
 
-  it("scheitert die Installation, steht der Satz der App da und der Knopf verschwindet", async () => {
+  it("ist die App aktuell, gibt es keinen Verweis", async () => {
     kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
-    const update = appSetzen();
-    update.pruefen.mockResolvedValue({ ok: true, version: "0.4.0", neuer: true });
-    update.installieren.mockResolvedValue({ ok: false, text: "Signatur passt nicht." });
-    const user = await zeige();
-    await user.click(screen.getByRole("button", { name: "Update installieren" }));
-    expect(await screen.findByText("Signatur passt nicht.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Update installieren" })).toBeNull();
-  });
-
-  it("ohne Anmeldung kein Aufruf der App", async () => {
-    kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
-    const update = appSetzen();
-    update.pruefen.mockResolvedValue({ ok: true, version: "0.4.0", neuer: true });
-    vi.mocked(accessToken).mockResolvedValue(null);
-    const user = await zeige();
-    await user.click(screen.getByRole("button", { name: "Update installieren" }));
-    expect(await screen.findByText("Die Anmeldung ist abgelaufen. Bitte neu anmelden.")).toBeTruthy();
-    expect(update.installieren).not.toHaveBeenCalled();
-  });
-
-  it("Doppelklick auf Update installieren ruft die App nur einmal, Erneut prüfen ruht während der Installation", async () => {
-    kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
-    const update = appSetzen();
-    update.pruefen.mockResolvedValue({ ok: true, version: "0.4.0", neuer: true });
-    const antwort = spaeter<unknown>();
-    update.installieren.mockReturnValue(antwort.versprechen);
-    const user = await zeige();
-    const aufrufe = vi.mocked(kernJson).mock.calls.length;
-    await user.dblClick(screen.getByRole("button", { name: "Update installieren" }));
-    await waitFor(() => expect(update.installieren).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "Update installieren" }));
-    const erneut = screen.getByRole("button", { name: "Erneut prüfen" });
-    expect(erneut.getAttribute("aria-disabled")).toBe("true");
-    await user.click(erneut);
-    expect(vi.mocked(kernJson).mock.calls.length).toBe(aufrufe);
-    expect(update.installieren).toHaveBeenCalledTimes(1);
-    await act(async () => antwort.erfuellen({ ok: false, text: "Abgebrochen.", abgebrochen: true }));
-    expect(erneut.getAttribute("aria-disabled")).toBeNull();
+    appSetzen();
+    await zeige();
+    expect(screen.getByText("Version 0.3.0, aktuell.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Zu den Updates" })).toBeNull();
   });
 
   it("Aushängen während des Ladens: die späte Antwort ändert nichts und meldet keinen Fehler", async () => {
@@ -213,34 +192,6 @@ describe("ErsteSchritteAbschnitt", () => {
     await act(async () => antwort.erfuellen(KERN));
     expect(container.innerHTML).toBe("");
     expect(fehler).not.toHaveBeenCalled();
-  });
-
-  it("Aushängen während der Installation: die späte Antwort ändert nichts und meldet keinen Fehler", async () => {
-    kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
-    const update = appSetzen();
-    update.pruefen.mockResolvedValue({ ok: true, version: "0.4.0", neuer: true });
-    const antwort = spaeter<unknown>();
-    update.installieren.mockReturnValue(antwort.versprechen);
-    const fehler = vi.spyOn(console, "error");
-    const user = userEvent.setup();
-    const { unmount, container } = render(<ErsteSchritteAbschnitt />);
-    await user.click(await screen.findByRole("button", { name: "Update installieren" }));
-    await waitFor(() => expect(update.installieren).toHaveBeenCalledTimes(1));
-    unmount();
-    await act(async () => antwort.erfuellen({ ok: false, text: "Signatur passt nicht." }));
-    expect(container.innerHTML).toBe("");
-    expect(fehler).not.toHaveBeenCalled();
-  });
-
-  it("zeigt den Satz der App, wenn der Installer nicht startet", async () => {
-    kernAntwortet({ "/einrichtung/stand": KERN, "/installer": MANIFEST });
-    const update = appSetzen();
-    update.pruefen.mockResolvedValue({ ok: true, version: "0.4.0", neuer: true });
-    const satz = "Der Installer ließ sich nicht starten. Bitte W.A.I.S. neu starten und es noch einmal versuchen.";
-    update.installieren.mockResolvedValue({ ok: false, text: satz });
-    const user = await zeige();
-    await user.click(screen.getByRole("button", { name: "Update installieren" }));
-    expect(await zeile("App-Version").findByText(satz)).toBeTruthy();
   });
 
   it("Erneut prüfen lädt neu und ist danach 10 Sekunden gesperrt", async () => {

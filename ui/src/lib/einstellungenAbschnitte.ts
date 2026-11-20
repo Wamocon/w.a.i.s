@@ -22,6 +22,7 @@ export const ABSCHNITT_IDS = [
   "konto",
   "start",
   "darstellung",
+  "updates",
   "info",
   "sprache",
   "stimme",
@@ -57,11 +58,14 @@ export type Abschnitt = {
 /** Die Reihenfolge hier ist nur die Grundreihenfolge für abschnitteFuer; die Anzeige folgt der Reihenfolge in GRUPPEN. */
 export const ABSCHNITTE: readonly Abschnitt[] = [
   { id: "konto", titel: "Konto", kurz: "E-Mail, Profil und Abmelden", stichwort: "Konto" },
-  // Erste Schritte nach dem Ausrollen (docs/ausrollen-neue-nutzer.md 4.2, 4.3, 4.7): Modellzugang, Installer, Prüfliste und Updates der App
+  // Erste Schritte nach dem Ausrollen (docs/ausrollen-neue-nutzer.md 4.2, 4.3, 4.7): Modellzugang, Installer und Prüfliste
   // (lib/einrichtungSchritte.ts, lib/installer.ts, lib/einrichtung.ts); Kennung "start", weil es "einrichtung" schon als Block in
   // "Geräte und PC" gibt. Für jede Rolle, nie in der Laborsicht.
-  { id: "start", titel: "Erste Schritte", kurz: "Modellzugang, Installer, Prüfliste und Updates", stichwort: "erste Schritte" },
+  { id: "start", titel: "Erste Schritte", kurz: "Modellzugang, Installer und Prüfliste", stichwort: "erste Schritte" },
   { id: "darstellung", titel: "Darstellung", kurz: "Helligkeit, Ansicht und Untertitel, gespeichert je Gerät", stichwort: "Darstellung" },
+  // Updates der Desktop-App suchen und installieren (lib/updates.ts, components/einstellungen/Updates.tsx); früher nur ein Punkt der
+  // Prüfliste in den Ersten Schritten. Für jede Rolle, nie in der Laborsicht; im Browser erklärt der Abschnitt, dass die App aktualisiert.
+  { id: "updates", titel: "Updates", kurz: "Neue Version der Desktop-App suchen und installieren", stichwort: "Updates" },
   { id: "info", titel: "Info", kurz: "Version, Kern und Hinweise", stichwort: "Version und Hinweise" },
   {
     id: "sprache",
@@ -120,7 +124,7 @@ export type Gruppe = { id: GruppeId; titel: string; abschnitte: readonly Abschni
 
 /** Die Gruppen in der Reihenfolge der Gliederung, mit ihren Abschnitten in der Reihenfolge der Seite. Jeder Abschnitt steht in genau einer Gruppe. */
 export const GRUPPEN: readonly Gruppe[] = [
-  { id: "allgemein", titel: "Konto und Allgemeines", abschnitte: ["konto", "start", "darstellung", "info"] },
+  { id: "allgemein", titel: "Konto und Allgemeines", abschnitte: ["konto", "start", "darstellung", "updates", "info"] },
   { id: "sprache-stimme", titel: "Sprache und Stimme", abschnitte: ["sprache", "stimme"] },
   { id: "zugaenge", titel: "Modelle und Zugänge", abschnitte: ["modellzugang", "github", "verbrauch"] },
   { id: "geraete-pc", titel: "Geräte und PC", abschnitte: ["geraete", "fernzugriff"] },

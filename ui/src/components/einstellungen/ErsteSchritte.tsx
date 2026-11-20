@@ -1,56 +1,29 @@
 "use client";
 
-import { memo, useCallback, useEffect, useId, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
 import { EinrichtungsAblauf } from "@/components/einrichtung/EinrichtungsAblauf";
 import { InstallerDownload } from "@/components/einrichtung/InstallerDownload";
 import { EINRICHTUNG_SCHRITTE } from "@/components/einrichtung/schritte";
-import {
-  STUFE_TEXT,
-  erneutWartezeit,
-  nachInstallation,
-  prueflisteLaden,
-  updateInstallieren,
-  zusammenfassung,
-  type Punkt,
-  type Stufe,
-  type UpdateAngebot,
-  type UpdateInstallation,
-} from "@/lib/einrichtung";
+import { PRUEF_ABSTAND_MS, STUFE_TEXT, prueflisteLaden, uhrzeitText, zusammenfassung, type Punkt } from "@/lib/einrichtung";
 import { SCHRITT_TITEL } from "@/lib/einrichtungSchritte";
 import { kernJson } from "@/lib/kernApi";
-import { accessToken } from "@/lib/supabase";
 import { Block } from "./Block";
+import { EinstellungenLink } from "./EinstellungenLink";
+import { Zeichen } from "./Zeichen";
+import { useSperre } from "./useSperre";
 import { Ueberschrift } from "@/components/Ueberschrift";
 
 /**
  * Abschnitt "Erste Schritte" (Kennung start), Teil Prüfliste: die Prüfliste der Einrichtung aus Kern und Desktop-App (lib/einrichtung.ts, Planpapier
  * docs/ausrollen-neue-nutzer.md 4.3). Je Zeile ein Zeichen (Haken, Ausrufezeichen, i) und der Zustand als Wort für Screenreader, dazu
- * der Satz; die Farbe trägt nie allein. Ein Update der App gibt es nur als Knopf, wenn die App das Manifest des Servers bestätigt hat.
- * Das Token holt erst der Klick und gibt es nur an die App weiter (lib/einrichtung.ts, updateInstallieren); es steht nie im Zustand.
- * "Erneut prüfen" geht einmal je 10 Sekunden und nie während einer Installation (aria-disabled, damit der Fokus auf dem Knopf bleibt).
- * Nach dem Aushängen setzt nichts mehr Zustand, auch keine Antwort, die erst danach kommt.
+ * der Satz; die Farbe trägt nie allein. Ein Update der App steht hier nur als Stand da: Hat die App das Manifest des Servers bestätigt,
+ * verweist die Zeile "App-Version" auf den Abschnitt Updates (Updates.tsx). Dort, und nur dort, wird installiert; diese Liste ruft die
+ * Installation der App nie und holt nie ein Token.
+ * "Erneut prüfen" geht einmal je 10 Sekunden (aria-disabled, damit der Fokus auf dem Knopf bleibt). Nach dem Aushängen setzt nichts
+ * mehr Zustand, auch keine Antwort, die erst danach kommt.
  */
 
-const UHRZEIT = new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" });
-
-const PFAD: Record<Stufe, string> = {
-  gruen: "M3.5 8.5l3 3 6-7",
-  rot: "M8 3.5v5.5M8 12.25v.25",
-  hinweis: "M8 7v5.5M8 3.75v.25",
-};
-
-function Zeichen({ stufe }: { stufe: Stufe }) {
-  return (
-    <span className="es-zeichen" aria-hidden="true">
-      <svg viewBox="0 0 16 16" focusable="false">
-        <path d={PFAD[stufe]} />
-      </svg>
-    </span>
-  );
-}
-
-function Zeile({ p, beschaeftigt, onUpdate }: { p: Punkt; beschaeftigt: boolean; onUpdate: (a: UpdateAngebot) => void }) {
-  const angebot = p.update;
+function Zeile({ p }: { p: Punkt }) {
   return (
     <li className="es-punkt" data-stufe={p.stufe}>
       <Zeichen stufe={p.stufe} />
@@ -60,88 +33,19 @@ function Zeile({ p, beschaeftigt, onUpdate }: { p: Punkt; beschaeftigt: boolean;
           {p.titel}
         </p>
         <p className="es-text">{p.text}</p>
-        {angebot && (
-          <div>
-            <button
-              type="button"
-              className="btn-primary es-update"
-              aria-disabled={beschaeftigt || undefined}
-              aria-busy={beschaeftigt || undefined}
-              onClick={() => {
-                if (!beschaeftigt) onUpdate(angebot);
-              }}
-            >
-              Update installieren
-            </button>
-          </div>
+        {p.update && (
+          <p className="es-verweis">
+            <EinstellungenLink abschnitt="updates">Zu den Updates</EinstellungenLink>
+          </p>
         )}
       </div>
     </li>
   );
 }
 
-/**
- * Sperre für "Erneut prüfen" aus einer einzigen Uhr (performance.now, monoton). Der Zeitgeber zeigt nur an, was die Uhr sagt: Er
- * schaut beim Ablauf noch einmal nach und stellt sich bei Bedarf neu. Vor jedem neuen Zeitgeber wird der alte gelöscht.
- */
-function useSperre() {
-  const [gesperrt, setGesperrt] = useState(false);
-  const letzter = useRef<number | null>(null);
-  const uhr = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (uhr.current !== null) clearTimeout(uhr.current);
-      uhr.current = null;
-    },
-    [],
-  );
-
-  const nachsehen = useCallback(function pruefe() {
-    if (uhr.current !== null) clearTimeout(uhr.current);
-    const warten = erneutWartezeit(letzter.current, performance.now());
-    uhr.current = warten > 0 ? setTimeout(pruefe, warten) : null;
-    setGesperrt(warten > 0);
-  }, []);
-
-  const frei = useCallback(() => erneutWartezeit(letzter.current, performance.now()) === 0, []);
-  const sperren = useCallback(() => {
-    letzter.current = performance.now();
-    nachsehen();
-  }, [nachsehen]);
-
-  return { gesperrt, frei, sperren };
-}
-
 type Punkte = readonly Punkt[] | null;
 
-const appPunktNach = (erg: UpdateInstallation) => (alt: Punkte) => alt && alt.map((p) => (p.id === "app" ? nachInstallation(p, erg) : p));
-
-/** Update starten (höchstens eines zugleich); das Ergebnis ersetzt nur den Punkt App-Version, nach dem Aushängen nichts mehr. */
-function useInstallation(aktiv: RefObject<boolean>, setPunkte: Dispatch<SetStateAction<Punkte>>) {
-  const [installiert, setInstalliert] = useState(false);
-  const installiertJetzt = useRef(false); // sofort gesetzt, damit ein Doppelklick die App nur einmal ruft
-
-  const installieren = useCallback(
-    async (angebot: UpdateAngebot) => {
-      if (installiertJetzt.current) return;
-      installiertJetzt.current = true;
-      setInstalliert(true);
-      try {
-        const erg = await updateInstallieren({ update: window.wamoDesktop?.update, angebot, token: accessToken });
-        if (aktiv.current) setPunkte(appPunktNach(erg));
-      } finally {
-        installiertJetzt.current = false;
-        if (aktiv.current) setInstalliert(false);
-      }
-    },
-    [aktiv, setPunkte],
-  );
-
-  return { installiert, installiertJetzt, installieren };
-}
-
-/** Laden, erneut prüfen (gedrosselt) und Update starten. Nach dem Aushängen setzt keine späte Antwort mehr Zustand. */
+/** Laden und erneut prüfen (gedrosselt). Nach dem Aushängen setzt keine späte Antwort mehr Zustand. */
 function usePruefliste() {
   const [punkte, setPunkte] = useState<Punkte>(null);
   const [laeuft, setLaeuft] = useState(true);
@@ -149,7 +53,6 @@ function usePruefliste() {
   const aktiv = useRef(true);
   const laeuftJetzt = useRef(false); // sofort gesetzt, damit ein zweiter Klick im selben Takt nichts auslöst
   const { gesperrt, frei, sperren } = useSperre();
-  const { installiert, installiertJetzt, installieren } = useInstallation(aktiv, setPunkte);
 
   const laden = useCallback(async () => {
     if (laeuftJetzt.current) return;
@@ -159,7 +62,7 @@ function usePruefliste() {
       const neu = await prueflisteLaden({ kernJson, bruecke: window.wamoDesktop });
       if (!aktiv.current) return;
       setPunkte(neu);
-      setZeit(UHRZEIT.format(new Date()));
+      setZeit(uhrzeitText(new Date()));
     } finally {
       laeuftJetzt.current = false;
       if (aktiv.current) setLaeuft(false);
@@ -176,18 +79,18 @@ function usePruefliste() {
   }, [laden]);
 
   const erneut = useCallback(() => {
-    if (laeuftJetzt.current || installiertJetzt.current || !frei()) return;
+    if (laeuftJetzt.current || !frei()) return;
     sperren();
     void laden();
-  }, [laden, frei, sperren, installiertJetzt]);
+  }, [laden, frei, sperren]);
 
-  return { punkte, laeuft, gesperrt, zeit, installiert, erneut, installieren };
+  return { punkte, laeuft, gesperrt, zeit, erneut };
 }
 
 function standZeile(laeuft: boolean, gesperrt: boolean, zeit: string | null): string {
   if (laeuft) return "Prüfe ...";
   const geprueft = zeit ? `Geprüft um ${zeit} Uhr.` : "";
-  return gesperrt ? `${geprueft} Erneut prüfen geht einmal je 10 Sekunden.`.trim() : geprueft;
+  return gesperrt ? `${geprueft} Erneut prüfen geht einmal je ${PRUEF_ABSTAND_MS / 1000} Sekunden.`.trim() : geprueft;
 }
 
 function zusammenfassungText(punkte: Punkte, laeuft: boolean): string {
@@ -196,7 +99,7 @@ function zusammenfassungText(punkte: Punkte, laeuft: boolean): string {
 }
 
 const Pruefliste = memo(function Pruefliste() {
-  const { punkte, laeuft, gesperrt, zeit, installiert, erneut, installieren } = usePruefliste();
+  const { punkte, laeuft, gesperrt, zeit, erneut } = usePruefliste();
   const offen = punkte !== null && punkte.some((p) => p.stufe === "rot");
   return (
     <Block titel="Prüfliste">
@@ -207,7 +110,7 @@ const Pruefliste = memo(function Pruefliste() {
       {punkte && (
         <ul className="es-liste" aria-label="Prüfliste">
           {punkte.map((p) => (
-            <Zeile key={p.id} p={p} beschaeftigt={installiert} onUpdate={(a) => void installieren(a)} />
+            <Zeile key={p.id} p={p} />
           ))}
         </ul>
       )}
@@ -215,7 +118,7 @@ const Pruefliste = memo(function Pruefliste() {
         <button
           type="button"
           className="btn-secondary es-knopf"
-          aria-disabled={laeuft || gesperrt || installiert || undefined}
+          aria-disabled={laeuft || gesperrt || undefined}
           aria-busy={laeuft || undefined}
           onClick={erneut}
         >
@@ -231,8 +134,8 @@ const MODELL_SCHRITTE = EINRICHTUNG_SCHRITTE.filter((s) => s.id !== "installer")
 
 /**
  * Abschnitt "Erste Schritte" (Kennung start, docs/ausrollen-neue-nutzer.md 4.2, 4.3, 4.7): zuerst der Modellzugang in Schritten
- * (Claude-Code-Token, API-Schlüssel, Zusammenfassung), dann der Installer zum Herunterladen, zuletzt die Prüfliste mit den Updates
- * der App. Bis das Gerüst der Erstanmeldung die Schritte selbst führt, sind sie hier erreichbar.
+ * (Claude-Code-Token, API-Schlüssel, Zusammenfassung), dann der Installer zum Herunterladen, zuletzt die Prüfliste (der Stand der
+ * App-Version verweist auf den Abschnitt Updates). Bis das Gerüst der Erstanmeldung die Schritte selbst führt, sind sie hier erreichbar.
  */
 export const ErsteSchritteAbschnitt = memo(function ErsteSchritteAbschnitt() {
   const id = useId();

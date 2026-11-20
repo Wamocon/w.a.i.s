@@ -3,7 +3,7 @@
 // Ausführen im Ordner ui/:  npm test   (node:test, Node lädt TypeScript selbst)
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PRUEF_ABSTAND_MS, TEXT_MAX, appVersionPunkt, erneutWartezeit, hostPunkt, mikrofonPunkt, nachInstallation, offenePunkte } from "./einrichtung.ts";
+import { PRUEF_ABSTAND_MS, TEXT_MAX, appVersionPunkt, erneutWartezeit, hostPunkt, mikrofonPunkt, offenePunkte } from "./einrichtung.ts";
 import { pruefeAppStatus, pruefeInstallation, pruefeKernStand, pruefeManifest, pruefeUpdatePruefung, prueflisteLaden } from "./einrichtung.ts";
 import { satz, tunnelPunkt, updateInstallieren, zusammenfassung, zusammenfuehren } from "./einrichtung.ts";
 import type { AppStand, KernStand, Punkt, PrueflisteBruecke, UpdateBruecke } from "./einrichtung.ts";
@@ -234,16 +234,6 @@ test("Antwort auf update.installieren: ok, still abgebrochen oder ein Satz", () 
   assert.deepEqual(pruefeInstallation({ ok: false, text: start }), { ok: false, text: start, abgebrochen: false });
 });
 
-test("Nach der Installation: abgebrochen lässt den Punkt stehen, ein Fehler nimmt den Knopf weg", () => {
-  const neu = appVersionPunkt("0.3.0", { art: "geprueft", manifest: MANIFEST, ergebnis: { ok: true, version: "0.4.0", neuer: true } });
-  assert.equal(nachInstallation(neu, { ok: false, text: "x", abgebrochen: true }), neu);
-  const fehler = nachInstallation(neu, { ok: false, text: "Update vom Server nicht bestätigt.", abgebrochen: false });
-  assert.deepEqual({ stufe: fehler.stufe, text: fehler.text, update: fehler.update }, { stufe: "rot", text: "Update vom Server nicht bestätigt.", update: undefined });
-  const ok = nachInstallation(neu, { ok: true });
-  assert.equal(ok.update, undefined);
-  assert.match(ok.text, /startet/);
-});
-
 test("updateInstallieren: das Token geht nur an die App, ohne Token und ohne Brücke kein Aufruf", async () => {
   const angebot = { version: "0.4.0", manifest: MANIFEST.manifest, signatur: SIGNATUR };
   const aufrufe: unknown[] = [];
@@ -393,7 +383,7 @@ test("alle festen Sätze ohne Gedankenstrich", async () => {
     ...zusammenfuehren({ kern: kernAlleGruen(), app: appBereit() }),
     appVersionPunkt("0.3.0", { art: "unbekannt" }),
     hostPunkt({ ok: true, tunnel: "aus", host: null }),
-    nachInstallation(appVersionPunkt("0.3.0", { art: "geprueft", manifest: MANIFEST, ergebnis: { ok: true, version: "0.4.0", neuer: true } }), { ok: true }),
+    appVersionPunkt("0.3.0", { art: "geprueft", manifest: MANIFEST, ergebnis: { ok: true, version: "0.4.0", neuer: true } }),
   ].map((p) => `${p.titel} ${p.text}`);
   for (const t of [...texte, zusammenfassung([])]) assert.ok(!OHNE_STRICH.test(t), t);
 });
