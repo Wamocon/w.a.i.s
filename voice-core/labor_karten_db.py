@@ -44,7 +44,7 @@ ANSICHT_WISSEN = "labor_wissen_aktiv"
 
 TTL_SECS = 30.0  # so lange gilt eine Lesung für alle Sitzungen des Prozesses
 SITZUNG_TAKT_SECS = 10.0  # so oft schaut eine laufende Sitzung in den Zwischenspeicher (nur Speicher, die Datenbank fragt allein TTL_SECS)
-LESE_TIMEOUT_SECS = 5.0
+LESE_TIMEOUT_SECS = 3.0  # so lange wartet höchstens ein Sitzungsstart auf die Lesung (nur der eine, der sie auslöst, höchstens alle 30 s)
 MAX_EINTRAEGE = 20
 MAX_TEXT = 900
 ABFRAGE_GRENZE = MAX_EINTRAEGE + 5  # eine Zeile mehr als erlaubt genügt, um "zu viele" zu erkennen; nie unbegrenzt lesen
@@ -188,10 +188,6 @@ class KartenNachlader:
         self._gemeldet: set[tuple[str, str]] = set()
         self._sperre_objekt: asyncio.Lock | None = None
         self._sperre_loop: asyncio.AbstractEventLoop | None = None
-
-    @property
-    def gueltig(self) -> Stand | None:
-        return self._gueltig
 
     def _frisch(self) -> bool:
         return self._frisch_bis is not None and self._uhr() < self._frisch_bis

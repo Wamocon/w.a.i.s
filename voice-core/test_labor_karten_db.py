@@ -386,6 +386,13 @@ class NachladerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(leser.aufrufe, 1)
         self.assertEqual(len(log.mit("nicht gelesen")), 1)
 
+    async def test_ein_unerwarteter_fehler_in_der_lesung_stoert_die_sitzung_nie(self):
+        nachlader, _, _ = self.bauen()
+        with mock.patch.object(nachlader, "_lesen", side_effect=ValueError(GEHEIM)), LogSammler() as log:
+            self.assertIsNone(await nachlader.aktuell())
+        self.assertEqual(log.mit("nicht gelesen"), ["Labor-Karten: nicht gelesen (ValueError)"])
+        self.assertNotIn(GEHEIM, "\n".join(log.zeilen))
+
     async def test_abbruch_waehrend_der_lesung_macht_den_speicher_nicht_frisch(self):
         nachlader, leser, _ = self.bauen(pause=5)
         aufgabe = asyncio.create_task(nachlader.aktuell())
