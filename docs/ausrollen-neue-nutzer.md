@@ -4,7 +4,7 @@ Planpapier, Stand 15.11.2026, Basis `origin/main` b0f0bb0 (Zweig `docs/ausrollen
 Entscheidungen von Niko vom 15.11.2026, der Stand der sieben neu angelegten Konten, die Befunde aus dem Repo und zwei Reviews des Entwurfs (Sicherheit und
 Architektur, Abschnitt 11). Kennzeichnung wie in den anderen Planpapieren: **B** belegt (Datei:Zeile), **A** abgeleitet, **V** vermutet oder nur am Server, am
 Laptop oder in GoTrue prüfbar. Nichts wurde am Server, an der Datenbank, an GoTrue oder an einem Laptop berührt. Pfade gelten relativ zur Repo-Wurzel, Bezeichner
-stehen in ASCII. Im Text heißt der Assistent W.A.I.S., technisch bleibt alles `wamo`. Das Testlabor am Sa 28.11.2026 hat Vorrang und darf nie gefährdet werden;
+stehen in ASCII. Im Text heißt der Assistent W.A.I.S., technisch bleibt alles `wamo`. Das Testlabor am Sa 05.12.2026 (verschoben vom 28.11.2026, Stand 20.11.2026) hat Vorrang und darf nie gefährdet werden;
 Laborprofile bekommen keine der neuen Funktionen.
 
 ## Entscheidungen und Kurzfassung
@@ -54,8 +54,8 @@ Enwicklungsaufträge benutzt!" Dazu: "SONIOX läuft bei allen Usern!" und der An
    braucht es Trennung je Profil, Grenzen je Profil und eine Warteschlange (4.6).
 9. **Aufwand 197 Stunden in zehn Paketen** (Abschnitt 6), mit Zweig A etwa 190. **Zeit:** Das Planpapier des Labors legt den Freeze auf So 15.11.
    (`docs/testlabor-wamo.md:34`, E14), der Auftrag nennt Fr 20.11. Empfohlen ist in beiden Fällen: vor dem Labor nur Prüfaufträge, rote Tests und Code auf Zweigen,
-   keine Merges (jeder Merge auf `main` baut am Server dev und test, `.github/workflows/deploy.yml:1` bis `:6`), Rollout ab Mo 30.11. Eine Pilotperson ab etwa
-   Mi 9.12., alle sieben Kollegen ab etwa Mi 16.12.2026.
+   keine Merges (jeder Merge auf `main` baut am Server dev und test, `.github/workflows/deploy.yml:1` bis `:6`), Rollout nach dem Labortag (bisher ab Mo 30.11.). Eine Pilotperson ab etwa
+   Mi 9.12., alle sieben Kollegen ab etwa Mi 16.12.2026. Diese Folgetermine sind mit dem neuen Labortag Sa 05.12.2026 nicht neu gerechnet `[offen: Niko]`.
 
 **IQ:** Jede Pflicht sitzt dort, wo sie sich nicht umgehen lässt: Passwortstärke in GoTrue, Erledigung im Trigger, Sperre im Kern, Rechte in einem Modul, Vertrauen
 in die Updates in der App. **EQ:** Ein neuer Kollege bekommt ein Blatt, folgt klaren Schritten und sieht am Ende eine grüne Liste statt einer stillen Fehlermeldung;
@@ -635,7 +635,7 @@ Merge auf `main` (jeder Merge außerhalb von `docs/` baut am Server dev und test
 des Labors messen ab Mo 16.11. den Stand des Labortags (`docs/testlabor-wamo.md:34`, `:76` bis `:79`), P1b ändert die Zugangskontrolle, durch die jede Laborsitzung
 läuft, und ein Hook oder Neustart von GoTrue trifft auch alle Laborkonten.
 
-**Nach dem Labor (ab Mo 30.11.), bei etwa 6 Stunden je Tag in zwei Strängen, ohne Puffer für Rollout, Bewährung und Nikos Ja:**
+**Nach dem Labor (bisher ab Mo 30.11.; mit dem Labortag Sa 05.12.2026 nicht neu gerechnet, die Tage der Tabelle sind Folgetermine `[offen: Niko]`), bei etwa 6 Stunden je Tag in zwei Strängen, ohne Puffer für Rollout, Bewährung und Nikos Ja:**
 
 | Strang | Folge | Ende etwa |
 | --- | --- | --- |
@@ -651,7 +651,7 @@ Auftrag läuft, später noch einmal").
 (Skript, nicht im Freeze, etwa 2 Stunden mit Test) mit derselben Reihenfolge wie `freischalten` (Sperre, Sitzungen und Faktoren weg, Passwort, Freigabe): Die Person
 tippt ihr Passwort am Platz von Niko selbst verdeckt ein, Niko schaltet das Profil frei, die Person richtet den Faktor im Browser ein. Installer aus dem Ordner der
 Firma mit Prüfsumme auf Papier. Ergebnis: Gespräch (nach D2 mit eigenem Schlüssel aus der Karte Modellzugang oder Hausmodellen), Stimme über Soniox, eigener Laptop mit
-Tunnel; keine PC-Werkzeuge, keine Entwicklungsaufträge. Etwa 20 Minuten je Person mit Niko. Nicht in der Labor-Woche (23. bis 28.11.).
+Tunnel; keine PC-Werkzeuge, keine Entwicklungsaufträge. Etwa 20 Minuten je Person mit Niko. Nicht zwischen Freeze und Labortag (23.11. bis 05.12.2026).
 
 ## 9. Rollout am Server und Rückweg
 
@@ -678,7 +678,7 @@ Ohne Antwort gilt die Empfehlung.
 
 | Nr | Frage | Empfehlung |
 | --- | --- | --- |
-| N1 | Wann geht es los? Laut `docs/testlabor-wamo.md` (E14) gilt der Freeze schon seit So 15.11., laut Auftrag ab Fr 20.11. | Vor dem Labor nur Prüfaufträge und Code auf Zweigen ohne Merge, Rollout ab Mo 30.11., Pilot ab etwa Mi 9.12., alle ab etwa Mi 16.12. Option Ü nur für einzelne Kollegen mit echtem Bedarf, nicht in der Labor-Woche |
+| N1 | Wann geht es los? Laut `docs/testlabor-wamo.md` (E14) gilt der Freeze schon seit So 15.11., laut Auftrag ab Fr 20.11. | Vor dem Labor nur Prüfaufträge und Code auf Zweigen ohne Merge, Rollout nach dem Labortag (bisher ab Mo 30.11., Folgetermin `[offen: Niko]`), Pilot ab etwa Mi 9.12., alle ab etwa Mi 16.12. Option Ü nur für einzelne Kollegen mit echtem Bedarf, nicht in der Labor-Woche |
 | N2 | Weg für den Passwortwechsel, falls GoTrue in frischen Sitzungen einen Code verlangt (Zweig B): V1 Mail, V2 Hook mit Code über den Kern, V3 eigener Dienst mit Service-Schlüssel | V2, wenn P0 den Hook belegt, sonst V3 mit eigenem Review. Verlangt GoTrue keinen Code (Zweig A), der direkte Weg, und der Befund zur Laborhärtung geht vor dem Labortag an dich |
 | N3 | Zertifikat für den Browser beim ersten Anmelden: Import der WAMO-CA nach dem Blatt oder ein eigener Name mit öffentlichem Zertifikat | Jetzt der Import nach dem Blatt (ein Befehl, Fingerabdruck zum Vergleichen); einen eigenen Namen mittelfristig prüfen |
 | N4 | Die sieben Konten jetzt in GoTrue sperren, die heutigen Startpasswörter verwerfen, am Übergabetag neue erzeugen (72 Stunden gültig, nur persönlich auf Papier) | Ja, die Sperre sofort |

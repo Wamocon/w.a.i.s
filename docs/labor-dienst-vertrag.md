@@ -1,11 +1,11 @@
-# Testlabor 28.11.2026: Vertrag Kern zu Test-Jira-Dienst, Version 1
+# Testlabor 05.12.2026: Vertrag Kern zu Test-Jira-Dienst, Version 1
 
 Übergabedatei von WAMO an die Kollegen, die den Test-Jira-Dienst bauen. Stand: Entwurf vom 11.11.2026 (vorläufige Version 1). Übergabe und Einfrieren: **Fr 13.11.2026, 12:00**.
 Danach ändert sich der Vertrag nur noch im Dienst, nie im Kern, denn der Kern von WAMO ist ab Mo 23.11.2026 früh eingefroren (Entscheidung von Niko am 16.11.2026, vorher Fr 20.11.). Quelle der Wahrheit ist dieses Papier, die Abnahme prüft jeden Satz davon.
 
 ## 1. Worum es geht
 
-Am Samstag, 28.11.2026, bedienen bis zu 8 Besucher gleichzeitig je einen Platz mit dem Sprachassistenten WAMO. Sie legen Fehler als Ticket in einem **Test-Jira** an, ändern, verschieben und
+Am Samstag, 05.12.2026 (verschoben vom 28.11.2026, Stand 20.11.2026), bedienen bis zu 8 Besucher gleichzeitig je einen Platz mit dem Sprachassistenten WAMO. Sie legen Fehler als Ticket in einem **Test-Jira** an, ändern, verschieben und
 kommentieren Tickets und lassen sich einen Testbericht erzeugen. Den Test-Jira baut ihr: Dienst, Board-Oberfläche, Container und Betreuer-Seite. WAMO spricht mit dem Dienst über genau die sieben Aufrufe
 V1 bis V7 aus Abschnitt 3. Dieses Papier legt fest, was der Dienst dafür können und aushalten muss, und wie WAMO ihn abnimmt.
 
@@ -186,7 +186,7 @@ Ein Fehler in A1, A2, A6 oder A7 (Abschnitt 7) heißt: Der Dienst geht nicht an 
 | D7 | Kein Löschweg für Besucher und den Kern: kein DELETE, kein Feld, das Zeilen verschwinden lässt. Einzige Ausnahmen sind die Betreuer-Funktionen (D9) | A7 |
 | D8 | Tokens: Platz-Token 128 Bit, nur als Hash gespeichert. Betreuer-Token getrennt. Bearer des Kerns in konstanter Zeit verglichen. Tokens nie in Adresszeilen-Protokollen | A9 |
 | D9 | Betreuer-Funktionen (Durchlauf beenden und starten, Einwilligung mit Versionsnummer erfassen, Platz zurücksetzen, Daten eines Platzes oder Durchlaufs löschen) hinter eigenem Token, eigene Pfade, nicht mit dem Platz-Token und nicht mit dem Bearer des Kerns erreichbar | A9 |
-| D10 | Protokolle ohne Ticket-, Kommentar- oder Einwilligungstexte (nur Metadaten), Aufbewahrung höchstens bis **11.12.2026** (14 Tage nach dem Labortag), danach gelöscht. Auch Sicherungen des Dienstes folgen dieser Frist. Ihr weist es mit dem Review nach | Review |
+| D10 | Protokolle ohne Ticket-, Kommentar- oder Einwilligungstexte (nur Metadaten), Aufbewahrung höchstens bis zur Löschfrist **`[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`** (bisher 11.12.2026, 14 Tage nach dem Labortag; verschoben auf 05.12.2026, Stand 20.11.2026), danach gelöscht. Auch Sicherungen des Dienstes folgen dieser Frist. Ihr weist es mit dem Review nach | Review |
 | D11 | Container: Nutzer ohne root, `read_only`, `cap_drop: ALL`, `no-new-privileges`, Speicher- und CPU-Grenzen (Empfehlung 256 MB, 0,5 CPU), Image mit festem Digest | Review |
 | D12 | Sicherheitsreview des Dienstes durch jemanden, der ihn nicht gebaut hat, schriftlich, vor dem 24.11. (Mo 23.11. abends). Ohne Review kein Einsatz am Labortag | Review |
 | D13 | Konsistenz: Der Dienst prüft `durchlauf_id` und `erwartete_version` atomar in derselben Transaktion wie das Schreiben (409 `durchlauf_beendet`, 409 `ticket_veraendert`). Wiederholt der Kern mit demselben Idempotenzschlüssel, kommt dieselbe Antwort, und es entsteht nichts doppelt | A8 |

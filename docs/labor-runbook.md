@@ -1,6 +1,6 @@
-# Testlabor 28.11.2026: Runbook für die Betreuer
+# Testlabor 05.12.2026: Runbook für die Betreuer
 
-**Stand:** 17.11.2026, Entwurf für die Generalprobe am 26.11.2026. Nachtrag: Abschnitte 5.3, 5.4 und 6.1 auf Version 0.5.0 und die Abschaltung nach #181 gebracht. Nachtrag 17.11.2026 (Entscheidungen von Niko): am Labortag nur vier Besucher-Plätze (1 bis 4), Reserveprofile 05 bis 08, Wartende (3.7), keine Aufzeichnung fürs Schaufenster mehr (Abschnitt 7). Nachtrag 17.11.2026: zweite Faktoren mit QR auf die Betreuer-Handys bringen (9.7, Fr 20.11.). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
+**Stand:** 17.11.2026, Entwurf für die Generalprobe am 03.12.2026. Nachtrag 20.11.2026: Der Labortag ist auf Sa 05.12.2026 verschoben (vorher Sa 28.11.), die Generalprobe auf Do 03.12., die Rückwegübung auf Fr 04.12., der Nachlauf auf Mo 07.12. Die Löschfrist ist nicht entschieden `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`. Nachtrag: Abschnitte 5.3, 5.4 und 6.1 auf Version 0.5.0 und die Abschaltung nach #181 gebracht. Nachtrag 17.11.2026 (Entscheidungen von Niko): am Labortag nur vier Besucher-Plätze (1 bis 4), Reserveprofile 05 bis 08, Wartende (3.7), keine Aufzeichnung fürs Schaufenster mehr (Abschnitt 7). Nachtrag 17.11.2026: zweite Faktoren mit QR auf die Betreuer-Handys bringen (9.7, Fr 20.11.). Gehört zum Konzept `docs/testlabor-wamo.md` (3.9, 3.10, 5.2) und zur Checkliste `docs/labor-morgencheckliste.md`. Dieses Runbook führt Betreuer ohne Vorwissen durch den Labortag: Plätze öffnen und schließen, Notaus, Störungen, Rückfall, wer wen anruft. Alles, was am Server geschieht, gehört der Technik-Bereitschaft und steht in den Abschnitten 5 und 9. Was in den Unterlagen noch fehlt (Namen, Telefonnummern, Raum, Uhrzeiten), steht im Text als `[offen: ...]` und gesammelt in Abschnitt 11.
 
 **So liest du es.** Jeder Ablauf besteht aus kurzen nummerierten Schritten. Mach sie in dieser Reihenfolge. Steht bei einem Schritt "Erwartet", vergleiche, bevor du weitermachst. Passt es nicht, höre auf und gehe zu Abschnitt 6 (Störungen) oder rufe die Leitung (Abschnitt 8). Ein Abbruch ist nie ein Fehler.
 
@@ -8,7 +8,7 @@
 
 ### 1.1 Rollen
 
-Namen und Telefonnummern trägt Niko vor dem 26.11. ein (Abschnitt 8). Hier stehen nur die Rollen.
+Namen und Telefonnummern trägt Niko vor dem 03.12. ein (Abschnitt 8). Hier stehen nur die Rollen.
 
 | Kürzel | Rolle | Aufgabe am Labortag |
 | --- | --- | --- |
@@ -155,7 +155,7 @@ Der Hinweis verspricht: Auf Wunsch löschen wir deine Daten sofort.
 3. Notiere nur Platz und Uhrzeit von bis, ohne Namen.
 4. Rufe T und nenne Platz und Zeitfenster. T sperrt dafür das Profil des Platzes, löscht den Gesprächstext dieses Zeitfensters im Kern und schaltet das Profil wieder frei (9.4). Der Platz ist dafür mindestens 3 Minuten nicht nutzbar (Sperrfrist), danach läuft das Löschen.
 5. Informiere D (Abschnitt 8).
-6. Sag der Person: "Die Löschung ist beauftragt. Spätestens am 11.12.2026 ist alles gelöscht."
+6. Sag der Person: "Die Löschung ist beauftragt. Spätestens zur Löschfrist ist alles gelöscht." Das Datum der Löschfrist nennst du erst, wenn Niko es entschieden hat `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`.
 
 ### 4.4 Weitere Fälle
 
@@ -188,10 +188,10 @@ Die Befehle laufen im Repo-Hauptordner auf dem PC der Technik (Voraussetzungen i
 | --- | --- | --- | --- | --- | --- |
 | 1 | B | alle Durchläufe beenden | Betreuer-Seite, **Durchlauf beenden** je Platz | Gespräche enden, Schreiben im Dienst wird abgewiesen | unter 5 Sekunden, Klicken etwa 1 Minute |
 | 2 | T | alle Laborprofile sperren | `python scripts/wamo_labor.py sperren --alle --ausfuehren` | laufende Gespräche enden, kein neues startet, Daten bleiben | rund 2 Minuten (Zwischenspeicher bis 60 s, Prüfung laufender Sitzungen jede Minute) |
-| 3 | T | Dienst abschalten (Board, Tickets, Betreuer-Seite) | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-rueckweg.sh"` | Container, Site und Firewall-Kette weg, Daten und Token bleiben, der Kern nimmt keine Sitzung mehr an | `[offen: Dauer messen in der Rückwegübung am 27.11.]`, das Skript nennt die Ausfalldauer |
+| 3 | T | Dienst abschalten (Board, Tickets, Betreuer-Seite) | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-rueckweg.sh"` | Container, Site und Firewall-Kette weg, Daten und Token bleiben, der Kern nimmt keine Sitzung mehr an | `[offen: Dauer messen in der Rückwegübung am 04.12.]`, das Skript nennt die Ausfalldauer |
 | 4 | T | Kern zurück auf die vorige Instanz | `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-core-slots.sh rueckweg-kern"` | neue Sitzungen gehen auf den vorigen Kern, der Laborprofile bedient (Releases ab 0.3.0) | unter 5 Minuten, nur solange der vorige Slot noch läuft (`status` zeigt es) |
 
-Läuft der vorige Slot nicht mehr (nach `ausleiten`), gibt es keinen schnellen Rückweg. Dann stellt T das vorige Release erneut bereit (`wamo-core-slots.sh release` und `umschalten-kern`). Das vorige Release muss eines mit Erstanmeldung sein (ab 0.3.0, Restplan Entscheidung E6), nie `c751d04` oder älter: Ein solcher Kern kennt `wamo_auth` nicht und ließe Mitglieder mit offenem Passwortwechsel in die App `[offen: Dauer ist nicht gemessen, die Rückwegübung am 27.11. misst sie]`.
+Läuft der vorige Slot nicht mehr (nach `ausleiten`), gibt es keinen schnellen Rückweg. Dann stellt T das vorige Release erneut bereit (`wamo-core-slots.sh release` und `umschalten-kern`). Das vorige Release muss eines mit Erstanmeldung sein (ab 0.3.0, Restplan Entscheidung E6), nie `c751d04` oder älter: Ein solcher Kern kennt `wamo_auth` nicht und ließe Mitglieder mit offenem Passwortwechsel in die App `[offen: Dauer ist nicht gemessen, die Rückwegübung am 04.12. misst sie]`.
 
 **Stand 17.11.2026:** Slot a läuft mit `v0.5.0-ddada3f`, Slot b ist inaktiv mit `v0.5.0-d12ba6f` (Rückweg-Ziel, mit Erstanmeldung). Stufe 4 wirkt damit nur, wenn `status` den vorigen Slot als aktiv zeigt. Meldet `ausleiten` einen Timeout, weil der Kern nicht rechtzeitig endet (#181), ruft das Skript danach `reset-failed` auf. Der Kern beendet sich dann nach etwa 13 Sekunden selbst.
 
@@ -418,7 +418,7 @@ Voraussetzungen: PC mit dem Repo, ssh-Alias `wamo-sokrates2`, `WAMO_ADMIN_DATABA
 
 ### 9.6 Schlüsseltausch für das Sprachmodell
 
-Fällt der Schlüssel des Servers aus (Limit, Guthaben), kann der Schlüssel eines Kollegen die Aufgabe übernehmen: die Zeile `ANTHROPIC_API_KEY` in `/etc/wamo/core.env` mit dem Hilfsprogramm `wamo-core-env` ändern (der Wert geht nur über stdin) und danach `wamo-core-slots.sh umschalten-kern <release>` ausführen. Es gibt kein neues Release. Der Ablauf ist nicht geprüft `[offen: genaue Befehlszeile und Dauer in der Rückwegübung am 27.11. festhalten]`.
+Fällt der Schlüssel des Servers aus (Limit, Guthaben), kann der Schlüssel eines Kollegen die Aufgabe übernehmen: die Zeile `ANTHROPIC_API_KEY` in `/etc/wamo/core.env` mit dem Hilfsprogramm `wamo-core-env` ändern (der Wert geht nur über stdin) und danach `wamo-core-slots.sh umschalten-kern <release>` ausführen. Es gibt kein neues Release. Der Ablauf ist nicht geprüft `[offen: genaue Befehlszeile und Dauer in der Rückwegübung am 04.12. festhalten]`.
 
 ### 9.7 Zweite Faktoren neu einrichten, QR auf die Betreuer-Handys (Fr 20.11. nachmittags)
 
@@ -443,27 +443,26 @@ Wenn etwas schiefgeht:
 
 ## 10. Nach dem Labortag
 
-Alle Daten der Besucher sind spätestens am **11.12.2026** zu löschen.
-
+Alle Daten der Besucher sind spätestens zur Löschfrist zu löschen `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`.
 1. **Betreuer:** Am Ende an jedem benutzten Platz den Durchlauf beenden und die Daten löschen (3.4, 3.5). Beide Chrome-Fenster schließen.
-2. **T, Nachlauf, am Abend des 28.11. oder am Montag 30.11.:**
+2. **T, Nachlauf, am Abend des 05.12. oder am Montag 07.12.:**
    1. Trockenlauf: `python scripts/wamo_labor_nachlauf.py nachlauf`. Das Skript zeigt den Plan, zählt davor (nur lesen) und nennt die Erinnerungen. Es ändert nichts.
    2. Ausführen: `python scripts/wamo_labor_nachlauf.py nachlauf --ausfuehren --protokoll <Datei außerhalb des Repos>`. Es sperrt alle Laborprofile, beendet und leert die 16 Plätze im Dienst, löscht den Gesprächstext im Kern und zählt danach. Erwartet: "Ergebnis: Nachweis erbracht", Ausgang 0, Dauer bis zu etwa 10 Minuten.
    3. Bei einem Fehler nennt das Skript Schritt und Grund. Der Lauf ist wiederholbar.
 3. **N oder T, je Laptop** (im Kiosk-Konto, Chrome vorher schließen): `python <Ordner>\wamo_labor_platz.py rueckweg --profil-loeschen`. Das nimmt Richtlinien und Zertifikat zurück und löscht das Chrome-Profil mit der angemeldeten Sitzung.
 4. **T:** Die Umschlag-Datei und ihre Sicherungen (`umschlag-labor.txt.sicherung-...`) enthalten Passwörter und Seeds. Löschen, sobald die Profile nicht mehr gebraucht werden.
-5. **T, ab dem 12.12.2026:** `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN"`. Es löscht Container, Token, Image und Kern-Einstellungen und schreibt einen Nachweis ohne Inhalte. Das Skript lässt den Lauf erst ab dem 12.12.2026 zu. Daten von Besuchern hat der Nachlauf dann längst gelöscht.
-6. **T, nach dem Nachlauf (Punkt 2), spätestens am Fr 11.12.2026:** Laborkonten löschen und alle Sitzungen widerrufen mit `infra/sokrates2/wamo_labor_konten_loeschen.py` (Ordner wie üblich nach `~/wamo-infra` kopiert, `infra/sokrates2/README.md` Abschnitt 0). Ein Laborkonto ist ein Konto mit Laborprofil (`labor_art`) und der Adresse `<Kennung>@wamo.test`, beides muss zutreffen. Jedes andere Konto fasst das Werkzeug nie an, bei mehr als 12 Laborkonten bricht es ohne Änderung ab.
+5. **T, nach Ablauf der Aufbewahrung `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`:** `ssh wamo-sokrates2 "sudo bash ~/wamo-infra/wamo-labor-loeschlauf.sh --bestaetigung LABOR-LOESCHEN"`. Es löscht Container, Token, Image und Kern-Einstellungen und schreibt einen Nachweis ohne Inhalte. Das Skript lässt den Lauf erst nach der Frist zu. Im Skript steht noch der 12.12.2026, die Anpassung folgt mit der Entscheidung zur Löschfrist. Daten von Besuchern hat der Nachlauf dann längst gelöscht.
+6. **T, nach dem Nachlauf (Punkt 2), im Fenster Mo 07.12. bis Fr 11.12.2026:** Laborkonten löschen und alle Sitzungen widerrufen mit `infra/sokrates2/wamo_labor_konten_loeschen.py` (Ordner wie üblich nach `~/wamo-infra` kopiert, `infra/sokrates2/README.md` Abschnitt 0). Ein Laborkonto ist ein Konto mit Laborprofil (`labor_art`) und der Adresse `<Kennung>@wamo.test`, beides muss zutreffen. Jedes andere Konto fasst das Werkzeug nie an, bei mehr als 12 Laborkonten bricht es ohne Änderung ab.
    1. Trockenlauf: `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py"`. Er listet die Laborkonten (Kennung, Adresse maskiert, Profil, letzte Anmeldung), zählt je Tabelle die Zeilen des Kontos und zeigt den Plan. Er ändert nichts und liest keinen Schlüssel. Erwartet: unter "Ziel" `labor-01` bis `labor-09`, kein Eintrag unter "Nicht angefasst", keine Zeile "Achtung".
    2. Zuerst ein Reservekonto: `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py --kennung labor-09 --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN"`. Erwartet: "labor-09: gelöscht (...), danach 0 Zeilen ..." und "Ergebnis: Nachweis erbracht.", Ausgang 0.
    3. Dann alle: `ssh wamo-sokrates2 "python3 -E -s ~/wamo-infra/wamo_labor_konten_loeschen.py --ausfuehren --bestaetigung LABORKONTEN-LOESCHEN"`. Je Konto: Profil sperren, Konto in GoTrue sperren, Sitzungen widerrufen, Einträge im Anmeldeprotokoll löschen, Konto hart löschen, nachzählen. Erwartet: "verbliebene Laborkonten (Konten mit Laborprofil in einem Schema): 0", "Ergebnis: Nachweis erbracht.", Ausgang 0. Die Ausgabe ist der Nachweis (ohne Adressen und Inhalte), dazu eine Zeile im Journal: `ssh wamo-sokrates2 "journalctl -t wamo-labor-loeschen"`.
    4. Bei einem Fehler nennt das Werkzeug Konto, Schritt und Grund, die übrigen Konten laufen weiter. Der Lauf ist wiederholbar. Ein Konto mit Fehler beim Löschen bleibt gesperrt und ohne Sitzungen. "Achtung: laufende Sitzung im Kern" heißt: später wiederholen. "Achtung: Verweis, den das Löschen nur auf null setzen würde" heißt: zuerst den Nachlauf (Punkt 2) laufen lassen. "Zählung unvollständig" heißt: die Rolle postgres liest eine Tabelle nicht vollständig, dann löscht das Werkzeug dieses Konto nicht und T klärt die Rechte.
-7. **T:** Snapshots und Sicherungen des Servers dürfen den 11.12.2026 nicht überdauern. Von Hand prüfen.
+7. **T:** Snapshots und Sicherungen des Servers dürfen die Löschfrist nicht überdauern `[offen: Niko, Vorschlag bis 18.12.2026, Löschlauf ab 19.12.2026]`. Von Hand prüfen.
 8. **P:** Verbrauch in der Konsole des Sprachmodells notieren, Ausgabenlimit zurücksetzen.
 
 ## 11. Offene Angaben
 
-Das muss Niko oder das Projektteam vor der Generalprobe am 26.11.2026 nennen:
+Das muss Niko oder das Projektteam vor der Generalprobe am 03.12.2026 nennen:
 
 1. Namen, Telefonnummern und der Kanal (Telefon oder Chat) aller Rollen aus Abschnitt 8.
 2. Raum und Standort des Labors, des Betreuer-Platzes und des Fernsehers.
@@ -473,7 +472,7 @@ Das muss Niko oder das Projektteam vor der Generalprobe am 26.11.2026 nennen:
 6. Der Ausdruck des Kartensatzes (`docs/labor-kartensatz.html`, Entwurf liegt vor, A4 mit WMC-Kopf) und sein Ablageort am Platz. Der Trainer trägt die Erwartungswerte zu W1 und W2 vor dem Ausdruck ein.
 7. Aus der Generalprobe: Einfügen des Platz-Tokens in die verdeckte Eingabe, Nutzung des Besucher-Links im Kiosk, Bezeichnung und Ort des Eingabefelds für Text.
 8. Reserve: ob der Reserve-Laptop Platz 9 ist, welche Profile am Labortag freigeschaltet sind und wie die Reserveprofile 05 bis 08 an einem Laptop genutzt werden (6.7).
-9. Aus der Rückwegübung am 27.11.: Dauer der Stufen 3 und 4 des Notaus, Befehl zum Neustart des Dienstes, Wiederherstellen des Dienstes nach Stufe 3, Befehlszeile des Schlüsseltauschs.
+9. Aus der Rückwegübung am 04.12.: Dauer der Stufen 3 und 4 des Notaus, Befehl zum Neustart des Dienstes, Wiederherstellen des Dienstes nach Stufe 3, Befehlszeile des Schlüsseltauschs.
 10. Fristen, die L und T festlegen: Wartezeit bis zum Wechsel an den Reserveplatz, Frist für die Rückkehr des Dienstes.
 11. Ob die Qualität mit weiteren Hausmodellen reicht und ob das Gateway Audiomodelle für Sprache anbietet.
 12. Ob Zuschauer am Betreuer-Platz einen Hinweis brauchen (Datenschutz) und ob Zuschauer bei laufenden Plätzen einen Hinweis brauchen (3.7).

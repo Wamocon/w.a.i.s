@@ -12,7 +12,7 @@ sondern in der Oberfläche umschaltbar machen". Messung M7 steht in Abschnitt 2.
 Laborprofile hören immer über Soniox (F4). Die zwei Einträge im Gateway (2.5) sind seit 16.11.2026, 18:27 Uhr aktiv (Nikos Ja,
 eingetragen vom Koordinator); Migration 0023 und `core.env` folgen nach demselben Ja.
 
-Das Testlabor am 28.11.2026 hat Vorrang. Der Freeze für Kern, Migration, Oberfläche und Dienste am Server gilt ab Mo 23.11.2026 früh (Entscheidung E1 im Restplan `docs/labor-restplan.md` vom 16.11.2026, der Freeze vom 15.11. ist überholt), der Daten-Freeze am Fr 27.11. um 12:00. Jedes Paket dieses Papiers, das Kern, Migration, Oberfläche oder Dienste am Server ändert, beginnt deshalb frühestens am Mo 30.11.2026, nach dem Labortag. Die Betriebsnotiz für das zentrale Gateway steht in `infra/sokrates1/gateway-wamo.md`. Sie gilt für alle Gateway-Änderungen aus diesem Papier (2.5 und 2.6).
+Das Testlabor am 05.12.2026 (verschoben vom 28.11.2026, Stand 20.11.2026) hat Vorrang. Der Freeze für Kern, Migration, Oberfläche und Dienste am Server gilt ab Mo 23.11.2026 früh (Entscheidung E1 im Restplan `docs/labor-restplan.md` vom 16.11.2026, der Freeze vom 15.11. ist überholt), der Daten-Freeze am Fr 27.11. um 12:00. Jedes Paket dieses Papiers, das Kern, Migration, Oberfläche oder Dienste am Server ändert, beginnt deshalb frühestens am Mo 30.11.2026, nach dem Labortag. Die Betriebsnotiz für das zentrale Gateway steht in `infra/sokrates1/gateway-wamo.md`. Sie gilt für alle Gateway-Änderungen aus diesem Papier (2.5 und 2.6).
 
 **Wunsch von Niko vom 15.11.2026 (wörtlich).** "Für die Zukunft müssen wir W.A.I.S. auch komplett auf die haueigenen Modelle in der UI umstellen können, also alles
 über Sokrates und seine Modelle! Dafür muss du die besten bestehenden Modelle auf den Sparks dafür finden oder neuen Modelle dafür installieren! Es gibt auch ein Projekt
@@ -562,7 +562,7 @@ und die Zeit des Gateway-Betreibers für drei bis vier Einträge.
 H3 zeigt im Test, dass im Haus-Modus kein Anthropic-Client entsteht und der Notschalter ohne Datenbank wirkt; H4 zeigt in den Tests, dass Mitglieder den Abschnitt nicht
 sehen; H5 besteht M7 und die Hörprobe; H6 schafft im Spike mindestens 7 von 8 und zwei von drei echten Aufgaben; K1 besteht den Vertragstest und den Sicherheitsreview.
 
-**Nicht angefasst bis nach dem Labortag am 28.11.2026** (Ausnahme seit 16.11.2026: H5 nach Nikos Entscheidung, eingebaut, ohne Umstellung): Kern, Migrationen, Oberfläche, Dienste und Gateway; das Laborprofil und sein Modell (Haiku über den
+**Nicht angefasst bis nach dem Labortag am 05.12.2026** (Ausnahme seit 16.11.2026: H5 nach Nikos Entscheidung, eingebaut, ohne Umstellung): Kern, Migrationen, Oberfläche, Dienste und Gateway; das Laborprofil und sein Modell (Haiku über den
 Server-Schlüssel); `core.env`; Soniox-Einstellungen; die Modelle auf allen drei Sparks, auch keine Messläufe über das Gateway in der Woche vor dem Labortag. Erlaubt ist
 nur dieses Papier.
 
