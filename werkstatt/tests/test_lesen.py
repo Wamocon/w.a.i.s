@@ -169,8 +169,7 @@ def test_marker_in_keiner_antwort(client, db, daten_ordner, caplog):
     for pfad in ("/karten/pruefen", "/karten/karte"):
         r = client.post(BASIS + pfad, headers=kopf())
         assert MARKER not in r.text, pfad
-    assert MARKER not in "
-".join(r.getMessage() for r in caplog.records if r.name == "wamo-werkstatt")
+    assert MARKER not in " ".join(r.getMessage() for r in caplog.records if r.name == "wamo-werkstatt")
 
 
 def test_journal_ohne_inhalte(client, caplog, db):
@@ -179,8 +178,7 @@ def test_journal_ohne_inhalte(client, caplog, db):
     client.get(f"{BASIS}/karten/W1?geheim=abc123", headers=kopf(tok))
     zeilen = [r.getMessage() for r in caplog.records if r.name == "wamo-werkstatt"]
     assert any(z.startswith("wamo-werkstatt: anfrage ") and "route=/karten/{kennung}" in z and "status=404" in z for z in zeilen)
-    eigene = "
-".join(zeilen)  # der Testclient (httpx) schreibt seine eigene Zeile mit der Adresse
+    eigene = " ".join(zeilen)  # der Testclient (httpx) schreibt seine eigene Zeile mit der Adresse
     assert tok not in eigene and "abc123" not in eigene and k.ADMIN not in eigene
     assert any("admin=11111111" in z for z in zeilen)
 
