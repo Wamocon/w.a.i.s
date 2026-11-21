@@ -9,7 +9,6 @@ Eine Falle bricht jeden Test ab, der ssh oder einen anderen Prozess starten wür
 """
 from __future__ import annotations
 
-import base64
 import io
 import json
 import subprocess
@@ -22,6 +21,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wamo_labor as wl  # noqa: E402
 import wamo_labor_last_server as sv  # noqa: E402
+import wamo_labor_ssh as ws  # noqa: E402
 
 GEHEIM = "TOKEN-nie-ausgeben-0123456789abcdefghijklmnopqrstuvwxyz"
 
@@ -156,6 +156,65 @@ def test_nichts_aus_dem_journal_wird_zurueckgegeben_ausser_zahlen(ns, tmp_path):
     assert "Hallo" not in antwort and "sokrates2" not in antwort and "rate_limit_error" not in antwort
 
 
+# ---- Modelle des Gesprächs (Claude oder Rückfall auf ein Hausmodell) ----
+
+MODELL_ZEILEN = [
+    "1700000001.0 sokrates2 python[1]: 2026-11-20 10:00:01 | INFO | llm_anbieter:gespraech_llm:797 - Gesprächsmodell für Profil ab12cd34: claude-haiku-5-5 über claude (Zugang claude)",
+    "1700000002.0 sokrates2 python[1]: 2026-11-20 10:00:02 | INFO | llm_anbieter:verbrauch_loggen:298 - Verbrauch profil=ab12cd34 anbieter=claude modell=claude-haiku-5-5 baustein=gespraech ein=17000 aus=40 cache_lesen=0 cache_schreiben=0",
+    "1700000003.0 sokrates2 python[1]: 2026-11-20 10:00:03 | INFO | llm_anbieter:verbrauch_loggen:298 - Verbrauch profil=ab12cd34 anbieter=claude modell=claude-haiku-5-5 baustein=gespraech ein=17100 aus=35 cache_lesen=16000 cache_schreiben=0",
+    "1700000004.0 sokrates2 python[1]: 2026-11-20 10:00:04 | INFO | llm_anbieter:verbrauch_loggen:298 - Verbrauch profil=ab12cd34 anbieter=litellm modell=qwen3.6-35b baustein=zusammenfassung ein=900 aus=80 cache_lesen=0 cache_schreiben=0",
+    "1700000005.0 sokrates2 python[1]: 2026-11-20 10:00:05 | WARNING | llm_anbieter:_claude_oder_haus:679 - Claude für Profil ef56ab12 nicht nutzbar (Claude lehnt den Schlüssel ab): Rückfall auf das Hausmodell gemma4-31b",
+    "1700000006.0 sokrates2 python[1]: 2026-11-20 10:00:06 | INFO | llm_anbieter:gespraech_llm:797 - Gesprächsmodell für Profil ef56ab12: gemma4-31b über litellm (Zugang claude)",
+    "1700000007.0 sokrates2 python[1]: 2026-11-20 10:00:07 | INFO | llm_anbieter:verbrauch_loggen:298 - Verbrauch profil=ef56ab12 anbieter=litellm modell=gemma4-31b baustein=gespraech ein=900 aus=40 cache_lesen=0 cache_schreiben=0",
+    "1700000008.0 sokrates2 python[1]: Verbrauch profil=ef56ab12 anbieter=litellm modell=bad name!x baustein=gespraech ein=1",  # kein gültiger Modellname
+]
+
+
+def test_modelle_werden_je_sitzungsstart_und_gespraechsaufruf_gezaehlt(ns, tmp_path):
+    j = zaehlen(ns, tmp_path, zeilen=MODELL_ZEILEN)["journal"]
+    assert j["modell_start"] == {"claude-haiku-5-5": 1, "gemma4-31b": 1}
+    assert j["modell_aufruf"] == {"claude-haiku-5-5": 2, "gemma4-31b": 1}   # nur der Baustein gespraech, nicht die Zusammenfassung
+    assert j["rueckfall"] == 1
+
+
+def test_umlaute_der_zeilen_werden_auch_bei_falscher_zeichenkodierung_gefunden(ns, tmp_path):
+    zeile = "1700000001.0 h python[1]: Gespr\u00e4chsmodell f\u00fcr Profil ab12cd34: claude-haiku-5-5 \u00fcber claude (Zugang claude)"
+    for kodiert in (zeile, zeile.encode("utf-8").decode("latin-1")):   # richtig gelesen und als Latin-1 fehlgelesen (aus einem Zeichen werden zwei)
+        assert zaehlen(ns, tmp_path, zeilen=[kodiert])["journal"]["modell_start"] == {"claude-haiku-5-5": 1}
+
+
+def test_ohne_modellzeilen_bleiben_die_zaehler_leer(ns, tmp_path):
+    j = zaehlen(ns, tmp_path)["journal"]
+    assert j["modell_start"] == {} and j["modell_aufruf"] == {} and j["rueckfall"] == 0
+
+
+def test_zu_viele_modellnamen_werden_unter_weitere_gezaehlt(ns, tmp_path):
+    zeilen = [f"1700000001.0 h python[1]: Verbrauch profil=ab12cd34 anbieter=litellm modell=m{i} baustein=gespraech ein=1" for i in range(25)]
+    j = zaehlen(ns, tmp_path, zeilen=zeilen)["journal"]
+    assert len(j["modell_aufruf"]) == ns["MAX_MODELLE"] + 1 and j["modell_aufruf"]["(weitere)"] == 5
+
+
+def test_modellzeilen_geben_nur_modellnamen_und_zahlen_zurueck(ns, tmp_path):
+    antwort = json.dumps(zaehlen(ns, tmp_path, zeilen=MODELL_ZEILEN))
+    assert "ab12cd34" not in antwort and "ef56ab12" not in antwort and "Schlüssel" not in antwort and "Zugang" not in antwort
+
+
+def test_server_liest_die_modelle_streng_und_ohne_feld_leer():
+    j = sv.Server("h", Ssh(antwort_messung(journal={**antwort_messung()["journal"], "modell_start": {"claude-haiku-5-5": 2},
+                                                    "modell_aufruf": {"claude-haiku-5-5": 7, "(weitere)": 1}, "rueckfall": 3})),
+                  slot="b", uhr=lambda: 1.0).messen(5.0).journal
+    assert j.modell_start == {"claude-haiku-5-5": 2} and j.modell_aufruf == {"claude-haiku-5-5": 7, "(weitere)": 1} and j.rueckfall == 3
+    alt = sv.Server("h", Ssh(antwort_messung()), slot="b", uhr=lambda: 1.0).messen(5.0).journal   # ein Programm ohne die Felder
+    assert alt.modell_start == {} and alt.modell_aufruf == {} and alt.rueckfall == 0
+
+
+@pytest.mark.parametrize("kaputt", [{"modell_aufruf": {"a b": 1}}, {"modell_aufruf": {"claude-x": -1}}, {"modell_aufruf": {"claude-x": "3"}},
+                                    {"modell_start": [1]}, {"rueckfall": -1}, {"rueckfall": "1"}, {"modell_aufruf": {f"m{i}": 1 for i in range(30)}}])
+def test_unerwartete_modellfelder_werden_abgelehnt(kaputt):
+    with pytest.raises(sv.ServerFehler, match="unerwartet"):
+        sv.Server("h", Ssh(antwort_messung(journal={**antwort_messung()["journal"], **kaputt})), slot="b", uhr=lambda: 1.0).messen(5.0)
+
+
 # ---- Journal lesen: erst ohne, dann mit sudo, nur lesend ----
 
 class Prozess:
@@ -221,7 +280,7 @@ def test_journal_befehle_enthalten_nur_feste_schlueter_und_keinen_schreibzugriff
 
 def test_programm_laeuft_mit_dem_echten_interpreter_wie_am_server(monkeypatch):
     monkeypatch.undo()  # die Falle ersetzt subprocess.run: hier ist der echte Start gewollt
-    code = f"import base64;exec(base64.b64decode('{base64.b64encode(sv.REMOTE_MESSUNG.encode()).decode()}').decode('utf-8'))"
+    code = ws.programm_code(sv.REMOTE_MESSUNG)
     r = subprocess.run([sys.executable, "-I", "-c", code], input=json.dumps({"slot": "b", "seit": None}), capture_output=True, text=True,
                        timeout=60)
     assert r.returncode == 0, r.stderr

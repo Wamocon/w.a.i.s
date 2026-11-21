@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wamo_labor as wl  # noqa: E402
 import wamo_labor_faktoren_totp as tt  # noqa: E402
+import wamo_labor_last as cli  # noqa: E402
 import wamo_labor_last_attrappe as at  # noqa: E402
 import wamo_labor_last_audio as au  # noqa: E402
 import wamo_labor_last_auswertung as aw  # noqa: E402
@@ -59,7 +60,7 @@ class Welt:
         self.ausgabe: list[str] = []
         self.gespeichert: list[dict] = []
         self.server_einstellung = at.ServerEinstellung()
-        self.server = at.ServerAttrappe(self.uhr, self.protokoll, self.server_einstellung)
+        self.server = at.ServerAttrappe(self.uhr, self.protokoll, self.server_einstellung, self.aktive)
         self.dienst = at.DienstAttrappe(self.protokoll)
         self.kern = at.KernAttrappe(self.protokoll)
         self.umschlag = at.UmschlagAttrappe()
@@ -520,3 +521,86 @@ def test_profil_stand_lehnt_unerwartete_zeilen_ab(welt):
     welt.kern = lambda host, nutzlast: wl.Ergebnis(0, "Hallo Welt", "")
     with pytest.raises(vb.VorpruefFehler, match="unerwartet"):
         vb.profil_stand(welt.ein, welt.umgebung())
+
+
+# ---------- Modellprüfung: Claude statt Hausmodell (Lasttest vom 20.11.2026 lief zwei Stunden auf gemma4-31b) ----------
+
+def test_gesunder_lauf_belegt_claude_je_stufe_prueft_einmal_und_nennt_die_modelle_im_bericht(tmp_path, clips):
+    w = Welt(tmp_path, clips)
+    e = w.lauf()
+    assert e["haus_erlaubt"] is False and e["abbruchgrund"] == ""
+    for s in e["stufen"]:
+        assert s["modelle"]["sitzungen"] == {"claude-haiku-5-5": s["sitzungen"]}
+        assert set(s["modelle"]["aufrufe"]) == {"claude-haiku-5-5"} and s["modelle"]["rueckfall"] == 0
+    assert next(k for k in e["kriterien"] if "Gespräch über Claude" in k["name"])["status"] == aw.BESTANDEN
+    assert sum(1 for z in w.ausgabe if z.startswith("Modellprüfung")) == 1 and any("Modellprüfung bestanden" in z for z in w.ausgabe)
+    assert "## Genutzte Modelle" in aw.bericht_text(e) and "claude-haiku-5-5" in aw.bericht_text(e)
+
+
+def test_hausmodell_statt_claude_bricht_gleich_nach_dem_start_der_gespraeche_ab_und_raeumt_auf(tmp_path, clips):
+    w = Welt(tmp_path, clips)
+    w.server_einstellung.modell = "gemma4-31b"
+    e = w.lauf()
+    assert e["abbruchgrund"].startswith(aw.SATZ_KEIN_CLAUDE) and "gemma4-31b" in e["abbruchgrund"]
+    assert "Das Labor nutzt nicht Claude (Rückfall auf Hausmodell). Claude-Zugang des Labors prüfen." in e["abbruchgrund"]
+    assert len(e["stufen"]) == 1 and e["stufen"][0]["schritte"] == 0   # keine einzige Sprechprobe lief
+    assert "schritt" not in w.protokoll.namen("treiber0")
+    assert e["stufen"][0]["modelle"]["sitzungen"] == {"gemma4-31b": 1}
+    assert e["gesamt"] == aw.DURCHGEFALLEN and cli.ausgangscode(e) == cli.EXIT_FEHLER
+    assert all(a["ok"] for a in e["aufraeumen"]), e["aufraeumen"]
+    assert {"durchlauf_beenden", "daten_loeschen"} <= set(w.protokoll.namen("dienst")) and "sperren" in w.protokoll.namen("kern")
+    assert "gemma4-31b" in aw.bericht_text(e) and "Der Lauf endete vorzeitig: Das Labor nutzt nicht Claude" in aw.bericht_text(e)
+
+
+def test_ein_hausmodell_bricht_auch_dann_ab_wenn_es_mehrere_sitzungen_betrifft_und_nennt_es_einmal(tmp_path, clips):
+    w = Welt(tmp_path, clips, sitzungen=(4,))
+    w.server_einstellung.modell = "gemma4-31b"
+    e = w.lauf()
+    assert e["abbruchgrund"].count("gemma4-31b") == 1 and e["stufen"][0]["modelle"]["sitzungen"] == {"gemma4-31b": 4}
+    assert all(a["ok"] for a in e["aufraeumen"])
+
+
+def test_eine_rueckfallmeldung_allein_beendet_den_lauf_auch_wenn_das_modell_claude_heisst(tmp_path, clips):
+    w = Welt(tmp_path, clips)
+    w.server_einstellung.rueckfall = True
+    e = w.lauf()
+    assert "Rückfall auf ein Hausmodell gemeldet" in e["abbruchgrund"] and e["stufen"][0]["schritte"] == 0
+
+
+def test_ein_hausmodell_mitten_im_lauf_beendet_den_lauf_bei_der_naechsten_messung(tmp_path, clips):
+    w = Welt(tmp_path, clips)
+    w.server_einstellung.journal = lambda seit, bis: {"modell_aufruf": {"gemma4-31b": 2}} if bis > w.uhr._start + 30 else {}
+    e = w.lauf()
+    assert "gemma4-31b" in e["abbruchgrund"] and len(e["stufen"]) == 1 and any("Modellprüfung bestanden" in z for z in w.ausgabe)
+    assert all(a["ok"] for a in e["aufraeumen"])
+
+
+def test_erlaube_haus_misst_den_notfallweg_laeuft_durch_und_urteilt_offen(tmp_path, clips):
+    w = Welt(tmp_path, clips, haus_erlauben=True)
+    w.server_einstellung.modell = "gemma4-31b"
+    e = w.lauf()
+    assert e["abbruchgrund"] == "" and e["haus_erlaubt"] is True and [s["sitzungen"] for s in e["stufen"]] == [1, 2]
+    assert all(s["schritte"] > 0 and s["modelle"]["aufrufe"] == {"gemma4-31b": s["modelle"]["aufrufe"]["gemma4-31b"]} for s in e["stufen"])
+    k = next(k for k in e["kriterien"] if "Gespräch über Claude" in k["name"])
+    assert k["status"] == aw.OFFEN and "Notfallweg" in k["text"]
+    assert e["gesamt"] == aw.OFFEN and cli.ausgangscode(e) == cli.EXIT_OFFEN
+    text = aw.bericht_text(e)
+    assert "--erlaube-haus" in text and "gemma4-31b" in text
+    assert not any(z.startswith("ABBRUCH") for z in w.ausgabe)
+
+
+def test_fehlen_die_startzeilen_im_journal_laeuft_der_lauf_weiter_und_sagt_es(tmp_path, clips):
+    w = Welt(tmp_path, clips)
+    w.server = at.ServerAttrappe(w.uhr, w.protokoll, w.server_einstellung)   # ohne Zähler der Gespräche schreibt die Attrappe keine Startzeilen
+    e = w.lauf()
+    assert e["abbruchgrund"] == "" and any("Modellprüfung unvollständig" in z for z in w.ausgabe)
+    assert next(k for k in e["kriterien"] if "Gespräch über Claude" in k["name"])["status"] == aw.BESTANDEN   # die Aufrufe zeigen Claude
+
+
+def test_die_modellpruefung_liest_hoechstens_viermal_das_journal_vor_der_ersten_sprechprobe(tmp_path, clips):
+    w = Welt(tmp_path, clips, sitzungen=(1,))
+    w.server = at.ServerAttrappe(w.uhr, w.protokoll, w.server_einstellung)   # nie eine Startzeile
+    w.lauf()
+    namen = [(e[0], e[1]) for e in w.protokoll.eintraege]
+    vor_der_probe = namen[:namen.index(("treiber0", "schritt"))]
+    assert vor_der_probe.count(("server", "messen")) <= 2 + 1 + la.MODELL_VERSUCHE   # Vorprüfung 2, Stufenbeginn 1, Modellprüfung höchstens MODELL_VERSUCHE

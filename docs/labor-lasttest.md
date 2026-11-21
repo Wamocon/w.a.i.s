@@ -1,4 +1,4 @@
-# Lasttest für das Testlabor (Stand 17.11.2026)
+# Lasttest für das Testlabor (Stand 21.11.2026)
 
 Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8 gleichzeitigen Sitzungen verhält. Es setzt den Absatz "Last" in `docs/testlabor-wamo.md`, Abschnitt 3.7, um. Dieses Dokument beschreibt Ablauf, Voraussetzungen, Kosten, Abbruch, Auswertung und die Grenzen der Aussage. **Vor dem Probelauf am Server wurde das Werkzeug nur gegen Attrappen getestet.** Am 16.11.2026 lief ein Probelauf mit einer Sitzung und drei Minuten am Server (Abschnitt 4). Der volle Lauf ist für Fr 20.11.2026 vorgesehen. Alles, was nur ein echter Lauf zeigt, steht im letzten Abschnitt.
 
@@ -11,6 +11,23 @@ Das Werkzeug `scripts/wamo_labor_last.py` misst, wie sich WAMO mit 1, 2, 4 und 8
 3. **Stufen** (Standard 1, 2, 4, 8 Sitzungen, je 15 Minuten, auf Wunsch weitere Stufen mit 8 Sitzungen und Murmeln): je Sitzung die Kette A1, J1, G3 im Wechsel, nach jedem Schritt eine zufällige Denkpause von 8 bis 20 Sekunden. Die Folge ist mit festem Seed wiederholbar, die Sitzungen beginnen versetzt (A1, J1, G3). Am Kern wird alle 15 Sekunden gelesen.
 4. **Aufräumen** (immer, auch bei Fehlern, Grenzen und Strg+C): Gespräche beenden, Browser schließen, Profile sperren, Durchläufe beenden, Plätze leeren, Gesprächstexte der Profile im Kern ab Beginn des Laufs löschen, Nachweis (Profile gesperrt, Plätze leer), Temp-Dateien löschen. Jeder Schritt läuft für sich, ein gescheiterter hält die anderen nicht auf und steht im Bericht.
 5. **Auswertung**: eine JSON-Datei und ein Bericht (Markdown) mit Bestehen, Durchfallen oder "offen" je Kriterium.
+
+## 1a. Modellprüfung: lief wirklich Claude?
+
+**Anlass (Lauf vom 20.11.2026):** Der volle Lauf dauerte zwei Stunden und lief die ganze Zeit über das Hausmodell gemma4-31b. Claude hatte den Schlüssel des Servers mit 401 abgelehnt, der Kern fiel deshalb für jedes Laborprofil auf das Hausmodell zurück (Journal: „Claude für Profil ... nicht nutzbar (Claude lehnt den Schlüssel ab): Rückfall auf das Hausmodell gemma4-31b“ und „Gesprächsmodell für Profil ...: gemma4-31b über litellm“). Gemessen war damit der Notfallweg, nicht die geplante Konfiguration mit Claude Haiku.
+
+**Ablauf der Prüfung (nur lesend):**
+
+1. Gleich nach dem Start der Gespräche der ersten Stufe, vor der ersten Sprechprobe, liest der Lauf im Journal des gemessenen Kern-Slots die Zeilen „Gesprächsmodell für Profil ...“ (eine je Sitzungsstart). Er liest bis zu viermal im Abstand von 5 Sekunden, bis für alle gestarteten Sitzungen eine Zeile da ist. Es ist dasselbe lesende Programm wie die Messung, es gibt nur Modellnamen und Zahlen zurück, nie Schlüssel, Profilkennungen oder Gesprächstext.
+2. Danach prüft jede Messung (alle 15 Sekunden) weiter, zusätzlich anhand der Zeilen „Verbrauch ... modell=... baustein=gespraech“ (eine je Gesprächsaufruf) und der Meldung „Rückfall auf das Hausmodell“.
+3. Jedes Gesprächsmodell, dessen Name nicht mit `claude-` beginnt, und jede Rückfall-Meldung beenden den Lauf sofort mit dem Satz **„Das Labor nutzt nicht Claude (Rückfall auf Hausmodell). Claude-Zugang des Labors prüfen.“** (dazu der gefundene Modellname). Das Aufräumen läuft wie immer, der Ausgang ist 1. Bis dahin vergehen etwa eine halbe Minute (Start der Gespräche, eine Messung), nicht zwei Stunden.
+4. Fehlen die Startzeilen im Journal (zum Beispiel weil es nicht lesbar ist), läuft der Lauf weiter und meldet „Modellprüfung unvollständig“. Das Kriterium bleibt dann offen, eine fehlende Angabe ist nie ein Bestehen.
+
+**`--erlaube-haus`:** Mit dieser Option bricht ein Hausmodell den Lauf nicht ab. Sie ist für das bewusste Messen des Notfallwegs gedacht (Claude fällt aus, was schafft das Haus?). Der Bericht schreibt das ausdrücklich hin (Zeile „Modellprüfung“ in der Tabelle „Lauf“, eigener Satz im Abschnitt „Genutzte Modelle“), das Kriterium „Gespräch über Claude, kein Hausmodell“ lautet dann **offen**, und das Gesamturteil kann nie „bestanden“ sein.
+
+**Bericht in jedem Fall:** JSON und Markdown nennen je Stufe die Gesprächsaufrufe je Modell, die Sitzungsstarts je Modell und die Zahl der Rückfall-Meldungen (JSON: `stufen[].modelle` mit `sitzungen`, `aufrufe` und `rueckfall`, dazu `haus_erlaubt`; Markdown: Abschnitt „Genutzte Modelle“).
+
+**Grenze der Aussage:** Das Journal gehört dem ganzen Kern. Das Werkzeug kennt die Profil-IDs der Laborprofile nicht (im Journal stehen nur die ersten acht Zeichen) und kann die Aufrufe der Laborprofile deshalb nicht von denen anderer Profile trennen. Arbeitet während des Laufs jemand mit einem Hausmodell auf demselben Kern, bricht der Lauf ebenfalls ab: dann prüfen, wer gerade arbeitet, und den Lauf wiederholen. Die Zeilenmuster stammen aus dem Quelltext des Kerns (`voice-core/llm_anbieter.py`) und sind am echten Journal zu bestätigen.
 
 ## 2. Voraussetzungen auf dem Mess-PC
 
@@ -54,6 +71,7 @@ Der **Trockenlauf** ist der Standard. Er zeigt Plan, Zahl der Profile und Plätz
 | `--preis-eingabe USD`, `--preis-ausgabe USD` | Dollar je Million Tokens, nur damit gibt es eine Schätzung in Dollar |
 | `--kosten-obergrenze USD` | lehnt einen teureren Plan schon im Trockenlauf ab (braucht beide Preise) |
 | `--kerndaten-behalten` | die Gesprächstexte im Kern am Ende nicht löschen |
+| `--erlaube-haus` | ein Hausmodell statt Claude im Gespräch bricht den Lauf nicht ab (misst den Notfallweg, Urteil nie „bestanden“, Abschnitt 1a) |
 | `--schema`, `--host` | Standard `wamo_dev`, `wamo-sokrates2` |
 | `--slot a\|b` | Kern-Slot vorgeben. Ohne die Option misst der Lasttest den aktiven Slot (seit #182 fragt er den Server ab, kein fester Slot b mehr): Der Echtlauf fragt ihn vor allem anderen am Server ab (nur lesend, `systemctl is-active wamo-core@a.service wamo-core@b.service`, ohne sudo). Genau einer der beiden Slots muss laufen. Laufen beide (Auslaufzeit nach einem Kern-Wechsel, vor `ausleiten`) oder keiner, endet der Lauf mit Ausgang 2 und dem Grund, nichts wird angefasst. Der Trockenlauf fragt nie am Server, er nennt nur „der aktive Slot“ |
 | `--ausgabe-ordner`, `--clips-ordner`, `--umschlag-datei` | Standard unter `%USERPROFILE%\.wamo-labor`, nie im Repo (das Werkzeug lehnt Orte im Repo ab) |
@@ -67,9 +85,8 @@ Ausgänge: 0 bestanden (oder Trockenlauf), 1 durchgefallen, vorzeitig beendet od
 **Am Mess-PC einmalig (Do 19.11.):**
 
 1. Playwright außerhalb des Repos installieren, zum Beispiel `npm install playwright-core@1.49.1` in einem eigenen Ordner. Chrome als Systeminstallation unter `C:\Program Files` wird seit #190 gefunden.
-2. Alle Aufrufe in **PowerShell**, nicht in Git Bash: In Git Bash zerlegen die ssh-Aufrufe der Werkzeuge die Anführungszeichen (`wamo_labor.py`, `wamo_labor_nachlauf.py`).
-3. Im Hauptordner des Repos starten (dort liegt die `.env` mit `WAMO_ADMIN_DATABASE_URL`), vorher `$env:PLAYWRIGHT_MODUL = "<Ordner>
-ode_modules\playwright-core"`.
+2. Alle Aufrufe in **PowerShell**. Ursache des früheren Fehlers in Git Bash (Nachlauf: „Dateiende beim Suchen nach »\"« erreicht“ in Schritt 1): Das ssh aus Git für Windows schneidet Befehlszeilen bei etwa 8191 Zeichen ab, der ssh-Befehl für den Kern war über 13000 Zeichen lang, dem fernen Befehl fehlte das schließende Anführungszeichen. Behoben seit 21.11.2026: Die Serverprogramme reisen gepackt, der Befehl ist unter 5000 Zeichen und eine Grenze (6000) lässt einen zu langen Befehl laut scheitern (`scripts/wamo_labor_ssh.py`, Test `scripts/test_wamo_labor_ssh.py`). Am Server ist die Behebung noch nicht erprobt, deshalb bleibt PowerShell der empfohlene Weg.
+3. Im Hauptordner des Repos starten (dort liegt die `.env` mit `WAMO_ADMIN_DATABASE_URL`), vorher `$env:PLAYWRIGHT_MODUL = "<Ordner>\node_modules\playwright-core"`.
 4. Trockenlauf mit den Werten aus N3: `python scripts\wamo_labor_last.py lauf --sitzungen 1,2,4,8 --minuten 15 --ratenlimit-anfragen 4000 --ratenlimit-tokens 2000000 --preis-eingabe 0.10 --preis-ausgabe 0.50 --kosten-obergrenze 5`.
 
 **Fr 20.11. vormittags:**
@@ -111,6 +128,7 @@ Der Lauf endet sofort und räumt auf bei:
 | Speicher des Kerns | über 3 GiB |
 | Messung am Server | 3 Fehler oder unvollständige Messungen in Folge (ohne Journal, Speicher oder CPU-Zeit wirken die Grenzen nicht) |
 | Kern nicht mehr aktiv | sofort |
+| Gespräch über ein Hausmodell statt Claude | sofort (Modellprüfung, Abschnitt 1a), außer mit `--erlaube-haus` |
 | Strg+C oder Signal | sofort, das Aufräumen zählt kein weiteres Signal |
 
 Höchstgrenzen im Code (`scripts/wamo_labor_last_plan.py`): höchstens 8 Sitzungen, höchstens 20 Minuten je Stufe, höchstens 10 Stufen. Der Browser darf nur die feste Adresse der Oberfläche auf Sokrates-2 öffnen (`https://192.168.178.136:55445`, Prüfung wie in `scripts/wamo_labor_platz_adressen.py`), Anfragen der Seite gehen nur an die vier Herkünfte 55443, 55444, 55445 und 55447.
@@ -130,6 +148,7 @@ Ausgabe unter `%USERPROFILE%\.wamo-labor\last\<lauf>.json` und `<lauf>.md`. Die 
 | Speicher des Kerns | unter 2,8 GiB | größter Stichprobenwert, dazu die Spitze des Speichers (`memory.peak`), wenn der Lauf sie erhöht hat |
 | 429 | kein einziges | Journal und Browser. Ein unlesbares oder abgeschnittenes Journal gilt nie als "kein 429", sondern als offen |
 | Spitze der Anfragen und Tokens je Minute | unter 70 Prozent des Ratenlimits | gleitende 60 Sekunden aus Eimern von 10 Sekunden. Ohne Angabe des Limits offen. Tokens nur, wenn der Kern Latenzzeilen (`LATENZ_TOKEN`, Schalter `WAMO_LATENZ_LOG`) schreibt |
+| Gespräch über Claude, kein Hausmodell | alle Gesprächsaufrufe mit einem Modell `claude-...` | Aus dem Journal des Kerns (Abschnitt 1a). Ein Hausmodell oder eine Rückfall-Meldung heißt durchgefallen, mit `--erlaube-haus` offen, ohne Gesprächsaufrufe im Journal offen |
 | Umfang des Laufs | Stufen 1, 2, 4 und 8, je mindestens 10 Minuten | Ein Teillauf liefert Hinweise, belegt aber nie das Bestehen |
 
 **Urteile:** Eine fehlende Messung ist nie ein Bestehen, sie heißt "offen". Durchgefallen ist der Lauf, sobald ein Kriterium durchfällt. Bestanden ist er nur, wenn alle Kriterien bestehen und der Lauf bis zum Ende kam. Zeigt das Journal in einer Stufe keine einzige Anfrage an das Modell, bleiben CPU, Speicher und 429 offen, weil dann nicht belegt ist, dass die Last den gemessenen Kern erreichte (falscher Slot oder falsches Schema).
@@ -166,6 +185,7 @@ Der letzte Befehl leert alle 16 Plätze und alle Gesprächstexte der Laborprofil
 | --- | --- |
 | Bezug der CPU-Grenze (ein Kern oder die ganze Maschine) | in den Unterlagen nicht genannt, hier ein Kern (der Kern ist ein Python-Prozess) |
 | Ratenlimit des Schlüssels, Preise | Konsole, Handgriff Niko |
+| Zeilenmuster der Modellprüfung („Gesprächsmodell für Profil ...“, „Verbrauch ... baustein=gespraech“, „Rückfall auf das Hausmodell“) | aus dem Quelltext des Kerns gelesen, am echten Journal bestätigen (zuerst ein kurzer Probelauf mit `--sitzungen 1 --minuten 3`) |
 | Muster für 429 und Soniox-Fehler im Journal | Annahme (zum Beispiel `Error code: 429`, `rate_limit_error`, `Too Many Requests`, Zeilen mit `soniox` und einem Fehlerwort), am echten Journal bestätigen |
 | Schema des Labortags | `wamo_dev` ist der Standard aller Laborskripte, `--schema` nennt ein anderes |
 | Bezeichnungen der Oberfläche (Anmelden, Gespräch starten, Beenden, Freigeben) und das Attribut `data-cut` für abgeschnittene Antworten | aus dem Quelltext gelesen, nur am echten Lauf prüfbar |

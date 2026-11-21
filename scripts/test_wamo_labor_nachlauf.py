@@ -8,7 +8,6 @@ Attrappe für HTTP und einmal gegen einen echten Server auf Loopback ausgeführt
 from __future__ import annotations
 
 import ast
-import base64
 import http.client
 import http.server
 import io
@@ -28,6 +27,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wamo_labor as wl  # noqa: E402
 import wamo_labor_nachlauf as na  # noqa: E402
+import wamo_labor_ssh as ws  # noqa: E402
 
 WURZEL = Path(__file__).resolve().parent.parent
 QUELLE = Path(na.__file__)
@@ -536,8 +536,7 @@ def test_dienst_remote_startet_nur_ssh_mit_sudo_und_gibt_das_programm_als_text(m
     cmd, kw = lauf_.aufrufe[0]
     assert cmd[:5] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"] and cmd[5] == "wamo-sokrates2" and len(cmd) == 7
     assert cmd[6].startswith("sudo -n python3 -I -c ") and kw["input"] == json.dumps({"aktion": "daten-loeschen", "platz": 5})
-    programm = base64.b64decode(re.search(r"b64decode\('([A-Za-z0-9+/=]+)'\)", cmd[6]).group(1)).decode("utf-8")
-    assert programm == na.REMOTE_DIENST
+    assert ws.programm_lesen(cmd[6]) == na.REMOTE_DIENST
     assert (e.code, json.loads(e.stdout)["status"]) == (0, 200)
 
 
@@ -712,8 +711,7 @@ def test_server_antwort_ohne_liste_und_unlesbarer_token_sind_klare_fehler(tmp_pa
 def test_der_echte_aufruf_mit_isoliertem_python_laeuft_durch_haupt(tmp_path):
     """Startet das Programm genau so wie der Server (python -I -c exec(b64decode(...)), Eingabe über stdin). Die Tokendatei gibt es hier nicht,
     das Programm muss mit einer klaren Meldung und Ausgang 1 enden. Das prüft den Zweig __main__ und den Start im isolierten Modus."""
-    programm = base64.b64encode(na.REMOTE_DIENST.encode("utf-8")).decode("ascii")
-    code_text = f"import base64;exec(base64.b64decode('{programm}').decode('utf-8'))"
+    code_text = ws.programm_code(na.REMOTE_DIENST)
     for eingabe, teil in ((json.dumps({"aktion": "plaetze"}), "nicht lesbar"), (json.dumps({"aktion": "neuer-durchlauf", "platz": 1}), "Ungueltige Aufgabe"),
                           ("kein json", "kein JSON-Objekt")):
         prozess = subprocess.Popen([sys.executable, "-I", "-c", code_text], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

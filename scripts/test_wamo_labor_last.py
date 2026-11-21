@@ -75,7 +75,7 @@ class Fabrik:
             ordner.mkdir(exist_ok=True)
             return ordner
 
-        return um.Umgebung(uhr=uhr, treiber_fabrik=fabrik, server=at.ServerAttrappe(uhr, protokoll), dienst=at.DienstAttrappe(protokoll),
+        return um.Umgebung(uhr=uhr, treiber_fabrik=fabrik, server=at.ServerAttrappe(uhr, protokoll, aktive=lambda: sum(1 for t in treiber.values() if t.gespraech)), dienst=at.DienstAttrappe(protokoll),
                            kern=at.KernAttrappe(protokoll), umschlag=at.UmschlagAttrappe(), tempordner_fabrik=temp, ausgabe=print, speichern=lambda e: None)
 
 
@@ -373,3 +373,23 @@ def test_standard_der_ermittlung_ist_der_lesende_weg_des_servers():
     import inspect
     assert inspect.signature(cli.main).parameters["slot_ermitteln"].default is sv.aktiven_slot_ermitteln
     assert cli._parser().parse_args(["lauf"]).slot is None
+
+
+# ---------- --erlaube-haus ----------
+
+def test_der_plan_nennt_die_modellpruefung_und_den_schalter_zum_erlauben(tmp_path, clips, capsys):
+    cli.main(basis(tmp_path, clips), umgebung_bauen=Fabrik(tmp_path))
+    aus = capsys.readouterr().out
+    assert "Modellprüfung: Gleich nach dem Start der ersten Gespräche" in aus and "einem Hausmodell statt Claude im Gespräch" in aus and "--erlaube-haus" in aus
+    cli.main(basis(tmp_path, clips, "--erlaube-haus"), umgebung_bauen=Fabrik(tmp_path))
+    aus = capsys.readouterr().out
+    assert "Hausmodell ERLAUBT (--erlaube-haus)" in aus and "einem Hausmodell statt Claude im Gespräch" not in aus
+
+
+def test_erlaube_haus_ist_ein_schalter_ohne_abkuerzung_und_gilt_nur_im_lauf(tmp_path, clips, capsys):
+    args = cli._parser().parse_args(basis(tmp_path, clips, "--erlaube-haus"))
+    assert args.erlaube_haus is True and cli.einstellungen_bauen(args).haus_erlauben is True
+    assert cli.einstellungen_bauen(cli._parser().parse_args(basis(tmp_path, clips))).haus_erlauben is False
+    with pytest.raises(SystemExit) as e:
+        cli.main(basis(tmp_path, clips, "--erlaube"), umgebung_bauen=Fabrik(tmp_path))
+    assert e.value.code == 2

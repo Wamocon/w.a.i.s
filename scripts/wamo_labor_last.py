@@ -13,11 +13,13 @@ Optionen: --sitzungen 1,2,4,8  --minuten 15 (höchstens 20)  --murmeln 20,10,5 (
 --seed 1  --lauf NAME  --schema wamo_dev  --host wamo-sokrates2  --slot a|b  --einwilligung 1  --freigabe ablehnen|freigeben|keine  --kopflos
 Ohne --slot ermittelt der Echtlauf den aktiven Kern-Slot am Server (nur lesend, systemctl is-active); genau einer muss laufen, sonst Ausgang 2.
 --kerndaten-behalten (die Gesprächstexte im Kern am Ende nicht löschen)
+--erlaube-haus (ein Hausmodell statt Claude im Gespräch bricht den Lauf nicht ab, zum Messen des Notfallwegs; das Urteil bleibt dann offen)
 --ratenlimit-anfragen N  --ratenlimit-tokens N  --preis-eingabe USD  --preis-ausgabe USD  (Dollar je Million Tokens)  --kosten-obergrenze USD
 --clips-ordner, --ausgabe-ordner, --umschlag-datei (Standard unter %USERPROFILE%\\.wamo-labor, nie im Repo).
 
 Sicherheit: Der Trockenlauf ruft nie den Server an. Der Echtlauf braucht --ausfuehren UND --bestaetigung LASTTEST. Höchstgrenzen im Code (scripts/wamo_labor_last_plan.py):
-höchstens 8 Sitzungen, höchstens 20 Minuten je Stufe, Abbruch bei 429, bei mehr als 2 Abbrüchen und bei Kernspeicher über 3 GiB. Der Browser darf nur die feste Adresse
+höchstens 8 Sitzungen, höchstens 20 Minuten je Stufe, Abbruch bei 429, bei mehr als 2 Abbrüchen, bei Kernspeicher über 3 GiB und bei einem Hausmodell
+statt Claude im Gespräch (Modellprüfung im Journal, ausgenommen mit --erlaube-haus). Der Browser darf nur die feste Adresse
 der Oberfläche auf Sokrates-2 öffnen. Am Server wird nur gelesen (Kern) oder über die vorhandenen Wege geschrieben (wamo_labor.py aktivieren und sperren, die
 Betreuer-Schnittstelle des Dienstes für die Plätze 1 bis 8). Das Aufräumen steht in einem finally und läuft auch bei Strg+C.
 
@@ -100,6 +102,8 @@ def _parser() -> argparse.ArgumentParser:
     lauf.add_argument("--einwilligung", type=int, default=1)
     lauf.add_argument("--freigabe", default="ablehnen", choices=FREIGABEN)
     lauf.add_argument("--kerndaten-behalten", action="store_true", help="die Gesprächstexte im Kern am Ende nicht löschen")
+    lauf.add_argument("--erlaube-haus", action="store_true",
+                      help="ein Hausmodell statt Claude im Gespräch bricht den Lauf nicht ab (misst den Notfallweg, das Urteil bleibt offen)")
     lauf.add_argument("--kopflos", action="store_true", help="Chrome ohne Fenster (nicht erprobt)")
     lauf.add_argument("--ratenlimit-anfragen", type=int)
     lauf.add_argument("--ratenlimit-tokens", type=int)
@@ -132,6 +136,7 @@ def einstellungen_bauen(args: argparse.Namespace) -> Einstellungen:
         lauf=lauf, seed=args.seed, stufen=stufen, clips_ordner=Path(args.clips_ordner or orte["clips"]).expanduser().resolve(),
         ausgabe_ordner=_ausserhalb_des_repos(Path(args.ausgabe_ordner or orte["ausgabe"]), "Der Ausgabeordner"), schema=args.schema, host=args.host,
         slot=args.slot, einwilligung=args.einwilligung, murmeln_datei=murmeln, freigabe=args.freigabe, kopflos=args.kopflos, kerndaten_loeschen=not args.kerndaten_behalten,
+        haus_erlauben=args.erlaube_haus,
         ratenlimit_anfragen=args.ratenlimit_anfragen, ratenlimit_tokens=args.ratenlimit_tokens, kosten=kosten)
 
 
@@ -172,7 +177,11 @@ def plan_text(ein: Einstellungen, echt: bool = False, slot_quelle: str = "vorgeg
         f"Annahmen (nicht gemessen): {a.eingabe_tokens_je_zug} Eingabe-Tokens je Zug, {a.ausgabe_tokens_je_zug} Ausgabe-Tokens je Zug, "
         f"{str(a.anfragen_je_zug).replace('.', ',')} Anfragen je Zug",
         f"Abbruch bei: einem 429, mehr als {pl.MAX_ABBRUECHE} Abbrüchen, Speicher des Kerns über {pl.ABBRUCH_SPEICHER_BYTES // pl.GIB} GiB, "
-        "dreimal ausgefallener Messung",
+        "dreimal ausgefallener Messung" + ("" if ein.haus_erlauben else ", einem Hausmodell statt Claude im Gespräch"),
+        ("Modellprüfung: Hausmodell ERLAUBT (--erlaube-haus). Der Lauf misst dann den Notfallweg, nicht die geplante Konfiguration mit Claude, "
+         "das Urteil bleibt offen." if ein.haus_erlauben else
+         "Modellprüfung: Gleich nach dem Start der ersten Gespräche liest der Lauf im Journal des Kerns, mit welchem Modell die Sitzungen laufen "
+         "(nur Modellnamen und Zahlen). Ein Hausmodell statt Claude beendet den Lauf nach Sekunden und räumt auf. Bewusst erlauben: --erlaube-haus."),
         f"Höchstgrenzen im Code: höchstens {pl.MAX_SITZUNGEN} Sitzungen, höchstens {pl.MAX_STUFE_MINUTEN} Minuten je Stufe",
         "Aufräumen (immer): Gespräche beenden, Browser schließen, Profile sperren, Durchläufe beenden, Plätze leeren, "
         + ("Gesprächstexte im Kern ab Beginn des Laufs löschen, " if ein.kerndaten_loeschen else "Gesprächstexte im Kern BLEIBEN (--kerndaten-behalten), ")

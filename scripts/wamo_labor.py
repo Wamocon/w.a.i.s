@@ -38,7 +38,6 @@ sie zu einer anderen Rolle, bricht das Skript vor dem ersten Aufruf des Servers 
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import re
@@ -49,6 +48,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, NamedTuple
 from urllib.parse import unquote, urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import wamo_labor_ssh as ws  # noqa: E402
 
 SCHEMA_RE = re.compile(r"^wamo_(dev|test|prod)$")
 KENNUNG_RE = re.compile(r"^labor-(0[1-9]|1[0-6]|schau)$")
@@ -330,8 +332,10 @@ def _unkenntlich(text: str, *geheimnisse: str | None) -> str:
 
 def run_remote(host: str, nutzlast: dict) -> Ergebnis:
     db_passwort = admin_passwort()  # vor dem ersten Aufruf: ohne Anmeldung der Verwaltungsrolle wird der Server nie angefasst
-    programm = base64.b64encode(remote_programm().encode("utf-8")).decode("ascii")
-    befehl = f"python3 -c \"import base64;exec(base64.b64decode('{programm}').decode('utf-8'))\""
+    try:
+        befehl = ws.server_befehl(remote_programm())  # gepackt und kurz: ssh aus Git für Windows schneidet lange Befehlszeilen ab (wamo_labor_ssh.py)
+    except ws.BefehlFehler as e:
+        raise Fehler(str(e)) from None
     # Das Passwort geht nur über die SSH-Eingabe (stdin), nie als Argument
     eingabe = json.dumps({**nutzlast, "db_passwort": db_passwort}, ensure_ascii=False)
     r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, befehl],

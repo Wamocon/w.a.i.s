@@ -143,8 +143,10 @@ def test_stufe_ohne_daten_hat_leere_kennzahlen_und_keine_zahlen_aus_dem_nichts()
 # ---------- Kriterien ----------
 
 def stufen_dict(sitzungen=1, snr=None, p95=1500.0, cpu=40.0, speicher=int(1.5 * GIB), r429=0, br429=0, abbrueche=0, lesbar=True,
-                anfragen_min=10, tokens_min=100000, proben=3, n=10, minuten=15, anfragen=20, abgeschnitten=False, spitze_neu=None, schritte=10):
-    return {"sitzungen": sitzungen, "snr_db": snr, "name": f"{sitzungen} Sitzungen", "minuten": minuten, "schritte": schritte, "speicher_spitze_neu": spitze_neu,
+                anfragen_min=10, tokens_min=100000, proben=3, n=10, minuten=15, anfragen=20, abgeschnitten=False, spitze_neu=None, schritte=10,
+                modell="claude-haiku-5-5", rueckfall=0, aufrufe=20):
+    modelle = {"sitzungen": {modell: sitzungen}, "aufrufe": {modell: aufrufe}, "rueckfall": rueckfall} if modell else {}
+    return {"modelle": modelle, "sitzungen": sitzungen, "snr_db": snr, "name": f"{sitzungen} Sitzungen", "minuten": minuten, "schritte": schritte, "speicher_spitze_neu": spitze_neu,
             "erster_ton_ms": {"n": n, "p50": p95 / 2, "p95": p95, "max": p95},
             "abbrueche": abbrueche, "cpu_prozent": {"proben": proben, "mittel": cpu / 2, "p95": cpu, "max": cpu},
             "speicher_max": speicher, "browser_429": br429,
@@ -285,6 +287,67 @@ def test_bestanden_gilt_nur_fuer_den_vollen_umfang():
     assert status(aw.kriterien_pruefen(kurz, "", 50, 200000), "Umfang") == "offen"
     mit_murmeln = alle_bestehen() + [stufen_dict(8, snr=5, minuten=15)]
     assert status(aw.kriterien_pruefen(mit_murmeln, "", 50, 200000), "Umfang") == "bestanden"
+
+
+# ---------- Gesprächsmodell: Claude oder Hausmodell ----------
+
+def test_modelle_summe_zaehlt_starts_aufrufe_und_rueckfaelle_ueber_die_proben():
+    proben = [probe(1, jr=journal(modell_start={"claude-haiku-5-5": 2}, modell_aufruf={"claude-haiku-5-5": 5}, rueckfall=0)),
+              probe(2, jr=journal(modell_aufruf={"claude-haiku-5-5": 4, "gemma4-31b": 1}, rueckfall=1)), probe(3)]
+    m = aw.modelle_summe(proben)
+    assert m == {"sitzungen": {"claude-haiku-5-5": 2}, "aufrufe": {"claude-haiku-5-5": 9, "gemma4-31b": 1}, "rueckfall": 1}
+    s = aw.stufe_auswerten(stufe_acht()[1], [], proben, 0, 0)
+    assert s["modelle"] == m
+    json.dumps(s)
+
+
+def test_haus_modelle_erkennt_alles_ausser_claude_und_nie_null_aufrufe():
+    assert aw.haus_modelle({"claude-haiku-5-5": 3, "gemma4-31b": 1, "(weitere)": 2, "qwen": 0}) == ["(weitere)", "gemma4-31b"]
+    assert aw.haus_modelle({}) == []
+
+
+def test_modell_kriterium_claude_besteht_ein_hausmodell_faellt_durch():
+    assert status(aw.kriterien_pruefen([stufen_dict(8)], "", None, None), "Gespräch über Claude") == "bestanden"
+    k = aw.kriterien_pruefen([stufen_dict(1), stufen_dict(8, modell="gemma4-31b")], "", None, None)
+    assert status(k, "Gespräch über Claude") == "durchgefallen" and aw.gesamturteil(k, "") == "durchgefallen"
+    text = next(x for x in k if "Gespräch über Claude" in x["name"])
+    assert "gemma4-31b" in text["wert"] and "nicht Claude" in text["text"] and "Claude-Zugang des Labors prüfen" in text["text"]
+
+
+def test_nur_eine_rueckfallmeldung_ohne_modellname_faellt_ebenfalls_durch():
+    assert status(aw.kriterien_pruefen([stufen_dict(8, rueckfall=2)], "", None, None), "Gespräch über Claude") == "durchgefallen"
+
+
+def test_mit_erlaube_haus_bleibt_das_urteil_offen_nie_bestanden():
+    k = aw.kriterien_pruefen([stufen_dict(n, modell="gemma4-31b") for n in (1, 2, 4, 8)], "", 50, 200000, haus_erlaubt=True)
+    assert status(k, "Gespräch über Claude") == "offen" and aw.gesamturteil(k, "") == "offen"
+    assert "Notfallweg" in next(x for x in k if "Gespräch über Claude" in x["name"])["text"]
+    k = aw.kriterien_pruefen([stufen_dict(n) for n in (1, 2, 4, 8)], "", 50, 200000, haus_erlaubt=True)   # erlaubt, aber es lief Claude: bestanden
+    assert status(k, "Gespräch über Claude") == "bestanden" and aw.gesamturteil(k, "") == "bestanden"
+
+
+def test_ohne_modellzeilen_im_journal_ist_das_modell_nicht_belegt():
+    k = aw.kriterien_pruefen([stufen_dict(8, modell=None)], "", None, None)
+    assert status(k, "Gespräch über Claude") == "offen" and "nicht belegt" in next(x for x in k if "Gespräch über Claude" in x["name"])["text"]
+    nur_start = aw.kriterien_pruefen([stufen_dict(8, aufrufe=0)], "", None, None)   # Start mit Claude, aber kein Aufruf gezählt: kein Beleg
+    assert status(nur_start, "Gespräch über Claude") == "offen"
+
+
+def test_bericht_nennt_in_jedem_fall_die_modelle_je_stufe():
+    e = ergebnis_fuer_bericht()
+    e["stufen"][0]["modelle"] = {"sitzungen": {"claude-haiku-5-5": 1}, "aufrufe": {"claude-haiku-5-5": 41, "gemma4-31b": 2}, "rueckfall": 1}
+    text = aw.bericht_text(e)
+    assert "## Genutzte Modelle" in text and "claude-haiku-5-5: 41, gemma4-31b: 2" in text and "Claude erwartet, ein Hausmodell bricht den Lauf ab" in text
+    ohne = ergebnis_fuer_bericht()   # ein Ergebnis ohne Modellangaben (älterer Lauf): keine Ausnahme, aber ein klarer Satz
+    assert "keine Angabe im Journal" in aw.bericht_text(ohne)
+    leer = {**ergebnis_fuer_bericht(), "stufen": []}
+    assert "## Genutzte Modelle" in aw.bericht_text(leer) and "keine Stufe gemessen" in aw.bericht_text(leer)
+
+
+def test_bericht_sagt_wenn_das_hausmodell_bewusst_erlaubt_war():
+    e = {**ergebnis_fuer_bericht(), "haus_erlaubt": True}
+    text = aw.bericht_text(e)
+    assert "--erlaube-haus" in text and "Notfallweg" in text
 
 
 # ---------- Bericht ----------

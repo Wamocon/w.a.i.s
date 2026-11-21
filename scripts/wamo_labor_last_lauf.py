@@ -6,7 +6,8 @@ Das Aufräumen steht in einem finally und läuft auch bei Fehlern, Grenzen und S
 
 Grenzen, bei denen der Lauf sofort endet (alles in scripts/wamo_labor_last_plan.py):
   ein 429 (im Journal des Kerns oder in einer Antwort im Browser), mehr als 2 Abbrüche, Speicher des Kerns über 3 GiB, Messung am Server dreimal in Folge
-  ausgefallen, Kern nicht mehr aktiv. Eine Stufe dauert höchstens 20 Minuten (harte Grenze, auch wenn weniger gewählt ist, plus die Dauer der Wartezeit
+  ausgefallen, Kern nicht mehr aktiv, ein Hausmodell statt Claude im Gespräch (Modellprüfung gleich nach dem Start der ersten Gespräche, danach bei jeder
+  Messung; erlaubt nur mit --erlaube-haus). Eine Stufe dauert höchstens 20 Minuten (harte Grenze, auch wenn weniger gewählt ist, plus die Dauer der Wartezeit
   eines laufenden Schritts, die nie über diese Grenze hinausgeht).
 """
 from __future__ import annotations
@@ -34,6 +35,8 @@ GESPRAECH_VERSUCHE = 3
 GESPRAECH_PAUSE_S = 20.0  # nach einem Fehlversuch (der Kern kennt ein Profil bis zu 2 Minuten aus dem Zwischenspeicher)
 MESSFEHLER_MAX = 3
 AB_RESERVE_S = 60.0  # Reserve für die Uhrabweichung beim Löschen der Gesprächstexte im Kern
+MODELL_VERSUCHE = 4  # so oft liest die Modellprüfung nach dem Start der Gespräche das Journal, bis alle Startzeilen da sind
+MODELL_PAUSE_S = 5.0
 
 
 @dataclass
@@ -67,6 +70,8 @@ class Lauf:
         self.seit: float | None = None
         self.basis_spitze: int | None = None
         self.murmeln: dict = {}
+        self.modell_start: dict[str, int] = {}  # Modell -> Sitzungsstarts im Journal seit Beginn des Laufs (alle Profile des Kerns)
+        self.modell_geprueft = False
         self.stufen: list[dict] = []
         self.schritte: dict[str, list] = {}
         self.proben: dict[str, list] = {}
@@ -156,6 +161,42 @@ class Lauf:
             self._abbrechen(f"Speicher des Kerns über {pl.ABBRUCH_SPEICHER_BYTES / pl.GIB:.0f} GiB ({m.speicher / pl.GIB:.2f} GiB)".replace(".", ","))
         elif not m.aktiv:
             self._abbrechen(f"Der Kern wamo-core@{self.ein.slot} ist nicht mehr aktiv")
+        elif not self.ein.haus_erlauben and (haus := self._haus_im_journal(m)):
+            self._abbrechen(f"{aw.SATZ_KEIN_CLAUDE} Im Journal gefunden: {', '.join(haus)}.")
+
+    @staticmethod
+    def _haus_im_journal(m: sv.Messung) -> list[str]:
+        """Die Hausmodelle, die das Journal dieser Messung für das Gespräch zeigt (Start oder Aufruf), sonst die Rückfall-Meldung allein."""
+        j = m.journal
+        if j is None:
+            return []
+        namen = sorted(set(aw.haus_modelle(j.modell_start)) | set(aw.haus_modelle(j.modell_aufruf)))
+        return namen or (["Rückfall auf ein Hausmodell gemeldet"] if j.rueckfall else [])
+
+    def _modelle_merken(self, m: sv.Messung) -> None:
+        if m.journal is not None:
+            for name, n in m.journal.modell_start.items():
+                self.modell_start[name] = self.modell_start.get(name, 0) + n
+
+    def _modell_vorpruefung(self, st: _Stufenlauf, aktive: list[int]) -> None:
+        """Gleich nach dem Start der Gespräche, vor der ersten Sprechprobe: Das Journal des Kerns zeigt, mit welchem Modell die Sitzungen laufen. Ein Hausmodell
+        statt Claude beendet den Lauf in Sekunden (_grenzen) und nicht erst nach zwei Stunden. Nur einmal je Lauf, danach prüft jede Messung weiter."""
+        if self.modell_geprueft or not aktive:
+            return
+        for versuch in range(MODELL_VERSUCHE):
+            self._probe(st)
+            if self.abbruch.is_set() or sum(self.modell_start.values()) >= len(aktive):
+                break
+            if versuch < MODELL_VERSUCHE - 1:
+                self.uhr.schlafen(MODELL_PAUSE_S)
+        self.modell_geprueft = True
+        if self.abbruch.is_set():
+            return
+        gesehen = sum(self.modell_start.values())
+        if gesehen >= len(aktive):
+            self._aus(f"Modellprüfung bestanden: Sitzungsstarts im Journal: {aw.modelle_text(self.modell_start)}")
+        else:
+            self._aus(f"Modellprüfung unvollständig: {gesehen} von {len(aktive)} Startzeilen im Journal gesehen, jede weitere Messung prüft mit")
 
     # ---- Messung am Kern ----
 
@@ -169,6 +210,7 @@ class Lauf:
                 self._abbrechen(f"Messung am Server ausgefallen ({MESSFEHLER_MAX} Fehler in Folge)")
             return
         self.seit = m.zeit
+        self._modelle_merken(m)
         fehlt = vb.messung_vollstaendig(m)
         if fehlt:
             self.messfehler += 1
@@ -198,6 +240,9 @@ class Lauf:
         try:
             self._probe(st)
             aktive = self._gespraeche_starten(st)
+            self._modell_vorpruefung(st, aktive)
+            if self.abbruch.is_set():
+                return  # das finally räumt die Stufe ab (auch bei einem Hausmodell statt Claude: keine Sprechprobe mehr)
             self._murmeln(st, aktive, True)
             st.start = self.uhr.jetzt()
             st.soft, st.hard = st.start + stufe.minuten * 60, st.start + pl.MAX_STUFE_MINUTEN * 60
@@ -331,10 +376,10 @@ class Lauf:
         return asdict(k)
 
     def _ergebnis(self) -> dict:
-        kriterien = aw.kriterien_pruefen(self.stufen, self.grund, self.ein.ratenlimit_anfragen, self.ein.ratenlimit_tokens)
+        kriterien = aw.kriterien_pruefen(self.stufen, self.grund, self.ein.ratenlimit_anfragen, self.ein.ratenlimit_tokens, self.ein.haus_erlauben)
         return {
             "lauf": self.ein.lauf, "version": VERSION, "ausfuehrung": "echt", "seed": self.ein.seed, "schema": self.ein.schema, "slot": self.ein.slot,
-            "beginn": self.beginn, "ende": self.ende, "abbruchgrund": self.grund, "von_aussen": self.von_aussen, "stufen": self.stufen,
+            "beginn": self.beginn, "ende": self.ende, "abbruchgrund": self.grund, "von_aussen": self.von_aussen, "haus_erlaubt": self.ein.haus_erlauben, "stufen": self.stufen,
             "kriterien": kriterien, "gesamt": aw.gesamturteil(kriterien, self.grund), "annahmen": asdict(self.ein.annahmen),
             "kosten_schaetzung": self._kosten(), "aufraeumen": self.aufraeumen_liste, "schritte": self.schritte, "proben": self.proben,
         }

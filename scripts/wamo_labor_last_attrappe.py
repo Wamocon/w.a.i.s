@@ -179,6 +179,8 @@ class ServerEinstellung:
     journal: Callable[[float, float], dict] | None = None  # (seit, bis) -> Felder von JournalZaehlung
     lesbar: bool = True
     aktiv: bool = True
+    modell: str = "claude-haiku-5-5"  # das Gesprächsmodell, das das Journal zeigt (gemma4-31b stellt den Rückfall auf ein Hausmodell dar)
+    rueckfall: bool = False  # das Journal meldet "Claude ... nicht nutzbar: Rückfall auf das Hausmodell" (je Messung mit neuen Sitzungen)
     fehler_ab: int | None = None  # ab dieser Messung scheitert ssh
     versatz_s: float = 0.0
 
@@ -186,8 +188,9 @@ class ServerEinstellung:
 class ServerAttrappe:
     """Ersetzt wamo_labor_last_server.Server (nur messen)."""
 
-    def __init__(self, uhr: Zeitraffer, protokoll: Protokoll, einstellung: ServerEinstellung | None = None):
+    def __init__(self, uhr: Zeitraffer, protokoll: Protokoll, einstellung: ServerEinstellung | None = None, aktive: Callable[[], int] | None = None):
         self.uhr, self.protokoll, self.e = uhr, protokoll, einstellung or ServerEinstellung()
+        self.aktive, self._aktive_zuletzt = aktive, 0  # Zahl der laufenden Gespräche: neue Sitzungen schreiben je eine Startzeile ins Journal
         self.aufrufe = 0
         self._t0 = uhr.jetzt()
 
@@ -203,7 +206,11 @@ class ServerAttrappe:
             felder = {"zeilen": 0, "r429": 0, "soniox": 0, "anfragen": 0, "unterbrechungen": 0, "pipeline_fehler": 0, "token_zuege": 0,
                       "token_eingabe": 0, "token_cache_lesen": 0, "token_cache_schreiben": 0, "abgeschnitten": False, "eimer": {}}
             gesund = int((t - seit) / 10)  # eine Anfrage je 10 Sekunden: Das Journal zeigt Last
-            felder.update({"anfragen": gesund, "eimer": {int(seit // 10 * 10): (gesund, 0)} if gesund else {}})
+            felder.update({"anfragen": gesund, "eimer": {int(seit // 10 * 10): (gesund, 0)} if gesund else {},
+                           "modell_aufruf": {self.e.modell: gesund} if gesund else {}})
+            jetzt_aktiv = self.aktive() if self.aktive else 0
+            neu, self._aktive_zuletzt = max(0, jetzt_aktiv - self._aktive_zuletzt), jetzt_aktiv
+            felder.update({"modell_start": {self.e.modell: neu} if neu else {}, "rueckfall": neu if self.e.rueckfall else 0})
             felder.update(self.e.journal(seit, t) if self.e.journal else {})
             journal = sv.JournalZaehlung(**felder)
         return sv.Messung(t + self.e.versatz_s, self.e.aktiv, self.e.kerne, cpu, self.e.speicher(t), self.e.speicher(t), 40,

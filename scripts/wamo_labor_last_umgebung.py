@@ -39,6 +39,7 @@ class Einstellungen:
     annahmen: Annahmen = field(default_factory=Annahmen)
     kosten: Kosten | None = None
     kerndaten_loeschen: bool = True  # am Ende die Gesprächstexte der Profile im Zeitfenster des Laufs im Kern löschen (wamo_labor.py loeschen --ab)
+    haus_erlauben: bool = False  # --erlaube-haus: Ein Gespräch über ein Hausmodell statt Claude bricht den Lauf nicht ab (Messung des Notfallwegs), das Urteil bleibt offen
 
     @property
     def sitzungen_max(self) -> int:

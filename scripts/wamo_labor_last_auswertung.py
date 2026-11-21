@@ -106,6 +106,29 @@ def journal_summe(proben: Sequence[Messung]) -> dict:
     return aus
 
 
+CLAUDE_PRAEFIX = "claude-"  # jedes Gesprächsmodell, das so nicht beginnt, ist ein Hausmodell (Rückfall, wenn Claude geplant war)
+
+
+def haus_modelle(modelle: dict) -> list[str]:
+    """Die Modelle in einer Zählung (Modell -> Zahl), die nicht von Claude sind. Der Sammelname "(weitere)" des Serverprogramms zählt nie als Claude."""
+    return sorted(m for m, n in modelle.items() if n and not m.startswith(CLAUDE_PRAEFIX))
+
+
+def modelle_summe(proben: Sequence[Messung]) -> dict:
+    """Die Zählung der Gesprächsmodelle aller Messungen einer Stufe: Sitzungsstarts und Gesprächsaufrufe je Modell, dazu die Rückfall-Meldungen."""
+    start: dict[str, int] = {}
+    aufruf: dict[str, int] = {}
+    rueckfall = 0
+    for p in proben:
+        if not isinstance(p.journal, JournalZaehlung):
+            continue
+        for ziel, quelle in ((start, p.journal.modell_start), (aufruf, p.journal.modell_aufruf)):
+            for name, n in quelle.items():
+                ziel[name] = ziel.get(name, 0) + n
+        rueckfall += p.journal.rueckfall
+    return {"sitzungen": dict(sorted(start.items())), "aufrufe": dict(sorted(aufruf.items())), "rueckfall": rueckfall}
+
+
 def _max_oder_none(werte: Sequence[int | None]) -> int | None:
     vorhanden = [w for w in werte if w is not None]
     return max(vorhanden) if vorhanden else None
@@ -137,7 +160,7 @@ def stufe_auswerten(stufe: pl.Stufe, schritte: Sequence[SchrittErgebnis], proben
         "zeitueberschreitungen": sum(1 for s in schritte if s.zeitueberschreitung),
         "cpu_prozent": {"proben": len(cpu), "mittel": sum(cpu) / len(cpu) if cpu else None, "p95": quantil(cpu, 0.95), "max": max(cpu, default=None)},
         "speicher_max": _max_oder_none([p.speicher for p in proben]), "speicher_spitze": spitze, "speicher_spitze_neu": neu_spitze,
-        "aufgaben_max": _max_oder_none([p.aufgaben for p in proben]), "journal": journal_summe(proben),
+        "aufgaben_max": _max_oder_none([p.aufgaben for p in proben]), "journal": journal_summe(proben), "modelle": modelle_summe(proben),
         "browser_429": browser_429, "konsolenfehler": konsolenfehler,
     }
 
@@ -231,6 +254,43 @@ def _kriterium_429(stufen: Sequence[dict]) -> dict:
     return _k("Kein 429", BESTANDEN, wert, "0")
 
 
+def modelle_text(zaehler: dict) -> str:
+    return ", ".join(f"{m}: {n}" for m, n in sorted(zaehler.items())) if zaehler else "keine Angabe im Journal"
+
+
+def modelle_gesamt(stufen: Sequence[dict]) -> tuple[dict, dict, int]:
+    """Sitzungsstarts und Gesprächsaufrufe je Modell über alle Stufen und die Zahl der Rückfall-Meldungen (Stufen ohne Angabe zählen null)."""
+    start: dict[str, int] = {}
+    aufruf: dict[str, int] = {}
+    rueckfall = 0
+    for s in stufen:
+        m = s.get("modelle") or {}
+        for ziel, quelle in ((start, m.get("sitzungen") or {}), (aufruf, m.get("aufrufe") or {})):
+            for name, n in quelle.items():
+                ziel[name] = ziel.get(name, 0) + n
+        rueckfall += m.get("rueckfall", 0)
+    return start, aufruf, rueckfall
+
+
+SATZ_KEIN_CLAUDE = "Das Labor nutzt nicht Claude (Rückfall auf Hausmodell). Claude-Zugang des Labors prüfen."
+SATZ_HAUS_ERLAUBT = ("Das Gespräch lief über ein Hausmodell, das Werkzeug lief mit --erlaube-haus: Gemessen wurde der Notfallweg, nicht die geplante "
+                     "Konfiguration mit Claude. Das belegt das Bestehen nie.")
+
+
+def _kriterium_modell(stufen: Sequence[dict], haus_erlaubt: bool) -> dict:
+    """Die geplante Konfiguration des Labors ist Claude. Ein Hausmodell im Gespräch heißt, der Lauf maß den Notfallweg (Rückfall bei abgelehntem Schlüssel)."""
+    name, grenze = "Gespräch über Claude, kein Hausmodell", "alle Gesprächsaufrufe mit einem Modell claude-..."
+    start, aufruf, rueckfall = modelle_gesamt(stufen)
+    haus = sorted(set(haus_modelle(start)) | set(haus_modelle(aufruf)))
+    if haus or rueckfall:
+        wert = f"Hausmodell {', '.join(haus) if haus else '(Rückfall gemeldet)'}; Aufrufe: {modelle_text(aufruf)}"
+        return _k(name, OFFEN if haus_erlaubt else DURCHGEFALLEN, wert, grenze, SATZ_HAUS_ERLAUBT if haus_erlaubt else SATZ_KEIN_CLAUDE)
+    if not sum(aufruf.values()):
+        return _k(name, OFFEN, "keine Gesprächsaufrufe gezählt", grenze,
+                  "im Journal des Kerns erschien kein Gesprächsaufruf mit Modellname (Journal nicht lesbar oder zu wenig Zeilen): Es ist nicht belegt, dass Claude lief")
+    return _k(name, BESTANDEN, modelle_text(aufruf), grenze)
+
+
 def _kriterium_rate(stufen: Sequence[dict], name: str, feld: str, limit: int | None, einheit: str) -> dict:
     spitze = max((s["journal"][feld] for s in stufen), default=0)
     if limit is None:
@@ -252,10 +312,12 @@ def _kriterium_umfang(stufen: Sequence[dict]) -> dict:
     return _k("Umfang des Laufs", BESTANDEN, "alle Stufen", grenze)
 
 
-def kriterien_pruefen(stufen: Sequence[dict], abbruchgrund: str, ratenlimit_anfragen: int | None, ratenlimit_tokens: int | None) -> list[dict]:
-    """Die Kriterien aus docs/testlabor-wamo.md, 3.7. Murmelstufen zählen nur für Abbrüche, CPU, Speicher und 429, nicht für den ersten Ton."""
+def kriterien_pruefen(stufen: Sequence[dict], abbruchgrund: str, ratenlimit_anfragen: int | None, ratenlimit_tokens: int | None,
+                      haus_erlaubt: bool = False) -> list[dict]:
+    """Die Kriterien aus docs/testlabor-wamo.md, 3.7, dazu das Gesprächsmodell (Claude statt Hausmodell). Murmelstufen zählen nur für Abbrüche, CPU,
+    Speicher und 429, nicht für den ersten Ton."""
     return [*_kriterium_erster_ton(stufen), _kriterium_abbrueche(stufen), _kriterium_cpu(stufen), _kriterium_speicher(stufen),
-            _kriterium_429(stufen), _kriterium_umfang(stufen),
+            _kriterium_429(stufen), _kriterium_modell(stufen, haus_erlaubt), _kriterium_umfang(stufen),
             _kriterium_rate(stufen, "Spitze der Anfragen je Minute", "anfragen_je_minute_max", ratenlimit_anfragen, "Anfragen je Minute"),
             _kriterium_rate(stufen, "Spitze der Tokens je Minute", "tokens_je_minute_max", ratenlimit_tokens, "Tokens je Minute")]
 
@@ -310,6 +372,22 @@ def _abschnitt_stufen(e: dict) -> list[str]:
     return kopf + zeilen + mehr + ["", SATZ_EINWURF, ""]
 
 
+def _abschnitt_modelle(e: dict) -> list[str]:
+    """Welche Modelle das Gespräch nutzte, je Stufe: Zahl der Gesprächsaufrufe je Modell (das ist die Antwort auf "lief wirklich Claude?")."""
+    kopf = ["## Genutzte Modelle", ""]
+    if e.get("haus_erlaubt"):
+        kopf += ["Ein Hausmodell statt Claude war bewusst erlaubt (--erlaube-haus). Ein solcher Lauf misst den Notfallweg, nicht die geplante Konfiguration.", ""]
+    if not e["stufen"]:
+        return kopf + ["Es wurde keine Stufe gemessen.", ""]
+    kopf += ["Gesprächsaufrufe je Modell aus dem Journal des Kerns (Zeilen „Verbrauch“ des Bausteins Gespräch, nur Modellnamen und Zahlen). Das Journal gehört "
+             "dem ganzen Kern: Aufrufe anderer Profile (zum Beispiel aus dem Büro) zählen mit.", "",
+             "| Stufe | Gesprächsaufrufe je Modell | Sitzungsstarts je Modell | Rückfall-Meldungen |", "| --- | --- | --- | --- |"]
+    for s in e["stufen"]:
+        m = s.get("modelle") or {}
+        kopf.append(f"| {s['nummer']} | {modelle_text(m.get('aufrufe') or {})} | {modelle_text(m.get('sitzungen') or {})} | {m.get('rueckfall', 0)} |")
+    return kopf + [""]
+
+
 def _abschnitt_kriterien(e: dict) -> list[str]:
     zeilen = ["## Bestehen", "", "| Kriterium | Grenze | Wert | Urteil |", "| --- | --- | --- | --- |"]
     zeilen += [f"| {k['name']} | {k['grenze']} | {k['wert']} | {k['status']} |" for k in e["kriterien"]]
@@ -347,6 +425,7 @@ def bericht_text(e: dict) -> str:
     if e["abbruchgrund"]:
         kopf += [f"Der Lauf endete vorzeitig: {e['abbruchgrund']}", ""]
     lauf = ["## Lauf", "", "| Angabe | Wert |", "| --- | --- |", f"| Ausführung | {e['ausfuehrung']} |", f"| Beginn | {e['beginn']} |", f"| Ende | {e['ende']} |",
-            f"| Schema | {e['schema']} |", f"| Kern-Instanz | wamo-core@{e['slot']} |", f"| Seed der Denkpausen | {e['seed']} |", ""]
+            f"| Schema | {e['schema']} |", f"| Kern-Instanz | wamo-core@{e['slot']} |", f"| Seed der Denkpausen | {e['seed']} |",
+            "| Modellprüfung | " + ("Hausmodell erlaubt (--erlaube-haus), Notfallweg" if e.get("haus_erlaubt") else "Claude erwartet, ein Hausmodell bricht den Lauf ab") + " |", ""]
     grenzen = ["## Was die Last nicht belegt", ""] + [f"- {t}" for t in NICHT_GEMESSEN] + [""]
-    return "\n".join(kopf + lauf + _abschnitt_kriterien(e) + _abschnitt_stufen(e) + _abschnitt_kosten(e) + _abschnitt_aufraeumen(e) + grenzen)
+    return "\n".join(kopf + lauf + _abschnitt_kriterien(e) + _abschnitt_stufen(e) + _abschnitt_modelle(e) + _abschnitt_kosten(e) + _abschnitt_aufraeumen(e) + grenzen)

@@ -5,7 +5,8 @@ JSON über stdin, Ausgabe eine Zeile JSON):
 
   Messung (nur lesend, ohne sudo): Das Programm liest die cgroup des Kerns (CPU-Zeit, Speicher, Spitze des Speichers, Zahl der Aufgaben) und
      zählt im Journal des Kerns, was die Auswertung braucht: 429 und Soniox-Fehler, Anfragen an das Modell, Unterbrechungen, Fehler der Pipeline, dazu
-     (falls der Kern Latenzzeilen schreibt) die Tokens. Es gibt nur Zahlen zurück, nie eine Journalzeile. Ist das Journal nicht lesbar (weder mit
+     (falls der Kern Latenzzeilen schreibt) die Tokens und je Modell, wie viele Sitzungen begannen und wie viele Gesprächsaufrufe liefen (nur
+     Modellnamen und Zahlen), dazu die Rückfälle von Claude auf ein Hausmodell. Es gibt nur Zahlen und Modellnamen zurück, nie eine Journalzeile. Ist das Journal nicht lesbar (weder mit
      noch ohne sudo -n), meldet es das ausdrücklich: Ein unlesbares Journal gilt nie als "kein 429".
   Dienst (Betreuer-Schnittstelle auf 127.0.0.1:18765 am Server, Muster wie scripts/wamo_labor_nachlauf.py): Das Programm läuft über sudo -n, liest den
      Betreuer-Token nur dort und gibt nur den Status und einen Fehlercode zurück. Es kennt genau vier Aufgaben: plaetze (lesen), neuer-durchlauf mit
@@ -16,15 +17,15 @@ Interpreter ausführen können. Alle Meldungen des Programms sind ASCII, damit d
 """
 from __future__ import annotations
 
-import base64
 import json
 import re
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import wamo_labor as wl
+import wamo_labor_ssh as ws
 
 HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")  # kein führender Strich: ssh hielte ihn für eine Option
 SLOTS = ("a", "b")  # die Kern-Slots wamo-core@a und wamo-core@b (das Programm am Server hat seine eigene Liste)
@@ -48,6 +49,13 @@ R429 = re.compile(r"(?i)error code: 429|rate_limit_error|ratelimiterror|too many
 SONIOX = re.compile(r"(?i)soniox")
 SONIOX_FEHLER = re.compile(r"(?i)error|fehler|exception|failed|fehlgeschlagen|timeout|konnte nicht|disconnect")
 VERWEIGERT = ("insufficient permissions", "not seeing messages from other users")
+# Welches Modell das Gespraech nutzt (nur Namen und Zahlen, nie Text): "Gespraechsmodell fuer Profil <Kennung>: <Modell> ueber <Anbieter> ..." beim
+# Start einer Sitzung und "Verbrauch profil=<Kennung> anbieter=<A> modell=<Modell> baustein=gespraech ..." bei jedem Aufruf. Die Umlaute der Zeilen
+# fangen die Punkte der Muster ab (zwei bis vier Zeichen, so bleibt die Zeichenkodierung des Servers egal).
+MODELL = r"[A-Za-z0-9._:/@+-]{1,80}"
+MODELL_START = re.compile(r"chsmodell f.{1,4}r Profil [0-9A-Za-z-]{1,40}: (" + MODELL + r") .{1,4}ber [a-z]{1,20}")
+MODELL_AUFRUF = re.compile(r"Verbrauch profil=\S{1,40} anbieter=\S{1,20} modell=(" + MODELL + r") baustein=gespraech\b")
+MAX_MODELLE = 20  # mehr verschiedene Namen werden unter "(weitere)" gezaehlt
 
 
 class Fehler(Exception):
@@ -118,9 +126,29 @@ def token_zaehlen(z, eimer, text):
     eimer()["eingabe"] += daten["eingabe"]
 
 
+def modell_zaehlen(zaehler, name):
+    if name not in zaehler and len(zaehler) >= MAX_MODELLE:
+        name = "(weitere)"
+    zaehler[name] = zaehler.get(name, 0) + 1
+
+
+def modelle_zaehlen(z, text):
+    if "chsmodell" in text:
+        treffer = MODELL_START.search(text)
+        if treffer:
+            modell_zaehlen(z["modell_start"], treffer.group(1))
+    if "Verbrauch profil=" in text:
+        treffer = MODELL_AUFRUF.search(text)
+        if treffer:
+            modell_zaehlen(z["modell_aufruf"], treffer.group(1))
+    if "nicht nutzbar" in text and "auf das Hausmodell" in text:
+        z["rueckfall"] += 1
+
+
 def zeile_zaehlen(z, ts, text):
     def eimer():
         return z["eimer"].setdefault(str(int(ts // EIMER_S) * EIMER_S), {"anfragen": 0, "eingabe": 0})
+    modelle_zaehlen(z, text)
     if "Pipeline: Anfrage an das Modell beginnt" in text:
         z["anfragen"] += 1
         eimer()["anfragen"] += 1
@@ -138,7 +166,8 @@ def zeile_zaehlen(z, ts, text):
 
 def zaehlen(zeilen, seit, bis):
     z = {"zeilen": 0, "r429": 0, "soniox": 0, "anfragen": 0, "unterbrechungen": 0, "pipeline_fehler": 0, "token_zuege": 0,
-         "token_eingabe": 0, "token_cache_lesen": 0, "token_cache_schreiben": 0, "abgeschnitten": False, "eimer": {}}
+         "token_eingabe": 0, "token_cache_lesen": 0, "token_cache_schreiben": 0, "abgeschnitten": False, "eimer": {},
+         "modell_start": {}, "modell_aufruf": {}, "rueckfall": 0}
     for zeile in zeilen:
         if z["zeilen"] >= MAX_ZEILEN:
             z["abgeschnitten"] = True
@@ -338,8 +367,10 @@ def kern_remote(host: str, nutzlast: dict, frist_s: float | None = None) -> wl.E
     bleibt nie stehen, sodass auch das Aufräumen am Ende kommt. Das Passwort der Rolle geht nur über stdin und wird aus jeder Ausgabe geschwärzt."""
     frist_s = frist_s or (KERN_LOESCH_FRIST_S if nutzlast.get("aktion") == "loeschen" else KERN_FRIST_S)
     db_passwort = wl.admin_passwort()
-    programm = base64.b64encode(wl.remote_programm().encode("utf-8")).decode("ascii")
-    befehl = f"python3 -c \"import base64;exec(base64.b64decode('{programm}').decode('utf-8'))\""
+    try:
+        befehl = ws.server_befehl(wl.remote_programm())
+    except ws.BefehlFehler as e:
+        return wl.Ergebnis(1, "", str(e))
     eingabe = json.dumps({**nutzlast, "db_passwort": db_passwort}, ensure_ascii=False)
     try:
         r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", host, befehl],
@@ -370,6 +401,9 @@ class JournalZaehlung:
     token_cache_schreiben: int
     abgeschnitten: bool
     eimer: dict  # Eimer von 10 Sekunden (Sekunden seit 1970, abgerundet) -> (Anfragen, Eingabe-Tokens)
+    modell_start: dict = field(default_factory=dict)  # Modell -> Zahl der Sitzungen, die im Fenster mit diesem Gesprächsmodell begannen (alle Profile des Kerns)
+    modell_aufruf: dict = field(default_factory=dict)  # Modell -> Zahl der Gesprächsaufrufe im Fenster (Zeilen "Verbrauch" mit baustein gespraech)
+    rueckfall: int = 0  # Meldungen "Claude für Profil ... nicht nutzbar: Rückfall auf das Hausmodell" im Fenster
 
 
 @dataclass(frozen=True)
@@ -404,8 +438,11 @@ class DienstPlatz:
 # ---------- ssh ----------
 
 def befehl_fuer(programm: str, sudo: bool = False) -> str:
-    kodiert = base64.b64encode(programm.encode("utf-8")).decode("ascii")
-    return f"{'sudo -n ' if sudo else ''}python3 -I -c \"import base64;exec(base64.b64decode('{kodiert}').decode('utf-8'))\""
+    """Der ferne Befehl für ein Serverprogramm (gepackt und kurz, siehe wamo_labor_ssh.py). Ist er zu lang, gilt ServerFehler."""
+    try:
+        return ws.server_befehl(programm, sudo=sudo, isoliert=True)
+    except ws.BefehlFehler as e:
+        raise ServerFehler(str(e)) from None
 
 
 def ssh_ausfuehren(host: str, befehl: str, eingabe: str, frist: float) -> wl.Ergebnis:
@@ -476,6 +513,24 @@ def _eimer(roh: object) -> dict:
     return aus
 
 
+MODELL_NAME_RE = re.compile(r"[A-Za-z0-9._:/@+()-]{1,80}")  # auch "(weitere)", der Sammelname des Serverprogramms
+MAX_MODELLE = 21
+
+
+def _modelle(roh: object) -> dict[str, int]:
+    """Modell -> Zahl. Fehlt das Feld, ist es leer. Alles andere als Namen (nur Zeichen von Modellnamen) und ganze Zahlen ist unerwartet."""
+    if roh is None:
+        return {}
+    if not isinstance(roh, dict) or len(roh) > MAX_MODELLE:
+        raise ServerFehler(UNERWARTET)
+    aus = {}
+    for name, zahl in roh.items():
+        if not (isinstance(name, str) and MODELL_NAME_RE.fullmatch(name) and type(zahl) is int and zahl >= 0):
+            raise ServerFehler(UNERWARTET)
+        aus[name] = zahl
+    return aus
+
+
 def _journal(roh: object) -> JournalZaehlung | None:
     if roh is None:
         return None
@@ -483,7 +538,9 @@ def _journal(roh: object) -> JournalZaehlung | None:
         raise ServerFehler(UNERWARTET)
     zahlen = {n: _ganz(roh, n) for n in ("zeilen", "r429", "soniox", "anfragen", "unterbrechungen", "pipeline_fehler", "token_zuege",
                                           "token_eingabe", "token_cache_lesen", "token_cache_schreiben")}
-    return JournalZaehlung(**zahlen, abgeschnitten=_flag(roh, "abgeschnitten"), eimer=_eimer(roh.get("eimer")))
+    return JournalZaehlung(**zahlen, abgeschnitten=_flag(roh, "abgeschnitten"), eimer=_eimer(roh.get("eimer")),
+                           modell_start=_modelle(roh.get("modell_start")), modell_aufruf=_modelle(roh.get("modell_aufruf")),
+                           rueckfall=_ganz({"rueckfall": roh.get("rueckfall", 0)}, "rueckfall"))
 
 
 def messung_lesen(daten: dict, versatz_s: float) -> Messung:

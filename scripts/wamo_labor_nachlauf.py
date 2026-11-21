@@ -38,7 +38,6 @@ Text aus einem Gespräch oder einem Ticket. Es erscheint nie ein Traceback.
 from __future__ import annotations
 
 import argparse
-import base64
 import importlib.util
 import json
 import os
@@ -54,6 +53,7 @@ from typing import Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import wamo_labor as wl  # noqa: E402
 import wamo_labor_faktoren_umschlag as um  # noqa: E402
+import wamo_labor_ssh as ws  # noqa: E402
 
 WURZEL = Path(__file__).resolve().parent.parent
 EXIT_OK, EXIT_FEHLER, EXIT_EINGABE, EXIT_ABBRUCH = 0, 1, 2, 130
@@ -304,8 +304,10 @@ def dienst_text(s: DienstStand) -> str:
 def dienst_remote(host: str, nutzlast: dict) -> wl.Ergebnis:
     """Ruft das Serverprogramm über ssh und sudo -n auf. Der Betreuer-Token wird nur dort gelesen, hier gibt es keinen.
     python3 -I (isolierter Modus): Als root lädt der Interpreter nichts aus dem aktuellen Ordner und nichts aus der Umgebung."""
-    programm = base64.b64encode(REMOTE_DIENST.encode("utf-8")).decode("ascii")
-    befehl = f"sudo -n python3 -I -c \"import base64;exec(base64.b64decode('{programm}').decode('utf-8'))\""
+    try:
+        befehl = ws.server_befehl(REMOTE_DIENST, sudo=True, isoliert=True)
+    except ws.BefehlFehler as e:
+        return wl.Ergebnis(1, "", str(e))
     try:
         r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, befehl], input=json.dumps(nutzlast),
                            capture_output=True, text=True, encoding="utf-8", timeout=SSH_FRIST_S)
