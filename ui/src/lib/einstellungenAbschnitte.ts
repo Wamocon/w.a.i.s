@@ -35,6 +35,7 @@ export const ABSCHNITT_IDS = [
   "teilen",
   "mitglieder",
   "aenderungen",
+  "werkstatt",
 ] as const;
 export type AbschnittId = (typeof ABSCHNITT_IDS)[number];
 
@@ -109,6 +110,14 @@ export const ABSCHNITTE: readonly Abschnitt[] = [
     stichwort: "Änderungen an W.A.I.S.",
     nurAdmin: true,
   },
+  // Die Werkstatt (Dashboards, Labor-Planer, Karten, Protokolle) ist eine eigene Seite /werkstatt (components/werkstatt); hier steht nur der Link.
+  {
+    id: "werkstatt",
+    titel: "Werkstatt",
+    kurz: "Dashboards, Labor-Planer, Karten und Protokolle in einem eigenen Fenster",
+    stichwort: "Werkstatt",
+    nurAdmin: true,
+  },
 ];
 
 // ---------- Gruppen ----------
@@ -129,7 +138,7 @@ export const GRUPPEN: readonly Gruppe[] = [
   { id: "zugaenge", titel: "Modelle und Zugänge", abschnitte: ["modellzugang", "github", "verbrauch"] },
   { id: "geraete-pc", titel: "Geräte und PC", abschnitte: ["geraete", "fernzugriff"] },
   { id: "inhalte", titel: "Gedächtnis und Teilen", abschnitte: ["gedaechtnis", "teilen"] },
-  { id: "verwaltung", titel: "Verwaltung", abschnitte: ["mitglieder", "aenderungen"] },
+  { id: "verwaltung", titel: "Verwaltung", abschnitte: ["mitglieder", "aenderungen", "werkstatt"] },
 ];
 
 /** Eine Gruppe, wie diese Rolle sie sieht: nur die sichtbaren Abschnitte, dazu die Kurzzeile der Gliederung. */

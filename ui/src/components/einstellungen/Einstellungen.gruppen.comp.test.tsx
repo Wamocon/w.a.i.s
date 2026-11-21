@@ -97,7 +97,7 @@ describe("Gliederung: nur die Gruppen", () => {
     expect(kurz("Konto und Allgemeines")).toBe("Konto, erste Schritte, Darstellung, Updates, Version und Hinweise");
     expect(kurz("Sprache und Stimme")).toBe("Mikrofon, Hören und Sprechen, eigene Stimme");
     expect(kurz("Modelle und Zugänge")).toBe("Schlüssel und Modelle, GitHub-Zugang, Verbrauch");
-    expect(kurz("Verwaltung")).toBe("Neue Mitglieder und GitHub-Rechte, Änderungen an W.A.I.S.");
+    expect(kurz("Verwaltung")).toBe("Neue Mitglieder und GitHub-Rechte, Änderungen an W.A.I.S., Werkstatt");
   });
 
   it("Mitglied sieht fünf Gruppen ohne Verwaltung, mit nur den offenen Abschnitten in den Kurzzeilen", async () => {

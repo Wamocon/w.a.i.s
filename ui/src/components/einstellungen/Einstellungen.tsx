@@ -40,6 +40,7 @@ import { NeueMitglieder } from "./NeueMitglieder";
 import { GithubRechte } from "./GithubRechte";
 import { ErsteSchritteAbschnitt } from "./ErsteSchritte";
 import { UpdatesAbschnitt } from "./Updates";
+import { WerkstattAbschnitt } from "./Werkstatt";
 
 /**
  * Die Einstellungsseite: eine Ansicht der Hauptseite, kein eigener Pfad (siehe lib/einstellungenAbschnitte.ts). Sechs Gruppen
@@ -186,6 +187,8 @@ function AbschnittInhalt({ id, aktionen, email, onAbmelden, labor, admin }: Inha
       );
     case "aenderungen":
       return <AenderungenAbschnitt />;
+    case "werkstatt":
+      return <WerkstattAbschnitt />;
     default: {
       const unbekannt: never = id; // neue Abschnitte müssen hier behandelt werden
       void unbekannt;

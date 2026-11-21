@@ -24,6 +24,7 @@
 @import "../components/kommando/bueroKarte.css"; /* Büro-Karte (Radialansicht der Bürogeräte): Regeln mit Präfix .bk- */
 @import "../components/abmeldenRueckfrage.css"; /* Rückfrage vor dem Abmelden (Laborkonten): Regeln mit Präfix .ab- */
 @import "../components/updateHinweis.css"; /* Pop-up "Update verfügbar" der Desktop-App: Regeln mit Präfix .uh- */
+@import "../components/werkstatt/werkstatt.css"; /* Werkstatt (Admin-Panel, Seite /werkstatt): Regeln mit Präfix .ws- */
 
 /* =====================================================================
    WAMO Kommandozentrale im WMC-Corporate-Design (WAMOCON GmbH)
