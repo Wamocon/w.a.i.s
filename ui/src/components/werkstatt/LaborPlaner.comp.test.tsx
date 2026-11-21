@@ -1,7 +1,7 @@
 // Komponententest des Labor-Planers der Werkstatt: Termin und Fristen, Plätze, Checkliste, Stand der Laborprofile.
 // Der Dienst (lib/werkstattApi.ts) ist durch Attrappen ersetzt.
 // Ausführen im Ordner ui/:  npm run test:komponenten
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -183,6 +183,9 @@ describe("Plätze", () => {
     await user.click(screen.getByRole("button", { name: "Plätze speichern" }));
     expect((await screen.findAllByRole("alert")).some((a) => /schon an einem anderen Platz/.test(a.textContent ?? ""))).toBe(true);
     expect(plaetzeSpeichern).not.toHaveBeenCalled();
+    // der Fokus springt im nächsten Bild auf die Meldung: erst danach weiter eingeben, sonst gingen Eingaben ins Leere
+    await waitFor(() => expect(document.activeElement?.getAttribute("role")).toBe("alert"));
+    await user.click(screen.getByLabelText("Kennung von Platz 2"));
     await user.clear(screen.getByLabelText("Kennung von Platz 2"));
     await user.type(screen.getByLabelText("Kennung von Platz 2"), "labor-02");
     await user.click(screen.getByRole("button", { name: "Plätze speichern" }));

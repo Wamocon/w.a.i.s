@@ -1,7 +1,7 @@
 // Komponententest des Bereichs Karten und Use Cases: Editor von null, Prüfung, Katalog, Zuordnung und der Vierschritt zum
 // Veröffentlichen. Der Dienst (lib/werkstattApi.ts) und der zweite Faktor (lib/geraeteVerwaltungApi.ts) sind durch Attrappen ersetzt.
 // Ausführen im Ordner ui/:  npm run test:komponenten
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codeBestaetigen } from "@/lib/geraeteVerwaltungApi";
@@ -166,11 +166,18 @@ describe("Katalog und Editor", () => {
     await user.click(screen.getByLabelText(/Eigener Wissenstext/));
     await user.paste("Text mit <b>Markup</b>");
     await user.click(screen.getByRole("button", { name: "Als Entwurf speichern" }));
-    expect((await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ")).toMatch(/enthält Markup/);
+    const meldung = (await screen.findAllByRole("alert")).find((a) => /enthält Markup/.test(a.textContent ?? ""));
+    expect(meldung).toBeTruthy();
     expect(karteAnlegen).not.toHaveBeenCalled();
+    // Nach der Prüfung springt der Fokus (im nächsten Bild) auf die Meldung. Erst wenn er dort ist, wird der Text ersetzt,
+    // sonst fiele das Einfügen ins Leere: der Test war davon abhängig, wie schnell der Rechner das nächste Bild zeichnet.
+    await waitFor(() => expect(document.activeElement).toBe(meldung));
     // ein Text, den nur der Dienst beanstandet (zum Beispiel eine Rollenzeile mitten im Text)
-    await user.clear(screen.getByLabelText(/Eigener Wissenstext/));
+    const feld = screen.getByLabelText(/Eigener Wissenstext/);
+    await user.click(feld);
+    await user.clear(feld);
     await user.paste("Ein erlaubter Satz.");
+    expect(feld).toHaveProperty("value", "Ein erlaubter Satz.");
     vi.mocked(karteAnlegen).mockRejectedValueOnce(new WerkstattFehler(fehlerBild(422, "ungueltig", "Der Wissenstext enthält eine Rollenzeile.")));
     await user.click(screen.getByRole("button", { name: "Als Entwurf speichern" }));
     expect((await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ")).toMatch(/Der Wissenstext enthält eine Rollenzeile/);
