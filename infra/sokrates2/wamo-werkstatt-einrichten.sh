@@ -89,8 +89,7 @@ CADDY_COMPOSE_NEU=nein
 DIENST_WAR_AKTIV=nein
 UNDO=()
 OWN_ROOT=(-o root -g root)
-OWN_WERKSTATT=(-o root -g "$BENUTZER")
-[ -z "$W" ] || { OWN_ROOT=(); OWN_WERKSTATT=(); }
+[ -z "$W" ] || OWN_ROOT=()   # im Probelauf gibt es kein chown
 
 usage() {
   echo "Aufruf: $0 [einrichten|status|pruefen] [--trocken] [--quelle ORDNER] [--schema wamo_dev|wamo_test|wamo_prod]" >&2
@@ -604,7 +603,10 @@ caddy() {
     echo "  (Probelauf: Site und Compose abgelegt, kein docker)"
     return 0
   fi
+  # CADDY_OWNER und CADDY_GROUP liest caddy_installieren in wamo-labor-site.sh (Besitzer der Dateien im Ordner von wamo-caddy)
+  # shellcheck disable=SC2034
   CADDY_OWNER="$(stat -c %U "$CADDY_DIR")"
+  # shellcheck disable=SC2034
   CADDY_GROUP="$(stat -c %G "$CADDY_DIR")"
   # Die gemeinsame Sperre mit dem Aktualisierer der Betreuer-Geräte (er lädt Caddy ebenfalls neu und prüft die ganze Konfiguration samt dieser Site)
   sperre_nehmen "$W/run/wamo-labor-geraete/lock" 120 || fehler "Ein Lauf des Aktualisierers der Betreuer-Geräte hält die Sperre (nach 120 Sekunden aufgegeben): Die Site wurde nicht geändert. Bitte einrichten erneut ausführen."

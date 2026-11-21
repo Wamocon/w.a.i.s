@@ -73,6 +73,16 @@ def als_benutzer(name: str, code: str, *argv: str) -> subprocess.CompletedProces
 
 
 # ---------------------------------------------------------------------------------------------------- HTTP-Hilfen
+def tls_kontext(ca: str) -> ssl.SSLContext:
+    """TLS 1.2 oder neuer, Zertifikat und Name werden gegen die WAMO-CA geprüft (nie CERT_NONE)."""
+    kontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    kontext.minimum_version = ssl.TLSVersion.TLSv1_2
+    kontext.check_hostname = True
+    kontext.verify_mode = ssl.CERT_REQUIRED
+    kontext.load_verify_locations(cafile=ca)
+    return kontext
+
+
 def roh_anfrage(verbinden, methode: str, pfad: str, token: str | None = None, koerper: bytes = b"") -> tuple[int, dict, bytes]:
     """Eine HTTP/1.1-Anfrage über eine fertige Verbindung (Unix-Socket oder TCP). Gibt Status, Köpfe (klein geschrieben) und Rumpf zurück."""
     kopf = f"{methode} {pfad} HTTP/1.1\r\nHost: wamo-werkstatt\r\nConnection: close\r\nContent-Length: {len(koerper)}\r\n"
@@ -108,7 +118,7 @@ def direkt(methode: str, pfad: str, token: str | None = None, koerper: bytes = b
 
 
 def ueber_caddy(ca: str, methode: str, pfad: str, token: str | None = None, koerper: bytes = b"", herkunft: str | None = None) -> tuple[int, dict, bytes]:
-    kontext = ssl.create_default_context(cafile=ca)
+    kontext = tls_kontext(ca)
     verbindung = http.client.HTTPSConnection(SERVER, PORT, timeout=15, context=kontext)
     kopf = {"Connection": "close"}
     if token:
@@ -354,7 +364,7 @@ def teil_d(ca: str) -> None:
         pruefe("55448 antwortet nicht", True)
     for port in (55443, 55444, 55445, 55446):
         try:
-            kontext = ssl.create_default_context(cafile=ca)
+            kontext = tls_kontext(ca)
             with socket.create_connection((SERVER, port), timeout=5) as roh, kontext.wrap_socket(roh, server_hostname=SERVER):
                 pruefe(f"{port} antwortet", True)
         except (OSError, ssl.SSLError) as e:

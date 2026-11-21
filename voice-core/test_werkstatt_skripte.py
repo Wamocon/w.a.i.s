@@ -109,6 +109,16 @@ class AllgemeinTests(unittest.TestCase):
                 for wort in re.findall(r"[A-Za-z0-9_+/=-]{40,}", zeile):
                     self.assertTrue("/" in wort or "$" in wort or re.fullmatch(r"[a-z0-9-]+|[A-Za-z_]+[_-][A-Za-z_-]+", wort), f"{f.name}: {wort[:20]}")
 
+    def test_tls_nur_mit_pruefung_und_mindestens_version_1_2(self):
+        """CodeQL: ssl.create_default_context lässt TLS 1.0 und 1.1 zu. Beide Python-Dateien bauen den Kontext selbst (tls_kontext) und prüfen immer das Zertifikat."""
+        for f in (RAUCHTEST, SAMMLER):
+            text = lies(f)
+            self.assertNotIn("create_default_context", text, f.name)
+            self.assertNotIn("CERT_NONE", text, f.name)
+            self.assertNotIn("check_hostname = False", text, f.name)
+            self.assertIn("minimum_version = ssl.TLSVersion.TLSv1_2", text, f.name)
+            self.assertIn("verify_mode = ssl.CERT_REQUIRED", text, f.name)
+
     def test_skripte_sind_ausfuehrbar_formuliert_und_in_der_syntax_fehlerfrei(self):
         for f in (EINRICHTEN, RUECKWEG):
             self.assertTrue(lies(f).startswith("#!/usr/bin/env bash\n"), f.name)

@@ -277,11 +277,21 @@ def kern_stand(caddy_dir: str, opt_core: str = "/opt/wamo-core", lauf=subprocess
     return {"slot": slot, "release": release, "aktiv": aktiv}
 
 
+def tls_kontext(ca: str) -> ssl.SSLContext:
+    """TLS 1.2 oder neuer, Zertifikat und Name werden gegen die WAMO-CA geprüft (nie CERT_NONE)."""
+    kontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    kontext.minimum_version = ssl.TLSVersion.TLSv1_2
+    kontext.check_hostname = True
+    kontext.verify_mode = ssl.CERT_REQUIRED
+    kontext.load_verify_locations(cafile=ca)
+    return kontext
+
+
 def http_json(url: str, ca: str, ohne_netz: bool) -> dict | None:
     if ohne_netz:
         return None
     try:
-        kontext = ssl.create_default_context(cafile=ca)
+        kontext = tls_kontext(ca)
         with urllib.request.urlopen(url, timeout=3, context=kontext) as antwort:
             daten = json.loads(antwort.read(MAX_DATEI_BYTES))
         return daten if isinstance(daten, dict) else None
