@@ -763,7 +763,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
     # PC-Steuerung je Sitzung standardmäßig aus; nur ein Profil mit Stufe (rechte.pc_stufe) schaltet sie in der UI ein.
     state: dict = {"pc": "verbindet" if (pc_enabled or pc_nachholen) else "aus", "pc_latenz_ms": None, "pc_steuerung": False,
                    "client_ready": False, "live": True, "cleaned": False, "guard": None,
-                   "pc_weg": False, "pc_tools": False, "pc_waechter": None, "geraet_wache": None, "labor_wache": None,  # pc_weg: Hinweis im Prompt
+                   "pc_weg": False, "pc_tools": False, "pc_waechter": None, "geraet_wache": None, "labor_wache": None, "labor_karten": None,  # pc_weg: Hinweis im Prompt
                    "stimme_laden": None,  # Hintergrundaufgabe: Abdruck laden (stimme_sitzung.laden_bis_bekannt)
                    "geraet_ok": geraet_zugang is None and not pc_nachholen, "geraet_entzogen": False,  # Tunnel je Gerät: erst nach dem Namensabgleich, nie nach einem Entzug
                    "pc_name": None, "pc_belegt": False, "pc_nachholen": None, "pc_klick": 0,  # pc_nachholen: Hintergrund des Nachholers
@@ -1765,6 +1765,9 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         # Labor: alle 5 Sekunden den Durchlauf fragen, Ende bei Wechsel oder Schluss (labor_durchlauf.LaborWache)
         if labor_sitzung is not None and labor_sitzung.wache is not None and state["labor_wache"] is None and state["live"]:
             state["labor_wache"] = _keep(asyncio.create_task(labor_sitzung.wache.run(labor_ende)))
+        # Labor: neue Wissenstexte der Karten gelten sofort (nur mit WAMO_LABOR_KARTEN_NACHLADEN=an, sonst gibt es keine Aufgabe)
+        if labor_sitzung is not None and labor_sitzung.karten is not None and state["labor_karten"] is None and state["live"]:
+            state["labor_karten"] = _keep(asyncio.create_task(labor_sitzung.katalog_wache(refresh_prompt)))
 
     async def labor_ende(grund: str) -> None:
         """Der Durchlauf ist beendet oder gewechselt: die Oberfläche lädt sich neu (Untertitel und Canvas liegen im Speicher der Seite)."""
@@ -1822,7 +1825,7 @@ async def build_session(transport, identity: Identity, sitzung: Sitzung | None =
         guard_task = state["guard"]
         if guard_task is not None and guard_task is not asyncio.current_task():
             guard_task.cancel()
-        for name in ("pc_waechter", "sperr_probe", "geraet_wache", "labor_wache", "stimme_laden", "pc_nachholen"):
+        for name in ("pc_waechter", "sperr_probe", "geraet_wache", "labor_wache", "labor_karten", "stimme_laden", "pc_nachholen"):
             hintergrund = state[name]
             if hintergrund is not None and hintergrund is not asyncio.current_task():
                 hintergrund.cancel()

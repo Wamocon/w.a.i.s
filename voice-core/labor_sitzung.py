@@ -6,6 +6,7 @@ Zweig entscheidet, steht in labor.py und hier, nicht in bot.py.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,6 +16,7 @@ from loguru import logger
 import labor
 import labor_daten
 import labor_durchlauf
+import labor_karten_db
 from labor_daten import LaborDaten
 from labor_durchlauf import Durchlauf, DurchlaufQuelle, LaborWache
 from labor_prompt import build_labor_prompt
@@ -32,12 +34,17 @@ class LaborSitzung:
     # keinen Platz und keine Freigabe) bleibt der Klick wirkungslos.
     freigabe: Callable[[dict], Awaitable[Any]] | None = None
     daten: LaborDaten = field(default_factory=LaborDaten)  # Regeln, Kontakte, Vorlagen, Wissen: bei jedem Sitzungsstart frisch gelesen
+    # Wissenstexte der veröffentlichten Karten (labor_karten_db.py): nur mit WAMO_LABOR_KARTEN_NACHLADEN=an, sonst leer und karten None
+    katalog: tuple[tuple[str, str], ...] = ()
+    karten: labor_karten_db.KartenNachlader | None = None
 
     @classmethod
     async def starten(cls, identity: Any, *, quelle: DurchlaufQuelle | None = None, min_version: int | None = None,
-                      db: Any = None, daten: LaborDaten | None = None) -> LaborSitzung:
+                      db: Any = None, daten: LaborDaten | None = None,
+                      karten: labor_karten_db.KartenNachlader | None = None) -> LaborSitzung:
         """Nimmt eine Laborsitzung an oder wirft LaborAbgelehnt (Durchlauf beendet, keine Einwilligung, Dienst nicht erreichbar).
-        daten: nur für Tests, sonst liest labor_daten.laden die Dateien aus WAMO_LABOR_DATEN (ein Fehler dort ergibt den reinen Laborprompt)."""
+        daten: nur für Tests, sonst liest labor_daten.laden die Dateien aus WAMO_LABOR_DATEN (ein Fehler dort ergibt den reinen Laborprompt).
+        karten: nur für Tests, ersetzt den Zwischenspeicher der Karten, schaltet aber nie am Schalter WAMO_LABOR_KARTEN_NACHLADEN vorbei."""
         if not labor.ist_labor(identity):
             raise labor.LaborPolitikFehler("LaborSitzung.starten ohne Laborprofil")
         if getattr(identity, "labor_aktiv", False) is not True or not labor.laborfelder_stimmig(
@@ -53,12 +60,52 @@ class LaborSitzung:
         geladen = daten if daten is not None else labor_daten.laden()
         logger.info("Labor: Sitzung {} Platz {} Durchlauf {} Text speichern: {} | {}", identity.labor_art, identity.labor_platz,
                     urteil.stand.durchlauf_id[:8] if urteil.stand else "-", "ja" if speicher.enabled else "nein", geladen.logzeile())
-        return cls(identity, urteil.stand, speicher, wache, daten=geladen)
+        nachlader = labor_karten_db.nachlader_fuer_sitzung(karten)  # None bei ausgeschaltetem Schalter: dann wird nichts gelesen
+        katalog = await cls._katalog(nachlader)
+        return cls(identity, urteil.stand, speicher, wache, daten=geladen, katalog=katalog, karten=nachlader)
+
+    @staticmethod
+    async def _katalog(nachlader: labor_karten_db.KartenNachlader | None) -> tuple[tuple[str, str], ...]:
+        if nachlader is None:
+            return ()
+        stand = await nachlader.aktuell()
+        return stand.eintraege if stand is not None else ()
+
+    async def katalog_nachladen(self) -> bool:
+        """Fragt den Zwischenspeicher der Karten (nie die Datenbank selbst, die liest der Nachlader höchstens alle 30 s). True, wenn sich die
+        Wissenstexte dieser Sitzung geändert haben und der Prompt neu gebaut werden muss."""
+        neu = await self._katalog(self.karten)
+        if neu == self.katalog:
+            return False
+        self.katalog = neu
+        return True
+
+    async def katalog_wache(self, geaendert: Callable[[], Awaitable[None]], *, takt: float | None = None,
+                            sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
+        """Läuft mit der Sitzung (nur mit Schalter an) und ruft geaendert, sobald neue Wissenstexte gelten. Fehler beenden sie nicht, ein
+        gescheiterter Aufruf von geaendert wird im nächsten Takt wiederholt. takt: Sekunden zwischen zwei Blicken in den Zwischenspeicher
+        (Standard labor_karten_db.SITZUNG_TAKT_SECS)."""
+        takt = labor_karten_db.SITZUNG_TAKT_SECS if takt is None else takt
+        offen = False
+        gemeldet: str | None = None  # Fehlertyp, der schon im Log steht: eine dauerhafte Störung füllt das Log nicht alle 10 s
+        while True:
+            await sleep(takt)
+            try:
+                offen = await self.katalog_nachladen() or offen
+                if offen:
+                    await geaendert()
+                    offen = False
+                gemeldet = None
+            except Exception as fehler:  # noqa: BLE001 (das Nachladen darf die Sitzung nie stören)
+                if gemeldet != type(fehler).__name__:
+                    gemeldet = type(fehler).__name__
+                    logger.warning("Labor-Karten: Prompt nicht erneuert ({})", gemeldet)
 
     def prompt(self) -> str:
         """Der Prompt dieser Sitzung: immer der Laborprompt, nie der normale mit Gedächtnis und PC. Regeln als eigener Block, alles andere als Daten."""
         return build_labor_prompt(self.identity.name, self.identity.anrede, self.identity.labor_art, self.daten.regeln, self.daten.daten,
-                                  text_speichern=bool(self.memory.enabled))  # maßgebend ist, ob der Speicher wirklich schreibt
+                                  text_speichern=bool(self.memory.enabled),  # maßgebend ist, ob der Speicher wirklich schreibt
+                                  katalog=self.katalog)
 
     def werkzeuge_pruefen(self, llm: Any, standard_tools: list, *, mit_tickets: bool = False) -> None:
         """Die Namen im Kontext und die am LLM registrierten Namen müssen genau der Liste dieser Sitzung entsprechen, sonst bricht die Sitzung ab:

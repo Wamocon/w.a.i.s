@@ -113,7 +113,8 @@ def verzeichnis_problem(pfad: str, st: os.stat_result, richtlinie: Richtlinie = 
     return None
 
 
-def _zeichen_ok(text: str) -> bool:
+def zeichen_ok(text: str) -> bool:
+    """Nur erlaubte Zeichen (auch für labor_karten_db.py: Texte aus der Datenbank gelten nach denselben Regeln wie die Dateien)."""
     return all(ch in "\n\t " or unicodedata.category(ch)[0] in _ERLAUBTE_KATEGORIEN for ch in text)
 
 
@@ -184,7 +185,7 @@ def laden(verzeichnis: str | None = None, *, richtlinie: Richtlinie = Richtlinie
                 problem = "kodierung"
         if text is not None:
             text = text.replace("\r\n", "\n")
-            if not _zeichen_ok(text):
+            if not zeichen_ok(text):
                 problem = "zeichen"
             elif not text.strip():
                 problem = "leer"

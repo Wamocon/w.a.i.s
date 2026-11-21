@@ -118,6 +118,9 @@ ERLAUBT = set(PFLICHT) | {
     # /start und Offer je Profil und Minute
     "WAMO_LABOR_TEXT_ABSTAND_SECS", "WAMO_LABOR_TEXT_MAX_ZEICHEN", "WAMO_LABOR_SUCHEN_MAX", "WAMO_LABOR_ANFRAGEN_MAX",
     "WAMO_LABOR_KLICK_ABSTAND_SECS", "WAMO_LABOR_KLICK_MAX",
+    # Werkstatt (voice-core/labor_karten_db.py): "an" lässt Laborsitzungen die Wissenstexte der veröffentlichten Karten aus der Datenbank
+    # nachladen (höchstens alle 30 s je Prozess), Standard aus, ein Tippfehler bleibt aus. Keine Geheimnisse, nur vom Server.
+    "WAMO_LABOR_KARTEN_NACHLADEN",
     # Jira-Stories aus dem Canvas (voice-core/jira_client.py, jira_werkzeuge.py): kommen nur vom Server, nie aus der .env des PCs (nicht in
     # AUS_ENV). WAMO_JIRA (an oder aus, Standard aus), Adresse (nur https://<name>.atlassian.net), Mailadresse und API-Token des technischen
     # Jira-Benutzers nur für W.A.I.S. (Rechte Browse Projects und Create Issues; das Token ist ein Geheimnis und wird wie alle Werte nie
