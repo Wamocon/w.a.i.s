@@ -197,8 +197,8 @@ class AusgeschaltetTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PruefregelTests(unittest.TestCase):
-    def pruefen(self, *texte, version=5, dateien=0):
-        return kdb.pruefen(Gelesen(version, tuple(texte)), dateien)
+    def pruefen(self, *texte, version=5):
+        return kdb.pruefen(Gelesen(version, tuple(texte)))
 
     def grund(self, *texte, **kw):
         with self.assertRaises(Abgelehnt) as fehler:
@@ -259,15 +259,20 @@ class PruefregelTests(unittest.TestCase):
         for roh in ("", "   \n ", None, 7, b"bytes"):
             self.assertEqual(self.grund(("W1", roh)), kdb.GRUND_LEER, repr(roh))
 
-    def test_gesamtumfang_mit_den_dateien_hoechstens_6000(self):
-        vier = [(f"W{i}", "x" * 250) for i in range(1, 5)]  # 1000 Zeichen
-        self.assertEqual(self.pruefen(*vier, dateien=5000).zeichen, 1000)  # genau 6000
-        self.assertEqual(self.grund(*vier, dateien=5001), kdb.GRUND_GESAMT)
-        self.assertEqual(labor_daten.MAX_GESAMT, 6000)
+    def test_katalogbudget_genau_2000_gehen_2001_sind_zu_gross(self):
+        self.assertEqual(kdb.KATALOG_BUDGET_ZEICHEN, 2000)
+        vier = [(f"W{i}", "x" * 500) for i in range(1, 5)]  # 2000 Zeichen
+        self.assertEqual(self.pruefen(*vier).zeichen, 2000)
+        self.assertEqual(self.grund(*vier, ("W5", "y")), kdb.GRUND_GESAMT)  # 2001
+        zwei = [("W1", "x" * 900), ("W2", "x" * 900), ("W3", "x" * 200)]  # 2000, je Text höchstens 900
+        self.assertEqual(self.pruefen(*zwei).zeichen, 2000)
+        self.assertEqual(self.grund(("W1", "x" * 900), ("W2", "x" * 900), ("W3", "x" * 201)), kdb.GRUND_GESAMT)
 
-    def test_dateien_zeichen_zaehlt_regeln_und_daten(self):
-        self.assertEqual(kdb.dateien_zeichen(DATEN), len(DATEN.regeln) + len("Anna Test, anna.test@labor.test"))
-        self.assertEqual(kdb.dateien_zeichen(LaborDaten()), 0)
+    def test_das_katalogbudget_ist_unabhaengig_von_den_dateien_der_labor_daten(self):
+        """Die 6000 Zeichen der Dateien bleiben wie sie sind und zählen nicht mehr mit (Entscheidung vom 21.11.2026)."""
+        self.assertEqual(labor_daten.MAX_GESAMT, 6000)
+        self.assertNotIn("dateien", kdb.pruefen.__code__.co_varnames)
+        self.assertFalse(hasattr(kdb, "dateien_zeichen"))
 
     def test_ein_anweisungstext_ist_fuer_die_pruefung_ein_gewoehnlicher_text(self):
         """Der Kern erkennt keine Anweisungen und behandelt auch keine als solche: Schutz ist die Trennung im Prompt (PromptTests)."""
@@ -506,19 +511,31 @@ class NachladerTests(unittest.IsolatedAsyncioTestCase):
         uhr.weiter(31)
         self.assertEqual(await nachlader.aktuell(), Stand(6, ()))
 
-    async def test_der_stand_passt_neben_die_dateien_oder_er_fehlt_in_dieser_sitzung(self):
-        nachlader, _, _ = self.bauen(gelesen(5, ("W1", "x" * 800)))
+    async def test_eine_version_ueber_dem_katalogbudget_wird_abgelehnt_und_die_letzte_gueltige_bleibt(self):
+        fuenf = [(f"W{i}", "x" * 500) for i in range(1, 6)]  # 2500 Zeichen
+        nachlader, _, uhr = self.bauen(gelesen(5, ("W1", GEHEIM + " gut")), Gelesen(6, tuple(fuenf)), Gelesen(6, tuple(fuenf)))
         with LogSammler() as log:
-            self.assertEqual((await nachlader.aktuell(5200)).version, 5)  # genau 6000
-            self.assertIsNone(await nachlader.aktuell(5201))
-            self.assertIsNone(await nachlader.aktuell(5300))
-        self.assertEqual(log.mit("neben den Dateien"), ["Labor-Karten: Version 5 abgelehnt (Gesamtumfang zu groß) neben den Dateien"])
+            self.assertEqual((await nachlader.aktuell()).version, 5)
+            uhr.weiter(31)
+            stand = await nachlader.aktuell()
+            uhr.weiter(31)
+            stand2 = await nachlader.aktuell()  # dieselbe Version noch einmal: nur eine Logzeile
+        self.assertEqual((stand.version, stand2.version), (5, 5))
+        self.assertEqual(log.mit("abgelehnt"), ["Labor-Karten: Version 6 abgelehnt (Gesamtumfang zu groß)"])
+        self.assertNotIn(GEHEIM, "\n".join(log.zeilen))
 
-    async def test_eine_version_zu_gross_fuer_die_dateien_wird_nicht_gekuerzt_sondern_abgelehnt(self):
-        nachlader, _, _ = self.bauen(gelesen(5, ("W1", "x" * 800)))
+    async def test_ist_die_erste_version_ueber_dem_budget_gibt_es_keinen_katalog(self):
+        nachlader, _, _ = self.bauen(Gelesen(5, tuple((f"W{i}", "x" * 500) for i in range(1, 6))))
         with LogSammler() as log:
-            self.assertIsNone(await nachlader.aktuell(5300))
+            self.assertIsNone(await nachlader.aktuell())
         self.assertEqual(log.mit("abgelehnt"), ["Labor-Karten: Version 5 abgelehnt (Gesamtumfang zu groß)"])
+
+    async def test_ein_voller_katalog_von_2000_zeichen_wird_geladen_unabhaengig_von_der_groesse_der_dateien(self):
+        nachlader, _, _ = self.bauen(Gelesen(5, tuple((f"W{i}", "x" * 500) for i in range(1, 5))))
+        with LogSammler() as log:
+            stand = await nachlader.aktuell()
+        self.assertEqual((stand.version, stand.zeichen), (5, 2000))
+        self.assertEqual(log.mit("Labor-Karten"), ["Labor-Karten: Version 5 geladen"])
 
     async def test_der_zwischenspeicher_laeuft_auch_nach_dem_wechsel_der_event_loop_weiter(self):
         nachlader, leser, uhr = self.bauen(gelesen(5, ("W1", "a")), gelesen(6, ("W1", "b")))
@@ -585,6 +602,15 @@ class SitzungTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s.daten.regeln, "Nichts erfinden.")
         self.assertNotIn("Nur Wissen.", s.daten.regeln)
         self.assertNotIn("Nur Wissen.", "".join(t for _, t in s.daten.daten))
+
+    async def test_der_katalog_hat_sein_eigenes_budget_und_passt_auch_neben_fast_vollen_dateien(self):
+        voll = LaborDaten("r" * 900, (("wissen-istqb.md", "w" * 5000),), {}, {})  # 5900 Zeichen, fast die 6000 der Dateien
+        nachlader, _, _ = self.nachlader(Gelesen(5, tuple((f"W{i}", "k" * 500) for i in range(1, 5))))  # 2000 Zeichen
+        with mock.patch.dict(os.environ, AN):
+            s = await starten(nachlader, daten=voll)
+        self.assertEqual(len(s.katalog), 4)
+        self.assertIn("| " + "k" * 500, s.prompt())
+        self.assertIn("w" * 5000, s.prompt())  # die Dateien bleiben unberührt
 
     async def test_fuenf_sitzungen_lesen_nur_einmal(self):
         nachlader, leser, _ = self.nachlader()

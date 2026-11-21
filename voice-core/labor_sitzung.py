@@ -61,20 +61,20 @@ class LaborSitzung:
         logger.info("Labor: Sitzung {} Platz {} Durchlauf {} Text speichern: {} | {}", identity.labor_art, identity.labor_platz,
                     urteil.stand.durchlauf_id[:8] if urteil.stand else "-", "ja" if speicher.enabled else "nein", geladen.logzeile())
         nachlader = labor_karten_db.nachlader_fuer_sitzung(karten)  # None bei ausgeschaltetem Schalter: dann wird nichts gelesen
-        katalog = await cls._katalog(nachlader, geladen)
+        katalog = await cls._katalog(nachlader)
         return cls(identity, urteil.stand, speicher, wache, daten=geladen, katalog=katalog, karten=nachlader)
 
     @staticmethod
-    async def _katalog(nachlader: labor_karten_db.KartenNachlader | None, daten: LaborDaten) -> tuple[tuple[str, str], ...]:
+    async def _katalog(nachlader: labor_karten_db.KartenNachlader | None) -> tuple[tuple[str, str], ...]:
         if nachlader is None:
             return ()
-        stand = await nachlader.aktuell(labor_karten_db.dateien_zeichen(daten))
+        stand = await nachlader.aktuell()
         return stand.eintraege if stand is not None else ()
 
     async def katalog_nachladen(self) -> bool:
         """Fragt den Zwischenspeicher der Karten (nie die Datenbank selbst, die liest der Nachlader höchstens alle 30 s). True, wenn sich die
         Wissenstexte dieser Sitzung geändert haben und der Prompt neu gebaut werden muss."""
-        neu = await self._katalog(self.karten, self.daten)
+        neu = await self._katalog(self.karten)
         if neu == self.katalog:
             return False
         self.katalog = neu

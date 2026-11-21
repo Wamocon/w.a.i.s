@@ -17,12 +17,12 @@ ihrem Takt fragt eine Sitzung nur diesen Speicher, nie die Datenbank. Gleichzeit
 
 Prüfregeln (eine Version gilt ganz oder gar nicht, es wird nie gekürzt): höchstens MAX_EINTRAEGE Einträge, Kennung wie die Karten (A1 bis Z99), je Text
 höchstens MAX_TEXT Zeichen, nur Zeichen wie in den Dateien der Labor-Daten (keine Steuer-, Format-, Bidi- und privaten Zeichen), kein Markup
-(Tags, Sondermarken von Chat-Vorlagen), und zusammen mit den Dateien aus labor_daten.py höchstens labor_daten.MAX_GESAMT Zeichen. Wird eine Version
+(Tags, Sondermarken von Chat-Vorlagen), und alle Wissenstexte einer Version zusammen höchstens KATALOG_BUDGET_ZEICHEN Zeichen. Der Katalog hat
+ein EIGENES Budget (Entscheidung vom 21.11.2026): Die Dateien aus labor_daten.py mit ihren 6000 Zeichen zählen nicht mit. Wird eine Version
 abgelehnt oder lässt sich nicht lesen (Fehler, Zeitlimit), bleibt die zuletzt gültige Version, im Log steht nur die Versionsnummer und der Grund,
 nie ein Text. Eine saubere leere Antwort ("keine aktive Version") ist dagegen keine Störung: Dann gilt kein Katalog mehr, ein zurückgezogener
-Wissenstext bleibt nicht bis zum Neustart stehen. Der Umfang der Dateien (labor_daten.dateien_zeichen) gilt für den ganzen Prozess: alle
-Sitzungen lesen dieselben Dateien, und jede Sitzung prüft in aktuell noch einmal, ob die Version neben ihre Dateien passt. Der Zwischenspeicher
-setzt eine einzige Event-Loop voraus (wie der Kern); die Sperre ist je Loop, nicht über Threads hinweg.
+Wissenstext bleibt nicht bis zum Neustart stehen. Der Zwischenspeicher setzt eine einzige Event-Loop voraus (wie der Kern); die Sperre ist je
+Loop, nicht über Threads hinweg.
 
 Die Texte sind DATEN, nie Anweisungen: Sie landen hinter einem Hinweis, der das ausspricht, zwischen Abschnittsmarken, die ein Text nicht
 vortäuschen kann (labor_prompt.py), und nie im Regelteil. Mehr als das Sprachmodell kennt der Kern von ihnen nicht.
@@ -52,6 +52,7 @@ SITZUNG_TAKT_SECS = 10.0  # so oft schaut eine laufende Sitzung in den Zwischens
 LESE_TIMEOUT_SECS = 3.0  # so lange wartet höchstens ein Sitzungsstart auf die Lesung (nur der eine, der sie auslöst, höchstens alle 30 s)
 MAX_EINTRAEGE = 20
 MAX_TEXT = 900
+KATALOG_BUDGET_ZEICHEN = 2000  # Summe aller Wissenstexte der aktiven Version, unabhängig von den Dateien der Labor-Daten
 ABFRAGE_GRENZE = MAX_EINTRAEGE + 5  # eine Zeile mehr als erlaubt genügt, um "zu viele" zu erkennen; nie unbegrenzt lesen
 
 GRUND_LANG = "zu lang"
@@ -121,17 +122,12 @@ def an(wert: str | None = None) -> bool:
     return schalter_an(SCHALTER, wert, standard=False)
 
 
-def dateien_zeichen(daten: labor_daten.LaborDaten) -> int:
-    """Wie viele Zeichen die Dateien der Labor-Daten schon verbrauchen (Regelteil und Datenteil, gestrichen wie beim Laden gezählt)."""
-    return len(daten.regeln) + sum(len(text) for _, text in daten.daten)
-
-
 def _reihenfolge(eintrag: tuple[str, str]) -> tuple[str, int]:
     return eintrag[0][0], int(eintrag[0][1:])
 
 
-def pruefen(gelesen: Gelesen, dateien: int = 0) -> Stand:
-    """Die geprüfte Version oder Abgelehnt. dateien: Zeichen, die die Dateien der Labor-Daten schon belegen (dateien_zeichen)."""
+def pruefen(gelesen: Gelesen) -> Stand:
+    """Die geprüfte Version oder Abgelehnt."""
     version = gelesen.version
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         raise Abgelehnt(GRUND_VERSION)
@@ -158,7 +154,7 @@ def pruefen(gelesen: Gelesen, dateien: int = 0) -> Stand:
             raise Abgelehnt(GRUND_MARKUP)
         eintraege[kennung] = sauber
     stand = Stand(version, tuple(sorted(eintraege.items(), key=_reihenfolge)))
-    if dateien + stand.zeichen > labor_daten.MAX_GESAMT:
+    if stand.zeichen > KATALOG_BUDGET_ZEICHEN:
         raise Abgelehnt(GRUND_GESAMT)
     return stand
 
@@ -210,7 +206,6 @@ class KartenNachlader:
         self._gueltig: Stand | None = None
         self._frisch_bis: float | None = None
         self._gemeldet: set[tuple[str, str]] = set()  # Fehler und Ablehnungen, die schon im Log stehen (bis eine Lesung gelingt)
-        self._passt_gemeldet: int | None = None  # Version, die neben den Dateien nicht passte und schon im Log steht
         self._sperre_objekt: asyncio.Lock | None = None
         self._sperre_loop: asyncio.AbstractEventLoop | None = None
 
@@ -229,27 +224,21 @@ class KartenNachlader:
             self._gemeldet.add(schluessel)
             logger.warning(zeile, *teile)
 
-    async def aktuell(self, dateien: int = 0) -> Stand | None:
-        """Die zuletzt gültige Version, die neben den Dateien der Labor-Daten (dateien Zeichen) noch Platz hat, oder None."""
+    async def aktuell(self) -> Stand | None:
+        """Die zuletzt gültige Version oder None (keine aktive Version, nichts Gültiges gelesen)."""
         try:
             if not self._frisch():
                 async with self._sperre():
                     if not self._frisch():
-                        await self._lesen(dateien)
+                        await self._lesen()
         except Exception as fehler:  # noqa: BLE001 (eine Laborsitzung scheitert nie am Nachladen)
             self._einmal(("fehler", type(fehler).__name__), "Labor-Karten: nicht gelesen ({})", type(fehler).__name__)
-        stand = self._gueltig
-        if stand is not None and dateien + stand.zeichen > labor_daten.MAX_GESAMT:
-            if self._passt_gemeldet != stand.version:
-                self._passt_gemeldet = stand.version
-                logger.warning("Labor-Karten: Version {} abgelehnt ({}) neben den Dateien", stand.version, GRUND_GESAMT)
-            return None
-        return stand
+        return self._gueltig
 
-    async def _lesen(self, dateien: int) -> None:
+    async def _lesen(self) -> None:
         self.lesungen += 1
         try:
-            await self._lesen_und_pruefen(dateien)
+            await self._lesen_und_pruefen()
         except asyncio.CancelledError:
             raise  # die Sitzung wurde abgebrochen: die Lesung zählt nicht, die nächste fragt neu
         except Exception as fehler:  # noqa: BLE001 (auch ein unerwarteter Fehler stört keine Sitzung und umgeht den Zwischenspeicher nicht)
@@ -262,7 +251,7 @@ class KartenNachlader:
         nummer = nummer if isinstance(nummer, int) and not isinstance(nummer, bool) else "?"
         self._einmal((str(nummer), grund), "Labor-Karten: Version {} abgelehnt ({})", nummer, grund)
 
-    async def _lesen_und_pruefen(self, dateien: int) -> None:
+    async def _lesen_und_pruefen(self) -> None:
         try:
             gelesen = await asyncio.wait_for(self._leser.lesen(), self._timeout)
         except Abgelehnt as abgelehnt:  # der Leser selbst hat die Zeilen verworfen (zwei Versionen in einer Antwort)
@@ -278,7 +267,7 @@ class KartenNachlader:
             self._gueltig = None
             return
         try:
-            stand = pruefen(gelesen, dateien)
+            stand = pruefen(gelesen)
         except Abgelehnt as abgelehnt:
             self._ablehnen(gelesen.version, abgelehnt.grund)
             return
