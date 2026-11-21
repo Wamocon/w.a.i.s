@@ -110,7 +110,7 @@ function PlatzTabelle({ terminId, plaetze, onGespeichert }: { terminId: string; 
           </tbody>
         </table>
       </div>
-      <p id={`${id}-hilfe`} className="ws-klein">Der Gast ist nur ein Pseudonym, zum Beispiel „Gast 1“, nie ein Name. Die Kennung gehört zum Laborprofil des Platzes.</p>
+      <p id={`${id}-hilfe`} className="ws-klein">Der Gast ist nur ein Pseudonym, zum Beispiel „Gast 1“, nie ein Name. Die Kennung gehört zum Laborprofil des Platzes und ist freiwillig.</p>
       {probleme.length > 0 && (
         <div ref={problemRef} className="ws-fehler" role="alert" tabIndex={-1}>
           <span>{probleme.map((p) => p.text).join(" ")}</span>

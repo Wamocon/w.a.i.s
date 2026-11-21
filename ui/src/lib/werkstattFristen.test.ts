@@ -8,7 +8,6 @@ import {
   fristen,
   heuteIso,
   istTag,
-  naechsterMontag,
   tagKurz,
   tagPlus,
   tagText,
@@ -17,14 +16,14 @@ import {
   zeitraumGueltig,
 } from "./werkstattFristen.ts";
 
-test("Fristen: Aufbewahrung Tag plus 13, Löschlauf einen Tag danach, Nachlauf zwei Tage nach dem Labortag", () => {
+test("Fristen: Aufbewahrung Tag plus 13, Löschlauf einen Tag danach, kein eigenes Datum für die Laborkonten", () => {
   const f = fristen("2026-12-05");
-  assert.deepEqual(f, { aufbewahrungBis: "2026-12-18", loeschlaufAb: "2026-12-19", nachlaufAb: "2026-12-07" });
+  assert.deepEqual(f, { aufbewahrungBis: "2026-12-18", loeschlaufAb: "2026-12-19" });
 });
 
 test("Fristen: ein gewählter Wert für die Aufbewahrung verschiebt den Löschlauf mit", () => {
   const f = fristen("2026-12-05", "2026-12-12");
-  assert.deepEqual(f, { aufbewahrungBis: "2026-12-12", loeschlaufAb: "2026-12-13", nachlaufAb: "2026-12-07" });
+  assert.deepEqual(f, { aufbewahrungBis: "2026-12-12", loeschlaufAb: "2026-12-13" });
   // ein ungültiger Wert fällt auf die Vorgabe zurück
   assert.equal(fristen("2026-12-05", "kaputt")?.aufbewahrungBis, "2026-12-18");
 });
@@ -96,14 +95,4 @@ test("Uhrzeit: nur HH:MM, Sekunden aus der Datenbank werden gekürzt", () => {
   assert.ok(!zeitraumGueltig("09:00", "09:00"));
   assert.ok(zeitraumGueltig(null, "09:00"));
   assert.ok(zeitraumGueltig("09:00", null));
-});
-
-test("Nachlauf: der erste Montag nach dem Labortag, nie der Tag selbst", () => {
-  assert.equal(naechsterMontag("2026-12-05"), "2026-12-07"); // Samstag
-  assert.equal(naechsterMontag("2026-12-06"), "2026-12-07"); // Sonntag
-  assert.equal(naechsterMontag("2026-12-07"), "2026-12-14"); // Montag
-  assert.equal(naechsterMontag("2026-12-08"), "2026-12-14"); // Dienstag
-  assert.equal(naechsterMontag("2026-12-11"), "2026-12-14"); // Freitag
-  assert.equal(naechsterMontag("kaputt"), null);
-  assert.equal(fristen("2026-12-09")?.nachlaufAb, "2026-12-14");
 });

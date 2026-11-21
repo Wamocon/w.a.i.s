@@ -50,11 +50,12 @@ function karte(id: string, teil: Partial<Karte> = {}): Karte {
     wissen: "keine", wissenstext: null, werkzeuge: [], dauerMin: 3, stand: "veroeffentlicht", ...teil,
   };
 }
+const GRUPPEN = { A: "Gruppe A", B: "Gruppe B", K: "Gruppe K" };
 const TERMIN = { id: "t1", tag: "2099-12-05", beginn: null, ende: null, einwilligungVersion: 1, status: "entwurf" as const, aufbewahrungBis: "2099-12-18" };
 const noop = () => undefined;
 
 beforeEach(() => {
-  vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("A2", { stand: "entwurf" })], version: 4 });
+  vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("A2", { stand: "entwurf" })], version: 4, gruppen: GRUPPEN });
   vi.mocked(versionenLaden).mockResolvedValue([]);
   vi.mocked(termineLaden).mockResolvedValue([TERMIN]);
   vi.mocked(plaetzeLaden).mockResolvedValue([
@@ -82,25 +83,27 @@ describe("Katalog und Editor", () => {
     expect(screen.queryByRole("button", { name: "A1 löschen" })).toBeNull();
   });
 
-  it("von null: ohne Katalog eine neue Gruppe, Pflichtfelder werden geprüft, dann als Entwurf gespeichert", async () => {
+  it("von null: die Gruppe kommt aus der festen Liste, Pflichtfelder werden geprüft, dann als Entwurf gespeichert", async () => {
     const user = userEvent.setup();
-    vi.mocked(kartenLaden).mockResolvedValue({ karten: [], version: null });
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [], version: null, gruppen: GRUPPEN });
     render(<Karten onFaktor={noop} />);
     expect(await screen.findByText("Noch keine veröffentlichte Version")).toBeTruthy();
     expect(screen.getByText(/Der Katalog ist noch leer/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Neuen Use Case aufbauen" }));
     expect(screen.getByRole("heading", { name: "Neuen Use Case aufbauen", level: 2 })).toBeTruthy();
-    expect(screen.getByLabelText("Gruppe")).toHaveProperty("value", "neu");
+    expect(screen.getByLabelText("Gruppe")).toHaveProperty("value", "");
+    // es gibt keine Möglichkeit, eine eigene Gruppe anzulegen: der Dienst kennt nur seine feste Liste
+    expect(screen.queryByRole("option", { name: /Neue Gruppe/ })).toBeNull();
+    expect(within(screen.getByLabelText("Gruppe")).getAllByRole("option").map((o) => o.textContent)).toEqual(["bitte wählen", "A Gruppe A", "B Gruppe B", "K Gruppe K"]);
     await user.click(screen.getByRole("button", { name: "Als Entwurf speichern" }));
     const alarm = (await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ");
-    expect(alarm).toMatch(/Der Buchstabe der neuen Gruppe fehlt/);
+    expect(alarm).toMatch(/Wähle eine Gruppe/);
     expect(alarm).toMatch(/Der Titel fehlt/);
     expect(karteAnlegen).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Titel").getAttribute("aria-invalid")).toBe("true");
 
-    await user.selectOptions(screen.getByLabelText("Buchstabe der neuen Gruppe"), "K");
-    expect(screen.getByLabelText("Kennung (automatisch)")).toHaveProperty("value", "K1");
-    await user.type(screen.getByLabelText("Name der neuen Gruppe"), "Eigene Gruppe");
+    await user.selectOptions(screen.getByLabelText("Gruppe"), "K");
+    expect(screen.getByLabelText("Kennung (vorgeschlagen)")).toHaveProperty("value", "K1");
     await user.type(screen.getByLabelText("Titel"), "Mail mit Anhang");
     await user.type(screen.getByLabelText(/Aufgabe für den Gast/), "Schreib eine Mail.");
     await user.type(screen.getByLabelText("Erwartetes Ergebnis"), "Ein Entwurf liegt vor.");
@@ -112,12 +115,13 @@ describe("Katalog und Editor", () => {
     expect(vorschau.getByText("Mail mit Anhang")).toBeTruthy();
     expect(vorschau.getByText("K1")).toBeTruthy();
     expect(vorschau.getByText("Werkzeuge: Mail")).toBeTruthy();
+    vi.mocked(karteAnlegen).mockResolvedValueOnce({ karte: karte("K2") }); // der Dienst vergibt die Kennung, die Antwort gilt
     await user.click(screen.getByRole("button", { name: "Als Entwurf speichern" }));
     expect(karteAnlegen).toHaveBeenCalledWith({
-      id: "K1", gruppe: "Eigene Gruppe", titel: "Mail mit Anhang", aufgabe: "Schreib eine Mail.", erwartung: "Ein Entwurf liegt vor.",
+      id: "K1", gruppe: "Gruppe K", titel: "Mail mit Anhang", aufgabe: "Schreib eine Mail.", erwartung: "Ein Entwurf liegt vor.",
       fehler: "falsches Datum", lernziel: null, wissen: "keine", wissenstext: null, werkzeuge: ["Mail"], dauerMin: 4,
     });
-    expect(await screen.findByText(/Der Use Case K1 ist als Entwurf gespeichert/)).toBeTruthy();
+    expect(await screen.findByText(/Der Use Case K2 ist als Entwurf gespeichert/)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Neuen Use Case aufbauen", level: 2 })).toBeNull();
   });
 
@@ -128,7 +132,7 @@ describe("Katalog und Editor", () => {
         karte("A1", { wissen: "Eigener Text", wissenstext: "x".repeat(900) }),
         karte("A2", { wissen: "Eigener Text", wissenstext: "x".repeat(900) }),
       ],
-      version: 1,
+      version: 1, gruppen: GRUPPEN
     });
     render(<Karten onFaktor={noop} />);
     await user.click(await screen.findByRole("button", { name: "Neuen Use Case aufbauen" }));
@@ -151,7 +155,7 @@ describe("Katalog und Editor", () => {
 
   it("Wissenstext mit Markup wird vor dem Senden gemeldet; lehnt der Dienst ihn ab, steht ein klarer Satz da", async () => {
     const user = userEvent.setup();
-    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1")], version: 1 });
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1")], version: 1, gruppen: GRUPPEN });
     render(<Karten onFaktor={noop} />);
     await user.click(await screen.findByRole("button", { name: "Neuen Use Case aufbauen" }));
     await user.selectOptions(screen.getByLabelText("Gruppe"), "A");
@@ -185,7 +189,7 @@ describe("Katalog und Editor", () => {
     expect(karteAendern).toHaveBeenCalledWith(expect.objectContaining({ id: "A1", gruppe: "Gruppe A", titel: "Neuer Titel" }));
 
     await user.click(await screen.findByRole("button", { name: "A1 kopieren" }));
-    expect(screen.getByLabelText("Kennung (automatisch)")).toHaveProperty("value", "A3");
+    expect(screen.getByLabelText("Kennung (vorgeschlagen)")).toHaveProperty("value", "A3");
     expect(screen.getByLabelText("Titel")).toHaveProperty("value", "Titel A1 (Kopie)");
     expect(screen.queryByRole("button", { name: "A1 löschen" })).toBeNull(); // veröffentlicht: nicht löschbar
     await user.click(screen.getByRole("button", { name: "A2 löschen" }));
@@ -197,7 +201,7 @@ describe("Katalog und Editor", () => {
 
   it("der Gruppenfilter schränkt die Tabelle ein", async () => {
     const user = userEvent.setup();
-    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("B1")], version: 1 });
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("B1")], version: 1, gruppen: GRUPPEN });
     render(<Karten onFaktor={noop} />);
     await screen.findByText("2 von 2 Karten");
     await user.selectOptions(screen.getByLabelText("Gruppe anzeigen"), "B");
@@ -226,7 +230,7 @@ describe("Zuordnung", () => {
 
   it("Zeiten über dem Richtwert werden als Wort gemeldet", async () => {
     vi.mocked(kartenLaden).mockResolvedValue({
-      karten: Array.from({ length: 3 }, (_, i) => karte(`A${i + 1}`, { dauerMin: 10 })), version: 1,
+      karten: Array.from({ length: 3 }, (_, i) => karte(`A${i + 1}`, { dauerMin: 10 })), version: 1, gruppen: GRUPPEN
     });
     vi.mocked(zuordnungLaden).mockResolvedValue({ 1: ["A1", "A2", "A3"] });
     render(<Karten onFaktor={noop} />);
@@ -242,7 +246,7 @@ describe("Zuordnung", () => {
 });
 
 describe("Veröffentlichen in vier Schritten", () => {
-  const frischeKarte = () => ({ id: "k1", giltBis: new Date(Date.now() + 300_000).toISOString(), aenderungen: 1, karten: ["A2"] });
+  const frischeKarte = () => ({ id: "k1", giltBis: new Date(Date.now() + 300_000).toISOString(), aenderungen: 1, karten: ["A2"], basisVersion: 4 });
 
   beforeEach(() => {
     vi.mocked(kartenPruefen).mockResolvedValue({ ok: true, probleme: [], zeichen: 1200 });
@@ -280,7 +284,7 @@ describe("Veröffentlichen in vier Schritten", () => {
   });
 
   it("ohne Entwürfe gibt es nichts zu prüfen", async () => {
-    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1")], version: 1 });
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1")], version: 1, gruppen: GRUPPEN });
     render(<Karten onFaktor={noop} />);
     expect(await screen.findByText("Keine Entwürfe. Speichere zuerst einen Use Case.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Prüfen" })).toBeNull();

@@ -38,7 +38,6 @@ export const ZEIT_RICHTWERT_MIN = 25;
 
 export const KARTEN_ID = /^[A-Z][0-9]{1,2}$/;
 const MAX_NUMMER = 99;
-const BUCHSTABEN = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 // ---------- Text ----------
 const STEUERZEICHEN = /[\u0000-\u001f\u007f-\u009f]+/g;
@@ -56,27 +55,14 @@ export function hatSteuerzeichen(text: string): boolean {
 // ---------- Gruppen und Kennungen ----------
 export type Gruppe = { buchstabe: string; name: string; anzahl: number };
 
-/** Die Gruppen des Katalogs: der Buchstabe steht in der Kennung, der Name in der Karte (der häufigste je Buchstabe). */
-export function gruppenAus(karten: readonly Karte[]): Gruppe[] {
-  const je = new Map<string, Map<string, number>>();
-  for (const k of karten) {
-    const b = k.id.charAt(0);
-    const namen = je.get(b) ?? new Map<string, number>();
-    namen.set(k.gruppe, (namen.get(k.gruppe) ?? 0) + 1);
-    je.set(b, namen);
-  }
-  return [...je.entries()]
-    .map(([buchstabe, namen]) => {
-      const sortiert = [...namen.entries()].sort((a, b) => b[1] - a[1]);
-      return { buchstabe, name: sortiert[0][0], anzahl: [...namen.values()].reduce((s, n) => s + n, 0) };
-    })
+/**
+ * Die Gruppen des Katalogs: Der Dienst kennt eine feste Liste (Buchstabe zu Name) und nimmt keine anderen an. Dazu zählt die Zahl
+ * der Karten je Gruppe (der Buchstabe steht in der Kennung der Karte).
+ */
+export function gruppenAus(gruppen: Readonly<Record<string, string>>, karten: readonly Karte[]): Gruppe[] {
+  return Object.entries(gruppen)
+    .map(([buchstabe, name]) => ({ buchstabe, name, anzahl: karten.filter((k) => k.id.charAt(0) === buchstabe).length }))
     .sort((a, b) => a.buchstabe.localeCompare(b.buchstabe));
-}
-
-/** Die Buchstaben, die noch keine Gruppe haben. */
-export function freieBuchstaben(gruppen: readonly Gruppe[]): string[] {
-  const belegt = new Set(gruppen.map((g) => g.buchstabe));
-  return BUCHSTABEN.filter((b) => !belegt.has(b));
 }
 
 /** Die nächste freie Kennung in der Gruppe: Buchstabe plus höchste vorhandene Zahl plus 1; null, wenn die Gruppe voll ist. */
@@ -131,24 +117,32 @@ export function zeichenBudget(
 }
 
 /**
- * Unsichtbare Zeichen: die Unicode-Kategorie Format (Nullbreite, Richtungssteuerung, Wortverbinder, Byte-Order-Mark, Tag-Zeichen,
- * weicher Trennstrich), Zeilen- und Absatztrenner, Füllzeichen und Variantenselektoren. Die Zeichen ohne Kategorienamen werden zur
- * Laufzeit eingesetzt, damit der Quelltext frei von unsichtbaren Zeichen bleibt.
+ * Zeichen, die als Buchstabe oder Symbol durchgehen, aber nicht zu sehen sind (Füllzeichen, Variantenselektoren, Braille-Leerzeichen,
+ * Graphem-Verbinder): dieselben Bereiche wie im Dienst (wissen_regeln.py). Die Zeichen werden zur Laufzeit eingesetzt, damit der
+ * Quelltext frei von unsichtbaren Zeichen bleibt.
  */
-const UNSICHTBAR = new RegExp(
-  `[\\p{Cf}\\p{Zl}\\p{Zp}${[0x115f, 0x1160, 0x3164].map((c) => String.fromCharCode(c)).join("")}${String.fromCharCode(0xfe00)}-${String.fromCharCode(0xfe0f)}]`,
-  "u",
-);
+const UNSICHTBAR_BEREICHE: readonly (readonly [number, number])[] = [
+  [0x034f, 0x034f], [0x115f, 0x1160], [0x17b4, 0x17b5], [0x180b, 0x180d], [0x2800, 0x2800], [0x3164, 0x3164], [0xfe00, 0xfe0f], [0xffa0, 0xffa0], [0xe0100, 0xe01ef],
+];
+const UNSICHTBAR = new RegExp(`[${UNSICHTBAR_BEREICHE.map(([von, bis]) => `${String.fromCodePoint(von)}-${String.fromCodePoint(bis)}`).join("")}]`, "u");
+/** Erlaubt sind Buchstaben, Zeichen mit Akzent, Ziffern, Satzzeichen, Symbole und das Leerzeichen; Steuer-, Format-, Trenn- und private Zeichen nicht. */
+const NICHT_ERLAUBT = /[^\p{L}\p{M}\p{N}\p{P}\p{S} ]/u;
+/** Markup nach NFKC wie im Dienst: Tags, Sondermarken der Chat-Vorlagen, eckige Marken älterer Vorlagen und Gesprächsrollen am Zeilenanfang. */
+const MARKUP = /<[/!?|A-Za-z][^<>]*>|<\||\|>|\[[ \t]*\/?[ \t]*(?:INST|SYS|TOOL_CALLS|AVAILABLE_TOOLS|TOOL_RESULTS)[ \t]*\]|^[ \t]*(?:human|assistant)[ \t]*:/im;
+/** Eine Rollenzeile am Anfang; der Dienst prüft human und assistant beim Speichern, die übrigen beim Prüfen als Anweisung. */
+const ROLLE = /^[ \t]*(?:human|assistant|system|user|developer|ai)[ \t]*:/i;
 
 /**
- * Was im Wissenstext nicht stehen darf: Markup (Tags in spitzen Klammern), eine Rollenzeile am Anfang ("System:", "Assistant:") und
- * unsichtbare Zeichen. Der Dienst lehnt das ab; die Oberfläche sagt es vorher und klar. Null, wenn der Text in Ordnung ist.
+ * Was im Wissenstext nicht stehen darf (die Regeln des Dienstes, die dieselben sind wie die des Kerns): unsichtbare und andere
+ * unerlaubte Zeichen, Markup und eine Rollenzeile am Anfang. Geprüft wird der Text, der gesendet wird (einzeilig). Der Dienst lehnt
+ * das ab; die Oberfläche sagt es vorher und klar. Null, wenn der Text in Ordnung ist.
  */
 export function wissenstextProblem(text: string): string | null {
-  if (UNSICHTBAR.test(text)) return "Der Wissenstext enthält unsichtbare Zeichen. Sie sind nicht erlaubt, bitte entferne sie.";
-  text = normalisieren(text); // der Dienst bekommt den normalisierten Text: Markup und Rollenzeile gelten dafür
-  if (/<\/?[A-Za-z!][^>]*>/.test(text)) return "Der Wissenstext enthält Markup (Tags in spitzen Klammern). Das ist nicht erlaubt, schreibe nur Text.";
-  if (/^\s*(system|assistant|user|human)\s*:/i.test(text)) return "Der Wissenstext beginnt wie eine Rollenzeile (zum Beispiel „System:“). Das ist nicht erlaubt, schreibe nur Wissen.";
+  const t = normalisieren(text);
+  if (UNSICHTBAR.test(t) || NICHT_ERLAUBT.test(t)) return "Der Wissenstext enthält unsichtbare oder unerlaubte Zeichen. Sie sind nicht erlaubt, bitte entferne sie.";
+  const n = t.normalize("NFKC");
+  if (ROLLE.test(n)) return "Der Wissenstext beginnt wie eine Rollenzeile (zum Beispiel „System:“). Das ist nicht erlaubt, schreibe nur Wissen.";
+  if (MARKUP.test(n)) return "Der Wissenstext enthält Markup (Tags in spitzen Klammern). Das ist nicht erlaubt, schreibe nur Text.";
   return null;
 }
 
@@ -157,10 +151,8 @@ export type Formular = {
   id: string;
   /** true bei einer bestehenden Karte: Kennung und Gruppe bleiben fest */
   bestehend: boolean;
-  /** Buchstabe einer vorhandenen Gruppe, "neu" für eine neue Gruppe, "" ohne Wahl */
+  /** Buchstabe der gewählten Gruppe, "" ohne Wahl */
   gruppeWahl: string;
-  neuerBuchstabe: string;
-  neuerName: string;
   titel: string;
   aufgabe: string;
   erwartung: string;
@@ -175,16 +167,13 @@ export type Formular = {
 
 export const VORGABE_DAUER = "4";
 
-/** Ein leeres Formular für einen neuen Use Case; mit der Gruppe, die der Katalog gerade zeigt, falls es eine gibt. */
-export function leeresFormular(karten: readonly Karte[], gruppe = ""): Formular {
-  const gruppen = gruppenAus(karten);
-  const wahl = gruppen.some((g) => g.buchstabe === gruppe) ? gruppe : gruppen.length === 0 ? "neu" : "";
+/** Ein leeres Formular für einen neuen Use Case; mit der Gruppe, die der Katalog gerade zeigt, falls der Dienst sie kennt. */
+export function leeresFormular(karten: readonly Karte[], gruppen: Readonly<Record<string, string>>, gruppe = ""): Formular {
+  const wahl = Object.prototype.hasOwnProperty.call(gruppen, gruppe) ? gruppe : "";
   return {
-    id: wahl && wahl !== "neu" ? (idVorschlag(wahl, karten) ?? "") : "",
+    id: wahl ? (idVorschlag(wahl, karten) ?? "") : "",
     bestehend: false,
     gruppeWahl: wahl,
-    neuerBuchstabe: "",
-    neuerName: "",
     titel: "",
     aufgabe: "",
     erwartung: "",
@@ -209,8 +198,6 @@ export function formularAusKarte(karte: Karte, karten: readonly Karte[], kopie =
     id: kopie ? (neu ?? "") : karte.id,
     bestehend: !kopie,
     gruppeWahl: buchstabe,
-    neuerBuchstabe: "",
-    neuerName: "",
     titel,
     aufgabe: karte.aufgabe,
     erwartung: karte.erwartung,
@@ -227,22 +214,11 @@ export function formularAusKarte(karte: Karte, karten: readonly Karte[], kopie =
 /** Wechselt die Gruppe eines neuen Formulars, folgt die vorgeschlagene Kennung mit. */
 export function mitGruppe(f: Formular, wahl: string, karten: readonly Karte[]): Formular {
   if (f.bestehend) return f;
-  let id = "";
-  if (wahl === "neu") id = /^[A-Z]$/.test(f.neuerBuchstabe) ? `${f.neuerBuchstabe}1` : "";
-  else if (wahl) id = idVorschlag(wahl, karten) ?? "";
-  return { ...f, gruppeWahl: wahl, id };
-}
-
-/** Der Buchstabe einer neuen Gruppe bestimmt die Kennung der ersten Karte darin. */
-export function mitNeuemBuchstaben(f: Formular, buchstabe: string): Formular {
-  const b = buchstabe.toUpperCase().slice(0, 1);
-  return { ...f, neuerBuchstabe: b, id: /^[A-Z]$/.test(b) ? `${b}1` : "" };
+  return { ...f, gruppeWahl: wahl, id: wahl ? (idVorschlag(wahl, karten) ?? "") : "" };
 }
 
 export type FeldName =
   | "gruppe"
-  | "neuerBuchstabe"
-  | "neuerName"
   | "id"
   | "titel"
   | "aufgabe"
@@ -267,23 +243,18 @@ function laenge(feld: FeldName, subjekt: string, wert: string, max: number, prob
 export function formularPruefen(
   f: Formular,
   karten: readonly Karte[],
+  gruppen: Readonly<Record<string, string>>,
 ): { eingabe: KartenEingabe | null; probleme: Problem[] } {
   const probleme: Problem[] = [];
-  const gruppen = gruppenAus(karten);
+  const kenntGruppe = (b: string) => Object.prototype.hasOwnProperty.call(gruppen, b);
 
+  // Eine bestehende Karte behält ihren Gruppennamen (kein stilles Umbenennen); eine neue nimmt den Namen der gewählten Gruppe.
   let gruppeName = "";
-  if (f.bestehend || (f.gruppeWahl !== "" && f.gruppeWahl !== "neu")) {
-    const eigene = f.bestehend ? karten.find((k) => k.id === f.id)?.gruppe : undefined;
-    const g = gruppen.find((x) => x.buchstabe === (f.bestehend ? f.id.charAt(0) : f.gruppeWahl));
-    if (eigene) gruppeName = eigene; // eine bestehende Karte behält ihren Gruppennamen, kein stilles Umbenennen
-    else if (g) gruppeName = g.name;
-    else probleme.push({ feld: "gruppe", text: "Die Gruppe gibt es nicht. Wähle eine Gruppe." });
-  } else if (f.gruppeWahl === "neu") {
-    const b = f.neuerBuchstabe;
-    if (!/^[A-Z]$/.test(b)) probleme.push({ feld: "neuerBuchstabe", text: "Der Buchstabe der neuen Gruppe fehlt." });
-    else if (gruppen.some((g) => g.buchstabe === b)) probleme.push({ feld: "neuerBuchstabe", text: "Dieser Buchstabe gehört schon einer Gruppe." });
-    gruppeName = normalisieren(f.neuerName);
-    laenge("neuerName", "Der Gruppenname", gruppeName, GRENZEN.gruppe, probleme);
+  if (f.bestehend) {
+    gruppeName = karten.find((k) => k.id === f.id)?.gruppe ?? (kenntGruppe(f.id.charAt(0)) ? gruppen[f.id.charAt(0)] : "");
+    if (!gruppeName) probleme.push({ feld: "gruppe", text: "Die Gruppe der Karte ist nicht mehr bekannt. Bitte lade die Ansicht neu." });
+  } else if (f.gruppeWahl !== "" && kenntGruppe(f.gruppeWahl)) {
+    gruppeName = gruppen[f.gruppeWahl];
   } else {
     probleme.push({ feld: "gruppe", text: "Wähle eine Gruppe." });
   }
@@ -349,10 +320,13 @@ export function formularPruefen(
   };
 }
 
-/** Der Rumpf für POST und PUT der Karten (Namen der Schnittstelle). */
+/**
+ * Der Rumpf für POST und PUT der Karten (Namen der Schnittstelle). Die Kennung steht nie darin: Beim Anlegen vergibt sie der Dienst
+ * (höchste Zahl der Gruppe plus eins), beim Ändern steht sie im Pfad. Der Stand wird vom Dienst gesetzt (jede Änderung macht die Karte
+ * zum Entwurf).
+ */
 export function eingabeZuRumpf(e: KartenEingabe): Record<string, unknown> {
   return {
-    id: e.id,
     gruppe: e.gruppe,
     titel: e.titel,
     aufgabe: e.aufgabe,
@@ -363,7 +337,6 @@ export function eingabeZuRumpf(e: KartenEingabe): Record<string, unknown> {
     wissenstext: e.wissenstext,
     werkzeuge: e.werkzeuge,
     dauer_min: e.dauerMin,
-    stand: "entwurf",
   };
 }
 

@@ -80,6 +80,21 @@ export function zustand(wert: string | null): { text: string; art: ZustandArt } 
   return Object.prototype.hasOwnProperty.call(ZUSTAENDE, schluessel) ? ZUSTAENDE[schluessel] : { text: wert, art: "neutral" };
 }
 
+const AKTION_STATUS_TEXT: Readonly<Record<string, string>> = {
+  pending: "wartet",
+  approved: "genehmigt",
+  rejected: "abgelehnt",
+  running: "läuft",
+  done: "erledigt",
+  failed: "fehlgeschlagen",
+  blocked: "gesperrt",
+};
+
+/** Der Status einer Aktion (Tabelle actions) als deutsches Wort; Unbekanntes erscheint unverändert. */
+export function aktionStatusText(status: string): string {
+  return Object.prototype.hasOwnProperty.call(AKTION_STATUS_TEXT, status) ? AKTION_STATUS_TEXT[status] : status;
+}
+
 export const STUFE_ART: Readonly<Record<string, ZustandArt>> = { info: "ok", warnung: "warn", fehler: "fehler" };
 
 /** Die Art zu einer Stufe; alles Unbekannte (auch Namen wie "constructor") ist neutral. */

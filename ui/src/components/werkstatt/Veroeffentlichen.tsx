@@ -134,6 +134,11 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
       if (karteUnbrauchbar(bild.code)) {
         setFehler(bild);
         setAblauf({ art: "geprueft", pruefung: a.pruefung });
+      } else if (bild.code === "ungueltig") {
+        // Die Prüfung beim Ausführen hat etwas gefunden: zurück zum Anfang, der Katalog wird neu geladen.
+        setFehler(bild);
+        setAblauf({ art: "bereit" });
+        onVeroeffentlicht();
       } else if (brauchtNeuenCode(bild.code)) {
         zurueck(bild.text);
       } else {
@@ -204,7 +209,7 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
           )}
           {(ablauf.art === "karte" || ablauf.art === "ausfuehren") && !abgelaufen && (
             <p className="ws-hinweis">
-              {wirkungText(aktiveVersion, ablauf.karte.karten.length > 0 ? ablauf.karte.karten : kennungen, ablauf.karte.aenderungen)}{" "}
+              {wirkungText(ablauf.karte.basisVersion ?? aktiveVersion, ablauf.karte.karten.length > 0 ? ablauf.karte.karten : kennungen, ablauf.karte.aenderungen)}{" "}
               {ablauf.art === "karte" ? <>Gültig noch <span className="ws-rest">{restText(rest)}</span>.</> : null}
             </p>
           )}

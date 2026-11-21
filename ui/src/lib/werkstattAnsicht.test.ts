@@ -117,7 +117,7 @@ test("Beschriftung der Achse: bis sieben alle, danach jede zweite und die letzte
 
 test("Vierschritt: Stand der Schritte je Zustand", () => {
   const pruefung = { ok: true, probleme: [], zeichen: 4200 };
-  const karte = { id: "k", giltBis: "2026-11-20T10:05:00Z", aenderungen: 1, karten: ["W1"] };
+  const karte = { id: "k", giltBis: "2026-11-20T10:05:00Z", aenderungen: 1, karten: ["W1"], basisVersion: 4 };
   const faelle: [Ablauf, string[]][] = [
     [{ art: "bereit" }, ["aktiv", "offen", "offen", "offen"]],
     [{ art: "prueft" }, ["aktiv", "offen", "offen", "offen"]],

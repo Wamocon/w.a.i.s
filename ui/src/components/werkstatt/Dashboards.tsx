@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 import { aktionenLaden, betriebLaden, latenzLaden, sitzungenLaden } from "@/lib/werkstattApi";
-import { BETRIEB_ALT_S, TAGE_OPTIONEN, alterText, zustand } from "@/lib/werkstattAnsicht";
+import { BETRIEB_ALT_S, TAGE_OPTIONEN, aktionStatusText, alterText, zustand } from "@/lib/werkstattAnsicht";
 import type { AktionZeile, Betrieb } from "@/lib/werkstattTypen";
 import { Abrufinhalt, Karte, Pille } from "./Bausteine";
 import { LatenzDiagramm, SitzungenDiagramm } from "./Diagramme";
@@ -33,14 +33,23 @@ function BetriebListe({ b }: { b: Betrieb }) {
   return (
     <>
       <dl className="ws-liste">
-        <div>
-          <dt>Kern{b.kern.slot ? `, Slot ${b.kern.slot}` : ""}</dt>
-          <dd>
-            <Pille art={b.kern.aktiv === null ? "neutral" : b.kern.aktiv ? "ok" : "warn"}>
-              <span className="ws-mono">{b.kern.release ?? "unbekannt"}</span>, {b.kern.aktiv === null ? "Zustand unbekannt" : b.kern.aktiv ? "aktiv" : "nicht aktiv"}
-            </Pille>
-          </dd>
-        </div>
+        {b.kern.length === 0 ? (
+          <div>
+            <dt>Kern</dt>
+            <dd>keine Angabe</dd>
+          </div>
+        ) : (
+          b.kern.map((k, i) => (
+            <div key={`${k.slot ?? "x"}-${i}`}>
+              <dt>Kern{k.slot ? `, Slot ${k.slot}` : ""}</dt>
+              <dd>
+                <Pille art={k.aktiv === null ? "neutral" : k.aktiv ? "ok" : "warn"}>
+                  <span className="ws-mono">{k.release ?? "unbekannt"}</span>, {k.aktiv === null ? "Zustand unbekannt" : k.aktiv ? "aktiv" : "nicht aktiv"}
+                </Pille>
+              </dd>
+            </div>
+          ))
+        )}
         <div>
           <dt>Oberfläche</dt>
           <dd>
@@ -91,7 +100,7 @@ function AktionenTabelle({ zeilen }: { zeilen: readonly AktionZeile[] }) {
           {zeilen.map((z) => (
             <tr key={`${z.tool}/${z.status}`}>
               <th scope="row">{z.tool}</th>
-              <td>{z.status}</td>
+              <td>{aktionStatusText(z.status)}</td>
               <td className="num">{z.anzahl}</td>
             </tr>
           ))}

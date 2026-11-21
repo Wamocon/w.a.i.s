@@ -20,7 +20,8 @@ export type Betrieb = {
   zeit: string | null;
   /** Alter der Datei des Sammlers in Sekunden */
   alterS: number | null;
-  kern: { slot: string | null; release: string | null; aktiv: boolean | null };
+  /** ein Eintrag je Slot (a und b), höchstens vier; leer, wenn der Sammler nichts meldet */
+  kern: { slot: string | null; release: string | null; aktiv: boolean | null }[];
   oberflaeche: { farbe: string | null; version: string | null };
   installer: { version: string | null };
   kanal: { zustand: string | null };
@@ -91,6 +92,8 @@ export type KartenListe = {
   karten: Karte[];
   /** Nummer der aktiven Version, null ohne veröffentlichte Version */
   version: number | null;
+  /** die festen Gruppen des Katalogs: Buchstabe zu Name (der Dienst nimmt keine anderen an) */
+  gruppen: Record<string, string>;
 };
 export type KartenVersion = { version: number; erstelltAt: string | null; anzahlAenderungen: number; wissenZeichen: number; aktiv: boolean };
 
@@ -99,5 +102,12 @@ export type Zuordnung = Record<number, string[]>;
 
 // ---------- Veröffentlichen ----------
 export type Pruefung = { ok: boolean; probleme: string[]; zeichen: number };
-export type FreigabeKarte = { id: string; giltBis: string; aenderungen: number | null; karten: string[] };
+export type FreigabeKarte = {
+  id: string;
+  giltBis: string;
+  aenderungen: number | null;
+  karten: string[];
+  /** aktive Version zur Zeit der Karte; die neue Version ist diese plus eins */
+  basisVersion: number | null;
+};
 export type Veroeffentlicht = { version: number; zeichen: number };

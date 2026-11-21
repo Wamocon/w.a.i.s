@@ -35,8 +35,8 @@ import {
 
 export type Obj = Record<string, unknown>;
 
-/** Kennungen, die die Oberfläche in einen Pfad setzt (Termine): nur Buchstaben, Ziffern, Unterstrich und Bindestrich. */
-export const SICHERE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Kennungen, die die Oberfläche in einen Pfad setzt (Termine, Freigabekarten): Der Dienst vergibt UUIDs in Kleinbuchstaben. */
+export const SICHERE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export const istObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -90,13 +90,19 @@ export function alsIch(d: unknown): Ich | null {
 
 const feld = (o: unknown, name: string): unknown => (istObj(o) ? o[name] : undefined);
 
+/** Der Kern im Sammler: eine Liste mit einem Eintrag je Slot (höchstens vier) oder ein einzelnes Objekt. */
+function kernListe(roh: unknown): Betrieb["kern"] {
+  const eintraege = Array.isArray(roh) ? roh.slice(0, 4) : istObj(roh) ? [roh] : [];
+  return eintraege.filter(istObj).map((k) => ({ slot: kurz(k.slot, 20), release: kurz(k.release, 60), aktiv: wahrheit(k.aktiv) }));
+}
+
 export function alsBetrieb(d: unknown): Betrieb | null {
   if (!istObj(d)) return null;
   const alter = zahl(d.alter_s);
   return {
     zeit: kurz(d.zeit, 40),
     alterS: alter !== null && alter >= 0 ? alter : null,
-    kern: { slot: kurz(feld(d.kern, "slot"), 20), release: kurz(feld(d.kern, "release"), 60), aktiv: wahrheit(feld(d.kern, "aktiv")) },
+    kern: kernListe(d.kern),
     oberflaeche: { farbe: kurz(feld(d.oberflaeche, "farbe"), 20), version: kurz(feld(d.oberflaeche, "version"), 40) },
     installer: { version: kurz(feld(d.installer, "version"), 40) },
     kanal: { zustand: kurz(feld(d.kanal, "zustand"), 40) },
@@ -106,7 +112,7 @@ export function alsBetrieb(d: unknown): Betrieb | null {
 
 // ---------- Dashboards ----------
 export function alsSitzungen(d: unknown): SitzungTag[] | null {
-  return alle(listeAus(d, ["tage", "sitzungen", "zeilen"]), (z) => {
+  return alle(listeAus(d, ["zeilen"]), (z) => {
     if (!istObj(z)) return null;
     const tag = tagAus(z.tag);
     const anzahl = zahl(z.anzahl);
@@ -116,8 +122,7 @@ export function alsSitzungen(d: unknown): SitzungTag[] | null {
 }
 
 export function alsLatenz(d: unknown): LatenzTag[] | null {
-  const zeilen = listeAus(d, ["tage", "latenz", "zeilen"]) ?? (istObj(d) && zahl(d.zuege) !== null ? [d] : null);
-  return alle(zeilen, (z) => {
+  return alle(listeAus(d, ["zeilen"]), (z) => {
     if (!istObj(z)) return null;
     const zuege = zahl(z.zuege);
     if (zuege === null) return null;
@@ -126,7 +131,7 @@ export function alsLatenz(d: unknown): LatenzTag[] | null {
 }
 
 export function alsAktionen(d: unknown): AktionZeile[] | null {
-  return alle(listeAus(d, ["aktionen", "zeilen"]), (z) => {
+  return alle(listeAus(d, ["zeilen"]), (z) => {
     if (!istObj(z)) return null;
     const tool = kurz(z.tool ?? z.werkzeug, 80);
     const status = kurz(z.status, 40);
@@ -155,7 +160,7 @@ export function zahlenText(v: unknown): string {
 }
 
 export function alsProtokolle(d: unknown): ProtokollAntwort | null {
-  const zeilen = alle(listeAus(d, ["zeilen", "eintraege", "protokolle"]), (z): ProtokollZeile | null => {
+  const zeilen = alle(listeAus(d, ["zeilen"]), (z): ProtokollZeile | null => {
     if (!istObj(z)) return null;
     const zeit = kurz(z.zeit, 40);
     const marke = kurz(z.marke, 60);
@@ -171,7 +176,7 @@ export function alsProtokolle(d: unknown): ProtokollAntwort | null {
 
 // ---------- Labor ----------
 export function alsLaborStand(d: unknown): LaborProfil[] | null {
-  return alle(listeAus(d, ["profile", "laborprofile", "zeilen"]), (z) => {
+  return alle(listeAus(d, ["profile"]), (z) => {
     if (!istObj(z)) return null;
     const art = kurz(z.art, 30);
     const aktiv = wahrheit(z.aktiv ?? z.freigeschaltet);
@@ -192,10 +197,10 @@ export function alsTermin(z: unknown): Termin | null {
   return { id, tag, beginn: uhrzeit(z.beginn), ende: uhrzeit(z.ende), einwilligungVersion: version, status, aufbewahrungBis: bis };
 }
 
-export const alsTermine = (d: unknown): Termin[] | null => alle(listeAus(d, ["termine", "zeilen"]), alsTermin);
+export const alsTermine = (d: unknown): Termin[] | null => alle(listeAus(d, ["termine"]), alsTermin);
 
 export function alsPlaetze(d: unknown): Platz[] | null {
-  return alle(listeAus(d, ["plaetze", "zeilen"]), (z) => {
+  return alle(listeAus(d, ["plaetze"]), (z) => {
     if (!istObj(z)) return null;
     const platz = ganz(z.platz);
     const zweck = PLATZ_ZWECKE.find((w) => w === z.zweck);
@@ -213,7 +218,7 @@ export function alsPunkt(z: unknown): ChecklistePunkt | null {
   return { nr, titel, quelle: kurz(z.quelle, 80), faellig: tagAus(z.faellig), erledigt };
 }
 
-export const alsCheckliste = (d: unknown): ChecklistePunkt[] | null => alle(listeAus(d, ["checkliste", "eintraege", "punkte", "zeilen"]), alsPunkt);
+export const alsCheckliste = (d: unknown): ChecklistePunkt[] | null => alle(listeAus(d, ["punkte"]), alsPunkt);
 
 // ---------- Karten ----------
 export function alsKarte(z: unknown): Karte | null {
@@ -248,8 +253,15 @@ export function alsKartenListe(d: unknown): KartenListe | null {
   const karten = alle(listeAus(d, ["karten", "zeilen"]), alsKarte);
   if (!karten) return null;
   const o = istObj(d) ? d : {};
-  const version = ganz(o.version);
-  return { karten, version: version !== null && version > 0 ? version : null };
+  const version = ganz(o.aktive_version);
+  const gruppen: Record<string, string> = {};
+  if (istObj(o.gruppen)) {
+    for (const [buchstabe, name] of Object.entries(o.gruppen)) {
+      const n = kurz(name, 30);
+      if (/^[A-Z]$/.test(buchstabe) && n) gruppen[buchstabe] = n;
+    }
+  }
+  return { karten, version: version !== null && version > 0 ? version : null, gruppen };
 }
 
 export function alsZuordnung(d: unknown): Zuordnung | null {
@@ -276,7 +288,7 @@ export function alsZuordnung(d: unknown): Zuordnung | null {
 }
 
 export function alsVersionen(d: unknown): KartenVersion[] | null {
-  return alle(listeAus(d, ["versionen", "zeilen"]), (z) => {
+  return alle(listeAus(d, ["versionen"]), (z) => {
     if (!istObj(z)) return null;
     const version = ganz(z.version);
     const aenderungen = ganz(z.anzahl_aenderungen);
@@ -299,8 +311,9 @@ export function alsPruefung(d: unknown): Pruefung | null {
   return { ok, probleme, zeichen };
 }
 
-export function alsFreigabeKarte(d: unknown): FreigabeKarte | null {
-  if (!istObj(d)) return null;
+export function alsFreigabeKarte(antwort: unknown): FreigabeKarte | null {
+  if (!istObj(antwort)) return null;
+  const d = istObj(antwort.karte) ? antwort.karte : antwort; // der Dienst verpackt die Karte als { karte: {...} }
   const id = typeof d.id === "string" && SICHERE_ID.test(d.id) ? d.id : null; // die Kennung kommt in einen Pfad
   const giltBis = kurz(d.gilt_bis, 40);
   if (!id || !giltBis || Number.isNaN(Date.parse(giltBis))) return null;
@@ -308,7 +321,8 @@ export function alsFreigabeKarte(d: unknown): FreigabeKarte | null {
   const aenderungen = ganz(ziel.aenderungen ?? ziel.anzahl ?? d.aenderungen ?? d.anzahl);
   const rohKarten = Array.isArray(ziel.karten) ? ziel.karten : Array.isArray(d.karten) ? d.karten : [];
   const karten = rohKarten.filter((k): k is string => typeof k === "string" && KARTEN_ID.test(k));
-  return { id, giltBis, aenderungen, karten };
+  const basis = ganz(d.basis_version);
+  return { id, giltBis, aenderungen, karten, basisVersion: basis !== null && basis >= 0 ? basis : null };
 }
 
 export function alsVeroeffentlicht(d: unknown): Veroeffentlicht | null {

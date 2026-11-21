@@ -120,7 +120,7 @@ export function erlaubteZwecke(platz: number): readonly PlatzZweck[] {
   return ABNAHME_PLAETZE.includes(platz) ? PLATZ_ZWECKE : PLATZ_ZWECKE.filter((z) => z !== "abnahme");
 }
 
-/** Wählt den Zweck eines Platzes; mit dem ersten Zweck kommt die Kennung des Platzes als Vorschlag. */
+/** Wählt den Zweck eines Platzes; mit dem ersten Zweck kommt die Kennung des Platzes als Vorschlag (sie lässt sich leeren). */
 export function mitZweck(z: PlatzZeile, zweck: PlatzZweck | ""): PlatzZeile {
   if (zweck === "") return { ...z, zweck: "", kennung: "", gast: "" };
   return { ...z, zweck, kennung: z.kennung || kennungVorschlag(z.platz) };
@@ -135,12 +135,13 @@ export function plaetzePruefen(zeilen: readonly PlatzZeile[]): { plaetze: Platz[
     const feld = `platz-${z.platz}`;
     if (!erlaubteZwecke(z.platz).includes(z.zweck)) probleme.push({ feld, text: `Platz ${z.platz}: Abnahme gibt es nur an den Plätzen 15 und 16.` });
     const kennung = z.kennung.trim();
-    if (!KENNUNG_PLATZ.test(kennung)) probleme.push({ feld, text: `Platz ${z.platz}: Die Kennung muss wie labor-01 aussehen (Kleinbuchstaben und Ziffern, 2 bis 8 nach labor-).` });
-    else if (kennungen.has(kennung)) probleme.push({ feld, text: `Platz ${z.platz}: Die Kennung ${kennung} steht schon an einem anderen Platz.` });
-    kennungen.add(kennung);
+    // Die Kennung ist freiwillig (ein Platz darf ohne Laborprofil geplant werden); steht eine da, muss sie passen und einmalig sein.
+    if (kennung !== "" && !KENNUNG_PLATZ.test(kennung)) probleme.push({ feld, text: `Platz ${z.platz}: Die Kennung muss wie labor-01 aussehen (Kleinbuchstaben und Ziffern, 2 bis 8 nach labor-).` });
+    else if (kennung !== "" && kennungen.has(kennung)) probleme.push({ feld, text: `Platz ${z.platz}: Die Kennung ${kennung} steht schon an einem anderen Platz.` });
+    if (kennung !== "") kennungen.add(kennung);
     const gast = normalisieren(z.gast);
     if (gast.length > GAST_MAX) probleme.push({ feld, text: `Platz ${z.platz}: Der Gast ist zu lang (höchstens ${GAST_MAX} Zeichen).` });
-    plaetze.push({ platz: z.platz, zweck: z.zweck, kennung, gast: gast || null });
+    plaetze.push({ platz: z.platz, zweck: z.zweck, kennung: kennung || null, gast: gast || null });
   }
   return probleme.length > 0 ? { plaetze: null, probleme } : { plaetze, probleme: [] };
 }

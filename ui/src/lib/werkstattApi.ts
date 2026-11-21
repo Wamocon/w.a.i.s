@@ -258,7 +258,7 @@ export const checklisteLaden = (terminId: string, signal?: AbortSignal): Promise
 export const checklistePunktAnlegen = (terminId: string, e: ChecklisteEingabe): Promise<true> =>
   anfrage(`/labor/termine/${sichereId(terminId)}/checkliste`, { methode: "POST", body: { titel: e.titel, quelle: e.quelle, faellig: e.faellig }, lesen: geschafft });
 export const checklisteUmschalten = (terminId: string, nr: number, erledigt: boolean): Promise<true> => {
-  if (!Number.isInteger(nr) || nr < 0) throw fehler("ungueltig");
+  if (!Number.isSafeInteger(nr) || nr < 1) throw fehler("ungueltig"); // die Nummer beginnt bei 1 (nummer_lesen im Dienst)
   return anfrage(`/labor/termine/${sichereId(terminId)}/checkliste/${nr}`, { methode: "PATCH", body: { erledigt }, lesen: geschafft });
 };
 
@@ -277,10 +277,15 @@ export const zuordnungSpeichern = (terminId: string, zuordnung: Zuordnung): Prom
   anfrage("/zuordnung", {
     methode: "PUT",
     abfrage: { termin: sichereId(terminId) },
+    // Der Dienst will ein Objekt Platz (als Text) zu Kennungen (matrix_pruefen) und ersetzt die ganze Zuordnung des Termins:
+    // Plätze ohne Karten fehlen darin.
     body: {
-      zuordnung: Object.entries(zuordnung)
-        .flatMap(([platz, ids]) => ids.map((id) => ({ platz: Number(platz), karte_id: karteId(id) })))
-        .sort((a, b) => a.platz - b.platz || a.karte_id.localeCompare(b.karte_id)),
+      zuordnung: Object.fromEntries(
+        Object.entries(zuordnung)
+          .filter(([, ids]) => ids.length > 0)
+          .sort(([a], [b]) => Number(a) - Number(b))
+          .map(([platz, ids]) => [String(Number(platz)), ids.map(karteId).sort()]),
+      ),
     },
     lesen: geschafft,
   });

@@ -5,11 +5,9 @@ import { fehlerBildAus, karteAendern, karteAnlegen } from "@/lib/werkstattApi";
 import {
   GRENZEN,
   formularPruefen,
-  freieBuchstaben,
   gruppenAus,
   hatSteuerzeichen,
   mitGruppe,
-  mitNeuemBuchstaben,
   normalisieren,
   zeichenBudget,
   type FeldName,
@@ -29,6 +27,8 @@ import { FehlerHinweis, Karte, Pille } from "./Bausteine";
 type Props = {
   start: Formular;
   karten: readonly KarteTyp[];
+  /** die festen Gruppen des Katalogs (Buchstabe zu Name) */
+  gruppen: Readonly<Record<string, string>>;
   onGespeichert: (id: string) => void;
   onSchliessen: () => void;
 };
@@ -41,14 +41,14 @@ function Zaehler({ id, wert, max }: { id: string; wert: string; max: number }) {
   );
 }
 
-export function KartenEditor({ start, karten, onGespeichert, onSchliessen }: Props) {
+export function KartenEditor({ start, karten, gruppen: gruppenKarte, onGespeichert, onSchliessen }: Props) {
   const id = useId();
   const [f, setF] = useState<Formular>(start);
   const [probleme, setProbleme] = useState<Problem[]>([]);
   const [fehler, setFehler] = useState<FehlerBild | null>(null);
   const [laeuft, setLaeuft] = useState(false);
   const zusammenfassung = useRef<HTMLDivElement>(null);
-  const gruppen = gruppenAus(karten);
+  const gruppen = gruppenAus(gruppenKarte, karten);
   const text = (feld: FeldName) => probleme.find((p) => p.feld === feld)?.text;
   const bei = (feld: FeldName, extra?: string) => ({
     "aria-invalid": text(feld) ? (true as const) : undefined,
@@ -64,7 +64,7 @@ export function KartenEditor({ start, karten, onGespeichert, onSchliessen }: Pro
     e.preventDefault();
     if (laeuft) return;
     setFehler(null);
-    const r = formularPruefen(f, karten);
+    const r = formularPruefen(f, karten, gruppenKarte);
     setProbleme(r.probleme);
     if (!r.eingabe) {
       requestAnimationFrame(() => zusammenfassung.current?.focus());
@@ -72,9 +72,9 @@ export function KartenEditor({ start, karten, onGespeichert, onSchliessen }: Pro
     }
     setLaeuft(true);
     try {
-      if (f.bestehend) await karteAendern(r.eingabe);
-      else await karteAnlegen(r.eingabe);
-      onGespeichert(r.eingabe.id);
+      // Beim Anlegen vergibt der Dienst die Kennung; die Antwort nennt die wirkliche (die Wahl hier war nur ein Vorschlag).
+      const ergebnis = f.bestehend ? await karteAendern(r.eingabe) : await karteAnlegen(r.eingabe);
+      onGespeichert(ergebnis.karte?.id ?? r.eingabe.id);
     } catch (x) {
       setFehler(fehlerBildAus(x));
     } finally {
@@ -97,35 +97,15 @@ export function KartenEditor({ start, karten, onGespeichert, onSchliessen }: Pro
                 {gruppen.map((g) => (
                   <option key={g.buchstabe} value={g.buchstabe}>{g.buchstabe} {g.name}</option>
                 ))}
-                <option value="neu">Neue Gruppe …</option>
               </select>
               {fehlerZeile("gruppe")}
             </div>
             <div className="ws-feld">
-              <label htmlFor={`${id}-id`}>Kennung (automatisch)</label>
+              <label htmlFor={`${id}-id`}>Kennung (vorgeschlagen)</label>
               <input id={`${id}-id`} className="ws-mono" value={f.id} readOnly size={6} {...bei("id")} />
               {fehlerZeile("id")}
             </div>
           </div>
-          {f.gruppeWahl === "neu" && !f.bestehend && (
-            <div className="ws-zeile">
-              <div className="ws-feld">
-                <label htmlFor={`${id}-buchstabe`}>Buchstabe der neuen Gruppe</label>
-                <select id={`${id}-buchstabe`} value={f.neuerBuchstabe} onChange={(e) => setF(mitNeuemBuchstaben(f, e.target.value))} {...bei("neuerBuchstabe")}>
-                  <option value="">bitte wählen</option>
-                  {freieBuchstaben(gruppen).map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-                {fehlerZeile("neuerBuchstabe")}
-              </div>
-              <div className="ws-feld" style={{ flex: "1 1 200px" }}>
-                <label htmlFor={`${id}-gname`}>Name der neuen Gruppe</label>
-                <input id={`${id}-gname`} value={f.neuerName} maxLength={GRENZEN.gruppe + 10} onChange={(e) => aendere({ neuerName: e.target.value })} {...bei("neuerName")} />
-                {fehlerZeile("neuerName")}
-              </div>
-            </div>
-          )}
           <div className="ws-feld">
             <label htmlFor={`${id}-titel`}>Titel</label>
             <input id={`${id}-titel`} value={f.titel} maxLength={GRENZEN.titel + 20} onChange={(e) => aendere({ titel: e.target.value })} {...bei("titel", `${id}-titel-z`)} />

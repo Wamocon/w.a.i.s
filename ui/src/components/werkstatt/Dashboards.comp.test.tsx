@@ -17,7 +17,10 @@ vi.mock("@/lib/werkstattApi", async (original) => {
 const BETRIEB = {
   zeit: "2026-11-20T10:00:00Z",
   alterS: 30,
-  kern: { slot: "a", release: "v0.7.1-abc", aktiv: true },
+  kern: [
+    { slot: "a", release: "v0.7.1-abc", aktiv: true },
+    { slot: "b", release: "v0.7.0-def", aktiv: false },
+  ],
   oberflaeche: { farbe: "grün", version: "0.7.1" },
   installer: { version: "0.7.1" },
   kanal: { zustand: "zu" },
@@ -37,7 +40,7 @@ describe("Dashboards", () => {
     vi.mocked(betriebLaden).mockResolvedValue(BETRIEB);
     vi.mocked(sitzungenLaden).mockResolvedValue(TAGE);
     vi.mocked(latenzLaden).mockResolvedValue(LATENZ);
-    vi.mocked(aktionenLaden).mockResolvedValue([{ tool: "werkstatt_karten_veroeffentlichen", status: "ok", anzahl: 2 }]);
+    vi.mocked(aktionenLaden).mockResolvedValue([{ tool: "werkstatt_karten_veroeffentlichen", status: "done", anzahl: 2 }]);
   });
 
   it("zeigt den Betrieb mit Wort und Form, den Stand des Sammlers und die Aktionen", async () => {
@@ -45,12 +48,17 @@ describe("Dashboards", () => {
     const betrieb = await screen.findByRole("heading", { name: "Betrieb jetzt" });
     const karte = within(betrieb.closest("section") as HTMLElement);
     expect(await karte.findByText(/v0\.7\.1-abc/)).toBeTruthy();
-    expect(karte.getByText(/aktiv$/)).toBeTruthy();
+    expect(karte.getAllByText(/aktiv$/)).toHaveLength(2); // a: aktiv, b: nicht aktiv
+    // der zweite Slot steht als eigene Zeile, nicht aktiv
+    expect(karte.getByText("Kern, Slot b")).toBeTruthy();
+    expect(karte.getByText(/v0\.7\.0-def/)).toBeTruthy();
+    expect(karte.getByText(/nicht aktiv/)).toBeTruthy();
     expect(karte.getByText("zu")).toBeTruthy();
     expect(karte.getByText("in Ordnung")).toBeTruthy();
     expect(karte.getByText("Stand vor 30 Sekunden, der Sammler schreibt jede Minute.")).toBeTruthy();
     const tabelle = await screen.findByRole("table", { name: "Aktionen im Zeitraum, insgesamt 2" });
     expect(within(tabelle).getByText("werkstatt_karten_veroeffentlichen")).toBeTruthy();
+    expect(within(tabelle).getByText("erledigt")).toBeTruthy(); // done als deutsches Wort
   });
 
   it("ein alter Stand des Sammlers wird als Warnung gemeldet", async () => {

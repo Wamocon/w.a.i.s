@@ -64,7 +64,7 @@ export function Karten({ onFaktor }: { onFaktor: () => void }) {
       <Karte
         titel="Katalog"
         rechts={
-          <button type="button" className="btn-primary btn-small" disabled={!liste} onClick={() => oeffne(leeresFormular(karten, filter))}>
+          <button type="button" className="btn-primary btn-small" disabled={!liste} onClick={() => oeffne(leeresFormular(karten, liste?.gruppen ?? {}, filter))}>
             Neuen Use Case aufbauen
           </button>
         }
@@ -73,7 +73,7 @@ export function Karten({ onFaktor }: { onFaktor: () => void }) {
           {(l) => (
             <KartenKatalog
               karten={l.karten}
-              gruppen={gruppenAus(l.karten)}
+              gruppen={gruppenAus(l.gruppen, l.karten)}
               filter={filter}
               onFilter={setFilter}
               onBearbeiten={(k) => oeffne(formularAusKarte(k, l.karten))}
@@ -92,6 +92,7 @@ export function Karten({ onFaktor }: { onFaktor: () => void }) {
           key={editor.nr}
           start={editor.formular}
           karten={liste.karten}
+          gruppen={liste.gruppen}
           onSchliessen={() => setEditor(null)}
           onGespeichert={(id) => {
             setEditor(null);

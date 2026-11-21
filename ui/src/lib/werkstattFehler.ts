@@ -46,7 +46,7 @@ const SERVER_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /** Codes, bei denen die Einzelheit des Dienstes dem Satz angehängt wird (ohne interne Namen, auf Länge und Zeichen geprüft). */
-const MIT_DETAIL: ReadonlySet<string> = new Set(["ungueltig", "konflikt", "nicht_gefunden"]);
+const MIT_DETAIL: ReadonlySet<string> = new Set(["ungueltig", "konflikt", "nicht_gefunden", "nicht_verfuegbar"]);
 
 const DETAIL_MAX = 200;
 
@@ -82,7 +82,8 @@ export function fehlerBild(status: number, code: unknown, serverText: unknown): 
   // 403 mit unbekanntem Code bleibt "nicht berechtigt", 409 und 410 mit unbekanntem Code behalten ihre Bedeutung
   const gewaehlt = bekannt ? (roh as string) : codeZuStatus(status);
   let text = FEHLER_SAETZE[gewaehlt] ?? FEHLER_SAETZE.antwort;
-  if (MIT_DETAIL.has(gewaehlt)) {
+  // Die Einzelheit des Dienstes zählt nur, wenn der Dienst den Code selbst gemeldet hat; aus dem Status abgeleitet bleibt es beim festen Satz.
+  if (bekannt && MIT_DETAIL.has(gewaehlt)) {
     const detail = detailText(serverText);
     if (detail && !text.includes(detail)) text = `${text} ${detail}`;
   }
@@ -100,7 +101,10 @@ export function brauchtNeuenCode(code: string): boolean {
   return code === "aal2_alt" || code === "aal2_fehlt";
 }
 
-/** Muss die Karte neu angefordert werden? */
+/**
+ * Muss die Karte neu angefordert werden? Beim Ausführen gilt das für eine abgelaufene, eine verbrauchte und eine unbekannte Karte und
+ * für einen Konflikt (der Katalog hat sich seit der Karte geändert).
+ */
 export function karteUnbrauchbar(code: string): boolean {
-  return code === "karte_abgelaufen" || code === "karte_verbraucht";
+  return code === "karte_abgelaufen" || code === "karte_verbraucht" || code === "konflikt" || code === "nicht_gefunden";
 }

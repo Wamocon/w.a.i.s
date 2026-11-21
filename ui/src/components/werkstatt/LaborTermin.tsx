@@ -60,8 +60,8 @@ function FristenListe({ tag, bis }: { tag: string; bis: string }) {
   return (
     <dl className="ws-liste">
       <div><dt>Aufbewahrung bis</dt><dd className="ws-mono">{tagText(f.aufbewahrungBis)}</dd></div>
-      <div><dt>Löschlauf des Dienstes ab</dt><dd className="ws-mono">{tagText(f.loeschlaufAb)}</dd></div>
-      <div><dt>Nachlauf, Laborkonten löschen ab</dt><dd className="ws-mono">{tagText(f.nachlaufAb)}</dd></div>
+      <div><dt>Löschlauf ab</dt><dd className="ws-mono">{tagText(f.loeschlaufAb)}</dd></div>
+      <div><dt>Laborkonten löschen</dt><dd>direkt nach dem Labortag</dd></div>
     </dl>
   );
 }
@@ -154,7 +154,7 @@ function TerminFormularKarte({ termin, onGeaendert, meldung }: { termin: Termin 
         </div>
       </div>
       <FristenListe tag={f.tag} bis={f.aufbewahrungBis} />
-      <p className="ws-klein">Eine Verschiebung ändert nur den Labortag. Die Aufbewahrung folgt mit (Tag plus 13), die übrigen Fristen werden daraus berechnet.</p>
+      <p className="ws-klein">Eine Verschiebung ändert nur den Labortag. Die Aufbewahrung folgt mit (Tag plus 13), der Löschlauf beginnt einen Tag nach ihrem Ende. Die Laborkonten werden direkt nach dem Labortag gelöscht.</p>
       {probleme.length > 0 && (
         <div ref={problemRef} className="ws-fehler" role="alert" tabIndex={-1}>
           <span>Bitte prüfe den Termin: {probleme.map((p) => p.text).join(" ")}</span>

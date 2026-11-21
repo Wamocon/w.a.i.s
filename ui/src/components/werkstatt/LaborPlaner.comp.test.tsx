@@ -64,7 +64,8 @@ describe("Termin und Fristen", () => {
     expect(await screen.findByLabelText("Labortag")).toHaveProperty("value", "2099-12-05");
     expect(screen.getByText("Fr 18.12.2099")).toBeTruthy();
     expect(screen.getByText("Sa 19.12.2099")).toBeTruthy();
-    expect(screen.getByText("Mo 07.12.2099")).toBeTruthy();
+    expect(screen.getByText("direkt nach dem Labortag")).toBeTruthy(); // Laborkonten: kein eigenes Datum
+    expect(screen.queryByText("Mo 07.12.2099")).toBeNull();
     const stand = await screen.findByRole("table", { name: "Laborprofile, nur lesend" });
     expect(within(stand).getByText("gesperrt")).toBeTruthy();
     expect(within(stand).getByText("freigeschaltet")).toBeTruthy();
@@ -79,6 +80,7 @@ describe("Termin und Fristen", () => {
     await user.type(tag, "2099-12-12");
     expect(screen.getByLabelText("Aufbewahrung bis")).toHaveProperty("value", "2099-12-25");
     expect(screen.getByText("Fr 25.12.2099")).toBeTruthy();
+    expect(screen.getByText("Sa 26.12.2099")).toBeTruthy(); // Löschlauf ab: Aufbewahrung plus ein Tag
     const bis = screen.getByLabelText("Aufbewahrung bis");
     await user.clear(bis);
     await user.type(bis, "2099-12-20");
@@ -156,6 +158,19 @@ describe("Plätze", () => {
     expect(screen.getByLabelText("Kennung von Platz 3")).toHaveProperty("disabled", true);
     await user.selectOptions(platz3, "reserve");
     expect(screen.getByLabelText("Kennung von Platz 3")).toHaveProperty("value", "labor-03");
+  });
+
+  it("die Kennung eines Platzes ist freiwillig: leer wird sie als null gespeichert", async () => {
+    const user = userEvent.setup();
+    render(<LaborPlaner />);
+    await screen.findByRole("table", { name: "Plätze 1 bis 16" });
+    await user.selectOptions(screen.getByLabelText("Zweck von Platz 4"), "reserve");
+    await user.clear(screen.getByLabelText("Kennung von Platz 4"));
+    await user.click(screen.getByRole("button", { name: "Plätze speichern" }));
+    expect(plaetzeSpeichern).toHaveBeenCalledWith("t1", [
+      { platz: 1, zweck: "besucher", kennung: "labor-01", gast: "Gast 1" },
+      { platz: 4, zweck: "reserve", kennung: null, gast: null },
+    ]);
   });
 
   it("speichert nur belegte Plätze und meldet Regelverstöße vorher", async () => {

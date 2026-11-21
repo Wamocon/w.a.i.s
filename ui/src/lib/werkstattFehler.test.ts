@@ -11,6 +11,7 @@ import {
   fehlerBild,
   karteUnbrauchbar,
 } from "./werkstattFehler.ts";
+import { API } from "./werkstattTestdaten.ts";
 
 const GEDANKENSTRICH = /[–—]|\s-\s/;
 const SCHNITTSTELLE = [
@@ -105,4 +106,25 @@ test("die Codes, die nur die Oberfläche kennt, nimmt sie vom Dienst nie an", ()
     assert.equal(f.code, "nicht_berechtigt", code);
     assert.doesNotMatch(f.text, /Text des Dienstes/);
   }
+});
+
+test("die Fehler der echten API (fehler.py, Routen): Code und Satz, die Einzelheit nur bei dem Dienst eigenen Codes", () => {
+  const abgelaufen = fehlerBild(410, API.fehler.code, API.fehler.text);
+  assert.deepEqual([abgelaufen.code, abgelaufen.status], ["karte_abgelaufen", 410]);
+  assert.equal(abgelaufen.text, FEHLER_SAETZE.karte_abgelaufen);
+  // Sammler ohne Werte: 503 mit eigenem Satz
+  assert.match(fehlerBild(503, "nicht_verfuegbar", "Der Sammler hat noch keine Werte geliefert.").text, /Der Sammler hat noch keine Werte geliefert\./);
+  // fremde Karte: 403, der feste Satz genügt (ein Text des Dienstes wird bei 403 nie angehängt)
+  assert.doesNotMatch(fehlerBild(403, "nicht_berechtigt", "Diese Karte gehört einem anderen Admin.").text, /anderen Admin/);
+  // Konflikt nach geändertem Katalog
+  assert.match(fehlerBild(409, "konflikt", "Der Katalog hat sich seit der Karte geändert. Bitte prüfe neu und lege eine neue Karte an.").text, /seit der Karte geändert/);
+  // 422 der Eingabe: der Satz nennt das Feld, nie den Wert
+  assert.match(fehlerBild(422, "ungueltig", "Der Wissenstext wird nicht angenommen (Markup).").text, /Markup/);
+  // aus dem Status abgeleitet bleibt es beim festen Satz
+  assert.doesNotMatch(fehlerBild(403, null, "Diese Karte gehört einem anderen Admin.").text, /anderen Admin/);
+});
+
+test("beim Ausführen heißt eine unbrauchbare Karte: abgelaufen, verbraucht, unbekannt oder ein geänderter Katalog", () => {
+  for (const code of ["karte_abgelaufen", "karte_verbraucht", "konflikt", "nicht_gefunden"]) assert.ok(karteUnbrauchbar(code), code);
+  for (const code of ["aal2_alt", "zu_oft", "ungueltig", "nicht_verfuegbar"]) assert.ok(!karteUnbrauchbar(code), code);
 });
