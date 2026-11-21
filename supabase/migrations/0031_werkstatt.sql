@@ -29,7 +29,7 @@
 -- Form der Momentaufnahme (labor_karten_versionen.karten): ein JSON-Array mit je einem Objekt je Karte, Schlüssel gleich den Spalten von
 -- labor_karten (id, gruppe, titel, aufgabe, erwartung, fehler, lernziel, wissen, wissenstext, werkzeuge, dauer_min). Verlangt und von
 -- der Datenbank geprüft werden id (Form A1 bis Z99), wissen (eine der vier Stufen) und bei wissen = 'Eigener Text' ein wissenstext von
--- 1 bis 900 Zeichen ohne Steuerzeichen. wissen_zeichen ist das Zeichenbudget der Version (Basis plus alle Wissenstexte, höchstens 6000).
+-- 1 bis 900 Zeichen ohne Steuerzeichen. wissen_zeichen ist das Katalogbudget der Version (mindestens die Summe aller Wissenstexte, höchstens 2000; ein eigenes Budget, die Dateien des Kerns zählen nicht mit).
 --
 -- Die Tabellen haben je zwei Policies: core_all für wamo_core verbietet alles (using false), denn der Kern liest nur die Ansichten (die
 -- laufen mit den Rechten des Eigentümers); werkstatt_all für wamo_werkstatt lässt zu, was die Spaltenrechte erlauben. Zusätzlich:
@@ -159,7 +159,7 @@ create table if not exists __SCHEMA__.labor_karten_versionen (
   karten             jsonb not null,
   aktiv              boolean not null default false,
   constraint labor_karten_versionen_aenderungen_chk check (anzahl_aenderungen >= 0),
-  constraint labor_karten_versionen_zeichen_chk check (wissen_zeichen between 0 and 6000)
+  constraint labor_karten_versionen_zeichen_chk check (wissen_zeichen between 0 and 2000)
 );
 comment on table __SCHEMA__.labor_karten_versionen is
   'Veröffentlichte Stände des Kartenkatalogs: unveränderliche Momentaufnahme, genau eine Version ist aktiv.';
@@ -229,7 +229,8 @@ declare
 begin
   if tg_op = 'UPDATE' then
     if new.version is distinct from old.version or new.erstellt_at is distinct from old.erstellt_at
-       or new.erstellt_von is distinct from old.erstellt_von or new.anzahl_aenderungen is distinct from old.anzahl_aenderungen
+       or (new.erstellt_von is distinct from old.erstellt_von and new.erstellt_von is not null)  -- null setzt on delete set null beim Löschen des Profils
+       or new.anzahl_aenderungen is distinct from old.anzahl_aenderungen
        or new.wissen_zeichen is distinct from old.wissen_zeichen or new.karten is distinct from old.karten then
       raise exception 'labor_karten_versionen: eine Version ist unveränderlich, nur aktiv wechselt' using errcode = '42501';
     end if;

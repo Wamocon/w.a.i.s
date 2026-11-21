@@ -177,7 +177,7 @@ def test_labor_zuordnung_und_versionen_und_freigabekarten_nach_vertrag():
     v = _eine_zeile(_tabelle("labor_karten_versionen"))
     assert "version integer generated always as identity primary key" in v
     assert "karten jsonb not null" in v and "aktiv boolean not null default false" in v
-    assert "wissen_zeichen between 0 and 6000" in v and "anzahl_aenderungen >= 0" in v
+    assert "wissen_zeichen between 0 and 2000" in v and "anzahl_aenderungen >= 0" in v
     assert "erstellt_von uuid references __SCHEMA__.profiles(user_id) on delete set null" in v
     k = _eine_zeile(_tabelle("werkstatt_karten"))
     assert "admin uuid not null references __SCHEMA__.profiles(user_id) on delete cascade" in k
@@ -227,6 +227,8 @@ def test_trigger_der_karten_und_der_freigabekarten_tun_was_der_vertrag_sagt():
     assert "'^[A-Z][0-9]{1,2}$'" in code and "length(t) not between 1 and 900" in code and "summe > new.wissen_zeichen" in code
     assert "constraint = 'labor_karten_versionen_karten'" in code and "constraint = 'labor_karten_versionen_zeichen'" in code
     assert "eine Version ist unveränderlich, nur aktiv wechselt" in code
+    # das Löschen eines Admin-Profils setzt erstellt_von per on delete set null auf null (ein update): das darf der Trigger nicht blockieren
+    assert "(new.erstellt_von is distinct from old.erstellt_von and new.erstellt_von is not null)" in code
     # Freigabekarten: einmalig, unveränderlich, nur bis gilt_bis
     assert "if old.ausgefuehrt_at is not null then" in code and "constraint = 'werkstatt_karten_verbraucht'" in code
     assert "pg_catalog.clock_timestamp() > old.gilt_bis" in code and "constraint = 'werkstatt_karten_abgelaufen'" in code

@@ -293,15 +293,15 @@ declare
   v2 integer;
 begin
   insert into __SCHEMA__.labor_karten_versionen (erstellt_von, anzahl_aenderungen, wissen_zeichen, karten, aktiv)
-    values ('00000000-0000-4000-8000-0000000031a1', 1, 4200,
+    values ('00000000-0000-4000-8000-0000000031a1', 1, 1200,
             '[{"id":"A1","wissen":"Eigener Text","wissenstext":"Text eins","titel":"x"},{"id":"B12","wissen":"keine"}]'::jsonb, false)
     returning version into v1;
   insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten, aktiv)
-    values (2, 4300, '[{"id":"A1","wissen":"Eigener Text","wissenstext":"Text zwei"},{"id":"C3","wissen":"Eigener Text","wissenstext":"Text drei"},
+    values (2, 1300, '[{"id":"A1","wissen":"Eigener Text","wissenstext":"Text zwei"},{"id":"C3","wissen":"Eigener Text","wissenstext":"Text drei"},
                       {"id":"B12","wissen":"keine"},{"id":"D4","wissen":"Glossar"}]'::jsonb, false)
     returning version into v2;
   insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten, aktiv)
-    values (3, 6000, jsonb_build_array(jsonb_build_object('id', 'A1', 'wissen', 'Eigener Text', 'wissenstext', repeat('x', 900))), false);
+    values (3, 2000, jsonb_build_array(jsonb_build_object('id', 'A1', 'wissen', 'Eigener Text', 'wissenstext', repeat('x', 900))), false);
   perform wamo_testhilfe.gleich(v2 > v1, true, 'Versionsnummer zählt fort');
   perform wamo_testhilfe.gleich((select count(*) from __SCHEMA__.labor_karten_versionen where aktiv), 0::bigint, 'noch keine aktive Version');
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
@@ -321,18 +321,18 @@ begin
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
     values (1, 100, '[{"id":"A1","wissen":"Eigener Text","wissenstext":5}]'::jsonb)$s$, '23514', 'labor_karten_versionen_karten');
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
-    values (1, 6000, jsonb_build_array(jsonb_build_object('id', 'A1', 'wissen', 'Eigener Text', 'wissenstext', repeat('x', 901))))$s$,
+    values (1, 2000, jsonb_build_array(jsonb_build_object('id', 'A1', 'wissen', 'Eigener Text', 'wissenstext', repeat('x', 901))))$s$,
     '23514', 'labor_karten_versionen_karten');
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
-    values (1, 6000, jsonb_build_array(jsonb_build_object('id', 'A1', 'wissen', 'Eigener Text', 'wissenstext', E'a\nb')))$s$,
+    values (1, 2000, jsonb_build_array(jsonb_build_object('id', 'A1', 'wissen', 'Eigener Text', 'wissenstext', E'a\nb')))$s$,
     '23514', 'labor_karten_versionen_karten');
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
-    values (1, 6000, (select jsonb_agg(jsonb_build_object('id', 'A1', 'wissen', 'keine')) from generate_series(1, 501)))$s$,
+    values (1, 2000, (select jsonb_agg(jsonb_build_object('id', 'A1', 'wissen', 'keine')) from generate_series(1, 501)))$s$,
     '23514', 'labor_karten_versionen_karten');
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
     values (1, 3, '[{"id":"A1","wissen":"Eigener Text","wissenstext":"Text eins"}]'::jsonb)$s$, '23514', 'labor_karten_versionen_zeichen');
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
-    values (1, 6001, '[]'::jsonb)$s$, '23514', 'labor_karten_versionen_zeichen_chk');
+    values (1, 2001, '[]'::jsonb)$s$, '23514', 'labor_karten_versionen_zeichen_chk');
   perform wamo_testhilfe.fehler_name($s$insert into __SCHEMA__.labor_karten_versionen (anzahl_aenderungen, wissen_zeichen, karten)
     values (-1, 10, '[]'::jsonb)$s$, '23514', 'labor_karten_versionen_aenderungen_chk');
   perform wamo_testhilfe.fehler($s$insert into __SCHEMA__.labor_karten_versionen (version, anzahl_aenderungen, wissen_zeichen, karten)
@@ -659,6 +659,22 @@ begin
     perform wamo_testhilfe.fehler($s$select __SCHEMA__.werkstatt_aufraeumen()$s$, '42501');
     reset role;
   end loop;
+end $$;
+
+-- 12. Wird das Profil eines Admins gelöscht (Austritt), bleiben Versionen, Karten und Checkliste; der Verweis wird null (on delete set null
+--     löst ein update aus, das der Trigger der Versionen zulassen muss); seine Freigabekarten fallen weg (on delete cascade)
+do $$
+declare
+  a1 uuid := '00000000-0000-4000-8000-0000000031a1';
+begin
+  perform wamo_testhilfe.gleich((select count(*) from __SCHEMA__.labor_karten_versionen where erstellt_von = a1), 1::bigint, 'eine Version des Admins');
+  delete from __SCHEMA__.profiles where user_id = a1;
+  perform wamo_testhilfe.gleich((select count(*) from __SCHEMA__.labor_karten_versionen where anzahl_aenderungen = 1 and erstellt_von is null),
+                                1::bigint, 'Version bleibt, Verweis ist null');
+  perform wamo_testhilfe.gleich((select geaendert_von is null from __SCHEMA__.labor_karten where id = 'A1'), true, 'Karte bleibt, Verweis ist null');
+  perform wamo_testhilfe.gleich((select count(*) from __SCHEMA__.werkstatt_karten where admin = a1), 0::bigint, 'Freigabekarten des Admins weg');
+  -- nur das Nullsetzen ist erlaubt: einen anderen Ersteller trägt auch der Eigentümer nicht nachträglich ein
+  perform wamo_testhilfe.fehler($s$update __SCHEMA__.labor_karten_versionen set erstellt_von = '00000000-0000-4000-8000-0000000031a2'$s$, '42501');
 end $$;
 
 rollback;
