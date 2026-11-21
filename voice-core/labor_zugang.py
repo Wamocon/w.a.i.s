@@ -279,9 +279,10 @@ def _db_fehler(e: Exception, was: str) -> LaborZugangFehler:
 
 
 async def setzen(admin_id: str, schluessel_roh: object, workspace_roh: object = None, *, db: Database | None = None,
-                 tresor: Tresor | None = None, testen=schluessel_pruefen) -> LaborStand:
-    """Prüft das Format, fragt Anthropic (testen), verschlüsselt und speichert den Schlüssel samt Protokollzeile. Wirft LaborZugangFehler.
-    Der Aufrufer (labor_zugang_api.py) hat Admin, zweiten Faktor und Bremse schon geprüft. Gespeichert wird nur nach erfolgreicher Testanfrage."""
+                 tresor: Tresor | None = None, testen=None) -> LaborStand:
+    """Prüft das Format, fragt Anthropic (testen, Standard schluessel_pruefen), verschlüsselt und speichert den Schlüssel samt
+    Protokollzeile. Wirft LaborZugangFehler. Der Aufrufer (labor_zugang_api.py) hat Admin, zweiten Faktor und Bremse schon geprüft.
+    Gespeichert wird nur nach erfolgreicher Testanfrage."""
     uid = normalize_uuid(admin_id)
     if uid is None:
         raise LaborZugangFehler("nicht_angemeldet", "Das Profil ist ungültig.", 401)
@@ -299,7 +300,7 @@ async def setzen(admin_id: str, schluessel_roh: object, workspace_roh: object = 
     workspace = str(workspace_roh or "").strip() or None
     if workspace and not _WORKSPACE.fullmatch(workspace):
         raise LaborZugangFehler("workspace_ungueltig", "Die Workspace-ID beginnt mit wrkspc_.")
-    await testen(schluessel, workspace)
+    await (testen or schluessel_pruefen)(schluessel, workspace)
     chiffre = tresor.verschluesseln(BINDUNG, schluessel, SCHLUESSEL)
     try:
         geschrieben = await db.fetchval(_sql(_SQL_SETZEN, db), chiffre, workspace, ende(schluessel), uid, WERKZEUG_SETZEN, GRUND_SETZEN)

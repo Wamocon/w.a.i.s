@@ -151,7 +151,7 @@ async function anfrage<T>(
 }
 
 /** JSON lesen oder senden (body wird als JSON verschickt). Die Antwort ist ungeprüft: Aufrufer prüfen mit lib/teilenHilfe. */
-export async function kernJson(pfad: string, methode: "GET" | "POST" | "PUT" = "GET", body?: unknown): Promise<unknown> {
+export async function kernJson(pfad: string, methode: "GET" | "POST" | "PUT" | "DELETE" = "GET", body?: unknown): Promise<unknown> {
   const init: RequestInit = { method: methode };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
