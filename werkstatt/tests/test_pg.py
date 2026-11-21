@@ -173,7 +173,8 @@ async def test_freigabekarte_und_version():
 
 async def test_entwuerfe_buchung_aufraeumen():
     o, c = ops(FakeConn(execute="UPDATE 3"))
-    assert await o.entwuerfe_veroeffentlichen() == 3
+    assert await o.entwuerfe_veroeffentlichen(["J1", "J2", "W3"]) == 3
+    assert c.aufrufe[0][1].endswith("where stand = 'entwurf' and id = any($1::text[])") and c.aufrufe[0][2] == (["J1", "J2", "W3"],)
     await o.aktion_buchen(ADMIN, "werkstatt_x", "critical", {"karte": "k"}, {"ok": True})
     sql, args = c.aufrufe[1][1], c.aufrufe[1][2]
     assert sql.startswith("insert into wamo_dev.actions (user_id, tool, params, risk, status, result, decided_at, finished_at)")

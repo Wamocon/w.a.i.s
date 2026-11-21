@@ -19,18 +19,18 @@ def test_standardwerte():
     assert k.schema == "wamo_dev" and k.supabase_url == "https://192.168.178.136:55443"
     assert k.jwks_url == "https://192.168.178.136:55443/auth/v1/.well-known/jwks.json" and k.issuer == "https://192.168.178.136:55443/auth/v1"
     assert (k.host, k.port, k.pfad, k.audience) == ("127.0.0.1", 18095, "/werkstatt/api", "authenticated")
-    assert k.herkunft == "https://192.168.178.136:55445" and k.wissen_basis == 4120 and k.ca_datei is None
+    assert k.herkunft == "https://192.168.178.136:55445" and k.ca_datei is None
     assert k.admins_datei == Path("/etc/wamo-werkstatt/admins") and k.daten_ordner == Path("/var/lib/wamo-werkstatt")
     assert "wamo-core" in k.marken and "wamo-nutzer" not in k.marken and "wamo-auth" not in k.marken
 
 
 def test_eigene_werte():
     k = aus_umgebung({**BASIS, "WAMO_WERKSTATT_PORT": "18999", "WAMO_WERKSTATT_PFAD": "/", "WAMO_WERKSTATT_HERKUNFT": "https://ui.test:55445/",
-                      "WAMO_WERKSTATT_WISSEN_BASIS": "5000", "WAMO_WERKSTATT_MARKEN": "wamo-core, wais-deploy,wamo-core", "WAMO_CA_FILE": ' "/etc/ca.crt" ',
+                      "WAMO_WERKSTATT_MARKEN": "wamo-core, wais-deploy,wamo-core", "WAMO_CA_FILE": ' "/etc/ca.crt" ',
                       "WAMO_WERKSTATT_ISS": "https://x.test/auth/v1/", "WAMO_WERKSTATT_AUD": "eigene", "WAMO_WERKSTATT_JWKS_URL": "https://x.test/jwks",
-                      "WAMO_WERKSTATT_ADMINS": "/tmp/a", "WAMO_WERKSTATT_DATEN": "/tmp/d", "WAMO_WERKSTATT_HOST": "0.0.0.0"})
-    assert (k.port, k.pfad, k.herkunft, k.wissen_basis, k.marken, k.ca_datei) == (18999, "", "https://ui.test:55445", 5000, ("wamo-core", "wais-deploy"), "/etc/ca.crt")
-    assert (k.issuer, k.audience, k.jwks_url, k.host) == ("https://x.test/auth/v1", "eigene", "https://x.test/jwks", "0.0.0.0")
+                      "WAMO_WERKSTATT_ADMINS": "/tmp/a", "WAMO_WERKSTATT_DATEN": "/tmp/d", "WAMO_WERKSTATT_HOST": "::1"})
+    assert (k.port, k.pfad, k.herkunft, k.marken, k.ca_datei) == (18999, "", "https://ui.test:55445", ("wamo-core", "wais-deploy"), "/etc/ca.crt")
+    assert (k.issuer, k.audience, k.jwks_url, k.host) == ("https://x.test/auth/v1", "eigene", "https://x.test/jwks", "::1")
     assert aus_umgebung({**BASIS, "WAMO_WERKSTATT_PFAD": "/api"}).pfad == "/api"
     assert aus_umgebung({**BASIS, "WAMO_WERKSTATT_SUPABASE_URL": "http://127.0.0.1:55321"}).supabase_url == "http://127.0.0.1:55321"
     assert aus_umgebung({**BASIS, "WAMO_WERKSTATT_HERKUNFT": "http://localhost:3000"}).herkunft == "http://localhost:3000"
@@ -44,8 +44,8 @@ def test_eigene_werte():
     ({"WAMO_WERKSTATT_HERKUNFT": "http://ui.test"}, "WAMO_WERKSTATT_HERKUNFT"), ({"WAMO_WERKSTATT_PORT": "abc"}, "WAMO_WERKSTATT_PORT"),
     ({"WAMO_WERKSTATT_PORT": "80"}, "WAMO_WERKSTATT_PORT"), ({"WAMO_WERKSTATT_PFAD": "pfad-ohne-schraegstrich"}, "WAMO_WERKSTATT_PFAD"),
     ({"WAMO_WERKSTATT_PFAD": "/a//b"}, "WAMO_WERKSTATT_PFAD"), ({"WAMO_WERKSTATT_PFAD": "/api/"}, "WAMO_WERKSTATT_PFAD"),
-    ({"WAMO_WERKSTATT_MARKEN": "Gross,klein"}, "WAMO_WERKSTATT_MARKEN"), ({"WAMO_WERKSTATT_MARKEN": "../x"}, "WAMO_WERKSTATT_MARKEN"), ({"WAMO_WERKSTATT_WISSEN_BASIS": "7000"}, "WAMO_WERKSTATT_WISSEN_BASIS"),
-    ({"WAMO_WERKSTATT_HOST": "kein host"}, "WAMO_WERKSTATT_HOST"),
+    ({"WAMO_WERKSTATT_MARKEN": "Gross,klein"}, "WAMO_WERKSTATT_MARKEN"), ({"WAMO_WERKSTATT_MARKEN": "../x"}, "WAMO_WERKSTATT_MARKEN"), ({"WAMO_WERKSTATT_HOST": "kein host"}, "WAMO_WERKSTATT_HOST"), ({"WAMO_WERKSTATT_HOST": "0.0.0.0"}, "WAMO_WERKSTATT_HOST"),
+    ({"WAMO_WERKSTATT_HOST": "192.168.178.136"}, "WAMO_WERKSTATT_HOST"),
 ])
 def test_fehlerhafte_einstellung(aenderung, variable):
     with pytest.raises(KonfigFehler) as e:

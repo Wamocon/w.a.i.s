@@ -13,7 +13,7 @@ from .daten import Verbindung
 from .dienst import dienst_von, zugang_pruefen
 from .eingabe import abfrage_ganz, json_objekt, pfad_id
 from .fehler import WerkstattFehler, ungueltig
-from .karten_regeln import (GRUPPEN, KARTE_ID_RE, WISSEN_MAX, gruppe_lesen, karte_ausgabe, karte_felder, matrix_pruefen, naechste_id,
+from .karten_regeln import (GRUPPEN, KARTE_ID_RE, KATALOG_BUDGET_ZEICHEN, gruppe_lesen, karte_ausgabe, karte_felder, matrix_pruefen, naechste_id,
                             sortierschluessel, zeichen)
 
 router = APIRouter()
@@ -37,7 +37,7 @@ async def karten_liste(request: Request, zugang: Zugang = Depends(zugang_pruefen
     dienst = dienst_von(request)
     zeilen = sorted(await dienst.db.karten(), key=lambda k: sortierschluessel(k["id"]))
     return {"karten": [karte_ausgabe(k) for k in zeilen], "gruppen": GRUPPEN, "aktive_version": await dienst.db.aktive_version(),
-            "zeichen": zeichen(zeilen, dienst.konfig.wissen_basis), "zeichen_max": WISSEN_MAX, "basis_zeichen": dienst.konfig.wissen_basis}
+            "zeichen": zeichen(zeilen), "grenze": KATALOG_BUDGET_ZEICHEN}
 
 
 @router.get("/karten/versionen")

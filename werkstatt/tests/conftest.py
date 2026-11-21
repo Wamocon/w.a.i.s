@@ -106,7 +106,7 @@ def konfig(tmp_path, daten_ordner) -> Konfig:
     admins = tmp_path / "admins"
     admins.write_text(f"# erlaubte Admins\n{ADMIN}\n{ANDERER_ADMIN}  # zweite Person\n{MITGLIED}\n{LABOR}\n", encoding="utf-8")
     return Konfig(schema="wamo_dev", supabase_url="https://stack.test", jwks_url="https://stack.test/auth/v1/.well-known/jwks.json", issuer=ISS,
-                  audience=AUD, herkunft=HERKUNFT, admins_datei=admins, daten_ordner=daten_ordner, wissen_basis=4120)
+                  audience=AUD, herkunft=HERKUNFT, admins_datei=admins, daten_ordner=daten_ordner)
 
 
 @pytest.fixture

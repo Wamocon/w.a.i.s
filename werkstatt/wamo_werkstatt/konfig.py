@@ -9,7 +9,7 @@ Umgebung (Standard in Klammern):
   WAMO_WERKSTATT_SUPABASE_URL (Pflicht, https), WAMO_WERKSTATT_ISS (<url>/auth/v1), WAMO_WERKSTATT_AUD (authenticated),
   WAMO_WERKSTATT_JWKS_URL (<url>/auth/v1/.well-known/jwks.json), WAMO_CA_FILE (CA des Stacks, für JWKS und Datenbank)
   WAMO_WERKSTATT_HERKUNFT (https://192.168.178.136:55445), WAMO_WERKSTATT_ADMINS (/etc/wamo-werkstatt/admins)
-  WAMO_WERKSTATT_DATEN (/var/lib/wamo-werkstatt), WAMO_WERKSTATT_WISSEN_BASIS (4120), WAMO_WERKSTATT_MARKEN (feste Liste)
+  WAMO_WERKSTATT_DATEN (/var/lib/wamo-werkstatt), WAMO_WERKSTATT_MARKEN (feste Liste)
   WAMO_WERKSTATT_DB_ZUGANG (Pfad der Zugangsdatei; sonst $CREDENTIALS_DIRECTORY/db.zugang, sonst /etc/wamo-werkstatt/db.zugang)
 """
 
@@ -31,8 +31,6 @@ STANDARD_HERKUNFT = "https://192.168.178.136:55445"
 STANDARD_ADMINS = "/etc/wamo-werkstatt/admins"
 STANDARD_DATEN = "/var/lib/wamo-werkstatt"
 STANDARD_ZUGANG = "/etc/wamo-werkstatt/db.zugang"
-STANDARD_WISSEN_BASIS = 4120
-WISSEN_MAX = 6000  # Grenze der Labor-Daten im Kern (voice-core/labor_daten.py, MAX_GESAMT)
 # Journal-Marken, die das Panel zeigen darf. Gespräche, Konten und Geheimnisse liegen in keiner davon (docs/produktdokumentation/betrieb.md).
 STANDARD_MARKEN = (
     "wamo-core", "wamo-labor-dienst", "wamo-labor-geraete", "wamo-labor-loeschen", "wamo-verteilung",
@@ -60,7 +58,6 @@ class Konfig:
     herkunft: str = STANDARD_HERKUNFT
     admins_datei: Path = Path(STANDARD_ADMINS)
     daten_ordner: Path = Path(STANDARD_DATEN)
-    wissen_basis: int = STANDARD_WISSEN_BASIS
     marken: tuple[str, ...] = STANDARD_MARKEN
     zugang_datei: Path = Path(STANDARD_ZUGANG)
 
@@ -152,11 +149,8 @@ def aus_umgebung(env: Mapping[str, str] | None = None) -> Konfig:
     aussteller = (env.get("WAMO_WERKSTATT_ISS") or "").strip().rstrip("/") or f"{url}/auth/v1"
     zielgruppe = (env.get("WAMO_WERKSTATT_AUD") or "").strip() or "authenticated"
     host = (env.get("WAMO_WERKSTATT_HOST") or "127.0.0.1").strip()
-    if host != "localhost":
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            raise KonfigFehler("WAMO_WERKSTATT_HOST: erwartet eine IP-Adresse") from None
+    if not _loopback(host):  # der Dienst liest Token unverschlüsselt: er lauscht nur auf Loopback, davor steht Caddy mit TLS
+        raise KonfigFehler("WAMO_WERKSTATT_HOST: erlaubt ist nur Loopback (127.0.0.1, ::1 oder localhost)")
     ca = (env.get("WAMO_CA_FILE") or "").strip().strip('"').strip("'") or None
     return Konfig(
         schema=schema, supabase_url=url, jwks_url=jwks, issuer=aussteller, audience=zielgruppe, ca_datei=ca, host=host,
@@ -165,7 +159,6 @@ def aus_umgebung(env: Mapping[str, str] | None = None) -> Konfig:
         herkunft=_url_pruefen((env.get("WAMO_WERKSTATT_HERKUNFT") or STANDARD_HERKUNFT), "WAMO_WERKSTATT_HERKUNFT", nur_ursprung=True),
         admins_datei=Path((env.get("WAMO_WERKSTATT_ADMINS") or STANDARD_ADMINS).strip()),
         daten_ordner=Path((env.get("WAMO_WERKSTATT_DATEN") or STANDARD_DATEN).strip()),
-        wissen_basis=_ganz(env.get("WAMO_WERKSTATT_WISSEN_BASIS"), "WAMO_WERKSTATT_WISSEN_BASIS", STANDARD_WISSEN_BASIS, 0, WISSEN_MAX),
         marken=_marken(env.get("WAMO_WERKSTATT_MARKEN")),
         zugang_datei=zugang_pfad(env),
     )

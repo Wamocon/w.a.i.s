@@ -3,13 +3,14 @@
 Eine Karte ist ein Use Case des Labors. Ihre Nummer besteht aus dem Buchstaben der Gruppe und einer Zahl (W1, J12). Die Zahl vergibt
 der Dienst: höchste Zahl der Gruppe plus eins, höchstens 99.
 
-Zeichenbudget: Der Kern lädt die Wissenstexte der aktiven Version zusammen mit den Dateien der Labor-Daten (BASIS_ZEICHEN, Umgebung
-WAMO_WERKSTATT_WISSEN_BASIS) und lehnt mehr als 6000 Zeichen ab. Die Prüfung hier warnt vorher: BASIS plus die Summe aller Wissenstexte
-(Wissen "Eigener Text") darf 6000 nicht übersteigen, höchstens 20 Karten tragen einen eigenen Text.
+Katalogbudget: Die Summe aller Wissenstexte (Wissen "Eigener Text") darf KATALOG_BUDGET_ZEICHEN (2000) nicht übersteigen, je Karte höchstens 900
+Zeichen, höchstens 20 Karten tragen einen eigenen Text. Es ist ein eigenes Budget des Katalogs: Die Dateien der Labor-Daten mit ihren 6000
+Zeichen zählen nicht mit.
 
-Anweisungen an das Modell: Nur der Wissenstext erreicht das Modell (als Daten, nie als Anweisung). Aufgabe und Erwartung sind die
-Sprechprobe und die Messlatte für den Gast, sie dürfen auch Sätze wie "Ignorier deine Regeln" enthalten, denn genau das wird geprüft.
-Im Wissenstext lehnt die Prüfung Muster ab, die wie eine Anweisung an das Modell aussehen (Heuristik, die zweite Linie ist der Kern).
+Prüfregeln für Wissenstexte: dieselben wie im Kern (wissen_regeln.py): Zeichen, Markup nach NFKC, Rollenzeilen, unsichtbare Zeichen, mit
+denselben Gründen. Zusätzlich eine Heuristik gegen Anweisungen an das Modell. Nur der Wissenstext erreicht das Modell (als Daten, nie als
+Anweisung). Aufgabe und Erwartung sind die Sprechprobe und die Messlatte für den Gast, sie dürfen auch Sätze wie "Ignorier deine Regeln"
+enthalten, denn genau das wird geprüft.
 """
 
 from __future__ import annotations
@@ -17,31 +18,32 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from collections.abc import Mapping
 from typing import Any
 
 from .eingabe import ganzzahl_lesen, text_lesen
 from .fehler import ungueltig
+from .wissen_regeln import KATALOG_BUDGET_ZEICHEN, MAX_EINTRAEGE, MAX_TEXT, text_grund
 
 GRUPPEN = {"W": "Wissen", "A": "Anforderungen", "J": "Jira", "M": "Mail", "S": "Sicherheit", "G": "Gespräch", "E": "Eigene Gruppe"}
 WISSEN = ("keine", "Glossar", "ISTQB-Basis", "Eigener Text")
 WERKZEUGE = ("Jira", "Mail", "Canvas", "Websuche")
 KARTE_ID_RE = re.compile(r"^[A-Z][0-9]{1,2}$")
 ZAHL_MAX = 99
-WISSEN_MAX = 6000
-WISSENSTEXT_MAX = 900
-EIGENE_TEXTE_MAX = 20
+WISSENSTEXT_MAX = MAX_TEXT
+EIGENE_TEXTE_MAX = MAX_EINTRAEGE
 STAND_ENTWURF, STAND_VEROEFFENTLICHT = "entwurf", "veroeffentlicht"
 FELDER_STAND = ("id", "gruppe", "titel", "aufgabe", "erwartung", "fehler", "lernziel", "wissen", "wissenstext", "werkzeuge", "dauer_min", "stand")
 AKTION_VEROEFFENTLICHEN = "karten_veroeffentlichen"
 
-# Heuristik gegen Anweisungen an das Modell im Wissenstext (Deutsch und Englisch, ohne Beachtung der Groß- und Kleinschreibung)
+# Heuristik gegen Anweisungen an das Modell im Wissenstext (Deutsch und Englisch, nach NFKC, ohne Beachtung der Groß- und Kleinschreibung).
+# Markup und Rollenzeilen prüft wissen_regeln.py wie der Kern; maßgeblich bleibt die zweite Linie im Kern.
 _ANWEISUNG = re.compile(
-    r"ignorier\w*|vergiss\s+(alle|deine|die|das)\b|du\s+bist\s+(jetzt|nun|ab)\b|neue\s+(regeln?|anweisung\w*)|"
-    r"(antworte|reagiere|handle|sprich)\s+(nur|immer|ab)\b|system\s*-?\s*prompt|"
+    r"ignorier\w*|missacht\w*|vergiss\s+(alle\w*|deine\w*|die|das|jede\w*)|du\s+bist\s+(jetzt|nun|ab|ein\w*)\b|neue\s+(regeln?|anweisung\w*)|"
+    r"(antworte|reagiere|handle|sprich)\w*\s+(nur|immer|ab)\b|ab\s+jetzt\s+(antwort|sag|handl|reagier)\w*|system\s*-?\s*prompt|"
     r"ignore\s+(all|any|the|previous|prior|your)\b|disregard\b|forget\s+(all|your|the|previous)\b|you\s+are\s+now\b|"
-    r"act\s+as\b|pretend\b|jailbreak|"
-    r"<[^>]{0,80}>|\[/?(inst|system)\]|^\s*(system|assistant|human|user|developer|ai)\s*:",
+    r"act\s+as\b|pretend\b|jailbreak|^[ \t]*(?:system|user|developer|ai)[ \t]*:",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -67,12 +69,20 @@ def naechste_id(buchstabe: str, vorhandene: list[str]) -> str | None:
     return f"{buchstabe}{hoechste + 1}" if hoechste < ZAHL_MAX else None
 
 
+def _wissenstext_lesen(roh: object) -> str | None:
+    """Der Wissenstext: erst die Regeln des Kerns auf dem Rohtext (Markup und Rollenzeilen über Zeilenumbrüche hinweg), dann Zeilenumbrüche
+    zu Leerzeichen und die Längenprüfung am gespeicherten Text."""
+    if isinstance(roh, str) and roh.strip() and (grund := text_grund(roh, laenge=False)) is not None:
+        raise ungueltig(f"Der Wissenstext wird nicht angenommen ({grund}).")
+    return text_lesen(roh, "Der Wissenstext", maximum=WISSENSTEXT_MAX)
+
+
 def karte_felder(daten: Mapping[str, Any]) -> dict[str, Any]:
     """Die Felder einer Karte, die die Person ändert (ohne Gruppe und Nummer). Unbekannte Felder werden ignoriert."""
     wissen = daten.get("wissen", "keine")
     if wissen not in WISSEN:
         raise ungueltig("Die Art des Wissens ist unbekannt.")
-    wissenstext = text_lesen(daten.get("wissenstext"), "Der Wissenstext", maximum=WISSENSTEXT_MAX) if wissen == "Eigener Text" else None
+    wissenstext = _wissenstext_lesen(daten.get("wissenstext")) if wissen == "Eigener Text" else None
     if wissen == "Eigener Text" and wissenstext is None:
         raise ungueltig("Beim Wissen \"Eigener Text\" fehlt der Wissenstext.")
     roh = daten.get("werkzeuge", [])
@@ -100,33 +110,46 @@ def karte_ausgabe(zeile: Mapping[str, Any]) -> dict[str, Any]:
     return aus
 
 
-def zeichen(karten: list[Mapping[str, Any]], basis: int) -> int:
-    return basis + sum(len(k.get("wissenstext") or "") for k in karten if k.get("wissen") == "Eigener Text")
+def eigene_texte(karten: list[Mapping[str, Any]]) -> list[str]:
+    return [k.get("wissenstext") or "" for k in karten if k.get("wissen") == "Eigener Text"]
 
 
-def pruefen(karten: list[Mapping[str, Any]], basis: int) -> tuple[list[str], int]:
+def zeichen(karten: list[Mapping[str, Any]]) -> int:
+    """Summe aller Wissenstexte (das Katalogbudget wird daran gemessen)."""
+    return sum(len(t) for t in eigene_texte(karten))
+
+
+def pruefen(karten: list[Mapping[str, Any]]) -> tuple[list[str], int]:
     """Probleme (Sätze ohne Inhalte der Texte) und Zeichenzahl des Katalogs. ok heißt: keine Probleme."""
     probleme: list[str] = []
-    entwuerfe = [k["id"] for k in karten if k.get("stand") == STAND_ENTWURF]
-    if not entwuerfe:
+    if not any(k.get("stand") == STAND_ENTWURF for k in karten):
         probleme.append("Es gibt keine Entwürfe zum Veröffentlichen.")
     for k in sorted(karten, key=lambda x: sortierschluessel(x["id"])):
         kid = k["id"]
         if not (k.get("titel") and k.get("aufgabe") and k.get("erwartung")):
             probleme.append(f"Karte {kid}: Titel, Aufgabe und erwartetes Ergebnis sind Pflicht.")
-        if k.get("wissen") == "Eigener Text" and not k.get("wissenstext"):
-            probleme.append(f"Karte {kid}: Beim Wissen \"Eigener Text\" fehlt der Wissenstext.")
         if any(w not in WERKZEUGE for w in k.get("werkzeuge") or []):
             probleme.append(f"Karte {kid}: Ein Werkzeug ist nicht erlaubt.")
-        if k.get("wissen") == "Eigener Text" and _ANWEISUNG.search(k.get("wissenstext") or ""):
-            probleme.append(f"Karte {kid}: Der Wissenstext enthält etwas, das wie eine Anweisung an das Modell aussieht.")
-    eigene = sum(1 for k in karten if k.get("wissen") == "Eigener Text")
+        if k.get("wissen") == "Eigener Text":
+            probleme.extend(_wissenstext_probleme(kid, k.get("wissenstext")))
+    eigene = len(eigene_texte(karten))
     if eigene > EIGENE_TEXTE_MAX:
         probleme.append(f"Zu viele eigene Wissenstexte: {eigene} von höchstens {EIGENE_TEXTE_MAX}.")
-    gesamt = zeichen(karten, basis)
-    if gesamt > WISSEN_MAX:
-        probleme.append(f"Das Zeichenbudget ist überschritten: {gesamt} von {WISSEN_MAX}.")
+    gesamt = zeichen(karten)
+    if gesamt > KATALOG_BUDGET_ZEICHEN:
+        probleme.append(f"Das Katalogbudget ist überschritten: {gesamt} von {KATALOG_BUDGET_ZEICHEN} Zeichen.")
     return probleme, gesamt
+
+
+def _wissenstext_probleme(kid: str, text: object) -> list[str]:
+    if not text:
+        return [f"Karte {kid}: Beim Wissen \"Eigener Text\" fehlt der Wissenstext."]
+    probleme = []
+    if (grund := text_grund(text)) is not None:
+        probleme.append(f"Karte {kid}: Der Wissenstext wird nicht angenommen ({grund}).")
+    elif _ANWEISUNG.search(unicodedata.normalize("NFKC", text)):
+        probleme.append(f"Karte {kid}: Der Wissenstext enthält etwas, das wie eine Anweisung an das Modell aussieht.")
+    return probleme
 
 
 def fingerabdruck(karten: list[Mapping[str, Any]]) -> str:

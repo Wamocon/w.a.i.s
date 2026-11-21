@@ -236,11 +236,11 @@ class AttrappeDB:
                                    "wissen_zeichen": zeichen, "karten": copy.deepcopy(karten), "aktiv": True})
         return self._version
 
-    async def entwuerfe_veroeffentlichen(self):
+    async def entwuerfe_veroeffentlichen(self, ids):
         self._pruefen()
         n = 0
         for k in self.karten_tab.values():
-            if k["stand"] == "entwurf":
+            if k["stand"] == "entwurf" and k["id"] in ids:
                 k["stand"] = "veroeffentlicht"
                 n += 1
         return n

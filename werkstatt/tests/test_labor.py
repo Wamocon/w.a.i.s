@@ -160,7 +160,7 @@ def test_checkliste(client, db):
 
 @pytest.mark.parametrize("eingabe", [{}, {"titel": ""}, {"titel": "   "}, {"titel": "x" * 121}, {"titel": "ok", "quelle": "q" * 81},
                                      {"titel": "ok", "faellig": "bald"}, {"titel": 5}, {"titel": "Punkt\x00mit Nullbyte"},
-                                     {"titel": "Punkt‮bidi"}, {"titel": "ok", "quelle": ["x"]}])
+                                     {"titel": "Punkt" + chr(0x202E) + "bidi"}, {"titel": "ok", "quelle": ["x"]}])
 def test_checkliste_ungueltig(client, eingabe):
     t = neu(client)
     assert client.post(f"{B}/{t['id']}/checkliste", json=eingabe, headers=kopf()).status_code == 422
@@ -215,7 +215,7 @@ def test_buchung_fehlt_dann_gilt_nichts(client, db):
 def test_eingabe_helfer():
     assert text_lesen("  a \n b\t c ", "X", maximum=10) == "a b c"
     assert text_lesen("   ", "X", maximum=10) is None and text_lesen(None, "X", maximum=10) is None
-    for falsch in (5, "x" * 11, "a\x00", "a​b", "a", "a b\x1f" + "\x85"[:0] + "\x07"):
+    for falsch in (5, "x" * 11, "a\x00", "a" + chr(0x200B) + "b", "a" + chr(0xE000) + "", "a" + chr(0x2028) + "b\x1f" + "\x85"[:0] + "\x07"):
         with pytest.raises(WerkstattFehler):
             text_lesen(falsch, "X", maximum=10)
     with pytest.raises(WerkstattFehler):

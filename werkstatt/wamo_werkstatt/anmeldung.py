@@ -77,6 +77,54 @@ class JwksQuelle:
         self._versuch = jetzt
         try:
             roh = await self._abrufen()
+            liste = json.loads(roh).get("keys")
+        except QuelleNichtErreichbar:
+            return  # der alte Satz bleibt
+        except (ValueError, AttributeError, TypeError):
+            return  # kein brauchbarer Satz: der alte bleibt
+        if not isinstance(liste, list):
+            return
+        neu: dict[str, object] = {}
+        for k in liste:
+            if (isinstance(k, dict) and k.get("kty") == "EC" and k.get("crv") == "P-256" and isinstance(k.get("kid"), str)
+                    and k.get("use", "sig") == "sig"):
+                try:
+                    neu[k["kid"]] = jwt.algorithms.ECAlgorithm.from_jwk(json.dumps(k))
+                except (ValueError, jwt.PyJWTError, TypeError):
+                    continue  # ein kaputter Schlüssel verwirft nicht den ganzen Satz
+        # Ein gültiger, aber leerer Satz heißt: GoTrue hat alle Schlüssel zurückgezogen. Der alte Satz gilt dann nicht weiter.
+        self._schluessel, self._geholt = neu, jetzt
+
+    async def schluessel(self, kid: str | None) -> object:
+        """Öffentlicher Schlüssel zu dieser Kennung. Wirft KeyError (unbekannt) oder QuelleNichtErreichbar."""
+
+
+class JwksQuelle:
+    """Schlüsselsatz von GoTrue (JWKS), nur P-256-Schlüssel zum Signieren."""
+
+    def __init__(self, url: str, ssl_context: ssl.SSLContext | None = None, *, transport: httpx.AsyncBaseTransport | None = None,
+                 mono: Callable[[], float] = time.monotonic):
+        self._url, self._ssl, self._transport, self._mono = url, ssl_context, transport, mono
+        self._schluessel: dict[str, object] = {}
+        self._geholt: float | None = None
+        self._versuch: float | None = None
+        self._sperre = asyncio.Lock()
+
+    async def _abrufen(self) -> bytes:
+        verify: ssl.SSLContext | bool = self._ssl if self._ssl is not None else True
+        try:
+            async with httpx.AsyncClient(timeout=5, verify=verify, transport=self._transport, follow_redirects=False, trust_env=False) as client:
+                antwort = await client.get(self._url, headers={"Accept": "application/json"})
+        except (httpx.HTTPError, ssl.SSLError, OSError) as e:
+            raise QuelleNichtErreichbar(type(e).__name__) from None
+        if antwort.status_code != 200 or len(antwort.content) > JWKS_MAX_BYTES:
+            raise QuelleNichtErreichbar("Antwort")
+        return antwort.content
+
+    async def _laden(self, jetzt: float) -> None:
+        self._versuch = jetzt
+        try:
+            roh = await self._abrufen()
             neu: dict[str, object] = {}
             for k in json.loads(roh).get("keys", []):
                 if (isinstance(k, dict) and k.get("kty") == "EC" and k.get("crv") == "P-256" and isinstance(k.get("kid"), str)

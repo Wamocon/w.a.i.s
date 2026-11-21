@@ -33,7 +33,7 @@ def karte_holen(client, tok=None):
 def test_pruefen_ok(client, katalog):
     r = client.post(f"{B}/pruefen", headers=kopf())
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "probleme": [], "zeichen": 4120 + 70 + 22, "entwuerfe": ["J1", "J2"]}
+    assert r.json() == {"ok": True, "probleme": [], "zeichen": 70 + 22, "grenze": 2000, "entwuerfe": ["J1", "J2"]}
 
 
 def test_pruefen_findet_probleme(client, katalog):
@@ -45,7 +45,7 @@ def test_pruefen_findet_probleme(client, katalog):
     katalog.karten_tab["J2"]["wissenstext"] = "x" * 900
     katalog.karten_tab["W1"]["wissenstext"] = "y" * 900
     katalog.karten_tab["J1"].update(werkzeuge=[], wissen="Eigener Text", wissenstext="z" * 900)
-    assert any("Zeichenbudget" in p for p in client.post(f"{B}/pruefen", headers=kopf()).json()["probleme"])
+    assert any("Katalogbudget" in p for p in client.post(f"{B}/pruefen", headers=kopf()).json()["probleme"])
 
 
 def test_pruefen_ohne_entwuerfe(client, db):
@@ -56,7 +56,7 @@ def test_pruefen_ohne_entwuerfe(client, db):
 def test_karte_anlegen(client, katalog):
     karte = karte_holen(client)
     assert karte["aenderungen"] == 2 and karte["karten"] == ["J1", "J2"] and karte["basis_version"] is None
-    assert karte["gilt_bis"] and karte["zeichen"] == 4212
+    assert karte["gilt_bis"] and karte["zeichen"] == 92
     gespeichert = katalog.freigaben[karte["id"]]
     assert gespeichert["aktion"] == "karten_veroeffentlichen" and gespeichert["admin"] == k.ADMIN
     assert set(gespeichert["ziel"]) == {"aenderungen", "karten", "stand"} and len(gespeichert["ziel"]["stand"]) == 64
@@ -77,15 +77,15 @@ def test_karte_nur_bei_bestandener_pruefung(client, db):
 def test_ausfuehren(client, katalog):
     karte = karte_holen(client)
     r = client.post(f"{B}/karte/{karte['id']}/ausfuehren", headers=kopf())
-    assert r.status_code == 200 and r.json() == {"version": 1, "zeichen": 4212}
+    assert r.status_code == 200 and r.json() == {"version": 1, "zeichen": 92}
     assert [v["aktiv"] for v in katalog.versionen_tab] == [True] and katalog.versionen_tab[0]["anzahl_aenderungen"] == 2
-    assert katalog.versionen_tab[0]["wissen_zeichen"] == 4212
+    assert katalog.versionen_tab[0]["wissen_zeichen"] == 92
     assert [c["id"] for c in katalog.versionen_tab[0]["karten"]] == ["J1", "J2", "W1"]
     assert all(c["stand"] == "veroeffentlicht" for c in katalog.karten_tab.values())
     assert katalog.freigaben[karte["id"]]["ausgefuehrt_at"] is not None
     aktion = katalog.actions[-1]
     assert aktion["tool"] == "werkstatt_karten_veroeffentlichen" and aktion["risk"] == "critical" and aktion["user_id"] == k.ADMIN
-    assert aktion["params"] == {"karte": karte["id"], "version": 1, "aenderungen": 2} and aktion["result"] == {"ok": True, "version": 1, "zeichen": 4212}
+    assert aktion["params"] == {"karte": karte["id"], "version": 1, "aenderungen": 2} and aktion["result"] == {"ok": True, "version": 1, "zeichen": 92}
     assert "Eigener Text" not in str(aktion) and "Bug anlegen" not in str(aktion)
 
 
@@ -181,7 +181,7 @@ def test_pruefung_bei_der_ausfuehrung_wird_wiederholt(client, katalog):
     # der Fingerabdruck der Karte passt zum neuen Stand, nur das Budget ist gerissen
     katalog.freigaben[karte["id"]]["ziel"]["stand"] = fingerabdruck(list(katalog.karten_tab.values()))
     r = client.post(f"{B}/karte/{karte['id']}/ausfuehren", headers=kopf())
-    assert r.status_code == 422 and "Zeichenbudget" in r.json()["text"] and katalog.versionen_tab == []
+    assert r.status_code == 422 and "Katalogbudget" in r.json()["text"] and katalog.versionen_tab == []
 
 
 def test_alles_oder_nichts_bei_fehler_in_der_buchung(client, katalog):
@@ -222,7 +222,7 @@ def test_journal_der_veroeffentlichung_ohne_texte(client, katalog, caplog):
     client.post(f"{B}/karte/{karte['id']}/ausfuehren", headers=kopf())
     client.post(f"{B}/karte/{karte['id']}/ausfuehren", headers=kopf())
     text = " ".join(r.getMessage() for r in caplog.records if r.name == "wamo-werkstatt")
-    assert "veroeffentlicht admin=11111111 version=1 aenderungen=2 zeichen=4212" in text
+    assert "veroeffentlicht admin=11111111 version=1 aenderungen=2 zeichen=92" in text
     assert "veroeffentlichen_abgelehnt admin=11111111 code=karte_verbraucht" in text
     assert "Eigener Text" not in text and MARKER not in text
 

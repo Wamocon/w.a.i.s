@@ -242,8 +242,9 @@ class _Ops:
             f"insert into {self._t('labor_karten_versionen')} (erstellt_von, anzahl_aenderungen, wissen_zeichen, karten, aktiv) "
             "values ($1::uuid, $2, $3, $4::text::jsonb, true) returning version", admin, aenderungen, zeichen, _json(karten))
 
-    async def entwuerfe_veroeffentlichen(self) -> int:
-        return _betroffen(await self._c.execute(f"update {self._t('labor_karten')} set stand = 'veroeffentlicht' where stand = 'entwurf'"))
+    async def entwuerfe_veroeffentlichen(self, ids: list[str]) -> int:
+        return _betroffen(await self._c.execute(
+            f"update {self._t('labor_karten')} set stand = 'veroeffentlicht' where stand = 'entwurf' and id = any($1::text[])", list(ids)))
 
     # Prüfspur und Pflege
     async def aktion_buchen(self, user_id: str, tool: str, risiko: str, params: Mapping[str, Any], ergebnis: Mapping[str, Any]) -> None:
