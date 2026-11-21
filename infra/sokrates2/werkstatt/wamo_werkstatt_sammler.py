@@ -366,12 +366,19 @@ def lauf_einmal(daten: str, caddy_dir: str, ca: str, ohne_netz: bool, jetzt: flo
             os.chown(ordner, 0, gid)
             os.chmod(ordner, 0o750)
     sperre = os.open(os.path.join(zustand, "sammler.lock"), os.O_WRONLY | os.O_CREAT, 0o600)
-    if fcntl is not None:
-        try:
-            fcntl.flock(sperre, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            print("Ein anderer Lauf des Sammlers läuft noch, nichts zu tun.")
-            return 0
+    try:
+        if fcntl is not None:
+            try:
+                fcntl.flock(sperre, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                print("Ein anderer Lauf des Sammlers läuft noch, nichts zu tun.")
+                return 0
+        return _sammeln(daten, protokolle, zustand, caddy_dir, ca, ohne_netz, jetzt, gid)
+    finally:
+        os.close(sperre)
+
+
+def _sammeln(daten: str, protokolle: str, zustand: str, caddy_dir: str, ca: str, ohne_netz: bool, jetzt: float, gid: int | None) -> int:
     betrieb = betrieb_bauen(jetzt, caddy_dir, ca, ohne_netz)
     if not betrieb_pruefen(betrieb):
         print("Betriebsstand entspricht nicht dem Schema, nichts geschrieben.", file=sys.stderr)
