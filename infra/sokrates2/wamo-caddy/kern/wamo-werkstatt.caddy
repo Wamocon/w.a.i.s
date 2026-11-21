@@ -1,0 +1,70 @@
+# W.A.I.S. Werkstatt (Admin-Panel, Dienst wamo-werkstatt auf Sokrates-2) über HTTPS 55448. Installiert durch wamo-werkstatt-einrichten.sh nach
+# <wamo-caddy>/etc/kern/wamo-werkstatt.caddy (das Caddyfile lädt die Datei mit "import /etc/caddy/kern/*.caddy"). Rückweg: wamo-werkstatt-rueckweg.sh
+# (Datei weg, caddy reload). Die Datei ändert keine bestehende Site: Sie legt nur diese eine Site und das Schnipsel werkstatt_koepfe an.
+#
+# Eigene Herkunft (Port 55448), getrennt von der Oberfläche (55445). Die Seite der Oberfläche ruft die Schnittstelle über CORS auf; die Köpfe dafür setzt
+# der Dienst selbst (nur die Herkunft der Oberfläche, Umgebung WAMO_WERKSTATT_HERKUNFT), Caddy überschreibt keinen Kopf des Dienstes. Nur die Antworten, die
+# Caddy selbst erzeugt (404, 405, Fehler beim Weiterleiten), bekommen die Schutzköpfe aus dem Schnipsel werkstatt_koepfe und einen kurzen deutschen Text.
+#
+# Der Dienst lauscht nur auf 127.0.0.1:18095. Der Container wamo-caddy erreicht Loopback des Hosts nicht, deshalb leitet die systemd-Brücke
+# wamo-werkstatt-bruecke.socket den Unix-Socket /run/wamo-werkstatt/werkstatt.sock an diesen Port weiter (Ordner 2750 root:wamocon, von
+# wamo-caddy nur lesend eingebunden, wie bei /run/wamo-freigabe). Wer den Port aus dem LAN erreicht, bestimmt die Firewall: 55448 steht in LAN_PORTS_ADMIN
+# (Kette WAMO-FW-ADMIN, Quellen aus /etc/wamo/admin-quellen). Wer die Schnittstelle benutzen darf, bestimmt allein der Dienst (Token, zweiter Faktor,
+# Profil, Erlaubnisliste); Caddy prüft davon nichts.
+#
+# Was Caddy durchlässt (alles andere ist 404, die Liste ist eine Positivliste mit genauem Muster ohne Punkt, Prozentzeichen und Schrägstrich am Ende):
+#   /werkstatt/api/<Teil>[/<Teil> ...]   Teile aus A-Z, a-z, 0-9, Unterstrich und Bindestrich (Kennungen der Karten wie A12, UUIDs, Zahlen)
+# Erlaubte Methoden: GET, HEAD, POST, PUT, PATCH, DELETE und OPTIONS (die Vorabfrage von CORS beantwortet der Dienst); jede andere Methode ist 405.
+# Anfragen sind höchstens 256 KB groß (die größte echte Anfrage ist ein Satz Kartentexte, weit darunter).
+# Statische Prüfung: voice-core/test_werkstatt_skripte.py, am Server infra/sokrates2/wamo_werkstatt_rauchtest.py.
+
+# Schutzköpfe für Antworten, die Caddy selbst erzeugt
+(werkstatt_koepfe) {
+	header Cache-Control "no-store"
+	header X-Content-Type-Options "nosniff"
+	header Referrer-Policy "no-referrer"
+	header X-Frame-Options "DENY"
+	header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+	header Content-Type "text/plain; charset=utf-8"
+}
+
+https://192.168.178.136:55448, https://sokrates2:55448, https://spark-651f.local:55448 {
+	tls internal
+	request_body {
+		max_size 256KB
+	}
+
+	@methode {
+		not method GET HEAD POST PUT PATCH DELETE OPTIONS
+	}
+	@api_pfad {
+		path_regexp ^/werkstatt/api(/[A-Za-z0-9_-]+)+$
+	}
+
+	handle @methode {
+		import werkstatt_koepfe
+		header Allow "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+		respond "Diese Methode ist nicht erlaubt." 405
+	}
+
+	handle @api_pfad {
+		reverse_proxy unix//run/wamo-werkstatt/werkstatt.sock {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	# alles andere
+	handle {
+		import werkstatt_koepfe
+		respond "Nicht gefunden." 404
+	}
+
+	# Fehler von Caddy selbst (Dienst nicht erreichbar, Zeitüberschreitung, zu große Anfrage)
+	handle_errors {
+		import werkstatt_koepfe
+		respond "Die Anfrage konnte nicht verarbeitet werden oder die Werkstatt ist gerade nicht erreichbar. Bitte einen Moment warten und es erneut versuchen." {http.error.status_code}
+	}
+}

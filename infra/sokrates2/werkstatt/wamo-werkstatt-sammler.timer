@@ -1,0 +1,14 @@
+# W.A.I.S. Werkstatt: Betriebsstand und Protokolle jede Minute sammeln (ruft wamo-werkstatt-sammler.service auf). Nach dem Systemstart 45 Sekunden Wartezeit,
+# damit Docker, wamo-caddy und das Journal oben sind. Installiert durch wamo-werkstatt-einrichten.sh.
+[Unit]
+Description=W.A.I.S. Werkstatt: Betriebsstand jede Minute sammeln
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=1min
+AccuracySec=1s
+Persistent=no
+Unit=wamo-werkstatt-sammler.service
+
+[Install]
+WantedBy=timers.target

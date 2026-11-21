@@ -6,6 +6,7 @@
 #   https://192.168.178.136:55445  ->  WAMO-Oberfläche (Container wamo-ui über das interne Netz wamo-ui-netz)
 #   https://192.168.178.136:55446  ->  Remote-Desktop-Gateway (Container wamo-rd-web über das interne Netz wamo-rd-netz)
 #   https://192.168.178.136:55447  ->  Labor-Dienst, Test-Jira des Testlabors (Container wamo-labor-dienst über das interne Netz wamo-labor-netz)
+#   https://192.168.178.136:55448  ->  Werkstatt, Admin-Panel (Dienst wamo-werkstatt über den Unix-Socket /run/wamo-werkstatt/werkstatt.sock)
 #
 # Der Container läuft als wamocon (1000:1000) ohne Linux-Capabilities und mit schreibgeschütztem Dateisystem.
 # Schreiben darf er nur in data/ (Serverzertifikate) und config/. Unter /ca sieht er nur Root-Zertifikat und
@@ -39,6 +40,8 @@ services:
       - "0.0.0.0:55446:55446"
       # Labor-Dienst, Test-Jira des Testlabors (wamo-labor-einrichten.sh); ohne Site-Datei lauscht Caddy hier nicht
       - "0.0.0.0:55447:55447"
+      # Werkstatt (Admin-Panel, wamo-werkstatt-einrichten.sh); ohne Site-Datei lauscht Caddy hier nicht
+      - "0.0.0.0:55448:55448"
     networks:
       default: {}
       ui: {}
@@ -62,6 +65,9 @@ services:
       # Socket des Freigabe-Dienstes (Route /wamo/release/<id>/freigeben auf 55444), nur lesend (Ordner 2750 wamo-anker:wamocon, angelegt per
       # tmpfiles.d vor Docker; der Container läuft als 1000:1000 und erreicht den Socket über die Gruppe wamocon)
       - /run/wamo-freigabe:/run/wamo-freigabe:ro
+      # Brücke zur Werkstatt (Site wamo-werkstatt.caddy, Socket werkstatt.sock), nur lesend (Ordner 2750 root:wamocon, angelegt per tmpfiles.d vor
+      # Docker; der Container läuft als 1000:1000 und erreicht den Socket über die Gruppe wamocon). Der Ordner bleibt auch nach dem Rückweg der Werkstatt stehen.
+      - /run/wamo-werkstatt:/run/wamo-werkstatt:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s

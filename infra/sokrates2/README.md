@@ -1909,6 +1909,87 @@ Kern-Release mit `verteilung_api.py` ist die Ablage wirkungslos; sie darf liegen
 Tests: `voice-core/test_verteilung_skript.py` (Probelauf mit `WAMO_VERTEILUNG_WURZEL`, auch unter Git Bash), `scripts/test_wamo_installer_sokrates2.py`,
 `voice-core/test_verteilung_api.py`. Echte Besitzer, die Gruppe `wamo-core` und das Lesen durch den Kern sind nur am Server prüfbar.
 
+## 23. Werkstatt (Admin-Panel, Stufe 1, Betrieb, vorbereitet am 20.11.2026, nicht eingerichtet)
+
+Die Werkstatt ist das Admin-Panel von W.A.I.S.: Dashboards, Protokolle, Labor-Planer und Kartenkatalog mit Use-Case-Editor (Konzept `docs/adminpanel-werkstatt.md`, Bauplan
+`docs/adminpanel-bauplan.md`). Der Dienst selbst liegt im Repo unter `werkstatt/` (Paket `wamo-werkstatt`, FastAPI), die Tabellen und Funktionen in der Migration `0031_werkstatt`.
+Dieser Abschnitt beschreibt nur den Betrieb auf Sokrates-2. Alles läuft als root (sudo) nach dem Muster des Freigabe-Dienstes (Abschnitt 15) und des Labor-Dienstes (Abschnitt 19):
+feste Namen, Probelauf mit `--trocken`, Sicherung vor jeder Änderung, Rückweg, Rauchtest.
+
+```text
+Admin im Browser ──HTTPS 55448──> wamo-caddy ──Unix-Socket /run/wamo-werkstatt/werkstatt.sock──> wamo-werkstatt-bruecke.socket
+                                                                                                   │ (systemd-socket-proxyd, nur Bytes)
+                                                                                                   v
+                                                      wamo-werkstatt.service (127.0.0.1:18095) ──Datenbank (55322), Schlüsselsatz (55443)
+Sammler (root, jede Minute) ──schreibt──> /var/lib/wamo-werkstatt/betrieb.json und protokolle/<marke>.jsonl ──gelesen vom Dienst
+```
+
+Der Dienst lauscht nur auf `127.0.0.1:18095`. Der Container `wamo-caddy` erreicht Loopback des Hosts nicht, darum nimmt `wamo-werkstatt-bruecke.socket` die Verbindung von Caddy an
+(Ordner `/run/wamo-werkstatt`, 2750 `root:wamocon`, in `wamo-caddy` nur lesend eingebunden, der Socket darin gehört `wamo-werkstatt` wie `/run/wamo-freigabe`) und reicht sie an den Port weiter. Wer die Schnittstelle
+benutzen darf, entscheidet allein der Dienst: Token (ES256 über den Schlüsselsatz von GoTrue), `aal2`, aktives Profil mit Rolle `admin` ohne Laborart und die Erlaubnisliste
+`/etc/wamo-werkstatt/admins` (eine `user_id` je Zeile). Wer den Port aus dem LAN erreicht, entscheidet die Firewall: 55448 steht in `LAN_PORTS_ADMIN` (Kette `WAMO-FW-ADMIN`, Quellen aus
+`/etc/wamo/admin-quellen`, Abschnitt 6.1).
+
+| Baustein | Datei |
+| --- | --- |
+| Einrichten (`einrichten`, `status`, `pruefen`, `--trocken`, `--quelle`, `--schema`) | `wamo-werkstatt-einrichten.sh` |
+| Rückweg (`--trocken`, `--entfernen`) | `wamo-werkstatt-rueckweg.sh` |
+| Dienst, Ausgangsregel, Brücke, Sammler (Units und nft) | `werkstatt/wamo-werkstatt.service`, `wamo-werkstatt-ausgang.service` und `.nft`, `wamo-werkstatt-bruecke.socket` und `.service`, `wamo-werkstatt-sammler.service` und `.timer` |
+| Sammler für Betriebsstand und Protokolle | `werkstatt/wamo_werkstatt_sammler.py` |
+| Vorlagen (nur wenn die Datei fehlt) | `werkstatt/werkstatt.env.vorlage`, `werkstatt/admins.vorlage` |
+| Caddy-Site auf 55448 | `wamo-caddy/kern/wamo-werkstatt.caddy` |
+| Port 55448 und Ordner `/run/wamo-werkstatt` | `wamo-caddy/docker-compose.yml` |
+| Login-Rolle und Zugangsdatei | `scripts/wamo_dienst_db.py einrichten werkstatt` (Rolle `wamo_werkstatt_login`, Mitglied der Gruppenrolle `wamo_werkstatt` aus `0031`) |
+| Rauchtest | `wamo_werkstatt_rauchtest.py` |
+| Tests der Skripte, Units, Site, Compose und des Sammlers | `voice-core/test_werkstatt_skripte.py` |
+
+**Einrichten (Reihenfolge, Handgriffe vom Betreiber, nichts davon läuft ohne ihn).**
+
+```bash
+# 1. Datenbank: Migration 0031_werkstatt im Betriebsschema anwenden (Betriebshandbuch, Abschnitt Datenbank-Migrationen), dann die Login-Rolle (vom PC, zeigt kein Passwort)
+python scripts/wamo_dienst_db.py einrichten werkstatt            # legt /etc/wamo-werkstatt/db.zugang (root:root 0600) und wamo-ca.crt an
+# 2. Ablage: Infrastruktur und den Code des Dienstes ins Home von wamocon (nie nach /tmp)
+ssh sokrates2 "rm -rf ~/wamo-infra ~/wamo-werkstatt-quelle" && scp -r infra/sokrates2 sokrates2:wamo-infra && scp -r werkstatt sokrates2:wamo-werkstatt-quelle
+ssh sokrates2 "chmod -R go-w ~/wamo-infra ~/wamo-werkstatt-quelle"
+# 3. nur anzeigen, was geschehen würde, dann einrichten
+ssh sokrates2 "sudo bash ~/wamo-infra/wamo-werkstatt-einrichten.sh einrichten --trocken"
+ssh sokrates2 "sudo bash ~/wamo-infra/wamo-werkstatt-einrichten.sh einrichten"
+ssh sokrates2 "sudo bash ~/wamo-infra/wamo-werkstatt-einrichten.sh status"      # nur Namen und Zustände, nie Werte
+# 4. Erlaubnisliste füllen (eine user_id je Zeile) und den Dienst neu starten
+ssh sokrates2 "sudoedit /etc/wamo-werkstatt/admins && sudo systemctl restart wamo-werkstatt"
+# 5. Rauchtest (mit Token-Dateien, nur für root lesbar und danach gelöscht, auch Teil C)
+ssh sokrates2 "sudo python3 -E -s -B /opt/wamo-werkstatt/app/wamo_werkstatt_rauchtest.py --produktiv"
+```
+
+Das Skript prüft vorab Werkzeuge, `wamo-caddy`, die Quelle (`werkstatt/wamo_werkstatt` und `pyproject.toml`, Syntax, keine Geheimnisdateien, keine Links), die Zugangsdatei (Inhalt wird nie gelesen),
+dass die Migration im Schema angewendet ist (Funktion `werkstatt_labor_stand`), dass `/etc/wamo/admin-quellen` mindestens einen Eintrag hat (sonst Abbruch, weil das ganze Büro-LAN den Port 55448 erreichte und am Labortag Gäste dort sitzen; nur mit `--lan-offen` bewusst anders), dass 55448 und 18095 frei sind oder den eigenen Diensten gehören, dass `systemd-socket-proxyd` da ist und
+(nur wenn sich das Compose von `wamo-caddy` ändert) dass Ruhe herrscht. Dann folgen: Sicherung unter `/var/backups/wamo-werkstatt/<Zeit>/` (ohne `db.zugang`, ohne Erlaubnisliste), Benutzer
+`wamo-werkstatt` (nologin, keine weiteren Gruppen), Ordner und Konfiguration, Programme nach `/opt/wamo-werkstatt/app` (mit `SHA256SUMS`, `ExecStartPre` prüft sie vor jedem Start),
+das venv `/opt/wamo-werkstatt/venv` aus `werkstatt/requirements.txt` (mit `uv pip compile pyproject.toml --generate-hashes` erzeugt; nur Binärpakete, immer mit `--require-hashes --no-deps`, fehlt die Datei oder eine Prüfsumme, bricht das Skript ab; die Import-Probe läuft als `wamo-werkstatt`, nie als root), die Firewall-Regel, Dienst, Brücke und Ausgangsregel (nft-Tabelle `wamo_werkstatt_ausgang`: nur Datenbank 55322 und Schlüsselsatz 55443 im LAN, dazu der Weg der Brücke auf
+`127.0.0.1:18095`), die Caddy-Site (geprüft mit `caddy adapt` in einem Wegwerf-Container ohne Netz, dann `caddy reload`), der Sammler und der Rauchtest.
+
+**Caddy und die Ausfallzeit.** Das Compose von `wamo-caddy` bekommt Port 55448 und den Ordner `/run/wamo-werkstatt`. Beim ersten Einrichten wird `wamo-caddy` deshalb EINMAL neu angelegt: 55443 bis
+55447 sind dann wenige Sekunden weg. Das Skript verlangt vorher Ruhe (keine Sitzung im Kern, keine offene Verbindung an 55443 bis 55448) und prüft danach alle Ports; die Dauer der Pause gibt es
+nicht vorab, sie ist am Server zu messen. Es nimmt dieselbe Sperre wie der Aktualisierer der Betreuer-Geräte (`/run/wamo-labor-geraete/lock`). Bei einem Fehler nimmt es Site und Compose zurück.
+
+**Sammler.** `wamo-werkstatt-sammler.timer` ruft den Sammler jede Minute auf (root). Er schreibt atomar `betrieb.json` (`zeit`, `kern` mit `slot`, `release`, `aktiv`, `oberflaeche` mit `farbe`, `version`,
+`installer`, `kanal`, `labor_dienst`) und je Journal-Marke eine Datei `protokolle/<marke>.jsonl` mit Zeilen `{zeit, marke, stufe, code, zahlen}`, alles `root:wamo-werkstatt 0640`. Rohzeilen gibt
+es nie: Eine Zeile wird nur gelesen, wenn sie vollständig zu einem festen Muster der Liste im Skript passt; aus ihr entsteht nur ein Code aus der festen Liste, eine Stufe und ganze Zahlen. Namen,
+Adressen, E-Mails und Hashes verbraucht das Muster, ausgegeben werden sie nie. Marken: `wais-deploy`, `wamo-job-kern`, `wamo-verteilung`, `wamo-labor-geraete`,
+`wamo-labor-loeschen`. Höchstens 2000 Zeilen und 30 Tage je Marke. Die Marke wählt jedes Konto frei, darum zählen nur Zeilen von root und wamocon (`_UID`, ein Aufruf über sudo läuft als root), je Lauf höchstens 50 neue Zeilen je Code, gleiche Zeilen nur einmal. Konten (`wamo-nutzer`, `wamo-auth`) liest der Sammler nicht. Ein neues Muster ist eine Zeile in `MUSTER` samt Fall in `voice-core/test_werkstatt_skripte.py`.
+
+**Rückweg.** `sudo bash ~/wamo-infra/wamo-werkstatt-rueckweg.sh --trocken`, dann ohne `--trocken`: Sammler, Brücke, Dienst und Ausgangsregel aus, Caddy-Site weg (Reload, dann müssen 55443 bis 55446
+antworten). Mit `--entfernen` zusätzlich Programme, venv, Konfiguration, Units und die Daten des Sammlers. Es bleiben: Port und Ordner im Compose von `wamo-caddy` (ohne Site lauscht Caddy auf 55448 nicht;
+der Ordner `/run/wamo-werkstatt` samt tmpfiles-Eintrag bleibt, sonst könnte `wamo-caddy` nach einem Neustart nicht starten), die Firewall-Regel, der Benutzer, die Sicherungen und die Tabellen der
+Migration (deren `.down.sql` gehört dem Datenbankpaket). Rolle sperren: `python scripts/wamo_dienst_db.py sperren werkstatt`. Danach `wamo_werkstatt_rauchtest.py --nach-rueckweg`.
+
+**Reihenfolge im Ganzen (Ausrollen der Werkstatt).** 1. Datenbank: Migration `0031_werkstatt` in `wamo_dev` und `wamo_test`, dann im Betriebsschema; Login-Rolle mit `scripts/wamo_dienst_db.py einrichten werkstatt`. 2. Dienst, Brücke, Caddy, Firewall-Regel und Sammler mit `wamo-werkstatt-einrichten.sh` (dieser Abschnitt). 3. Oberfläche (blau und grün, Seite `/werkstatt`, die CSP braucht 55448 als Ziel). 4. Kern-Release MIT ausgeschaltetem Schalter `WAMO_LABOR_KARTEN_NACHLADEN` (Standard aus; Modul `voice-core/labor_karten_db.py`, liest nur die Ansichten `labor_karten_aktive_version` und `labor_wissen_aktiv`), Labor-Rauchtest. 5. Erst danach den Schalter über `wamo-core-env` auf `an` setzen, einen weiteren Kern-Release umschalten und mit einer Probekarte prüfen. Fehlt die Migration oder ist der Schalter aus, läuft der Kern unverändert.
+
+**Probelauf und Tests.** `WAMO_WERKSTATT_WURZEL=/pfad/zum/wegwerf/ordner bash wamo-werkstatt-einrichten.sh einrichten --quelle <Ordner>` läuft ohne root, ohne systemd, ohne Benutzer, ohne pip, ohne Docker und
+ohne Firewall (`WAMO_WERKSTATT_CADDY_DIR` und `WAMO_WERKSTATT_PYTHON` lassen sich setzen); `voice-core/test_werkstatt_skripte.py` fährt Probeläufe und prüft Units, Ausgangsregel, Site, Compose,
+Firewall und den Sammler (mit Markerzeilen). Nur am Server prüfbar: root, die Besitzer, die Härtung der Units (`systemd-analyze verify` macht das Skript, ob der Dienst unter `MemoryDenyWriteExecute`
+startet, zeigt der Start), die nft-Tabelle, `systemd-socket-proxyd`, Caddy, die Quellen der Firewall und alle Proben des Rauchtests.
+
 ---
 
 WAMOCON GmbH, Mergenthalerallee 79-81, 65760 Eschborn

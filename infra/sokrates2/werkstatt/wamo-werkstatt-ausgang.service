@@ -1,0 +1,14 @@
+[Unit]
+Description=W.A.I.S. Werkstatt: Ausgangsregel (nur Datenbank und Schlüsselsatz)
+Documentation=file:///opt/wamo-werkstatt/app/wamo-werkstatt-ausgang.nft
+Before=wamo-werkstatt.service wamo-werkstatt-bruecke.service
+AssertPathExists=/etc/wamo-werkstatt-ausgang/regeln.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/wamo-werkstatt-ausgang/regeln.nft
+ExecStop=/usr/sbin/nft delete table inet wamo_werkstatt_ausgang
+
+[Install]
+WantedBy=multi-user.target

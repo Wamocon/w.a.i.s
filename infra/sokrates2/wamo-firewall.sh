@@ -13,9 +13,10 @@
 #                                       Stufe 1 zusätzlich 192.168.178.0/24
 #   Ports 55443, 55444, 55445 (LAN_PORTS)          127.0.0.0/8, 192.168.178.0/24 (55444: HTTPS des Kerns, Phase P3;
 #                                       55445: HTTPS der Oberfläche, Browser-Betrieb)
-#   Ports 55446, 55322, 56543 (LAN_PORTS_ADMIN)    127.0.0.0/8 und die Admin-Quellen (Entscheidung Q13 vom 17.11.2026), Kette WAMO-FW-ADMIN:
+#   Ports 55446, 55322, 56543, 55448 (LAN_PORTS_ADMIN)    127.0.0.0/8 und die Admin-Quellen (Entscheidung Q13 vom 17.11.2026), Kette WAMO-FW-ADMIN:
 #     55446 ist das Remote-Desktop-Gateway wamo-rd (HTTPS über Caddy, docs/remote-desktop.md), 55322 und 56543 sind der Pooler (Session und
-#     Transaktion). Am Labortag sitzen Gäste-Laptops im selben flachen Büronetz, deshalb erreichen diese drei Ports aus dem LAN nur die Quellen
+#     Transaktion), 55448 ist die Werkstatt (Admin-Panel, HTTPS über Caddy, wamo-werkstatt-einrichten.sh). Am Labortag sitzen
+#     Gäste-Laptops im selben flachen Büronetz, deshalb erreichen diese vier Ports aus dem LAN nur die Quellen
 #     aus /etc/wamo/admin-quellen (Format und Prüfung wie bei den Plätzen, siehe unten). Ohne Datei oder mit nur Kommentaren gilt das ganze
 #     Büro-LAN wie vor Q13 (damit auch WireGuard-Clients der Fritzbox); die Vorlage aus wamo-firewall-einrichten.sh hat nur Kommentare und
 #     ändert deshalb nichts. Loopback gilt immer: Der Kern läuft auf dem Server und spricht den Pooler vom Host aus an, solche Pakete laufen
@@ -60,7 +61,7 @@ set -euo pipefail
 CONF="${WAMO_FW_CONF:-/etc/wamo/firewall.conf}"
 HTTP_PORT=55321
 LAN_PORTS="55443 55444 55445"       # API (HTTPS), Kern (HTTPS, wamo-core über Caddy), Oberfläche (HTTPS, wamo-ui über Caddy)
-LAN_PORTS_ADMIN="55446 55322 56543" # Remote-Desktop-Gateway (HTTPS, wamo-rd über Caddy), Pooler Session, Transaktion (Q13)
+LAN_PORTS_ADMIN="55446 55322 56543 55448" # Remote-Desktop-Gateway (HTTPS, wamo-rd über Caddy), Pooler Session, Transaktion (Q13), Werkstatt (HTTPS, Admin-Panel über Caddy)
 NETZ_LOOPBACK="127.0.0.0/8"
 NETZ_CADDY="172.24.0.0/24"          # wamo-caddy_default (fest in infra/sokrates2/wamo-caddy/docker-compose.yml)
 NETZ_DOCKER="172.16.0.0/12"         # alle Docker-Netze, nur zur Erkennung gefälschter Absender

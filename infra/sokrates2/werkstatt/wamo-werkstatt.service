@@ -1,0 +1,83 @@
+# W.A.I.S. Werkstatt (Admin-Panel) auf Sokrates-2. Installiert durch infra/sokrates2/wamo-werkstatt-einrichten.sh, Rückweg: wamo-werkstatt-rueckweg.sh.
+#
+# Läuft als unprivilegierter Systembenutzer wamo-werkstatt, ohne jede Capability, mit schreibgeschütztem Dateisystem (der Dienst schreibt nur in die Datenbank,
+# nie in eine Datei). Prüft das Token der Sitzung (Signatur gegen den Schlüsselsatz von GoTrue, aal2, Profil, Erlaubnisliste /etc/wamo-werkstatt/admins) und
+# arbeitet in der Datenbank als Rolle wamo_werkstatt_login (Mitglied der Gruppenrolle wamo_werkstatt). Lauscht nur auf 127.0.0.1:18095. Caddy erreicht ihn
+# über die Brücke wamo-werkstatt-bruecke.socket (Unix-Socket /run/wamo-werkstatt/werkstatt.sock). Der Code liegt root-eigen unter /opt/wamo-werkstatt/app,
+# die Bibliotheken im venv /opt/wamo-werkstatt/venv; vor jedem Start prüft ExecStartPre die Prüfsummen des Codes (fail closed).
+#
+# Den Zugang zur Datenbank (db.zugang, root:wamo-werkstatt 0440) reicht systemd als Credential durch: Der Pfad steht für den Dienst in
+# WAMO_WERKSTATT_DB_ZUGANG (%d ist der Credential-Ordner). Alle übrigen Einstellungen ohne Geheimnisse stehen in /etc/wamo-werkstatt/werkstatt.env.
+#
+# Netz nur zur Datenbank (Supavisor, 55322), zum Schlüsselsatz (GoTrue hinter Caddy, 55443) und, für die Brücke, auf Loopback. Docker setzt für
+# veröffentlichte Ports ein DNAT auf die Container-Adresse (172.23.0.0/16 Supabase, 172.24.0.0/24 Caddy); der Filter von systemd sieht erst die umgesetzte
+# Adresse, darum stehen die Docker-Netze hier. Genau die zwei Ziele im LAN und den einen Loopback-Port erzwingt die nft-Tabelle wamo_werkstatt_ausgang
+# (ct original, wamo-werkstatt-ausgang.service, unten verlangt).
+#
+# Prüfpunkte, weil die Unit auf Sokrates-2 noch nicht erprobt wurde: systemd-analyze verify (macht das Einrichtungsskript), wamo_werkstatt_rauchtest.py
+# --produktiv. Startet der Dienst nicht, sind MemoryDenyWriteExecute und SystemCallFilter die ersten Verdächtigen (journalctl -u wamo-werkstatt).
+[Unit]
+Description=W.A.I.S. Werkstatt (Admin-Panel: Kennzahlen, Labor-Planer, Karten)
+Requires=wamo-werkstatt-ausgang.service
+After=wamo-werkstatt-ausgang.service
+ConditionPathExists=/opt/wamo-werkstatt/app/SHA256SUMS
+ConditionPathExists=/etc/wamo-werkstatt/db.zugang
+ConditionPathExists=/etc/wamo-werkstatt/werkstatt.env
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=wamo-werkstatt
+Group=wamo-werkstatt
+EnvironmentFile=/etc/wamo-werkstatt/werkstatt.env
+LoadCredential=db.zugang:/etc/wamo-werkstatt/db.zugang
+Environment=WAMO_WERKSTATT_DB_ZUGANG=%d/db.zugang
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUTF8=1
+WorkingDirectory=/opt/wamo-werkstatt/app
+ExecStartPre=/usr/bin/sha256sum -c --quiet SHA256SUMS
+ExecStart=/opt/wamo-werkstatt/venv/bin/python -I -B -m wamo_werkstatt
+SyslogIdentifier=wamo-werkstatt
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+
+# Geheimnisordner anderer Dienste sind unsichtbar; geschrieben wird nirgends (ProtectSystem=strict ohne ReadWritePaths)
+InaccessiblePaths=-/etc/wamo -/etc/wamo-anker -/etc/wamo-freigabe -/etc/wamo-geraete -/etc/wamo-release -/etc/wamo-labor -/etc/wamo-haus-proxy -/etc/wamo-pruefer -/etc/wamo-rd -/etc/wamo-verteilung
+LimitCORE=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32 192.168.178.136/32 172.23.0.0/16 172.24.0.0/24
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=512
+
+[Install]
+WantedBy=multi-user.target
