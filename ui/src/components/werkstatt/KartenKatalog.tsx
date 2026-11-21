@@ -30,7 +30,7 @@ export function KartenKatalog({ karten, gruppen, filter, onFilter, onBearbeiten,
     <>
       <div className="ws-zeile">
         <div className="ws-feld">
-          <label htmlFor={`${id}-gruppe`}>Gruppe</label>
+          <label htmlFor={`${id}-gruppe`}>Gruppe anzeigen</label>
           <select id={`${id}-gruppe`} value={filter} onChange={(e) => onFilter(e.target.value)}>
             <option value="">alle</option>
             {gruppen.map((g) => (
