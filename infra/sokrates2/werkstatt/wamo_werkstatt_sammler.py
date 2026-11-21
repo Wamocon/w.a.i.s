@@ -278,7 +278,7 @@ def kern_stand(caddy_dir: str, opt_core: str = "/opt/wamo-core", lauf=subprocess
 
 
 def tls_kontext(ca: str) -> ssl.SSLContext:
-    """TLS 1.2 oder neuer, Zertifikat und Name werden gegen die WAMO-CA geprüft (nie CERT_NONE)."""
+    """TLS 1.2 oder neuer, Zertifikat und Name werden gegen die WAMO-CA geprüft, nie ohne Prüfung."""
     kontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     kontext.minimum_version = ssl.TLSVersion.TLSv1_2
     kontext.check_hostname = True
