@@ -17,7 +17,7 @@ import labor_zugang_api as api
 import wamo_api
 from auth_gate import Identity
 from schluessel import Tresor, kek_erzeugen
-from test_labor_zugang import ADMIN, GAST, MARKER, SCHLUESSEL_NEU, SERVER, FakeDb
+from test_labor_schluessel import ADMIN, GAST, MARKER, SCHLUESSEL_NEU, SERVER, FakeDb
 
 PFAD = "/wamo/api/admin/labor-zugang"
 
