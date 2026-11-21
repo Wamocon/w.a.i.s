@@ -97,6 +97,18 @@ AUSNAHMEN: dict[str, str] = {
     "github_rechte": "Vom Admin erlaubte Rechte klassischer GitHub-Tokens je Person (Migration 0027), Konfiguration ohne Gesprächstext. Für "
                      "Laborprofile gesperrt: die Admin-Route lehnt sie ab, der Trigger github_rechte_guard ebenso. Fällt mit dem Profil weg "
                      "(on delete cascade); geaendert_von wird beim Löschen des Admin-Profils null.",
+    "labor_termine": "Labortage des Werkstatt-Panels (Migration 0031), nur Planung ohne Gesprächstext. Das Panel ist nur für Admins ohne "
+                     "labor_art zugänglich, ein Laborprofil kommt dort nie vor. erstellt_von wird beim Löschen des Profils null "
+                     "(on delete set null), der Termin bleibt.",
+    "labor_checkliste": "Checkliste je Labortermin (Migration 0031), nur Planung. erledigt_von nennt den Admin, der abhakte, nie ein "
+                        "Laborprofil; beim Löschen des Profils wird der Verweis null (on delete set null).",
+    "labor_karten": "Arbeitsstand der Karten des Testlabors (Migration 0031), Texte des Katalogs ohne Personenbezug. geaendert_von nennt den "
+                    "Admin der letzten Änderung, nie ein Laborprofil; beim Löschen des Profils wird der Verweis null (on delete set null).",
+    "labor_karten_versionen": "Veröffentlichte Stände des Kartenkatalogs (Migration 0031), unveränderliche Momentaufnahme ohne "
+                              "Personenbezug. erstellt_von nennt den veröffentlichenden Admin, nie ein Laborprofil; beim Löschen des "
+                              "Profils wird der Verweis null (on delete set null).",
+    "werkstatt_karten": "Freigabekarten des Werkstatt-Panels (Migration 0031), fünf Minuten gültig, nur Zahlen und Kennungen. Gebunden an "
+                        "einen Admin ohne labor_art; fällt mit dem Profil weg (on delete cascade), das Aufräumen löscht sie nach einem Tag.",
 }
 
 #: Spuren außerhalb des Schemas von WAMO (GoTrue, Schema auth): Die Funktion labor_loeschen kann und soll sie nicht anfassen. Sie
