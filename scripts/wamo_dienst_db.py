@@ -95,7 +95,7 @@ def datei_installieren(ziel: str, inhalt: str, gruppe: str, modus: str, ordner_m
     """Legt die Datei root-eigen ab (atomar über eine Zwischendatei, Inhalt nur über stdin, nie in einem Argument)."""
     ordner = ziel.rsplit("/", 1)[0]
     ssh(f"sudo -n install -d -m {ordner_modus} -o root -g {gruppe} {ordner} && "
-        f"sudo -n tee {ziel}.neu >/dev/null && sudo -n chown root:{gruppe} {ziel}.neu && sudo -n chmod {modus} {ziel}.neu && "
+        f"sudo -n sh -c 'umask 077; cat > {ziel}.neu' && sudo -n chown root:{gruppe} {ziel}.neu && sudo -n chmod {modus} {ziel}.neu && "
         f"sudo -n mv -f {ziel}.neu {ziel}", stdin=inhalt)
 
 
@@ -165,9 +165,12 @@ def pruefen_mit(dienst: str, sch: str, tenant: str, passwort: str) -> None:
     if dienst == "werkstatt":   # die Werkstatt liest Sichten und Funktionen, schreibt nur ihre eigenen Tabellen und nie Profile oder Laborkonten
         schritt("Funktion werkstatt_labor_stand", lambda: len(pg.zeilen(f"select 1 from {sch}.werkstatt_labor_stand() limit 1")) >= 0)
         verboten = [("delete in profiles", f"delete from {sch}.profiles where false"),
-                    ("update in profiles", f"update {sch}.profiles set aktiv = aktiv where false"),
-                    ("labor_loeschen", f"select {sch}.labor_loeschen(gen_random_uuid(), now(), now())"),
-                    ("labor_zaehlen", f"select {sch}.labor_zaehlen(gen_random_uuid())")]
+                    ("update in profiles", f"update {sch}.profiles set aktiv = aktiv where false")]
+        # Rechte an den Laborfunktionen prüfen, nicht aufrufen: Die Funktionen weisen eine fremde Kennung selbst ab und bewiesen so nichts
+        for funktion in ("labor_loeschen(uuid,timestamptz,timestamptz)", "labor_zaehlen(uuid)"):
+            antwort = pg.eine(f"select has_function_privilege(current_user, '{sch}.{funktion}', 'execute')::text")[0]
+            ok.append(antwort == "false")
+            print(f"  {'ok      ' if antwort == 'false' else 'FEHLER  '} kein execute auf {funktion.split('(')[0]}" + ("" if antwort == "false" else f" (Antwort {antwort})"))
     else:
         adapter = ReleaseDatenbank(pg, sch) if dienst == "release" else FreigabePg(pg, sch)
         schritt("Funktion release_ist_admin", lambda: adapter.ist_admin("00000000-0000-4000-8000-000000000000"))

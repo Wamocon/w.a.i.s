@@ -1,6 +1,6 @@
 # W.A.I.S. Werkstatt: Unix-Socket für Caddy. Der Container wamo-caddy erreicht Loopback des Hosts nicht, der Dienst wamo-werkstatt lauscht nur auf
 # 127.0.0.1:18095. Dieser Socket nimmt die Verbindung von Caddy an und reicht sie über wamo-werkstatt-bruecke.service an den Dienst weiter.
-# Der Ordner /run/wamo-werkstatt (2750 wamo-werkstatt:wamocon) entsteht per tmpfiles.d (wamo-werkstatt-einrichten.sh) und bleibt über Neustarts der Units
+# Der Ordner /run/wamo-werkstatt (2750 root:wamocon) entsteht per tmpfiles.d (wamo-werkstatt-einrichten.sh) und bleibt über Neustarts der Units
 # bestehen, weil wamo-caddy ihn einbindet; der Socket darin gehört wamo-werkstatt, die Gruppe wamocon (Caddy läuft als 1000:1000) darf lesen und schreiben.
 # Installiert durch wamo-werkstatt-einrichten.sh.
 [Unit]

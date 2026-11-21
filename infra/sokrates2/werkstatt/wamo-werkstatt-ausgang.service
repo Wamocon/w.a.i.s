@@ -2,7 +2,7 @@
 Description=W.A.I.S. Werkstatt: Ausgangsregel (nur Datenbank und Schlüsselsatz)
 Documentation=file:///opt/wamo-werkstatt/app/wamo-werkstatt-ausgang.nft
 Before=wamo-werkstatt.service wamo-werkstatt-bruecke.service
-ConditionPathExists=/etc/wamo-werkstatt-ausgang/regeln.nft
+AssertPathExists=/etc/wamo-werkstatt-ausgang/regeln.nft
 
 [Service]
 Type=oneshot

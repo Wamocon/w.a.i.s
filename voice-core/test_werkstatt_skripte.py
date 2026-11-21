@@ -173,6 +173,8 @@ class UnitTests(unittest.TestCase):
         self.assertIn("ExecStart=/usr/sbin/nft -f /etc/wamo-werkstatt-ausgang/regeln.nft", einheit)
         self.assertIn("ExecStop=/usr/sbin/nft delete table inet wamo_werkstatt_ausgang", einheit)
         self.assertIn("Before=wamo-werkstatt.service wamo-werkstatt-bruecke.service", einheit)
+        self.assertIn("AssertPathExists=/etc/wamo-werkstatt-ausgang/regeln.nft", einheit)   # fehlt die Regel, startet der Dienst nicht (Condition würde nur überspringen)
+        self.assertNotIn("ConditionPathExists", einheit)
 
     def test_bruecke_reicht_nur_bytes_auf_loopback_weiter(self):
         sock = self.zeilen("wamo-werkstatt-bruecke.socket")
@@ -204,8 +206,8 @@ class UnitTests(unittest.TestCase):
     def test_vorlagen_haben_keine_geheimnisse(self):
         env = self.zeilen("werkstatt.env.vorlage")
         schluessel = {z.split("=", 1)[0] for z in env}
-        self.assertEqual(schluessel, {"WAMO_WERKSTATT_HOST", "WAMO_WERKSTATT_PORT", "WAMO_WERKSTATT_SCHEMA", "WAMO_WERKSTATT_ADMINS", "WAMO_WERKSTATT_DATEN", "WAMO_WERKSTATT_CA",
-                                      "WAMO_WERKSTATT_JWKS_URL", "WAMO_WERKSTATT_ISS", "WAMO_WERKSTATT_AUD", "WAMO_WERKSTATT_HERKUNFT", "WAMO_WERKSTATT_WISSEN_BASIS"})
+        self.assertEqual(schluessel, {"WAMO_WERKSTATT_HOST", "WAMO_WERKSTATT_PORT", "WAMO_WERKSTATT_SCHEMA", "WAMO_WERKSTATT_SUPABASE_URL", "WAMO_CA_FILE",
+                                      "WAMO_WERKSTATT_ADMINS", "WAMO_WERKSTATT_DATEN", "WAMO_WERKSTATT_HERKUNFT"})   # die Namen liest konfig.py des Dienstes
         text = "\n".join(env).lower()
         for verboten in ("password", "passwort", "secret", "token", "apikey", "key="):
             self.assertNotIn(verboten, text)
@@ -273,9 +275,9 @@ class CaddyTests(unittest.TestCase):
 
 
 # ====================================================================================== Sammler
-def journal_zeile(marke_text: str, prioritaet: int = 6, sekunden: float | None = None) -> bytes:
+def journal_zeile(marke_text: str, prioritaet: int = 6, sekunden: float | None = None, uid: str = "0") -> bytes:
     zeit = int((time.time() if sekunden is None else sekunden) * 1_000_000)
-    return json.dumps({"MESSAGE": marke_text, "PRIORITY": str(prioritaet), "__REALTIME_TIMESTAMP": str(zeit)}).encode()
+    return json.dumps({"MESSAGE": marke_text, "PRIORITY": str(prioritaet), "__REALTIME_TIMESTAMP": str(zeit), "_UID": uid}).encode()
 
 
 class SammlerMusterTests(unittest.TestCase):
@@ -286,10 +288,6 @@ class SammlerMusterTests(unittest.TestCase):
         ("wamo-job-kern", "aktion=schluessel ergebnis=ok", "kern_kanal_schluessel", "info", {}),
         ("wamo-job-kern", "aktion=notaus ergebnis=ok", "kern_kanal_notaus", "warnung", {}),
         ("wamo-job-kern", "aktion=schalter ergebnis=fehler", "kern_kanal_schalter", "fehler", {}),
-        ("wamo-nutzer", "aktion=anlegen schema=wamo_dev email=a.b@c.test ergebnis=ok", "nutzer_anlegen", "info", {}),
-        ("wamo-nutzer", "aktion=sperren schema=wamo_prod email=x@y.test ergebnis=fehler schritt=4", "nutzer_sperren", "fehler", {"schritt": 4}),
-        ("wamo-auth", "einrichten: wamo_auth angewendet", "auth_eingerichtet", "info", {}),
-        ("wamo-auth", "rueckweg: Trigger entfernt, Rechte entzogen", "auth_rueckweg", "warnung", {}),
         ("wamo-verteilung", "einsetzen version=0.7.1 sha256=" + "ab" * 32 + " signatur=ok vorher=0.7.0", "verteilung_einsetzen", "info", {"major": 0, "minor": 7, "patch": 1}),
         ("wamo-verteilung", "rueckweg aktuell=0.7.0 zuvor=0.7.1 signatur=ok", "verteilung_rueckweg", "warnung", {}),
         ("wamo-labor-geraete", "Gerät LAPTOP-07: 192.168.178.57 zugelassen", "geraet_zugelassen", "info", {}),
@@ -306,14 +304,10 @@ class SammlerMusterTests(unittest.TestCase):
     def test_jede_marke_hat_muster_und_jeder_code_wird_von_einem_fall_erreicht(self):
         self.assertEqual({p[0] for p in self.POSITIV}, set(S.MARKEN))
         erreicht = {p[2] for p in self.POSITIV}
-        # die Befehle des Ausrollens und die Aktionen der Nutzerverwaltung entstehen aus derselben Regelform: Jeder einzelne wird hier erzeugt
+        # die Befehle des Ausrollens entstehen aus derselben Regelform: Jeder einzelne wird hier erzeugt
         for befehl in S.BEFEHLE_AUSROLLEN.split("|"):
             e = S.zeile_auswerten("wais-deploy", f"befehl={befehl} commit=keiner teil=keiner trocken=nein rueckgabe=0")
             self.assertEqual(e["code"], "ausrollen_" + befehl.replace("-", "_"))
-            erreicht.add(e["code"])
-        for aktion in S.AKTIONEN_NUTZER.split("|"):
-            e = S.zeile_auswerten("wamo-nutzer", f"aktion={aktion} schema=wamo_test email=a@b.test ergebnis=ok")
-            self.assertEqual(e["code"], "nutzer_" + aktion)
             erreicht.add(e["code"])
         self.assertEqual(S.CODES - erreicht, set())
 
@@ -324,13 +318,14 @@ class SammlerMusterTests(unittest.TestCase):
                 self.assertEqual(e, {"code": soll_code, "stufe": soll_stufe, "zahlen": soll_zahlen})
 
     def test_hohe_prioritaet_hebt_die_stufe_auf_fehler(self):
-        self.assertEqual(S.zeile_auswerten("wamo-auth", "einrichten: wamo_auth angewendet", 3)["stufe"], "fehler")
-        self.assertEqual(S.zeile_auswerten("wamo-auth", "einrichten: wamo_auth angewendet", 6)["stufe"], "info")
+        self.assertEqual(S.zeile_auswerten("wamo-job-kern", "aktion=kanal ergebnis=ok", 3)["stufe"], "fehler")
+        self.assertEqual(S.zeile_auswerten("wamo-job-kern", "aktion=kanal ergebnis=ok", 6)["stufe"], "info")
 
     def test_fremde_zeilen_verschwinden(self):
-        for marke, zeile in (("wamo-nutzer", f"irgendein Text {MARKER}"), ("wamo-nutzer", f"aktion=loeschen schema=wamo_dev email=a@b.test ergebnis=ok"),
-                             ("wamo-nutzer", "aktion=anlegen schema=wamo_xyz email=a@b.test ergebnis=ok"), ("wais-deploy", f"befehl=anderes commit=x teil=y trocken=nein rueckgabe=0 {MARKER}"),
-                             ("wais-deploy", "befehl=verteilen commit=x teil=y trocken=nein rueckgabe=0\nzweite Zeile"), ("wamo-auth", "einrichten: wamo_auth angewendet "),
+        # wamo-nutzer und wamo-auth sind keine Marken mehr: Konten gehören nicht in die Werkstatt (E-Mail-Adressen), die Erlaubnisliste des Dienstes kennt sie nicht
+        for marke, zeile in (("wamo-nutzer", "aktion=anlegen schema=wamo_dev email=a@b.test ergebnis=ok"), ("wamo-auth", "einrichten: wamo_auth angewendet"),
+                             ("wamo-job-kern", f"irgendein Text {MARKER}"), ("wais-deploy", f"befehl=anderes commit=x teil=y trocken=nein rueckgabe=0 {MARKER}"),
+                             ("wais-deploy", "befehl=verteilen commit=x teil=y trocken=nein rueckgabe=0\nzweite Zeile"), ("wamo-job-kern", "aktion=kanal ergebnis=ok "),
                              ("unbekannte-marke", "aktion=kanal ergebnis=ok"), ("wamo-job-kern", "aktion=kanal ergebnis=ok " + "x" * 700), ("wamo-job-kern", 12345),
                              ("wamo-job-kern", ["a", "b"]), ("wamo-job-kern", None), ("wamo-labor-geraete", f"Gerät {MARKER}"), ("wamo-verteilung", "einsetzen version=abc")):
             with self.subTest(marke=marke, zeile=str(zeile)[:40]):
@@ -338,8 +333,7 @@ class SammlerMusterTests(unittest.TestCase):
 
     def test_kein_marker_in_der_ausgabe(self):
         """Namen, Adressen, E-Mails, Hashes und Auswahl stecken in Zeilen, die das Muster verbraucht; keiner davon darf in einem Eintrag landen."""
-        faelle = (("wamo-nutzer", f"aktion=anlegen schema=wamo_dev email={MARKER}@x.test ergebnis=ok"),
-                  ("wais-deploy", f"befehl=verteilen commit={MARKER} teil={MARKER} trocken=nein rueckgabe=0"),
+        faelle = (("wais-deploy", f"befehl=verteilen commit={MARKER} teil={MARKER} trocken=nein rueckgabe=0"),
                   ("wamo-verteilung", f"einsetzen version=1.0.0 sha256={MARKER} signatur={MARKER} vorher={MARKER}"),
                   ("wamo-labor-geraete", f"Gerät {MARKER}: {MARKER} entfernt ({MARKER})"),
                   ("wamo-labor-geraete", f"WARNUNG Gerät {MARKER}: {MARKER}"),
@@ -478,6 +472,45 @@ class SammlerDateienTests(unittest.TestCase):
         self.assertIs(befehle[0][1].get("shell", False), False)
         self.assertEqual(befehle[0][1]["env"], S.UMGEBUNG)
 
+    def test_nur_zeilen_vertrauter_benutzer_obergrenze_und_gleiches_nur_einmal(self):
+        """Die Marke wählt jedes Konto frei: Nur root und wamocon zählen, je Code höchstens JE_CODE_MAX, gleiche Zeilen nur einmal."""
+        jetzt = time.time()
+        gut = "befehl=status commit=x teil=y trocken=nein rueckgabe=0"
+        fremd = journal_zeile(gut, 6, jetzt, uid="1234")
+        viele = [journal_zeile(f"befehl=status commit=x teil=y trocken=nein rueckgabe={n % 100}", 6, jetzt - n, uid="0") for n in range(1, 400)]
+        befehle = []
+
+        def lauf(b, **kw):
+            befehle.append(b)
+            return subprocess.CompletedProcess(b, 0, b"\n".join([fremd, *viele]), b"")
+
+        e = S.journal_lesen("wais-deploy", str(self.t), lauf=lauf, uids=["0"])
+        self.assertEqual(len(e), S.JE_CODE_MAX)
+        self.assertIn("_UID=0", befehle[0])   # journalctl filtert schon selbst: Zeilen fremder Konten kommen gar nicht an
+        zwei = [journal_zeile(gut, 6, jetzt, uid="0")] * 5
+        self.assertEqual(len(S.journal_lesen("wais-deploy", str(self.t), lauf=lambda b, **kw: subprocess.CompletedProcess(b, 0, b"\n".join(zwei), b""), uids=["0"])), 1)
+        # was journalctl trotzdem liefert, gilt nur mit vertrauter Kennung: fremde und fehlende Kennung fallen weg
+        ohne = json.dumps({"MESSAGE": gut, "PRIORITY": "6", "__REALTIME_TIMESTAMP": str(int(jetzt * 1e6))}).encode()
+        for roh in (fremd, ohne):
+            self.assertEqual(S.journal_lesen("wais-deploy", str(self.t), lauf=lambda b, **kw: subprocess.CompletedProcess(b, 0, roh, b""), uids=["0"]), [])
+        argv = []
+        S.journal_lesen("wais-deploy", str(self.t), lauf=lambda b, **kw: argv.append(b) or subprocess.CompletedProcess(b, 0, b"", b""), uids=["0", "1000"])
+        self.assertEqual([a for a in argv[0] if a.startswith("_UID=")], ["_UID=0", "_UID=1000"])   # gleiche Felder gelten als "oder"
+
+    @unittest.skipIf(os.name == "nt", "Links und FIFOs brauchen Linux")
+    def test_datei_lesen_folgt_keinem_link_und_blockiert_nicht_an_einem_fifo(self):
+        echt, link, fifo = self.t / "echt", self.t / "link", self.t / "fifo"
+        echt.write_text("inhalt", encoding="utf-8")
+        os.symlink(echt, link)
+        os.mkfifo(fifo)
+        self.assertEqual(S.datei_lesen(str(echt)), "inhalt")
+        self.assertIsNone(S.datei_lesen(str(link)))
+        self.assertIsNone(S.datei_lesen(str(fifo)))
+        self.assertIsNone(S.datei_lesen(str(self.t / "fehlt")))
+
+    def test_weiterleitungen_werden_nicht_verfolgt(self):
+        self.assertIsNone(S._KeineWeiterleitung().redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1:18765/api/kern/x"))
+
     def test_journal_fehler_loescht_den_lesezeiger(self):
         zeiger = self.t / "wais-deploy.zeiger"
         zeiger.write_text("s=abc\n", encoding="utf-8")
@@ -491,9 +524,12 @@ class SammlerDateienTests(unittest.TestCase):
         original = S.journal_lesen
         jetzt = time.time()
 
-        def falsches_journal(marke, zustand, lauf=subprocess.run):
-            roh = journal_zeile(f"aktion=anlegen schema=wamo_dev email={MARKER}@x.test ergebnis=ok", 6, jetzt) if marke == "wamo-nutzer" else journal_zeile("nichts", 6, jetzt)
-            return original(marke, zustand, lauf=lambda b, **kw: subprocess.CompletedProcess(b, 0, roh, b""))
+        def falsches_journal(marke, zustand, lauf=subprocess.run, uids=None):
+            if marke == "wamo-job-kern":
+                roh = b"\n".join([journal_zeile("aktion=kanal ergebnis=ok", 6, jetzt), journal_zeile(f"aktion=kanal ergebnis=ok {MARKER}", 6, jetzt)])
+            else:
+                roh = journal_zeile("nichts", 6, jetzt)
+            return original(marke, zustand, lauf=lambda b, **kw: subprocess.CompletedProcess(b, 0, roh, b""), uids=["0"])
 
         S.journal_lesen = falsches_journal
         try:
@@ -504,11 +540,10 @@ class SammlerDateienTests(unittest.TestCase):
         betrieb = json.loads((daten / "betrieb.json").read_text(encoding="ascii"))
         self.assertTrue(S.betrieb_pruefen(betrieb))
         self.assertEqual(sorted(p.name for p in (daten / "protokolle").iterdir()), sorted(f"{m}.jsonl" for m in S.MARKEN))
-        zeilen = (daten / "protokolle" / "wamo-nutzer.jsonl").read_text(encoding="ascii").splitlines()
+        zeilen = (daten / "protokolle" / "wamo-job-kern.jsonl").read_text(encoding="ascii").splitlines()
         self.assertEqual(len(zeilen), 2)   # zwei Läufe, je eine neue Zeile (das Journal ist hier eine Attrappe ohne Lesezeiger)
         for datei in (daten / "protokolle").iterdir():
             self.assertNotIn(MARKER, datei.read_text(encoding="ascii"))
-            self.assertNotIn("x.test", datei.read_text(encoding="ascii"))
         self.assertNotIn(MARKER, (daten / "betrieb.json").read_text(encoding="ascii"))
         self.assertEqual(sorted(p.name for p in daten.iterdir()), ["betrieb.json", "protokolle", "zustand"])
 
@@ -526,7 +561,7 @@ class ProbelaufTests(unittest.TestCase):
         (self.quelle / "wamo_werkstatt" / "__init__.py").write_text("NAME = 'wamo_werkstatt'\n", encoding="utf-8")
         (self.quelle / "wamo_werkstatt" / "__pycache__").mkdir()
         (self.quelle / "wamo_werkstatt" / "__pycache__" / "x.pyc").write_bytes(b"\0")
-        (self.quelle / "pyproject.toml").write_text('[project]\nname = "wamo-werkstatt"\ndependencies = ["fastapi>=0.115"]\n', encoding="utf-8")
+        (self.quelle / "requirements.txt").write_text("fastapi==0.115.0 --hash=sha256:" + "ab" * 32 + "\nuvicorn==0.30.0 --hash=sha256:" + "cd" * 32 + "\n", encoding="utf-8")
 
     def lauf(self, skript: Path, *args: str, wurzel: str | None = None) -> subprocess.CompletedProcess:
         env = dict(os.environ)
@@ -534,7 +569,14 @@ class ProbelaufTests(unittest.TestCase):
                     "LC_ALL": "C.UTF-8"})
         return subprocess.run([BASH, str(skript), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120, stdin=subprocess.DEVNULL)
 
-    def einrichten(self, *args: str) -> subprocess.CompletedProcess:
+    def quellen_setzen(self, text: str = "192.168.178.10\n") -> None:
+        datei = self.wurzel / "etc" / "wamo" / "admin-quellen"
+        datei.parent.mkdir(parents=True, exist_ok=True)
+        datei.write_text(text, encoding="utf-8")
+
+    def einrichten(self, *args: str, quellen: bool = True) -> subprocess.CompletedProcess:
+        if quellen and not (self.wurzel / "etc" / "wamo" / "admin-quellen").exists():
+            self.quellen_setzen()   # ohne Eintrag in /etc/wamo/admin-quellen richtet das Skript nicht ein (siehe test_admin_quellen_sind_pflicht)
         return self.lauf(EINRICHTEN, "einrichten", "--quelle", posix(self.quelle), *args)
 
     def p(self, *teile) -> Path:
@@ -567,7 +609,7 @@ class ProbelaufTests(unittest.TestCase):
         self.assertIn("--caddy-dir " + posix(self.wurzel / "home" / "wamocon" / "wamo-tls" / "caddy"), self.p("etc", "systemd", "system", "wamo-werkstatt-sammler.service").read_text(encoding="utf-8"))
         self.assertEqual(self.p("etc", "wamo-werkstatt-ausgang", "regeln.nft").read_text(encoding="utf-8"), lies(WERKSTATT / "wamo-werkstatt-ausgang.nft"))
         self.assertEqual(self.p("home", "wamocon", "wamo-tls", "caddy", "etc", "kern", "wamo-werkstatt.caddy").read_text(encoding="utf-8"), lies(SITE))
-        self.assertIn("d /run/wamo-werkstatt 2750 wamo-werkstatt wamocon -", self.p("etc", "tmpfiles.d", "wamo-werkstatt.conf").read_text(encoding="utf-8"))
+        self.assertIn("d /run/wamo-werkstatt 2750 root wamocon -", self.p("etc", "tmpfiles.d", "wamo-werkstatt.conf").read_text(encoding="utf-8"))
         env = self.p("etc", "wamo-werkstatt", "werkstatt.env").read_text(encoding="utf-8")
         self.assertIn("WAMO_WERKSTATT_SCHEMA=wamo_dev", env)
         self.assertNotIn("__SCHEMA__", env)
@@ -620,7 +662,7 @@ class ProbelaufTests(unittest.TestCase):
         r = self.einrichten()
         self.assertEqual(r.returncode, 1)
         self.assertIn("Syntaxfehler", r.stderr)
-        self.assertFalse(self.wurzel.exists())
+        self.assertFalse(self.p("opt").exists())
         schlecht.unlink()
         for name in (".env", "geheim.env", "x.pem", "x.key"):
             datei = self.quelle / "wamo_werkstatt" / name
@@ -629,11 +671,36 @@ class ProbelaufTests(unittest.TestCase):
             self.assertEqual(r.returncode, 1, name)
             self.assertIn("Geheimnisdatei", r.stderr)
             datei.unlink()
-        (self.quelle / "pyproject.toml").unlink()
+        (self.quelle / "requirements.txt").write_text("fastapi==0.115.0\nuvicorn==0.30.0 --hash=sha256:" + "cd" * 32 + "\n", encoding="utf-8")
         r = self.einrichten()
         self.assertEqual(r.returncode, 1)
-        self.assertIn("pyproject.toml fehlt", r.stderr)
-        self.assertFalse(self.wurzel.exists())
+        self.assertIn("keine Prüfsummen für jedes Paket", r.stderr)   # ein Paket ohne Prüfsumme genügt zum Abbruch
+        (self.quelle / "requirements.txt").write_text("fastapi==0.115.0 --hash=sha256:" + "ab" * 32 + "\ngit+https://example.invalid/x.git\n", encoding="utf-8")
+        self.assertEqual(self.einrichten().returncode, 1)
+        (self.quelle / "requirements.txt").unlink()
+        r = self.einrichten()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("requirements.txt fehlt", r.stderr)
+        self.assertFalse(self.p("opt").exists())
+
+    def test_admin_quellen_sind_pflicht_oder_lan_offen_ist_ausdruecklich(self):
+        """Ohne Eintrag in /etc/wamo/admin-quellen erreichte das ganze Büro-LAN den Port 55448 (am Labortag sitzen dort Gäste)."""
+        r = self.einrichten(quellen=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("/etc/wamo/admin-quellen hat keinen Eintrag", r.stderr)
+        self.assertFalse(self.p("opt").exists())
+        self.quellen_setzen("# nur Kommentare\n\n   \n")
+        self.assertEqual(self.einrichten().returncode, 1)
+        r = self.einrichten("--lan-offen")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ganze Büro-LAN erreicht den Port 55448", r.stderr)
+        self.quellen_setzen("192.168.178.10\n192.168.178.11/32  # zweites Gerät\n")
+        r = self.einrichten()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Admin-Quellen: 2 Einträge", r.stdout)
+        trocken = self.lauf(EINRICHTEN, "einrichten", "--quelle", posix(self.quelle), "--trocken", wurzel=posix(self.t / "andere"))
+        self.assertEqual(trocken.returncode, 0, trocken.stdout + trocken.stderr)   # im Trockenlauf nur eine Warnung
+        self.assertIn("WARNUNG (im Echtlauf Abbruch)", trocken.stderr)
 
     def test_aufruf_und_wurzel_werden_geprueft(self):
         self.assertEqual(self.lauf(EINRICHTEN, "--unsinn").returncode, 2)
@@ -687,7 +754,7 @@ class ProbelaufTests(unittest.TestCase):
 class RauchtestUndDokuTests(unittest.TestCase):
     def test_rauchtest_hat_alle_teile_und_gibt_nie_ein_token_aus(self):
         text = lies(RAUCHTEST)
-        for soll in ("def teil_a", "def teil_b", "def teil_c", "def teil_d", "--produktiv", "--nach-rueckweg", "--token-admin", "--token-mitglied", "--token-labor", "--token-aal1",
+        for soll in ("def teil_a", "def teil_b", "def teil_c", "def teil_d", "--produktiv", "--nach-rueckweg", "--token-admin", "--token-mitglied", "--token-labor", "--token-aal1", "--lan-offen",
                      "aal2_alter_s", "nicht_angemeldet", "WAMO-FW-ADMIN", "wamo_werkstatt_ausgang", "Cache-Control", "no-store"):
             self.assertIn(soll, text)
         for zeile in code(RAUCHTEST):
@@ -720,7 +787,7 @@ class RauchtestUndDokuTests(unittest.TestCase):
         abschnitt = text.split("## 23. Werkstatt (Admin-Panel", 1)[1]
         for soll in ("wamo-werkstatt-einrichten.sh", "wamo-werkstatt-rueckweg.sh", "wamo_werkstatt_rauchtest.py", "wamo_werkstatt_sammler.py", "55448", "127.0.0.1:18095",
                      "wamo-werkstatt-bruecke.socket", "/etc/wamo-werkstatt/admins", "db.zugang", "wamo_dienst_db.py einrichten werkstatt", "--trocken", "WAMO_WERKSTATT_WURZEL",
-                     "test_werkstatt_skripte.py", "pg/requirements-werkstatt.lock"):
+                     "test_werkstatt_skripte.py", "requirements.txt", "--lan-offen", "admin-quellen", "2750 `root:wamocon`"):
             self.assertIn(soll, abschnitt, soll)
         self.assertNotIn(chr(0x2014), abschnitt)
         self.assertNotIn(chr(0x2013), abschnitt)

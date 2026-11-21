@@ -167,7 +167,6 @@ def teil_a() -> None:
     import wamo_werkstatt_sammler as S
 
     faelle = (
-        ("wamo-nutzer", f"aktion=anlegen schema=wamo_dev email={MARKER}@beispiel.test ergebnis=ok"),
         ("wais-deploy", f"befehl=verteilen commit={MARKER} teil=keiner trocken=nein rueckgabe=0"),
         ("wamo-labor-geraete", f"Gerät {MARKER}: 192.168.178.77 zugelassen"),
         ("wamo-verteilung", f"einsetzen version=1.2.3 sha256={MARKER} signatur=ok vorher=1.2.2"),
@@ -178,8 +177,8 @@ def teil_a() -> None:
         text = json.dumps(e)
         pruefe(f"Zeile der Marke {marke} wird ausgewertet", e is not None and e["code"] in S.CODES, text[:100])
         pruefe(f"Marke {marke}: kein Marker in der Ausgabe", MARKER not in text and "beispiel.test" not in text and "192.168" not in text, text[:100])
-    for marke, zeile in (("wamo-nutzer", f"irgendein Text {MARKER}"), ("wais-deploy", f"befehl=anderes commit=x teil=y trocken=nein rueckgabe=0 {MARKER}"),
-                         ("unbekannte-marke", "aktion=anlegen"), ("wamo-auth", "einrichten: wamo_auth angewendet\nzweite Zeile")):
+    for marke, zeile in (("wamo-job-kern", f"irgendein Text {MARKER}"), ("wamo-nutzer", "aktion=anlegen schema=wamo_dev email=a@b.test ergebnis=ok"), ("wais-deploy", f"befehl=anderes commit=x teil=y trocken=nein rueckgabe=0 {MARKER}"),
+                         ("unbekannte-marke", "aktion=anlegen"), ("wamo-verteilung", "rueckweg aktuell=1 zuvor=2 signatur=ok\nzweite Zeile")):
         pruefe(f"Fremde Zeile der Marke {marke} verschwindet", S.zeile_auswerten(marke, zeile) is None)
     kaputt = {"zeit": "2026-11-20T10:00:00Z", "marke": "wais-deploy", "stufe": "info", "code": "ausrollen_verteilen", "zahlen": {"x": 1}, "extra": MARKER}
     pruefe("Eintrag mit Zusatzfeld oder fremder Zahl wird nicht geschrieben", S.eintrag_pruefen(kaputt) is False)
@@ -275,7 +274,7 @@ def teil_b_http(ca: str) -> None:
         pruefe("Caddy auf 55448 erreichbar", False, type(e).__name__)
 
 
-def teil_b_firewall() -> None:
+def teil_b_firewall(lan_offen: bool) -> None:
     print("== B4. Firewall: Port 55448 nur aus den Admin-Quellen")
     r = ausfuehren("iptables", "-w", "5", "-S", "WAMO-FW")
     pruefe("Regel: 55448 geht in die Kette WAMO-FW-ADMIN", f"--ctorigdstport {PORT} -j WAMO-FW-ADMIN" in r.stdout, r.stdout[-150:] + r.stderr[:100])
@@ -283,6 +282,9 @@ def teil_b_firewall() -> None:
     zeilen = r.stdout.splitlines()
     pruefe("Kette WAMO-FW-ADMIN endet mit Protokoll und DROP", len(zeilen) >= 3 and zeilen[-1] == "-A WAMO-FW-ADMIN -j DROP" and "LOG" in zeilen[-2], r.stdout[-150:])
     pruefe("Kette WAMO-FW-ADMIN erlaubt Loopback", any(z.startswith("-A WAMO-FW-ADMIN -s 127.0.0.0/8") for z in zeilen))
+    breit = [z for z in zeilen if z.endswith("RETURN") and re.search(r"-s \S+/(\d|1\d|2[0-4])\b", z) and not z.startswith("-A WAMO-FW-ADMIN -s 127.0.0.0/8")]
+    pruefe("Kette WAMO-FW-ADMIN lässt nicht das ganze Büro-LAN (/24 oder breiter) zu" + (" (mit --lan-offen nur gemeldet)" if lan_offen else ""),
+           lan_offen or not breit, "; ".join(breit)[:150])
     pruefe("Kette WAMO-FW-ADMIN lässt kein Netz außerhalb von RFC 1918 zu", all(re.match(r"-A WAMO-FW-ADMIN -s (127\.|10\.|192\.168\.)", z) for z in zeilen if z.endswith("RETURN")), r.stdout[-200:])
 
 
@@ -301,14 +303,14 @@ def teil_b_als_dienstbenutzer() -> None:
     pruefe("Socket für den Benutzer nobody abgewiesen", "ABGELEHNT" in r.stdout, (r.stdout + r.stderr)[:150])
 
 
-def teil_b(ca: str) -> None:
+def teil_b(ca: str, lan_offen: bool) -> None:
     if os.geteuid() != 0:
         pruefe("Teil B läuft als root", False, "bitte mit sudo")
         return
     teil_b_dateien_und_dienste()
     teil_b_sammler()
     teil_b_http(ca)
-    teil_b_firewall()
+    teil_b_firewall(lan_offen)
     teil_b_als_dienstbenutzer()
 
 
@@ -376,6 +378,7 @@ def main() -> int:
     ap.add_argument("--produktiv", action="store_true", help="die echte Installation prüfen (als root)")
     ap.add_argument("--nach-rueckweg", action="store_true", help="prüfen, dass der Rückweg nichts übrig ließ")
     ap.add_argument("--ca", default=CA_STANDARD, help="Zertifikat der WAMO-CA für HTTPS auf 55448")
+    ap.add_argument("--lan-offen", action="store_true", help="die Werkstatt wurde bewusst mit --lan-offen eingerichtet (Port 55448 für das ganze Büro-LAN)")
     ap.add_argument("--token-admin", help="Datei mit dem Zugangstoken eines Admins aus der Erlaubnisliste (aal2, frisch)")
     ap.add_argument("--token-mitglied", help="Datei mit dem Zugangstoken eines Mitglieds")
     ap.add_argument("--token-labor", help="Datei mit dem Zugangstoken eines Laborprofils")
@@ -390,7 +393,7 @@ def main() -> int:
     else:
         teil_a()
         if a.produktiv:
-            teil_b(a.ca)
+            teil_b(a.ca, a.lan_offen)
             teil_c(a.ca, a)
     print(f"Ergebnis: {ERGEBNIS['ok']} bestanden, {ERGEBNIS['fehler']} fehlgeschlagen")
     return 0 if ERGEBNIS["fehler"] == 0 else 1

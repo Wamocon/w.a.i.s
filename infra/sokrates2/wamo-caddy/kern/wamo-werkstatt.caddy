@@ -7,7 +7,7 @@
 # Caddy selbst erzeugt (404, 405, Fehler beim Weiterleiten), bekommen die Schutzköpfe aus dem Schnipsel werkstatt_koepfe und einen kurzen deutschen Text.
 #
 # Der Dienst lauscht nur auf 127.0.0.1:18095. Der Container wamo-caddy erreicht Loopback des Hosts nicht, deshalb leitet die systemd-Brücke
-# wamo-werkstatt-bruecke.socket den Unix-Socket /run/wamo-werkstatt/werkstatt.sock an diesen Port weiter (Ordner 2750 wamo-werkstatt:wamocon, von
+# wamo-werkstatt-bruecke.socket den Unix-Socket /run/wamo-werkstatt/werkstatt.sock an diesen Port weiter (Ordner 2750 root:wamocon, von
 # wamo-caddy nur lesend eingebunden, wie bei /run/wamo-freigabe). Wer den Port aus dem LAN erreicht, bestimmt die Firewall: 55448 steht in LAN_PORTS_ADMIN
 # (Kette WAMO-FW-ADMIN, Quellen aus /etc/wamo/admin-quellen). Wer die Schnittstelle benutzen darf, bestimmt allein der Dienst (Token, zweiter Faktor,
 # Profil, Erlaubnisliste); Caddy prüft davon nichts.

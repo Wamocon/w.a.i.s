@@ -45,7 +45,7 @@ TimeoutStopSec=30
 UMask=0077
 
 # Geheimnisordner anderer Dienste sind unsichtbar; geschrieben wird nirgends (ProtectSystem=strict ohne ReadWritePaths)
-InaccessiblePaths=-/etc/wamo -/etc/wamo-anker -/etc/wamo-freigabe -/etc/wamo-geraete -/etc/wamo-release -/etc/wamo-labor -/etc/wamo-haus-proxy -/etc/wamo-pruefer
+InaccessiblePaths=-/etc/wamo -/etc/wamo-anker -/etc/wamo-freigabe -/etc/wamo-geraete -/etc/wamo-release -/etc/wamo-labor -/etc/wamo-haus-proxy -/etc/wamo-pruefer -/etc/wamo-rd -/etc/wamo-verteilung
 LimitCORE=0
 NoNewPrivileges=yes
 ProtectSystem=strict

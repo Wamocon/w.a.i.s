@@ -15,25 +15,28 @@
 #   ssh sokrates2 "sudo bash ~/wamo-infra/wamo-werkstatt-einrichten.sh einrichten --trocken"
 #   ssh sokrates2 "sudo bash ~/wamo-infra/wamo-werkstatt-einrichten.sh einrichten"
 #
-#   bash wamo-werkstatt-einrichten.sh [einrichten|status|pruefen] [--trocken] [--quelle ORDNER] [--schema wamo_dev|wamo_test|wamo_prod]
+#   bash wamo-werkstatt-einrichten.sh [einrichten|status|pruefen] [--trocken] [--quelle ORDNER] [--schema wamo_dev|wamo_test|wamo_prod] [--lan-offen]
 #
 #   einrichten  (Standard) in dieser Reihenfolge: Vorprüfung, Sicherung, Benutzer, Ordner und Konfiguration, Programme, venv, Firewall, Dienst, Caddy, Sammler, Prüfung
 #   status      zeigt Namen und Zustände (Units, Dateien, Rechte, Schema, Firewall-Regel), nie Werte
 #   pruefen     Rauchtest gegen den Betrieb (wamo_werkstatt_rauchtest.py --produktiv)
 #   --trocken   Lesen und Prüfen wie sonst, aber jede Änderung (Dateien, systemctl, docker, Caddy, Firewall) nur anzeigen
-#   --quelle    Ordner mit dem Code des Dienstes (Standard /home/wamocon/wamo-werkstatt-quelle: wamo_werkstatt/ und pyproject.toml)
+#   --quelle    Ordner mit dem Code des Dienstes (Standard /home/wamocon/wamo-werkstatt-quelle: wamo_werkstatt/ und requirements.txt mit Prüfsummen)
 #   --schema    Datenbankschema des Dienstes beim ERSTEN Einrichten (Standard: WAMO_DB_SCHEMA des Kerns, sonst wamo_dev). Danach gilt die Zeile in werkstatt.env.
+#   --lan-offen Erlaubt das Einrichten auch ohne Einträge in /etc/wamo/admin-quellen (dann erreicht das ganze Büro-LAN den Port 55448, am Labortag sitzen dort Gäste).
+#               Ohne diese Option bricht das Skript in diesem Fall ab.
 #
 # Was einrichten tut (vor jeder Änderung eine Sicherung unter /var/backups/wamo-werkstatt/<JJJJMMTT-HHMMSS>/ ohne db.zugang und ohne Erlaubnisliste):
 #   Benutzer    wamo-werkstatt (System, Shell /usr/sbin/nologin, kein Home, keine weiteren Gruppen)
 #   Ordner      /opt/wamo-werkstatt (root, 0755), /etc/wamo-werkstatt (root, 0755), /var/lib/wamo-werkstatt (root:wamo-werkstatt 0750, darin protokolle/ ebenso und zustand/
-#               nur root), /run/wamo-werkstatt (2750 wamo-werkstatt:wamocon per tmpfiles.d, Caddy bindet ihn lesend ein)
+#               nur root), /run/wamo-werkstatt (2750 root:wamocon per tmpfiles.d, Caddy bindet ihn lesend ein; der Socket darin gehört wamo-werkstatt)
 #   Dateien     werkstatt.env (root:root 0644, aus der Vorlage, nur wenn sie fehlt), admins (root:wamo-werkstatt 0640, Vorlage nur mit Kommentaren, nur wenn sie fehlt: ohne Einträge
 #               kommt niemand hinein), db.zugang (root:wamo-werkstatt 0440, Inhalt unberührt), wamo-ca.crt (root:root 0644)
 #   Programme   /opt/wamo-werkstatt/app (root:root 0755): das Paket wamo_werkstatt, der Sammler, der Rauchtest, die Ausgangsregel und SHA256SUMS (ExecStartPre prüft sie vor jedem
 #               Start). Der bisherige Baum liegt bis zur bestandenen Prüfung als app.vorher daneben.
-#   venv        /opt/wamo-werkstatt/venv (root:root): Bibliotheken aus werkstatt/pyproject.toml, nur Binärpakete (pip --only-binary), mit Prüfsummen, wenn
-#               infra/sokrates2/pg/requirements-werkstatt.lock vorliegt (dann --require-hashes), sonst ohne Prüfsummen und mit Warnung. Der Code kommt über eine .pth-Datei auf den Pfad.
+#   venv        /opt/wamo-werkstatt/venv (root:root): Bibliotheken NUR aus werkstatt/requirements.txt (aus pyproject.toml mit uv pip compile --generate-hashes erzeugt), nur Binärpakete,
+#               immer mit --require-hashes --no-deps; fehlt die Datei oder eine Prüfsumme, bricht das Skript ab. Der Code kommt über eine .pth-Datei auf den Pfad. Die Import-Probe
+#               läuft nicht als root, sondern als wamo-werkstatt.
 #   Firewall    wamo-firewall-einrichten.sh (Port 55448 in LAN_PORTS_ADMIN), nur wenn die Regel fehlt
 #   Dienst      wamo-werkstatt.service (127.0.0.1:18095), wamo-werkstatt-ausgang.service (nft-Tabelle wamo_werkstatt_ausgang), wamo-werkstatt-bruecke.socket und .service
 #   Caddy       Site wamo-werkstatt.caddy, vorher in einem Wegwerf-Container ohne Netz geprüft (caddy adapt), Reload ohne Ausfall. Das Compose von wamo-caddy bekommt Port 55448 und den
@@ -79,6 +82,7 @@ MODULE_DATEIEN=(werkstatt/wamo_werkstatt_sammler.py wamo_werkstatt_rauchtest.py 
 TROCKEN=nein
 BEFEHL=einrichten
 SCHEMA=""
+LAN_OFFEN=nein
 ARBEIT=""
 CADDY_OWNER=""
 CADDY_GROUP=""
@@ -92,7 +96,7 @@ OWN_ROOT=(-o root -g root)
 [ -z "$W" ] || OWN_ROOT=()   # im Probelauf gibt es kein chown
 
 usage() {
-  echo "Aufruf: $0 [einrichten|status|pruefen] [--trocken] [--quelle ORDNER] [--schema wamo_dev|wamo_test|wamo_prod]" >&2
+  echo "Aufruf: $0 [einrichten|status|pruefen] [--trocken] [--quelle ORDNER] [--schema wamo_dev|wamo_test|wamo_prod] [--lan-offen]" >&2
   exit 2
 }
 fehler() { echo "$*" >&2; exit 1; }
@@ -195,8 +199,14 @@ dateien_pruefen() {
 
 quelle_pruefen() {
   local py
-  [ -d "$QUELLE/wamo_werkstatt" ] && [ -f "$QUELLE/pyproject.toml" ] \
-    || { muss "$QUELLE/wamo_werkstatt oder $QUELLE/pyproject.toml fehlt (werkstatt/ aus dem Repo nach $QUELLE kopieren)."; return 0; }
+  [ -d "$QUELLE/wamo_werkstatt" ] && [ -f "$QUELLE/requirements.txt" ] \
+    || { muss "$QUELLE/wamo_werkstatt oder $QUELLE/requirements.txt fehlt (werkstatt/ aus dem Repo nach $QUELLE kopieren)."; return 0; }
+  # Die Sperrdatei muss Prüfsummen tragen (uv pip compile --generate-hashes): Jedes angeheftete Paket hat mindestens eine --hash=sha256 in seinem Block
+  "$PYTHON" -I -c 'import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.split(r"(?m)^(?=[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[^]]*\])?==)", text)[1:]
+sys.exit(0 if blocks and all("--hash=sha256:" in b for b in blocks) and not re.search(r"(?m)^\s*(-e|git\+|https?://)", text) else 1)' "$QUELLE/requirements.txt" \
+    || muss "$QUELLE/requirements.txt hat keine Prüfsummen für jedes Paket (uv pip compile pyproject.toml --generate-hashes)."
   if find "$QUELLE/wamo_werkstatt" -type l | grep -q .; then muss "Im Code liegt ein symbolischer Link ($QUELLE/wamo_werkstatt), Abbruch."; fi
   if find "$QUELLE/wamo_werkstatt" \( -name '.env*' -o -name 'geheim*' -o -name '*.pem' -o -name '*.key' -o -name '*.env' \) | grep -q .; then
     muss "Im Code liegt eine Geheimnisdatei ($QUELLE/wamo_werkstatt), Abbruch."
@@ -204,6 +214,24 @@ quelle_pruefen() {
   while IFS= read -r py; do
     "$PYTHON" -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$py" || muss "Syntaxfehler in $py"
   done < <(find "$QUELLE/wamo_werkstatt" -name '*.py' -not -path '*/__pycache__/*')
+}
+
+# Port 55448 hängt an /etc/wamo/admin-quellen (Kette WAMO-FW-ADMIN). Ohne gültigen Eintrag gilt das ganze Büro-LAN, am Labortag sitzen dort Gäste:
+# Das Skript richtet die Werkstatt dann nur mit --lan-offen ein.
+admin_quellen_pruefen() {
+  local datei="$W/etc/wamo/admin-quellen" n=0 zeile
+  if [ -r "$datei" ]; then
+    while IFS= read -r zeile || [ -n "$zeile" ]; do
+      zeile="${zeile%%#*}"
+      if [[ "$zeile" =~ [^[:space:]] ]]; then n=$((n + 1)); fi
+    done < "$datei"
+  fi
+  if [ "$n" -gt 0 ]; then echo "  Admin-Quellen: $n Einträge in /etc/wamo/admin-quellen"; return 0; fi
+  if [ "$LAN_OFFEN" = ja ]; then
+    echo "  WARNUNG: /etc/wamo/admin-quellen hat keinen Eintrag: Das ganze Büro-LAN erreicht den Port $PORT (--lan-offen)." >&2
+    return 0
+  fi
+  muss "/etc/wamo/admin-quellen hat keinen Eintrag: Das ganze Büro-LAN erreichte den Port $PORT (Gäste am Labortag). Quellen eintragen (README Abschnitt 6.1) oder bewusst --lan-offen setzen."
 }
 
 # Das Schema: Option, sonst die Zeile in werkstatt.env, sonst WAMO_DB_SCHEMA des Kerns (nur diese eine Zeile), sonst wamo_dev
@@ -257,6 +285,7 @@ vorpruefung() {
   quelle_pruefen
   schema_bestimmen
   "$PYTHON" -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' || muss "Python 3.11 oder neuer nötig ($PYTHON)."
+  admin_quellen_pruefen
   if [ -n "$W" ]; then echo "  Vorprüfung der Programme und Dienste entfällt im Probelauf"; return 0; fi
   for w in docker curl ss journalctl flock systemctl nft systemd-analyze useradd getent; do
     command -v "$w" >/dev/null 2>&1 || muss "$w fehlt."
@@ -349,9 +378,9 @@ ordner_und_konfig() {
   verz 0750 root "$BENUTZER" "$DATEN/protokolle"
   verz 0700 root root "$DATEN/zustand"
   mkdir -p "$(dirname "$TMPFILES")"
-  printf '%s\n' "# W.A.I.S. Werkstatt: Ordner des Sockets. 2750 $BENUTZER:wamocon: nur der Dienst schreibt, die Gruppe wamocon (der Container wamo-caddy) erreicht den" \
+  printf '%s\n' "# W.A.I.S. Werkstatt: Ordner des Sockets. 2750 root:wamocon: nur root legt dort an, die Gruppe wamocon (der Container wamo-caddy) erreicht den" \
     "# Socket werkstatt.sock (0660); das Setgid-Bit vererbt die Gruppe. Der Ordner bleibt bestehen, solange wamo-caddy ihn einbindet (Compose von wamo-caddy)." \
-    "d /run/wamo-werkstatt 2750 $BENUTZER wamocon -" > "$TMPFILES"
+    "d /run/wamo-werkstatt 2750 root wamocon -" > "$TMPFILES"
   chmod 0644 "$TMPFILES"
   if [ -z "$W" ]; then
     systemd-tmpfiles --create "$TMPFILES"
@@ -405,36 +434,27 @@ programme() {
   echo "  $(wc -l < "$APP/SHA256SUMS") Dateien, Prüfsumme geprüft"
 }
 
-# Die Bibliotheken aus pyproject.toml (project.dependencies), nur Binärpakete; mit Prüfsummen, wenn pg/requirements-werkstatt.lock vorliegt
+# Die Bibliotheken nur aus requirements.txt der Quelle (mit Prüfsummen), nur Binärpakete: pip führt dabei keinen Code aus
 venv_bauen() {
   if [ -n "$W" ]; then echo "  (Probelauf: kein venv, kein pip, kein Netz)"; return 0; fi
-  local neu="$BASIS/.venv.neu" anforderungen purelib sperre="$HERE/pg/requirements-werkstatt.lock" modus=()
+  local neu="$BASIS/.venv.neu" purelib
   rm -rf -- "$neu"
   "$PYTHON" -I -m venv --without-pip "$neu"
   purelib="$("$neu/bin/python" -I -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
-  anforderungen="$neu/.anforderungen.txt"
-  if [ -f "$sperre" ]; then
-    cp "$sperre" "$anforderungen"
-    modus=(--require-hashes --no-deps)
-    echo "  Bibliotheken mit Prüfsummen aus pg/requirements-werkstatt.lock"
-  else
-    "$PYTHON" -I -c 'import sys, tomllib; print("\n".join(tomllib.load(open(sys.argv[1], "rb"))["project"]["dependencies"]))' "$QUELLE/pyproject.toml" > "$anforderungen" \
-      || { rm -rf "$neu"; fehler "pyproject.toml lässt sich nicht lesen (project.dependencies)."; }
-    [ -s "$anforderungen" ] || { rm -rf "$neu"; fehler "pyproject.toml nennt keine Abhängigkeiten."; }
-    echo "  WARNUNG: pg/requirements-werkstatt.lock fehlt, die Bibliotheken kommen OHNE Prüfsummen aus pyproject.toml (uv pip compile --generate-hashes erzeugt die Sperrdatei)."
-  fi
-  # Saubere Umgebung: keine PIP_*-Einstellungen, kein Benutzerordner; nur Binärpakete (kein Bauen von Quellpaketen als root)
+  # Saubere Umgebung: keine PIP_*-Einstellungen, kein Benutzerordner. --require-hashes lehnt jede Datei ab, deren Prüfsumme nicht in der Sperrdatei steht,
+  # --no-deps, weil die Sperrdatei alles nennt, --only-binary, damit nie ein Quellpaket als root gebaut wird.
   env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C.UTF-8 HOME=/nonexistent PIP_CONFIG_FILE=/dev/null \
-    "$PYTHON" -I -m pip install "${modus[@]}" --only-binary=:all: --no-cache-dir --no-compile --disable-pip-version-check --root-user-action=ignore --quiet \
-    --target "$purelib" -r "$anforderungen" \
-    || { rm -rf "$neu"; fehler "pip-Installation der Bibliotheken fehlgeschlagen, Abbruch."; }
-  rm -f "$anforderungen"
+    "$PYTHON" -I -m pip install --require-hashes --no-deps --only-binary=:all: --no-cache-dir --no-compile --disable-pip-version-check --root-user-action=ignore --quiet \
+    --target "$purelib" -r "$QUELLE/requirements.txt" \
+    || { rm -rf "$neu"; fehler "pip-Installation aus $QUELLE/requirements.txt fehlgeschlagen (Prüfsumme, Architektur?), Abbruch."; }
   find "$purelib" -name '__pycache__' -prune -exec rm -rf {} +
+  find "$purelib" -type l -exec rm -f {} +                                 # nichts, was aus dem Ordner herauszeigt
   printf '%s\n' "$APP" > "$purelib/wamo_werkstatt_app.pth"
   chown -R root:root "$neu"
   chmod -R go-w,a+rX "$neu"
-  # Import-Probe mit genau dem Interpreter des Dienstes
-  "$neu/bin/python" -I -B -c 'import wamo_werkstatt' || { rm -rf "$neu"; fehler "Das Paket wamo_werkstatt lässt sich nicht laden (Abhängigkeiten?), Abbruch."; }
+  # Import-Probe mit genau dem Interpreter des Dienstes, aber NICHT als root: Ein Import führt den Code der Pakete und der .pth-Dateien aus.
+  ( cd / && runuser -u "$BENUTZER" -- "$neu/bin/python" -I -B -c 'import wamo_werkstatt' ) \
+    || { rm -rf "$neu"; fehler "Das Paket wamo_werkstatt lässt sich nicht laden (Abhängigkeiten?), Abbruch."; }
   rm -rf "$VENV.vorher"
   if [ -e "$VENV" ]; then mv "$VENV" "$VENV.vorher"; fi
   if ! mv "$neu" "$VENV"; then
@@ -669,6 +689,7 @@ while [ $# -gt 0 ]; do
     --trocken) TROCKEN=ja ;;
     --quelle) [ $# -ge 2 ] || usage; QUELLE="$2"; shift ;;
     --schema) [ $# -ge 2 ] || usage; SCHEMA="$2"; shift ;;
+    --lan-offen) LAN_OFFEN=ja ;;
     *) usage ;;
   esac
   shift
@@ -702,7 +723,7 @@ case "$BEFEHL" in
     benutzer_anlegen
     schritt "Ordner und Konfiguration" "legt Ordner, die tmpfiles-Datei, werkstatt.env und admins (nur wenn sie fehlen) an und setzt Besitzer und Rechte von db.zugang" ordner_und_konfig
     schritt "Programme nach $APP (neuer Baum, Prüfsumme, dann Austausch)" "baut $APP neu aus $QUELLE/wamo_werkstatt, schreibt SHA256SUMS, prüft sie und tauscht dann aus" programme
-    schritt "venv $VENV" "baut das venv aus $QUELLE/pyproject.toml (nur Binärpakete), prüft den Import des Pakets und tauscht dann aus" venv_bauen
+    schritt "venv $VENV" "baut das venv aus $QUELLE/requirements.txt (nur Binärpakete, mit Prüfsummen), prüft den Import des Pakets als $BENUTZER und tauscht dann aus" venv_bauen
     firewall
     dienst
     caddy

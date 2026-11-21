@@ -1925,7 +1925,7 @@ Sammler (root, jede Minute) ──schreibt──> /var/lib/wamo-werkstatt/betrie
 ```
 
 Der Dienst lauscht nur auf `127.0.0.1:18095`. Der Container `wamo-caddy` erreicht Loopback des Hosts nicht, darum nimmt `wamo-werkstatt-bruecke.socket` die Verbindung von Caddy an
-(Ordner `/run/wamo-werkstatt`, 2750 `wamo-werkstatt:wamocon`, in `wamo-caddy` nur lesend eingebunden wie `/run/wamo-freigabe`) und reicht sie an den Port weiter. Wer die Schnittstelle
+(Ordner `/run/wamo-werkstatt`, 2750 `root:wamocon`, in `wamo-caddy` nur lesend eingebunden, der Socket darin gehört `wamo-werkstatt` wie `/run/wamo-freigabe`) und reicht sie an den Port weiter. Wer die Schnittstelle
 benutzen darf, entscheidet allein der Dienst: Token (ES256 über den Schlüsselsatz von GoTrue), `aal2`, aktives Profil mit Rolle `admin` ohne Laborart und die Erlaubnisliste
 `/etc/wamo-werkstatt/admins` (eine `user_id` je Zeile). Wer den Port aus dem LAN erreicht, entscheidet die Firewall: 55448 steht in `LAN_PORTS_ADMIN` (Kette `WAMO-FW-ADMIN`, Quellen aus
 `/etc/wamo/admin-quellen`, Abschnitt 6.1).
@@ -1962,11 +1962,10 @@ ssh sokrates2 "sudo python3 -E -s -B /opt/wamo-werkstatt/app/wamo_werkstatt_rauc
 ```
 
 Das Skript prüft vorab Werkzeuge, `wamo-caddy`, die Quelle (`werkstatt/wamo_werkstatt` und `pyproject.toml`, Syntax, keine Geheimnisdateien, keine Links), die Zugangsdatei (Inhalt wird nie gelesen),
-dass die Migration im Schema angewendet ist (Funktion `werkstatt_labor_stand`), dass 55448 und 18095 frei sind oder den eigenen Diensten gehören, dass `systemd-socket-proxyd` da ist und
+dass die Migration im Schema angewendet ist (Funktion `werkstatt_labor_stand`), dass `/etc/wamo/admin-quellen` mindestens einen Eintrag hat (sonst Abbruch, weil das ganze Büro-LAN den Port 55448 erreichte und am Labortag Gäste dort sitzen; nur mit `--lan-offen` bewusst anders), dass 55448 und 18095 frei sind oder den eigenen Diensten gehören, dass `systemd-socket-proxyd` da ist und
 (nur wenn sich das Compose von `wamo-caddy` ändert) dass Ruhe herrscht. Dann folgen: Sicherung unter `/var/backups/wamo-werkstatt/<Zeit>/` (ohne `db.zugang`, ohne Erlaubnisliste), Benutzer
 `wamo-werkstatt` (nologin, keine weiteren Gruppen), Ordner und Konfiguration, Programme nach `/opt/wamo-werkstatt/app` (mit `SHA256SUMS`, `ExecStartPre` prüft sie vor jedem Start),
-das venv `/opt/wamo-werkstatt/venv` aus `werkstatt/pyproject.toml` (nur Binärpakete; mit `--require-hashes`, wenn `pg/requirements-werkstatt.lock` vorliegt, sonst mit Warnung ohne
-Prüfsummen), die Firewall-Regel, Dienst, Brücke und Ausgangsregel (nft-Tabelle `wamo_werkstatt_ausgang`: nur Datenbank 55322 und Schlüsselsatz 55443 im LAN, dazu der Weg der Brücke auf
+das venv `/opt/wamo-werkstatt/venv` aus `werkstatt/requirements.txt` (mit `uv pip compile pyproject.toml --generate-hashes` erzeugt; nur Binärpakete, immer mit `--require-hashes --no-deps`, fehlt die Datei oder eine Prüfsumme, bricht das Skript ab; die Import-Probe läuft als `wamo-werkstatt`, nie als root), die Firewall-Regel, Dienst, Brücke und Ausgangsregel (nft-Tabelle `wamo_werkstatt_ausgang`: nur Datenbank 55322 und Schlüsselsatz 55443 im LAN, dazu der Weg der Brücke auf
 `127.0.0.1:18095`), die Caddy-Site (geprüft mit `caddy adapt` in einem Wegwerf-Container ohne Netz, dann `caddy reload`), der Sammler und der Rauchtest.
 
 **Caddy und die Ausfallzeit.** Das Compose von `wamo-caddy` bekommt Port 55448 und den Ordner `/run/wamo-werkstatt`. Beim ersten Einrichten wird `wamo-caddy` deshalb EINMAL neu angelegt: 55443 bis
@@ -1976,8 +1975,8 @@ nicht vorab, sie ist am Server zu messen. Es nimmt dieselbe Sperre wie der Aktua
 **Sammler.** `wamo-werkstatt-sammler.timer` ruft den Sammler jede Minute auf (root). Er schreibt atomar `betrieb.json` (`zeit`, `kern` mit `slot`, `release`, `aktiv`, `oberflaeche` mit `farbe`, `version`,
 `installer`, `kanal`, `labor_dienst`) und je Journal-Marke eine Datei `protokolle/<marke>.jsonl` mit Zeilen `{zeit, marke, stufe, code, zahlen}`, alles `root:wamo-werkstatt 0640`. Rohzeilen gibt
 es nie: Eine Zeile wird nur gelesen, wenn sie vollständig zu einem festen Muster der Liste im Skript passt; aus ihr entsteht nur ein Code aus der festen Liste, eine Stufe und ganze Zahlen. Namen,
-Adressen, E-Mails und Hashes verbraucht das Muster, ausgegeben werden sie nie. Marken: `wais-deploy`, `wamo-job-kern`, `wamo-nutzer`, `wamo-auth`, `wamo-verteilung`, `wamo-labor-geraete`,
-`wamo-labor-loeschen`. Höchstens 2000 Zeilen und 30 Tage je Marke. Ein neues Muster ist eine Zeile in `MUSTER` samt Fall in `voice-core/test_werkstatt_skripte.py`.
+Adressen, E-Mails und Hashes verbraucht das Muster, ausgegeben werden sie nie. Marken: `wais-deploy`, `wamo-job-kern`, `wamo-verteilung`, `wamo-labor-geraete`,
+`wamo-labor-loeschen`. Höchstens 2000 Zeilen und 30 Tage je Marke. Die Marke wählt jedes Konto frei, darum zählen nur Zeilen von root und wamocon (`_UID`, ein Aufruf über sudo läuft als root), je Lauf höchstens 50 neue Zeilen je Code, gleiche Zeilen nur einmal. Konten (`wamo-nutzer`, `wamo-auth`) liest der Sammler nicht. Ein neues Muster ist eine Zeile in `MUSTER` samt Fall in `voice-core/test_werkstatt_skripte.py`.
 
 **Rückweg.** `sudo bash ~/wamo-infra/wamo-werkstatt-rueckweg.sh --trocken`, dann ohne `--trocken`: Sammler, Brücke, Dienst und Ausgangsregel aus, Caddy-Site weg (Reload, dann müssen 55443 bis 55446
 antworten). Mit `--entfernen` zusätzlich Programme, venv, Konfiguration, Units und die Daten des Sammlers. Es bleiben: Port und Ordner im Compose von `wamo-caddy` (ohne Site lauscht Caddy auf 55448 nicht;

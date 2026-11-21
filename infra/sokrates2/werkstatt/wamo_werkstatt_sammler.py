@@ -13,6 +13,9 @@ Gruppen des Musters (Namen aus ZAHLEN_NAMEN). Namen, Adressen, E-Mails, Hashes u
 verbraucht und nie ausgegeben. Passt eine Zeile zu keinem Muster, verschwindet sie. Vor dem Schreiben prüft eintrag_pruefen jede Zeile noch einmal, und
 betrieb_pruefen den Betriebsstand: Was nicht genau dem Schema entspricht, wird nicht geschrieben.
 
+Herkunft: Die Marke (logger -t) kann jedes Konto frei wählen. Darum fragt journalctl nur Zeilen von root und vom Benutzer wamocon ab (_UID, ein Zugriff über sudo
+läuft als root), nie von Dienstkonten; je Lauf werden je Code höchstens JE_CODE_MAX neue Zeilen übernommen, gleiche Zeilen (Zeit, Code, Zahlen) nur einmal.
+
 Je Marke höchstens 2000 Zeilen und höchstens 30 Tage (Entscheidung A4). Der Lesezeiger je Marke (journalctl --cursor-file) liegt in zustand/ (nur root).
 Aufruf:  python3 -I -B wamo_werkstatt_sammler.py [--daten ORDNER] [--caddy-dir ORDNER] [--ohne-netz]
 """
@@ -24,6 +27,7 @@ import json
 import os
 import re
 import ssl
+import stat
 import subprocess
 import sys
 import time
@@ -47,11 +51,13 @@ MAX_TAGE = 30
 ERSTER_LAUF_STUNDEN = 24
 MAX_JOURNAL_BYTES = 4_000_000
 MAX_DATEI_BYTES = 65536
+JE_CODE_MAX = 50
+VERTRAUTE_BENUTZER = ("root", "wamocon")
 SERVER = "https://192.168.178.136"
 UMGEBUNG = {"PATH": "/usr/bin:/bin", "LC_ALL": "C.UTF-8"}
 
 STUFEN = ("info", "warnung", "fehler")
-ZAHLEN_NAMEN = frozenset({"rueckgabe", "trocken", "schritt", "major", "minor", "patch", "ziel", "geloescht", "fehler", "verblieben"})
+ZAHLEN_NAMEN = frozenset({"rueckgabe", "trocken", "major", "minor", "patch", "ziel", "geloescht", "fehler", "verblieben"})
 
 # ---------------------------------------------------------------------------------------------------- feste Muster-Liste
 # Regel: muster (vollständig passend, benannte Gruppen z_<name> für Zahlen), code (fest), stufe (fest) oder eine Funktion Match -> Stufe
@@ -75,7 +81,6 @@ def _stufe_nachweis(m: re.Match) -> str:
 
 
 BEFEHLE_AUSROLLEN = "pruefen-stand|verteilen|test-kern|test-oberflaeche|prod-kern|prod-oberflaeche|ausleiten|rueckweg|rauchtest|status"
-AKTIONEN_NUTZER = "anlegen|freischalten|zuruecksetzen|passwort|umbenennen|sperren|austreten|liste"
 
 MUSTER: dict[str, tuple[Regel, ...]] = {
     # logger -t wais-deploy "befehl=... commit=... teil=... trocken=... rueckgabe=..." (infra/sokrates2/wais-deploy.sh); der Befehl bestimmt den Code
@@ -88,15 +93,6 @@ MUSTER: dict[str, tuple[Regel, ...]] = {
         _r(r"aktion=kanal ergebnis=(?P<ergebnis>ok|fehler)", "kern_kanal_kanal", _stufe_ergebnis),
         _r(r"aktion=schalter ergebnis=(?P<ergebnis>ok|fehler)", "kern_kanal_schalter", _stufe_ergebnis),
         _r(r"aktion=notaus ergebnis=(?P<ergebnis>ok|fehler)", "kern_kanal_notaus", "warnung"),
-    ),
-    # logger -t wamo-nutzer "aktion=... schema=... email=... ergebnis=ok|fehler schritt=N" (scripts/wamo_nutzer.py); die E-Mail wird nur verbraucht
-    "wamo-nutzer": tuple(
-        _r(rf"aktion={a} schema=wamo_(?:dev|test|prod) email=\S{{1,100}} ergebnis=(?P<ergebnis>ok|fehler)(?: schritt=(?P<z_schritt>\d{{1,3}}))?", f"nutzer_{a}", _stufe_ergebnis)
-        for a in AKTIONEN_NUTZER.split("|")),
-    # logger -t wamo-auth (wamo-auth-einrichten.sh)
-    "wamo-auth": (
-        _r(r"einrichten: wamo_auth angewendet", "auth_eingerichtet", "info"),
-        _r(r"rueckweg: Trigger entfernt, Rechte entzogen", "auth_rueckweg", "warnung"),
     ),
     # logger -t wamo-verteilung (wamo-verteilung-einrichten.sh); Version nur als drei Zahlen, Hashes und Pfade werden nur verbraucht
     "wamo-verteilung": (
@@ -214,10 +210,40 @@ def jsonl_fortschreiben(pfad: str, neue: list[dict], jetzt: float, gid: int | No
 
 
 # ---------------------------------------------------------------------------------------------------- Journal lesen
-def journal_lesen(marke: str, zustand: str, lauf=subprocess.run) -> list[dict]:
+def vertraute_uids() -> list[str]:
+    """Die Kennungen der Benutzer, deren Journalzeilen gelten (root und wamocon, soweit es sie gibt)."""
+    uids = []
+    try:
+        import pwd
+        for name in VERTRAUTE_BENUTZER:
+            try:
+                uids.append(str(pwd.getpwnam(name).pw_uid))
+            except KeyError:
+                continue
+    except ImportError:
+        pass
+    return uids or ["0"]
+
+
+def begrenzen(eintraege: list[dict]) -> list[dict]:
+    """Gleiche Einträge nur einmal, je Code höchstens JE_CODE_MAX (die jüngsten bleiben)."""
+    gesehen, je_code, ergebnis = set(), {}, []
+    for e in reversed(eintraege):
+        schluessel = json.dumps(e, sort_keys=True)
+        if schluessel in gesehen or je_code.get(e["code"], 0) >= JE_CODE_MAX:
+            continue
+        gesehen.add(schluessel)
+        je_code[e["code"]] = je_code.get(e["code"], 0) + 1
+        ergebnis.append(e)
+    return ergebnis[::-1]
+
+
+def journal_lesen(marke: str, zustand: str, lauf=subprocess.run, uids: list[str] | None = None) -> list[dict]:
     """Neue Zeilen der Marke seit dem Lesezeiger, bereits ausgewertet (nie wörtlich). Fehler: Lesezeiger weg, nächster Lauf beginnt neu."""
     zeiger = os.path.join(zustand, f"{marke}.zeiger")
-    befehl = ["/usr/bin/journalctl", "-t", marke, "-o", "json", "--no-pager", "--quiet", f"--cursor-file={zeiger}", f"--since=-{ERSTER_LAUF_STUNDEN}h"]
+    uids = vertraute_uids() if uids is None else uids
+    befehl = (["/usr/bin/journalctl", "-t", marke, "-o", "json", "--no-pager", "--quiet", f"--cursor-file={zeiger}", f"--since=-{ERSTER_LAUF_STUNDEN}h"]
+              + [f"_UID={u}" for u in uids])   # mehrere Treffer desselben Feldes gelten als "oder"
     try:
         r = lauf(befehl, capture_output=True, timeout=20, env=UMGEBUNG, check=False)
     except (OSError, subprocess.SubprocessError):
@@ -236,21 +262,34 @@ def journal_lesen(marke: str, zustand: str, lauf=subprocess.run) -> list[dict]:
             prioritaet = int(j.get("PRIORITY", 6))
         except (ValueError, KeyError, TypeError):
             continue
+        if str(j.get("_UID", "")) not in uids:
+            continue
         auswertung = zeile_auswerten(marke, j.get("MESSAGE"), prioritaet)
         if auswertung is not None:
             e = {"zeit": zeit_text(sekunden), "marke": marke, **auswertung}
             if eintrag_pruefen(e):
                 ergebnis.append(e)
-    return ergebnis
+    return begrenzen(ergebnis)
 
 
 # ---------------------------------------------------------------------------------------------------- Betriebsstand
 def datei_lesen(pfad: str) -> str | None:
+    """Eine normale Datei, höchstens MAX_DATEI_BYTES. Keine Links (O_NOFOLLOW), kein Warten an einem FIFO oder Gerät (O_NONBLOCK, nur S_ISREG)."""
     try:
-        with open(pfad, "rb") as f:
+        fd = os.open(pfad, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
             return f.read(MAX_DATEI_BYTES).decode("utf-8", "replace")
     except OSError:
         return None
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def befehl_ausgabe(befehl: list[str], lauf=subprocess.run) -> str:
@@ -287,12 +326,20 @@ def tls_kontext(ca: str) -> ssl.SSLContext:
     return kontext
 
 
+class _KeineWeiterleitung(urllib.request.HTTPRedirectHandler):
+    """Eine Weiterleitung ist eine Antwort wie jede andere, nie ein neuer Abruf (der Sammler läuft als root und fragt nur diese zwei festen Adressen)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def http_json(url: str, ca: str, ohne_netz: bool) -> dict | None:
     if ohne_netz:
         return None
     try:
         kontext = tls_kontext(ca)
-        with urllib.request.urlopen(url, timeout=3, context=kontext) as antwort:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=kontext), _KeineWeiterleitung)
+        with opener.open(url, timeout=3) as antwort:
             daten = json.loads(antwort.read(MAX_DATEI_BYTES))
         return daten if isinstance(daten, dict) else None
     except (OSError, ValueError, ssl.SSLError):
