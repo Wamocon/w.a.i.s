@@ -109,6 +109,9 @@ AUSNAHMEN: dict[str, str] = {
                               "Profils wird der Verweis null (on delete set null).",
     "werkstatt_karten": "Freigabekarten des Werkstatt-Panels (Migration 0031), fünf Minuten gültig, nur Zahlen und Kennungen. Gebunden an "
                         "einen Admin ohne labor_art; fällt mit dem Profil weg (on delete cascade), das Aufräumen löscht sie nach einem Tag.",
+    "labor_zugang": "Claude-Zugang des Testlabors (Migration 0032): eine Zeile mit dem Schlüssel als Chiffrat des Kerns, Konfiguration ohne "
+                    "Gesprächstext und ohne Besitzer. gesetzt_von nennt den Admin, der ihn gesetzt hat, nie ein Laborprofil (die Route lehnt "
+                    "Laborprofile ab); beim Löschen des Profils wird der Verweis null (on delete set null), die Zeile bleibt.",
 }
 
 #: Spuren außerhalb des Schemas von WAMO (GoTrue, Schema auth): Die Funktion labor_loeschen kann und soll sie nicht anfassen. Sie

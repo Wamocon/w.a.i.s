@@ -44,6 +44,7 @@ def _kein_echtes_gateway(monkeypatch):
     # in Tests aus (test_boss.py schaltet sie gezielt ein und ersetzt das Netz)
     monkeypatch.setenv("WAMO_BOSS_PROBE", "aus")
     import boss
+    import labor_zugang
     import llm_anbieter
     import modellzugang
 
@@ -51,8 +52,10 @@ def _kein_echtes_gateway(monkeypatch):
     llm_anbieter._claude_cache.clear()
     llm_anbieter._haus_pause.clear()
     modellzugang._versuche.clear()
+    labor_zugang.cache_leeren()  # der gespeicherte Labor-Schlüssel gilt nie über einen Test hinaus
     boss._probe_cache_leeren()
     yield
+    labor_zugang.cache_leeren()
     llm_anbieter._cache_leeren()
     llm_anbieter._claude_cache.clear()
     llm_anbieter._haus_pause.clear()

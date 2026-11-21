@@ -15,7 +15,8 @@ Zwei Schlüsseltypen, getrennt gespeichert und verwendet:
 
 Der Schlüssel des Kerns (ANTHROPIC_API_KEY) gehört einer Person. Er gilt nur für das Profil in
 WAMO_CLAUDE_SCHLUESSEL_PROFIL (Übergang, bis sie ihn selbst hinterlegt hat) und für Laborprofile (Testlabor, Quelle
-"labor": nur das Gespräch, Standardmodell Haiku, nie für Entwicklungsaufträge), nie für andere.
+"labor": nur das Gespräch, Standardmodell Haiku, nie für Entwicklungsaufträge), nie für andere. Für Laborprofile geht ihm der Schlüssel
+vor, den ein Admin in der Werkstatt gespeichert hat (labor_zugang.py, Tabelle labor_zugang, Migration 0032).
 
 Schlüssel und Token liegen nur verschlüsselt in der Datenbank (schluessel.py, Hauptschlüssel WAMO_SCHLUESSEL_KEK nur
 beim Kern). Sie werden nie geloggt, nie an die Oberfläche zurückgegeben (nur "hinterlegt, endet auf …abcd") und nie
@@ -58,6 +59,7 @@ import anthropic
 import asyncpg
 from loguru import logger
 
+import labor_zugang
 import modellwahl as mw
 from llm_anbieter import STANDARD_CLAUDE, Zugang, lesbarer_modellname
 from memory import DB_ERRORS, Database, DatabaseUnavailable, admin_database, normalize_uuid, shared_database
@@ -200,7 +202,10 @@ async def zugang_laden(user_id: str, *, db: Database | None = None, tresor: Tres
         except (DatabaseUnavailable, *DB_ERRORS) as e:
             logger.error("Modellzugang für Profil {} nicht lesbar ({}): nur Hausmodelle", uid[:8], type(e).__name__)
             return Zugang.haus(uid, "fehler", "Modellzugang nicht lesbar")
-    zugang = _zugang_aus_zeile(uid, zeile, tresor, labor_art)
+    # Laborprofile: zuerst der Schlüssel, den ein Admin in der Werkstatt gespeichert hat (labor_zugang.py, Migration 0032). Je Prozess höchstens
+    # alle 30 Sekunden gelesen, nie je Sitzung; ohne ihn gilt der Schlüssel des Servers. Für jedes andere Profil wird nichts davon berührt.
+    labor_schluessel = (await labor_zugang.schluessel_fuer_labor(db=db, tresor=tresor)) if labor_art in LABOR_ARTEN and db.configured else None
+    zugang = _zugang_aus_zeile(uid, zeile, tresor, labor_art, labor_schluessel)
     return zugang if labor_art in LABOR_ARTEN else _wahl_anhaengen(zugang, zeile)
 
 
@@ -221,8 +226,10 @@ def _wahl_anhaengen(zugang: Zugang, zeile) -> Zugang:
     return replace(zugang, modell_wahl=wahl, tts_stimme=stimme) if wahl or stimme else zugang
 
 
-def _zugang_aus_zeile(uid: str, zeile, tresor: Tresor | None, labor_art: str | None) -> Zugang:
-    """Zugang ohne Wahl der Person (zugang_laden hängt sie danach an)."""
+def _zugang_aus_zeile(uid: str, zeile, tresor: Tresor | None, labor_art: str | None,
+                      labor_schluessel: tuple[str, str | None] | None = None) -> Zugang:
+    """Zugang ohne Wahl der Person (zugang_laden hängt sie danach an). labor_schluessel: der von einem Admin gespeicherte Schlüssel des
+    Labors samt Workspace (labor_zugang.schluessel_fuer_labor), wirkt nur bei einem Laborprofil und geht dem Schlüssel des Servers vor."""
     stt = zeile["stt"] if zeile else "soniox"
     tts = zeile["tts"] if zeile else "soniox"
     if zeile and zeile["nur_haus"]:
@@ -245,12 +252,14 @@ def _zugang_aus_zeile(uid: str, zeile, tresor: Tresor | None, labor_art: str | N
         return Zugang(uid, "claude", "profil", claude_modell=modell, claude_schluessel=schluessel,
                       claude_workspace=zeile["claude_workspace"], stt=stt, tts=tts, claude_code=code)
     server_schluessel = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
-    if labor_art in LABOR_ARTEN and server_schluessel:
-        # Testlabor: Laborprofile führen das Gespräch über den Server-Schlüssel (ANTHROPIC_API_KEY), Standardmodell Haiku
-        # (oder das vom Admin gesetzte Modell des Profils). Nur das Gespräch: kein Claude-Code-Token (claude_code bleibt
-        # falsch) und boss.entwicklung_quelle liefert für labor immer "keine". Ohne Schlüssel bleibt es bei Hausmodellen.
-        return Zugang(uid, "claude", "labor", claude_modell=modell, claude_schluessel=server_schluessel,
-                      claude_workspace=(os.getenv("ANTHROPIC_WORKSPACE_ID") or "").strip() or None, stt=stt, tts=tts)
+    if labor_art in LABOR_ARTEN and (labor_schluessel or server_schluessel):
+        # Testlabor: Laborprofile führen das Gespräch über den Schlüssel des Labors (den ein Admin in der Werkstatt gespeichert hat,
+        # Migration 0032), sonst über den Server-Schlüssel (ANTHROPIC_API_KEY), Standardmodell Haiku (oder das vom Admin gesetzte Modell
+        # des Profils). Nur das Gespräch: kein Claude-Code-Token (claude_code bleibt falsch) und boss.entwicklung_quelle liefert für
+        # labor immer "keine". Ohne Schlüssel bleibt es bei Hausmodellen.
+        schluessel, workspace = labor_schluessel or (server_schluessel, labor_zugang.server_workspace())
+        return Zugang(uid, "claude", "labor", claude_modell=modell, claude_schluessel=schluessel, claude_workspace=workspace,
+                      stt=stt, tts=tts)
     if kern_zuordnung(uid):
         return Zugang(uid, "claude", "zuordnung", claude_modell=modell,
                       claude_schluessel=(os.getenv("ANTHROPIC_API_KEY") or "").strip(),
