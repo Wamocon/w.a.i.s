@@ -80,11 +80,14 @@ class LaborSitzung:
         self.katalog = neu
         return True
 
-    async def katalog_wache(self, geaendert: Callable[[], Awaitable[None]], *, takt: float = labor_karten_db.SITZUNG_TAKT_SECS,
+    async def katalog_wache(self, geaendert: Callable[[], Awaitable[None]], *, takt: float | None = None,
                             sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
         """Läuft mit der Sitzung (nur mit Schalter an) und ruft geaendert, sobald neue Wissenstexte gelten. Fehler beenden sie nicht, ein
-        gescheiterter Aufruf von geaendert wird im nächsten Takt wiederholt."""
+        gescheiterter Aufruf von geaendert wird im nächsten Takt wiederholt. takt: Sekunden zwischen zwei Blicken in den Zwischenspeicher
+        (Standard labor_karten_db.SITZUNG_TAKT_SECS)."""
+        takt = labor_karten_db.SITZUNG_TAKT_SECS if takt is None else takt
         offen = False
+        gemeldet: str | None = None  # Fehlertyp, der schon im Log steht: eine dauerhafte Störung füllt das Log nicht alle 10 s
         while True:
             await sleep(takt)
             try:
@@ -92,8 +95,11 @@ class LaborSitzung:
                 if offen:
                     await geaendert()
                     offen = False
+                gemeldet = None
             except Exception as fehler:  # noqa: BLE001 (das Nachladen darf die Sitzung nie stören)
-                logger.warning("Labor-Karten: Prompt nicht erneuert ({})", type(fehler).__name__)
+                if gemeldet != type(fehler).__name__:
+                    gemeldet = type(fehler).__name__
+                    logger.warning("Labor-Karten: Prompt nicht erneuert ({})", gemeldet)
 
     def prompt(self) -> str:
         """Der Prompt dieser Sitzung: immer der Laborprompt, nie der normale mit Gedächtnis und PC. Regeln als eigener Block, alles andere als Daten."""
