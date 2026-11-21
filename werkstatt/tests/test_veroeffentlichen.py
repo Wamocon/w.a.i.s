@@ -250,3 +250,19 @@ def test_aufraeumen_fehler_stoppt_den_dienst_nicht(konfig, db, quelle, mono, cap
     with TestClient(create_app(konfig, db, quelle, mono=mono), raise_server_exceptions=False) as c:
         assert c.get("/werkstatt/api/ich", headers=kopf()).status_code == 200
     assert "aufraeumen_fehlgeschlagen art=RuntimeError" in caplog.text and "geheim" not in caplog.text
+
+
+def test_neue_karte_waehrend_des_veroeffentlichens_bleibt_entwurf(client, katalog):
+    """Die Zeilensperre sieht eine gerade neu angelegte Karte nicht: Es werden nur die geprüften Entwürfe veröffentlicht, sonst gilt nichts."""
+    karte = karte_holen(client)
+    echt = katalog.entwuerfe_veroeffentlichen
+
+    async def mit_zwischenkarte(ids):
+        katalog.karten_tab["J3"] = karte_roh("J3", gruppe="Jira", stand="entwurf")  # ein anderer Admin legt sie jetzt an
+        return await echt(ids) - 1  # nur die geprüften Entwürfe wurden gefunden: einer weniger als erwartet
+
+    katalog.entwuerfe_veroeffentlichen = mit_zwischenkarte
+    r = client.post(f"{B}/karte/{karte['id']}/ausfuehren", headers=kopf())
+    assert r.status_code == 409 and r.json()["code"] == "konflikt"
+    assert katalog.versionen_tab == [] and katalog.freigaben[karte["id"]]["ausgefuehrt_at"] is None
+    assert katalog.karten_tab["J1"]["stand"] == "entwurf" and "J3" not in katalog.karten_tab  # alles zurückgerollt

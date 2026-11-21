@@ -268,7 +268,7 @@ async def test_jwks_quelle_nie_erreichbar():
 
 
 @pytest.mark.parametrize("antwort", [httpx.Response(200, content=b"kein json"), httpx.Response(200, json={"keys": "x"}),
-                                     httpx.Response(200, content=b"x" * 70000), httpx.Response(200, json=_jwks(use="enc"))])
+                                     httpx.Response(200, content=b"x" * 70000)])
 async def test_jwks_quelle_unbrauchbare_antworten(antwort):
     quelle = JwksQuelle("https://stack.test/jwks", transport=httpx.MockTransport(lambda r: antwort))
     with pytest.raises(QuelleNichtErreichbar):
@@ -277,3 +277,28 @@ async def test_jwks_quelle_unbrauchbare_antworten(antwort):
 
 def test_fremder_schluessel_im_satz_wird_nicht_genutzt():
     assert isinstance(FREMDER_SCHLUESSEL, ec.EllipticCurvePrivateKey) and anmeldung.AAL2_MAX_ALTER_S == 60
+
+
+async def test_jwks_leerer_satz_widerruft_alte_schluessel():
+    antworten = [httpx.Response(200, json=_jwks()), httpx.Response(200, json={"keys": []})]
+    uhr = {"t": 0.0}
+    quelle = JwksQuelle("https://stack.test/jwks", transport=httpx.MockTransport(lambda r: antworten.pop(0)), mono=lambda: uhr["t"])
+    assert await quelle.schluessel("k1") is not None
+    uhr["t"] = 400  # veraltet: neuer Abruf, GoTrue nennt keinen Schlüssel mehr
+    with pytest.raises(KeyError):
+        await quelle.schluessel("k1")
+
+
+async def test_jwks_kaputter_einzelschluessel_verwirft_den_satz_nicht():
+    satz = _jwks()
+    satz["keys"].insert(0, {"kty": "EC", "crv": "P-256", "kid": "kaputt", "use": "sig", "x": "!!", "y": "!!"})
+    quelle = JwksQuelle("https://stack.test/jwks", transport=httpx.MockTransport(lambda r: httpx.Response(200, json=satz)))
+    assert await quelle.schluessel("k1") is not None
+    with pytest.raises(KeyError):
+        await quelle.schluessel("kaputt")
+
+
+async def test_jwks_schluessel_nur_zum_signieren():
+    quelle = JwksQuelle("https://stack.test/jwks", transport=httpx.MockTransport(lambda r: httpx.Response(200, json=_jwks(use="enc"))))
+    with pytest.raises(KeyError):
+        await quelle.schluessel("k1")
