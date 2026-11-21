@@ -12,7 +12,7 @@
 /* ---------- Seitenleiste ---------- */
 .ws-seite { position: sticky; top: 16px; align-self: start; display: grid; gap: 20px; min-width: 0; }
 .ws-marke { display: grid; gap: 2px; }
-.ws-marke-name { font: 700 22px/1.1 var(--marke); }
+.ws-marke-name { font-size: 22px; line-height: 1.1; } /* Schrift und Punkte kommen von der Wortmarke (.marke) */
 .ws-marke-zusatz { font: 500 11px/1.3 var(--hud); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-soft); }
 .ws-nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ws-nav a {
