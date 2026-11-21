@@ -9,6 +9,7 @@ import { Abrufinhalt, Karte, Pille } from "./Bausteine";
 import { LaborCheckliste } from "./LaborCheckliste";
 import { LaborPlaetze } from "./LaborPlaetze";
 import { LaborTermin, NEUER_TERMIN } from "./LaborTermin";
+import { LaborZugang } from "./LaborZugang";
 import { useAbruf } from "./useAbruf";
 
 /**
@@ -117,7 +118,8 @@ function Plan({ termine, neuLaden }: { termine: readonly Termin[]; neuLaden: () 
   );
 }
 
-export function LaborPlaner() {
+/** onFaktor: nach einem frischen Code (Claude-Zugang des Labors): der Zugang der Werkstatt (Alter des zweiten Faktors) hat sich geändert. */
+export function LaborPlaner({ onFaktor }: { onFaktor?: () => void } = {}) {
   const termine = useAbruf((s) => termineLaden(s), "termine");
   const stand = useAbruf((s) => laborStandLaden(s), "laborstand");
   return (
@@ -133,6 +135,7 @@ export function LaborPlaner() {
           {(p) => <StandTabelle profile={p} />}
         </Abrufinhalt>
       </Karte>
+      <LaborZugang onFaktor={onFaktor} />
     </div>
   );
 }

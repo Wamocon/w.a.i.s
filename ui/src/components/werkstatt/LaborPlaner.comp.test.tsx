@@ -37,6 +37,9 @@ vi.mock("@/lib/werkstattApi", async (original) => {
   };
 });
 
+// Die Karte "Claude-Zugang des Labors" hat ihren eigenen Test (LaborZugang.comp.test.tsx) und spricht mit dem Kern, nicht mit dem Dienst
+vi.mock("./LaborZugang", () => ({ LaborZugang: () => <p>Karte Claude-Zugang</p> }));
+
 const TERMIN = { id: "t1", tag: "2099-12-05", beginn: "09:00", ende: "17:00", einwilligungVersion: 1, status: "entwurf" as const, aufbewahrungBis: "2099-12-18" };
 
 beforeEach(() => {
@@ -70,6 +73,7 @@ describe("Termin und Fristen", () => {
     expect(within(stand).getByText("gesperrt")).toBeTruthy();
     expect(within(stand).getByText("freigeschaltet")).toBeTruthy();
     expect(screen.getByText(/laufen bis zur nächsten Stufe weiter über die Skripte/)).toBeTruthy();
+    expect(screen.getByText("Karte Claude-Zugang")).toBeTruthy(); // der Claude-Zugang des Labors gehört in den Planer
   });
 
   it("ein neuer Labortag verschiebt die Fristen mit, bis die Aufbewahrung von Hand gewählt wird", async () => {

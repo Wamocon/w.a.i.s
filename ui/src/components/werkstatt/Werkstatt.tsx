@@ -149,7 +149,7 @@ export function Werkstatt({ sitzung }: { sitzung: Sitzung }) {
     <Rahmen seite={seite}>
       <h1 ref={titel} tabIndex={-1} className="ws-titel">{bereichTitel(bereich)}</h1>
       {bereich === "dashboard" && <Dashboards />}
-      {bereich === "labor" && <LaborPlaner />}
+      {bereich === "labor" && <LaborPlaner onFaktor={ich.neu} />}
       {bereich === "karten" && <KartenBereich onFaktor={ich.neu} />}
       {bereich === "protokolle" && <Protokolle />}
     </Rahmen>
