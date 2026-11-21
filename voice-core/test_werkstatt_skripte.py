@@ -694,6 +694,16 @@ class RauchtestUndDokuTests(unittest.TestCase):
         self.assertNotIn(chr(0x2014), zeile)
         self.assertNotIn(chr(0x2013), zeile)
 
+    def test_namensvertrag_nennt_den_schalter_des_kerns(self):
+        zeile = next((z for z in lies(REPO / "CLAUDE.md").splitlines() if z.startswith("| Labor-Karten nachladen (Kern) |")), None)
+        self.assertIsNotNone(zeile, "Zeile Labor-Karten nachladen (Kern) fehlt in der Tabelle")
+        for soll in ("WAMO_LABOR_KARTEN_NACHLADEN", "wamo-core-env", "AUS_ENV", "voice-core/labor_karten_db.py", "30 Sekunden", "labor_karten_aktive_version", "labor_wissen_aktiv",
+                     "2000 Zeichen", "höchstens 20 Einträge", "letzte gültige Version", "ausgeschaltetem Schalter"):
+            self.assertIn(soll, zeile, soll)
+        self.assertNotIn(chr(0x2014), zeile)
+        self.assertNotIn(chr(0x2013), zeile)
+        self.assertIn("MIT ausgeschaltetem Schalter", lies(SOKRATES2 / "README.md"))   # der Rollout-Plan nennt den Kern-Release vor dem Zuschalten
+
     def test_abschnitt_im_readme_von_sokrates2(self):
         text = lies(SOKRATES2 / "README.md")
         self.assertIn("## 23. Werkstatt (Admin-Panel", text)
