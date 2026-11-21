@@ -18,10 +18,10 @@ export type Abruf<T> = {
   neu: () => void;
 };
 
-type Stand<T> = { marke: string; daten: T | null; fehler: FehlerBild | null };
+type Stand<T> = { schluessel: string; marke: string; daten: T | null; fehler: FehlerBild | null };
 
 export function useAbruf<T>(laden: (signal: AbortSignal) => Promise<T>, schluessel: string, aktiv = true): Abruf<T> {
-  const [stand, setStand] = useState<Stand<T>>({ marke: "", daten: null, fehler: null });
+  const [stand, setStand] = useState<Stand<T>>({ schluessel: "", marke: "", daten: null, fehler: null });
   const [zaehler, setZaehler] = useState(0);
   const ladenRef = useRef(laden);
   useEffect(() => {
@@ -37,18 +37,18 @@ export function useAbruf<T>(laden: (signal: AbortSignal) => Promise<T>, schluess
       .then(() => ladenRef.current(steuerung.signal))
       .then(
         (daten) => {
-          if (!steuerung.signal.aborted) setStand({ marke, daten, fehler: null });
+          if (!steuerung.signal.aborted) setStand({ schluessel, marke, daten, fehler: null });
         },
         (e: unknown) => {
           // gleicher Schlüssel: der letzte Stand bleibt stehen, der Fehler kommt dazu
-          if (!steuerung.signal.aborted) setStand((alt) => ({ marke, daten: alt.marke.startsWith(`${schluessel}#`) ? alt.daten : null, fehler: fehlerBildAus(e) }));
+          if (!steuerung.signal.aborted) setStand((alt) => ({ schluessel, marke, daten: alt.schluessel === schluessel ? alt.daten : null, fehler: fehlerBildAus(e) }));
         },
       );
     return () => steuerung.abort();
   }, [marke, aktiv, schluessel]);
 
   const neu = useCallback(() => setZaehler((n) => n + 1), []);
-  const gilt = stand.marke.startsWith(`${schluessel}#`);
+  const gilt = stand.schluessel === schluessel;
   return {
     daten: gilt ? stand.daten : null,
     fehler: gilt ? stand.fehler : null,

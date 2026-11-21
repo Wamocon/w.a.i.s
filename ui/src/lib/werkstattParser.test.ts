@@ -78,6 +78,10 @@ test("Sitzungen, Latenz und Aktionen: Listen mit strengen Zeilen", () => {
   const s = alsSitzungen({ tage: [{ tag: "2026-11-07", anzahl: 12, dauer_p50_s: 90, dauer_p95_s: 300, offen: 1 }] });
   assert.deepEqual(s, [{ tag: "2026-11-07", anzahl: 12, dauerP50S: 90, dauerP95S: 300, offen: 1 }]);
   assert.equal(alsSitzungen([{ tag: "kaputt", anzahl: 1 }]), null);
+  assert.equal(alsSitzungen([{ tag: "2026-11-21xyz", anzahl: 1 }]), null);
+  assert.equal(alsSitzungen([{ tag: "2026-11-21 10:00:00+00", anzahl: 1 }])?.[0].tag, "2026-11-21");
+  assert.equal(alsSitzungen([{ tag: "2026-11-21", anzahl: 1e21 }])?.[0].anzahl, 1e21); // Zahl bleibt Zahl, nur ganze Werte für Kennungen
+  assert.equal(alsPlaetze([{ platz: 1e21, zweck: "besucher" }]), null);
   assert.deepEqual(alsLatenz([{ tag: "2026-11-07T00:00:00Z", zuege: 5, p50_ms: 1700, p95_ms: 3100 }]), [{ tag: "2026-11-07", zuege: 5, p50Ms: 1700, p95Ms: 3100 }]);
   assert.deepEqual(alsLatenz({ zuege: 9, p50_ms: 1, p95_ms: 2 }), [{ tag: null, zuege: 9, p50Ms: 1, p95Ms: 2 }]);
   assert.equal(alsLatenz([{ p50_ms: 1 }]), null);
@@ -157,6 +161,7 @@ test("Versionen, Prüfung, Freigabekarte und Ergebnis", () => {
   const karte = alsFreigabeKarte({ id: "k1", gilt_bis: "2026-11-20T10:05:00Z", ziel: { anzahl: 2, karten: ["W1", "kaputt"] } });
   assert.deepEqual(karte, { id: "k1", giltBis: "2026-11-20T10:05:00Z", aenderungen: 2, karten: ["W1"] });
   assert.equal(alsFreigabeKarte({ id: "k1", gilt_bis: "nie" }), null);
+  assert.equal(alsFreigabeKarte({ id: "../k1", gilt_bis: "2026-11-20T10:05:00Z" }), null); // die Kennung kommt in einen Pfad
   assert.equal(alsFreigabeKarte({ gilt_bis: "2026-11-20T10:05:00Z" }), null);
   assert.deepEqual(alsVeroeffentlicht({ version: 5, zeichen: 4300 }), { version: 5, zeichen: 4300 });
   assert.equal(alsVeroeffentlicht({ version: 0, zeichen: 1 }), null);

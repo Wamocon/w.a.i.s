@@ -138,6 +138,8 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
         zurueck(bild.text);
       } else {
         setFehler(bild);
+        // Netz oder Zeit: unklar, ob die Version entstanden ist. Der Katalog wird neu geladen, dann zeigt sich der Stand.
+        if (bild.code === "netz" || bild.code === "zeit") onVeroeffentlicht();
         zurueck();
       }
     }

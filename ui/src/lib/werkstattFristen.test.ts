@@ -8,6 +8,7 @@ import {
   fristen,
   heuteIso,
   istTag,
+  naechsterMontag,
   tagKurz,
   tagPlus,
   tagText,
@@ -95,4 +96,14 @@ test("Uhrzeit: nur HH:MM, Sekunden aus der Datenbank werden gekürzt", () => {
   assert.ok(!zeitraumGueltig("09:00", "09:00"));
   assert.ok(zeitraumGueltig(null, "09:00"));
   assert.ok(zeitraumGueltig("09:00", null));
+});
+
+test("Nachlauf: der erste Montag nach dem Labortag, nie der Tag selbst", () => {
+  assert.equal(naechsterMontag("2026-12-05"), "2026-12-07"); // Samstag
+  assert.equal(naechsterMontag("2026-12-06"), "2026-12-07"); // Sonntag
+  assert.equal(naechsterMontag("2026-12-07"), "2026-12-14"); // Montag
+  assert.equal(naechsterMontag("2026-12-08"), "2026-12-14"); // Dienstag
+  assert.equal(naechsterMontag("2026-12-11"), "2026-12-14"); // Freitag
+  assert.equal(naechsterMontag("kaputt"), null);
+  assert.equal(fristen("2026-12-09")?.nachlaufAb, "2026-12-14");
 });

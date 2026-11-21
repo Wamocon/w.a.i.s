@@ -2,14 +2,13 @@
  * Fristen eines Labortags (Labor-Planer der Werkstatt). Ein Labortag wird einmal geplant, die Fristen werden daraus berechnet und
  * nicht gespeichert, außer der Aufbewahrung (aufbewahrung_bis): Sie ist ein Wert des Termins und darf höchstens 14 Tage nach dem
  * Labortag liegen. Vorgabe ist Tag plus 13, der Löschlauf des Dienstes beginnt einen Tag nach dem Ende der Aufbewahrung. Der Nachlauf
- * (Laborkonten löschen) beginnt am Montag nach dem Labortag, also zwei Tage danach, wenn der Labortag ein Samstag ist.
+ * (Laborkonten löschen) beginnt am Montag nach dem Labortag, bei einem Samstag also zwei Tage danach.
  * Alle Rechnungen laufen auf Kalendertagen in UTC, damit die Zeitzone und die Sommerzeit nichts verschieben.
  * Ohne React und ohne Netz (werkstattFristen.test.ts).
  */
 
 export const AUFBEWAHRUNG_VORGABE_TAGE = 13;
 export const AUFBEWAHRUNG_MAX_TAGE = 14;
-export const NACHLAUF_TAGE = 2;
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WOCHENTAG = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"] as const;
@@ -49,6 +48,14 @@ export function tageZwischen(von: string, bis: string): number | null {
   return a === null || b === null ? null : Math.round((b - a) / 86_400_000);
 }
 
+/** Der erste Montag nach dem Tag (nie der Tag selbst): ein Samstag ergibt den übernächsten Tag, ein Montag die Woche darauf. */
+export function naechsterMontag(tag: string): string | null {
+  const ms = tagZuMs(tag);
+  if (ms === null) return null;
+  const wochentag = new Date(ms).getUTCDay(); // 0 = Sonntag
+  return tagPlus(tag, (8 - wochentag) % 7 || 7);
+}
+
 export type Fristen = {
   /** Vorgabe für aufbewahrung_bis */
   aufbewahrungBis: string;
@@ -61,7 +68,7 @@ export type Fristen = {
 /** Die Fristen zu einem Labortag; null bei einem ungültigen Tag. bis: der gewählte Wert für die Aufbewahrung (sonst die Vorgabe). */
 export function fristen(tag: string, bis?: string | null): Fristen | null {
   const vorgabe = tagPlus(tag, AUFBEWAHRUNG_VORGABE_TAGE);
-  const nachlauf = tagPlus(tag, NACHLAUF_TAGE);
+  const nachlauf = naechsterMontag(tag);
   if (vorgabe === null || nachlauf === null) return null;
   const gewaehlt = bis && istTag(bis) ? bis : vorgabe;
   const loesch = tagPlus(gewaehlt, 1);

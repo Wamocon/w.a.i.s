@@ -48,7 +48,7 @@ export function kurz(v: unknown, max = 200): string | null {
 }
 
 export const zahl = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
-export const ganz = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
+export const ganz = (v: unknown): number | null => (typeof v === "number" && Number.isSafeInteger(v) ? v : null);
 const wahrheit = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
 
 /** Eine Liste aus der Antwort: entweder die Antwort selbst oder das Feld mit einem der genannten Namen. */
@@ -73,7 +73,7 @@ function alle<T>(zeilen: unknown[] | null, einzeln: (z: unknown) => T | null): T
 
 /** JJJJ-MM-TT aus einem Datum oder Zeitstempel. */
 function tagAus(v: unknown): string | null {
-  if (typeof v !== "string" || v.length < 10) return null;
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}(?:$|[T ])/.test(v)) return null;
   const t = v.slice(0, 10);
   return istTag(t) ? t : null;
 }
@@ -301,7 +301,7 @@ export function alsPruefung(d: unknown): Pruefung | null {
 
 export function alsFreigabeKarte(d: unknown): FreigabeKarte | null {
   if (!istObj(d)) return null;
-  const id = kurz(d.id, 64);
+  const id = typeof d.id === "string" && SICHERE_ID.test(d.id) ? d.id : null; // die Kennung kommt in einen Pfad
   const giltBis = kurz(d.gilt_bis, 40);
   if (!id || !giltBis || Number.isNaN(Date.parse(giltBis))) return null;
   const ziel = istObj(d.ziel) ? d.ziel : {};

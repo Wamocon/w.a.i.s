@@ -98,3 +98,11 @@ test("welche Fehler einen neuen Code oder eine neue Karte verlangen", () => {
   assert.ok(karteUnbrauchbar("karte_verbraucht"));
   assert.ok(!karteUnbrauchbar("aal2_alt"));
 });
+
+test("die Codes, die nur die Oberfläche kennt, nimmt sie vom Dienst nie an", () => {
+  for (const code of ["netz", "zeit", "antwort", "nicht_eingerichtet", "abgebrochen"]) {
+    const f = fehlerBild(403, code, "Text des Dienstes");
+    assert.equal(f.code, "nicht_berechtigt", code);
+    assert.doesNotMatch(f.text, /Text des Dienstes/);
+  }
+});

@@ -23,6 +23,7 @@ import {
   alsVersionen,
   alsZuordnung,
   istObj,
+  SICHERE_ID,
 } from "@/lib/werkstattParser";
 import type {
   AktionZeile,
@@ -165,7 +166,9 @@ async function anfrage<T>(pfad: string, o: Optionen<T>): Promise<T> {
     } catch (e) {
       if (e instanceof WerkstattFehler) throw e;
       if (o.signal?.aborted) throw fehler("abgebrochen");
-      throw fehler(steuerung.signal.aborted ? "zeit" : "netz");
+      const aus = steuerung.signal.aborted ? "zeit" : "netz";
+      // bei einem Schreibaufruf ist unklar, ob die Änderung angekommen ist
+      throw fehler(aus, (o.methode ?? "GET") === "GET" ? undefined : "Ob die Änderung angekommen ist, siehst du nach dem Neuladen der Ansicht.");
     } finally {
       clearTimeout(uhr);
       o.signal?.removeEventListener("abort", abbrechen);
@@ -175,8 +178,6 @@ async function anfrage<T>(pfad: string, o: Optionen<T>): Promise<T> {
 }
 
 // ---------- Eingaben prüfen, bevor etwas gesendet wird ----------
-const SICHERE_ID = /^[A-Za-z0-9_-]{1,64}$/;
-
 function sichereId(id: string): string {
   if (!SICHERE_ID.test(id)) throw fehler("ungueltig");
   return encodeURIComponent(id);
@@ -188,7 +189,7 @@ function karteId(id: string): string {
 }
 
 function ganzImBereich(wert: number, von: number, bis: number): number {
-  return Math.min(bis, Math.max(von, Math.round(wert)));
+  return Number.isFinite(wert) ? Math.min(bis, Math.max(von, Math.round(wert))) : von;
 }
 
 /** Löst eine Antwort ohne Inhalt oder mit beliebigem Inhalt als "geschafft" auf (Schreibaufrufe, deren Ergebnis die Ansicht neu lädt). */
@@ -212,16 +213,15 @@ export const aktionenLaden = (tage: number, signal?: AbortSignal): Promise<Aktio
 const MARKE = /^[a-z0-9_.@-]{1,60}$/;
 const STUFE = /^[a-z]{1,20}$/;
 
-export const protokolleLaden = (filter: ProtokollFilter, signal?: AbortSignal): Promise<ProtokollAntwort> =>
-  anfrage("/protokolle", {
-    abfrage: {
-      marke: MARKE.test(filter.marke) ? filter.marke : undefined,
-      stufe: STUFE.test(filter.stufe) ? filter.stufe : undefined,
-      stunden: ganzImBereich(filter.stunden, 1, 168),
-    },
+export function protokolleLaden(filter: ProtokollFilter, signal?: AbortSignal): Promise<ProtokollAntwort> {
+  // Ein Filter, der nicht passt, wird nie still weggelassen (die Ansicht zeigte sonst ungefiltert unter dem gewählten Filter).
+  if ((filter.marke !== "" && !MARKE.test(filter.marke)) || (filter.stufe !== "" && !STUFE.test(filter.stufe))) throw fehler("ungueltig");
+  return anfrage("/protokolle", {
+    abfrage: { marke: filter.marke, stufe: filter.stufe, stunden: ganzImBereich(filter.stunden, 1, 168) },
     signal,
     lesen: alsProtokolle,
   });
+}
 
 // ---------- Labor-Planer ----------
 export const laborStandLaden = (signal?: AbortSignal): Promise<LaborProfil[]> => anfrage("/labor/stand", { signal, lesen: alsLaborStand });

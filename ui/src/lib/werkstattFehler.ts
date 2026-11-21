@@ -29,6 +29,22 @@ export const FEHLER_SAETZE: Readonly<Record<string, string>> = Object.freeze({
   abgebrochen: "Abgebrochen.",
 });
 
+/** Die Codes, die der Dienst melden darf. Die Codes, die nur die Oberfläche kennt (netz, zeit, antwort ...), nimmt sie vom Dienst nie an. */
+const SERVER_CODES: ReadonlySet<string> = new Set([
+  "nicht_angemeldet",
+  "aal2_fehlt",
+  "aal2_alt",
+  "nicht_berechtigt",
+  "labor_profil",
+  "nicht_gefunden",
+  "karte_verbraucht",
+  "konflikt",
+  "karte_abgelaufen",
+  "ungueltig",
+  "zu_oft",
+  "nicht_verfuegbar",
+]);
+
 /** Codes, bei denen die Einzelheit des Dienstes dem Satz angehängt wird (ohne interne Namen, auf Länge und Zeichen geprüft). */
 const MIT_DETAIL: ReadonlySet<string> = new Set(["ungueltig", "konflikt", "nicht_gefunden"]);
 
@@ -62,7 +78,7 @@ const KENNUNG = /^[a-z0-9_]{1,40}$/;
  */
 export function fehlerBild(status: number, code: unknown, serverText: unknown): FehlerBild {
   const roh = typeof code === "string" && KENNUNG.test(code) ? code : null;
-  const bekannt = roh !== null && Object.prototype.hasOwnProperty.call(FEHLER_SAETZE, roh);
+  const bekannt = roh !== null && SERVER_CODES.has(roh);
   // 403 mit unbekanntem Code bleibt "nicht berechtigt", 409 und 410 mit unbekanntem Code behalten ihre Bedeutung
   const gewaehlt = bekannt ? (roh as string) : codeZuStatus(status);
   let text = FEHLER_SAETZE[gewaehlt] ?? FEHLER_SAETZE.antwort;

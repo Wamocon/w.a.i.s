@@ -130,9 +130,14 @@ export function zeichenBudget(
   };
 }
 
-/** Unsichtbare Zeichen (Nullbreite, Richtungssteuerung, Wortverbinder, Byte-Order-Mark): im Wissenstext nie erlaubt. Der Bereich wird zur Laufzeit gebaut, damit der Quelltext ohne diese Zeichen bleibt. */
+/**
+ * Unsichtbare Zeichen: die Unicode-Kategorie Format (Nullbreite, Richtungssteuerung, Wortverbinder, Byte-Order-Mark, Tag-Zeichen,
+ * weicher Trennstrich), Zeilen- und Absatztrenner, Füllzeichen und Variantenselektoren. Die Zeichen ohne Kategorienamen werden zur
+ * Laufzeit eingesetzt, damit der Quelltext frei von unsichtbaren Zeichen bleibt.
+ */
 const UNSICHTBAR = new RegExp(
-  `[${[[0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2069], [0xfeff, 0xfeff]].map(([von, bis]) => `${String.fromCharCode(von)}-${String.fromCharCode(bis)}`).join("")}]`,
+  `[\\p{Cf}\\p{Zl}\\p{Zp}${[0x115f, 0x1160, 0x3164].map((c) => String.fromCharCode(c)).join("")}${String.fromCharCode(0xfe00)}-${String.fromCharCode(0xfe0f)}]`,
+  "u",
 );
 
 /**
@@ -141,6 +146,7 @@ const UNSICHTBAR = new RegExp(
  */
 export function wissenstextProblem(text: string): string | null {
   if (UNSICHTBAR.test(text)) return "Der Wissenstext enthält unsichtbare Zeichen. Sie sind nicht erlaubt, bitte entferne sie.";
+  text = normalisieren(text); // der Dienst bekommt den normalisierten Text: Markup und Rollenzeile gelten dafür
   if (/<\/?[A-Za-z!][^>]*>/.test(text)) return "Der Wissenstext enthält Markup (Tags in spitzen Klammern). Das ist nicht erlaubt, schreibe nur Text.";
   if (/^\s*(system|assistant|user|human)\s*:/i.test(text)) return "Der Wissenstext beginnt wie eine Rollenzeile (zum Beispiel „System:“). Das ist nicht erlaubt, schreibe nur Wissen.";
   return null;
@@ -196,7 +202,9 @@ export function leeresFormular(karten: readonly Karte[], gruppe = ""): Formular 
 export function formularAusKarte(karte: Karte, karten: readonly Karte[], kopie = false): Formular {
   const buchstabe = karte.id.charAt(0);
   const neu = kopie ? idVorschlag(buchstabe, karten) : null;
-  const titel = kopie ? `${karte.titel} (Kopie)`.slice(0, GRENZEN.titel) : karte.titel;
+  const zusatz = " (Kopie)";
+  // der Zusatz bleibt immer stehen, ein langer Titel wird davor gekürzt
+  const titel = kopie ? `${karte.titel.slice(0, GRENZEN.titel - zusatz.length)}${zusatz}` : karte.titel;
   return {
     id: kopie ? (neu ?? "") : karte.id,
     bestehend: !kopie,
@@ -265,8 +273,10 @@ export function formularPruefen(
 
   let gruppeName = "";
   if (f.bestehend || (f.gruppeWahl !== "" && f.gruppeWahl !== "neu")) {
+    const eigene = f.bestehend ? karten.find((k) => k.id === f.id)?.gruppe : undefined;
     const g = gruppen.find((x) => x.buchstabe === (f.bestehend ? f.id.charAt(0) : f.gruppeWahl));
-    if (g) gruppeName = g.name;
+    if (eigene) gruppeName = eigene; // eine bestehende Karte behält ihren Gruppennamen, kein stilles Umbenennen
+    else if (g) gruppeName = g.name;
     else probleme.push({ feld: "gruppe", text: "Die Gruppe gibt es nicht. Wähle eine Gruppe." });
   } else if (f.gruppeWahl === "neu") {
     const b = f.neuerBuchstabe;

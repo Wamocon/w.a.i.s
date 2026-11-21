@@ -125,6 +125,12 @@ describe("Fehlerbilder", () => {
   it("kein Netz, falsche Form und kaputtes JSON sind eigene Fehler", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     await expect(ichLaden()).rejects.toMatchObject({ code: "netz" });
+    // bei einem Schreibaufruf ist unklar, ob die Änderung angekommen ist
+    const schreiben = await fange(terminLoeschen("t-1"));
+    expect(schreiben.code).toBe("netz");
+    expect(schreiben.message).toMatch(/Ob die Änderung angekommen ist, siehst du nach dem Neuladen/);
+    const lesen = await fange(ichLaden());
+    expect(lesen.message).not.toMatch(/Neuladen der Ansicht/);
     fetchMock.mockResolvedValue(antwort(200, { nichts: 1 }));
     await expect(ichLaden()).rejects.toMatchObject({ code: "antwort" });
     fetchMock.mockResolvedValue(new Response("<html>", { status: 200 }));
@@ -149,8 +155,12 @@ describe("Aufrufe", () => {
     expect(aufruf().adresse).toMatch(/\/dashboard\/sitzungen\?tage=30$/);
     await protokolleLaden({ marke: "wamo-core", stufe: "fehler", stunden: 24 });
     expect(aufruf(1).adresse).toMatch(/\/protokolle\?marke=wamo-core&stufe=fehler&stunden=24$/);
-    await protokolleLaden({ marke: "../x y", stufe: "", stunden: 0 });
+    await protokolleLaden({ marke: "", stufe: "", stunden: Number.NaN });
     expect(aufruf(2).adresse).toMatch(/\/protokolle\?stunden=1$/);
+    // ein Filter, der nicht passt, wird nie still weggelassen
+    expect(() => protokolleLaden({ marke: "../x y", stufe: "", stunden: 1 })).toThrow(WerkstattFehler);
+    expect(() => protokolleLaden({ marke: "", stufe: "Fehler!", stunden: 1 })).toThrow(WerkstattFehler);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("Kennungen werden vor dem Senden geprüft, nichts Fremdes gelangt in den Pfad", async () => {
