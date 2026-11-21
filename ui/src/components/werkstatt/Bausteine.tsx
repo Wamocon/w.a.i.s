@@ -62,7 +62,12 @@ export function Abrufinhalt<T>({
   was: string;
   children: (daten: T) => ReactNode;
 }) {
-  if (abruf.fehler) return <FehlerHinweis fehler={abruf.fehler} onNeu={abruf.neu} />;
-  if (abruf.daten === null) return <Laedt was={was} />;
-  return <>{children(abruf.daten)}</>;
+  if (abruf.daten === null) return abruf.fehler ? <FehlerHinweis fehler={abruf.fehler} onNeu={abruf.neu} /> : <Laedt was={was} />;
+  // scheitert ein Neuladen, bleibt der letzte Stand sichtbar und der Fehler steht darüber
+  return (
+    <>
+      {abruf.fehler && <FehlerHinweis fehler={abruf.fehler} onNeu={abruf.neu} />}
+      <div aria-busy={abruf.laedt || undefined}>{children(abruf.daten)}</div>
+    </>
+  );
 }

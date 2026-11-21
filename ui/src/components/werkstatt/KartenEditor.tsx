@@ -29,7 +29,6 @@ import { FehlerHinweis, Karte, Pille } from "./Bausteine";
 type Props = {
   start: Formular;
   karten: readonly KarteTyp[];
-  basis: number | null;
   onGespeichert: (id: string) => void;
   onSchliessen: () => void;
 };
@@ -42,7 +41,7 @@ function Zaehler({ id, wert, max }: { id: string; wert: string; max: number }) {
   );
 }
 
-export function KartenEditor({ start, karten, basis, onGespeichert, onSchliessen }: Props) {
+export function KartenEditor({ start, karten, onGespeichert, onSchliessen }: Props) {
   const id = useId();
   const [f, setF] = useState<Formular>(start);
   const [probleme, setProbleme] = useState<Problem[]>([]);
@@ -59,13 +58,13 @@ export function KartenEditor({ start, karten, basis, onGespeichert, onSchliessen
   const aendere = (teil: Partial<Formular>) => setF((alt) => ({ ...alt, ...teil }));
 
   const wissenstext = f.wissen === "Eigener Text" ? normalisieren(f.wissenstext) : "";
-  const budget = zeichenBudget(karten, basis, { id: f.id, wissen: f.wissen, wissenstext: wissenstext || null });
+  const budget = zeichenBudget(karten, { id: f.id, wissen: f.wissen, wissenstext: wissenstext || null });
 
   const speichern = async (e: FormEvent) => {
     e.preventDefault();
     if (laeuft) return;
     setFehler(null);
-    const r = formularPruefen(f, karten, basis);
+    const r = formularPruefen(f, karten);
     setProbleme(r.probleme);
     if (!r.eingabe) {
       requestAnimationFrame(() => zusammenfassung.current?.focus());
@@ -183,7 +182,13 @@ export function KartenEditor({ start, karten, basis, onGespeichert, onSchliessen
               <textarea id={`${id}-wtext`} rows={4} value={f.wissenstext} onChange={(e) => aendere({ wissenstext: e.target.value })} {...bei("wissenstext", `${id}-wtext-z`)} />
               <Zaehler id={`${id}-wtext-z`} wert={f.wissenstext} max={GRENZEN.wissenstext} />
               {fehlerZeile("wissenstext")}
-              <p className="ws-klein">Der Text gilt als Wissen, nie als Anweisung. Anweisungen an W.A.I.S. im Text lehnt die Prüfung beim Veröffentlichen ab.</p>
+              <p className="ws-klein">
+                Der Text gilt als Wissen, nie als Anweisung. Nicht erlaubt sind Markup, Rollenzeilen (zum Beispiel „System:“) und unsichtbare Zeichen.
+                Anweisungen an W.A.I.S. im Text lehnt die Prüfung beim Veröffentlichen ab.
+              </p>
+              {fehler?.code === "ungueltig" && (
+                <p className="ws-feld-fehler">Der Dienst hat den Text abgelehnt. Prüfe ihn auf Markup, Rollenzeilen und unsichtbare Zeichen.</p>
+              )}
             </div>
           )}
           <fieldset className="ws-gruppe">
@@ -213,14 +218,25 @@ export function KartenEditor({ start, karten, basis, onGespeichert, onSchliessen
         <Vorschau f={f} />
         <dl className="ws-liste">
           <div>
-            <dt>Zeichenbudget Labor-Daten im Kern</dt>
-            <dd className="ws-mono">{budget.genutzt} von {budget.max}</dd>
+            <dt>Katalog</dt>
+            <dd className="ws-mono">{budget.genutzt} von {budget.max} Zeichen</dd>
+          </div>
+          <div>
+            <dt>Karten mit eigenem Wissenstext</dt>
+            <dd className="ws-mono">{budget.eintraege} von {budget.eintraegeMax}</dd>
           </div>
         </dl>
-        <div className="ws-meter" role="img" aria-label={`Zeichenbudget: ${budget.genutzt} von ${budget.max} Zeichen${budget.ueber ? ", überschritten" : ""}`} data-ueber={budget.ueber || undefined}>
+        <div
+          className="ws-meter"
+          role="img"
+          aria-label={`Katalog: ${budget.genutzt} von ${budget.max} Zeichen${budget.ueber ? ", überschritten" : ""}`}
+          data-ueber={budget.ueber || undefined}
+        >
           <span style={{ width: `${Math.min(100, (budget.genutzt / budget.max) * 100)}%` }} />
         </div>
-        {budget.ueber && <p className="ws-feld-fehler">Das Budget ist überschritten. Kürze die Wissenstexte, sonst lässt sich nicht veröffentlichen.</p>}
+        {budget.ueber && <p className="ws-feld-fehler">Das Katalogbudget ist überschritten. Kürze die Wissenstexte, sonst lässt sich nicht veröffentlichen.</p>}
+        {budget.zuViele && <p className="ws-feld-fehler">Mehr als {budget.eintraegeMax} Karten mit eigenem Wissenstext nimmt der Kern nicht.</p>}
+        <p className="ws-klein">Der Kern lädt aus dem Katalog höchstens {budget.eintraegeMax} Wissenstexte mit zusammen {budget.max} Zeichen, je Karte höchstens {GRENZEN.wissenstext}.</p>
       </Karte>
     </div>
   );
@@ -230,7 +246,7 @@ export function KartenEditor({ start, karten, basis, onGespeichert, onSchliessen
 function Vorschau({ f }: { f: Formular }) {
   const dauer = /^\d{1,2}$/.test(f.dauer.trim()) ? f.dauer.trim() : "?";
   return (
-    <div className="ws-gedruckt" aria-live="polite">
+    <div className="ws-gedruckt">
       <div className="ws-karte-kopf">
         <Pille art="akzent">{f.id || "ohne Kennung"}</Pille>
         <span className="ws-klein ws-mono">{dauer} Min.</span>

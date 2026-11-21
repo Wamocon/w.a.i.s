@@ -4,6 +4,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { codeBestaetigen } from "@/lib/geraeteVerwaltungApi";
 import { fehlerBildAus, freigabeAusfuehren, freigabeKarteAnlegen, kartenPruefen } from "@/lib/werkstattApi";
 import { brauchtNeuenCode, karteUnbrauchbar } from "@/lib/werkstattFehler";
+import { KATALOG_MAX_ZEICHEN } from "@/lib/werkstattKarten";
 import {
   SCHRITT_TITEL,
   codeSauber,
@@ -59,6 +60,14 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
   const [jetzt, setJetzt] = useState(0);
   const entwuerfe = karten.filter((k) => k.stand === "entwurf");
   const kennungen = entwuerfe.map((k) => k.id);
+  // Ändern sich die Entwürfe unter einem laufenden Ablauf (Editor speichert, ein Entwurf wird gelöscht), gilt die Prüfung nicht mehr:
+  // zurück zum Anfang. Ein fertiger Ablauf und eine laufende Ausführung bleiben.
+  const stand = `${karten.map((k) => `${k.id}:${k.stand}`).join(",")}`;
+  const [gesehen, setGesehen] = useState(stand);
+  if (gesehen !== stand) {
+    setGesehen(stand);
+    if (ablauf.art !== "fertig" && ablauf.art !== "ausfuehren") setAblauf({ art: "bereit" });
+  }
   const zaehlt = ablauf.art === "karte";
 
   // Die Uhr läuft nur, solange eine Karte wartet.
@@ -107,14 +116,13 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
     }
     setFehler(null);
     setCodeFehler("");
+    setCode(""); // der Code wird nur einmal gebraucht und nicht länger im Zustand gehalten
     setAblauf({ art: "ausfuehren", pruefung: a.pruefung, karte: a.karte, endeMs: a.endeMs });
     const zurueck = (meldung?: string) => {
-      setCode("");
       if (meldung) setCodeFehler(meldung);
       setAblauf(a);
     };
     const bestaetigt = await codeBestaetigen(sauber);
-    setCode("");
     if (!bestaetigt.ok) return zurueck(bestaetigt.text);
     try {
       const ergebnis = await freigabeAusfuehren(a.karte.id);
@@ -135,7 +143,7 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
     }
   };
 
-  const stand = schrittStaende(abgelaufen && ablauf.art === "karte" ? { art: "geprueft", pruefung: ablauf.pruefung } : ablauf);
+  const schritte = schrittStaende(abgelaufen && ablauf.art === "karte" ? { art: "geprueft", pruefung: ablauf.pruefung } : ablauf);
   const beschaeftigt = ablauf.art === "prueft" || ablauf.art === "karte_laeuft" || ablauf.art === "ausfuehren";
   const pruefung = "pruefung" in ablauf ? ablauf.pruefung : null;
   const wirkung = wirkungText(aktiveVersion, kennungen, null);
@@ -147,7 +155,7 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
       </p>
       {fehler && <FehlerHinweis fehler={fehler} />}
       <ol className="ws-leitfaden" aria-label="Schritte zum Veröffentlichen" aria-busy={beschaeftigt || undefined}>
-        <Schritt nr={1} stand={stand[0]}>
+        <Schritt nr={1} stand={schritte[0]}>
           <p className="ws-klein">Prüft Pflichtfelder, die Werkzeuge, Anweisungen an W.A.I.S. im Text und das Zeichenbudget. Ändert nichts.</p>
           {(ablauf.art === "bereit" || ablauf.art === "prueft" || ablauf.art === "abgelehnt") && (
             entwuerfe.length === 0 ? (
@@ -171,10 +179,10 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
               </span>
             </div>
           )}
-          {pruefung && pruefung.ok && <p className="ws-erfolg">Geprüft: {pruefung.zeichen} Zeichen von 6000, keine Probleme.</p>}
+          {pruefung && pruefung.ok && <p className="ws-erfolg" role="status">Geprüft: {pruefung.zeichen} von {KATALOG_MAX_ZEICHEN} Zeichen im Katalog, keine Probleme.</p>}
         </Schritt>
 
-        <Schritt nr={2} stand={stand[1]}>
+        <Schritt nr={2} stand={schritte[1]}>
           <p className="ws-klein">Die Karte nennt die Wirkung. Sie gilt fünf Minuten, einmal und nur für dich.</p>
           {(ablauf.art === "geprueft" || ablauf.art === "karte_laeuft") && (
             <>
@@ -195,12 +203,12 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
           {(ablauf.art === "karte" || ablauf.art === "ausfuehren") && !abgelaufen && (
             <p className="ws-hinweis">
               {wirkungText(aktiveVersion, ablauf.karte.karten.length > 0 ? ablauf.karte.karten : kennungen, ablauf.karte.aenderungen)}{" "}
-              {ablauf.art === "karte" ? <>Gültig noch <span className="ws-rest" aria-label={`noch ${restText(rest)} Minuten`}>{restText(rest)}</span>.</> : null}
+              {ablauf.art === "karte" ? <>Gültig noch <span className="ws-rest">{restText(rest)}</span>.</> : null}
             </p>
           )}
         </Schritt>
 
-        <Schritt nr={3} stand={stand[2]}>
+        <Schritt nr={3} stand={schritte[2]}>
           <p className="ws-klein">Ein frischer Code deiner Authenticator-App, höchstens 60 Sekunden alt.</p>
           {(ablauf.art === "karte" || ablauf.art === "ausfuehren") && !abgelaufen && (
             <form
@@ -235,7 +243,7 @@ export function Veroeffentlichen({ karten, aktiveVersion, onVeroeffentlicht, onF
           <p id={`${id}-code-f`} className="ws-feld-fehler" role="alert">{codeFehler}</p>
         </Schritt>
 
-        <Schritt nr={4} stand={stand[3]}>
+        <Schritt nr={4} stand={schritte[3]}>
           {ablauf.art === "fertig" ? (
             <>
               <p className="ws-erfolg" role="status">

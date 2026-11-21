@@ -41,7 +41,6 @@
 .ws-titel:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .ws-kurz { margin: 0; max-width: 64ch; color: var(--ink-soft); }
 .ws-klein { margin: 0; font-size: 14px; line-height: 1.4; color: var(--ink-soft); }
-.ws-klein:empty { display: none; }
 .ws-mono { font: 400 14px/1.4 var(--hud); font-variant-numeric: tabular-nums; }
 .ws-gitter { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
 .ws-gitter-breit { grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); }
@@ -74,7 +73,8 @@ dl.ws-liste { margin: 0; }
 .ws-fehler:focus-visible, .ws-erfolg:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .ws-hinweis { border-left-color: var(--core); background: color-mix(in srgb, var(--core) 9%, transparent); }
 .ws-erfolg { border-left-color: var(--ink); }
-.ws-erfolg:empty, .ws-fehler:empty { display: none; }
+/* leer bleiben die Meldungen im Baum (Hilfstechnik sagt spätere Inhalte an), nehmen aber keinen Platz */
+.ws-erfolg:empty, .ws-fehler:empty { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); }
 .ws-leer { margin: 0; padding: 12px 14px; border: 1px dashed var(--kante); border-radius: 10px; background: var(--glas-leicht); color: var(--ink-soft); font-size: 15px; }
 
 /* ---------- Bedienelemente ---------- */
@@ -179,7 +179,7 @@ dl.ws-liste { margin: 0; }
   .ws-nav ul { display: flex; overflow-x: auto; padding-bottom: 4px; }
   .ws-nav a { white-space: nowrap; border-left: 0; border-bottom: 3px solid transparent; border-radius: 8px 8px 0 0; }
   .ws-nav a[aria-current="page"] { border-bottom-color: var(--core); }
-  .ws-ich { display: none; }
+  .ws-ich > span { display: none; }
   .ws-gitter-breit { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .ws * { transition: none !important; animation: none !important; } }

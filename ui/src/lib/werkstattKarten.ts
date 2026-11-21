@@ -27,10 +27,12 @@ export const GRENZEN = {
   dauerMax: 20,
 } as const;
 
-/** Höchstmenge an Zeichen, die der Kern aus den Labor-Daten und den Wissenstexten der Karten zusammen lädt. */
-export const WISSEN_MAX_ZEICHEN = 6000;
-/** Zeichen der festen Labor-Daten im Kern (ohne Wissenstexte der Karten); der Dienst darf einen genaueren Wert melden. */
-export const WISSEN_BASIS_STANDARD = 4120;
+/**
+ * Katalogbudget für Wissenstexte: Der Kern lädt aus dem Katalog höchstens 20 Einträge (Karten mit "Eigener Text") und zusammen höchstens
+ * 2000 Zeichen; je Karte gelten höchstens 900 Zeichen (GRENZEN.wissenstext). Die festen Labor-Daten des Kerns zählen hier nicht mit.
+ */
+export const KATALOG_MAX_ZEICHEN = 2000;
+export const KATALOG_MAX_EINTRAEGE = 20;
 /** Richtwert für die Zeit eines Gastes: darüber färbt sich die Summe der Spalte. */
 export const ZEIT_RICHTWERT_MIN = 25;
 
@@ -91,27 +93,57 @@ export function idVorschlag(buchstabe: string, karten: readonly Karte[]): string
 /** Entwürfe zuerst im Sinn von "noch nicht veröffentlicht". */
 export const entwuerfe = (karten: readonly Karte[]): Karte[] => karten.filter((k) => k.stand === "entwurf");
 
-// ---------- Zeichenbudget ----------
-export type Budget = { genutzt: number; max: number; rest: number; ueber: boolean };
+// ---------- Katalogbudget ----------
+export type Budget = { genutzt: number; max: number; rest: number; ueber: boolean; eintraege: number; eintraegeMax: number; zuViele: boolean };
 
 /**
- * Das Zeichenbudget: Grundmenge plus die Wissenstexte aller Karten mit "Eigener Text". aktuell ersetzt die Karte mit dieser Kennung
- * (oder kommt neu dazu), damit der Editor das Budget schon beim Tippen zeigt.
+ * Das Katalogbudget: die Wissenstexte aller Karten mit "Eigener Text". aktuell ersetzt die Karte mit dieser Kennung (oder kommt neu
+ * dazu), damit der Editor das Budget schon beim Tippen zeigt.
  */
 export function zeichenBudget(
   karten: readonly Karte[],
-  basis: number | null,
   aktuell?: { id: string; wissen: WissenArt; wissenstext: string | null } | null,
 ): Budget {
-  let genutzt = basis ?? WISSEN_BASIS_STANDARD;
+  let genutzt = 0;
+  let eintraege = 0;
   let ersetzt = false;
   for (const k of karten) {
     const quelle = aktuell && aktuell.id === k.id ? aktuell : k;
     if (quelle === aktuell) ersetzt = true;
-    if (quelle.wissen === "Eigener Text") genutzt += quelle.wissenstext?.length ?? 0;
+    if (quelle.wissen === "Eigener Text") {
+      genutzt += quelle.wissenstext?.length ?? 0;
+      eintraege += 1;
+    }
   }
-  if (aktuell && !ersetzt && aktuell.wissen === "Eigener Text") genutzt += aktuell.wissenstext?.length ?? 0;
-  return { genutzt, max: WISSEN_MAX_ZEICHEN, rest: WISSEN_MAX_ZEICHEN - genutzt, ueber: genutzt > WISSEN_MAX_ZEICHEN };
+  if (aktuell && !ersetzt && aktuell.wissen === "Eigener Text") {
+    genutzt += aktuell.wissenstext?.length ?? 0;
+    eintraege += 1;
+  }
+  return {
+    genutzt,
+    max: KATALOG_MAX_ZEICHEN,
+    rest: KATALOG_MAX_ZEICHEN - genutzt,
+    ueber: genutzt > KATALOG_MAX_ZEICHEN,
+    eintraege,
+    eintraegeMax: KATALOG_MAX_EINTRAEGE,
+    zuViele: eintraege > KATALOG_MAX_EINTRAEGE,
+  };
+}
+
+/** Unsichtbare Zeichen (Nullbreite, Richtungssteuerung, Wortverbinder, Byte-Order-Mark): im Wissenstext nie erlaubt. Der Bereich wird zur Laufzeit gebaut, damit der Quelltext ohne diese Zeichen bleibt. */
+const UNSICHTBAR = new RegExp(
+  `[${[[0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2069], [0xfeff, 0xfeff]].map(([von, bis]) => `${String.fromCharCode(von)}-${String.fromCharCode(bis)}`).join("")}]`,
+);
+
+/**
+ * Was im Wissenstext nicht stehen darf: Markup (Tags in spitzen Klammern), eine Rollenzeile am Anfang ("System:", "Assistant:") und
+ * unsichtbare Zeichen. Der Dienst lehnt das ab; die Oberfläche sagt es vorher und klar. Null, wenn der Text in Ordnung ist.
+ */
+export function wissenstextProblem(text: string): string | null {
+  if (UNSICHTBAR.test(text)) return "Der Wissenstext enthält unsichtbare Zeichen. Sie sind nicht erlaubt, bitte entferne sie.";
+  if (/<\/?[A-Za-z!][^>]*>/.test(text)) return "Der Wissenstext enthält Markup (Tags in spitzen Klammern). Das ist nicht erlaubt, schreibe nur Text.";
+  if (/^\s*(system|assistant|user|human)\s*:/i.test(text)) return "Der Wissenstext beginnt wie eine Rollenzeile (zum Beispiel „System:“). Das ist nicht erlaubt, schreibe nur Wissen.";
+  return null;
 }
 
 // ---------- Formular ----------
@@ -227,7 +259,6 @@ function laenge(feld: FeldName, subjekt: string, wert: string, max: number, prob
 export function formularPruefen(
   f: Formular,
   karten: readonly Karte[],
-  basis: number | null,
 ): { eingabe: KartenEingabe | null; probleme: Problem[] } {
   const probleme: Problem[] = [];
   const gruppen = gruppenAus(karten);
@@ -275,11 +306,18 @@ export function formularPruefen(
   if (f.wissen === "Eigener Text") {
     if (!wissenstext) probleme.push({ feld: "wissenstext", text: "Der eigene Wissenstext fehlt." });
     else if (wissenstext.length > GRENZEN.wissenstext) probleme.push({ feld: "wissenstext", text: `Der Wissenstext ist zu lang (höchstens ${GRENZEN.wissenstext} Zeichen).` });
+    else {
+      const unzulaessig = wissenstextProblem(f.wissenstext);
+      if (unzulaessig) probleme.push({ feld: "wissenstext", text: unzulaessig });
+    }
   }
 
-  const budget = zeichenBudget(karten, basis, { id: f.id, wissen: f.wissen, wissenstext: wissenstext || null });
+  const budget = zeichenBudget(karten, { id: f.id, wissen: f.wissen, wissenstext: wissenstext || null });
   if (budget.ueber) {
-    probleme.push({ feld: "budget", text: `Das Zeichenbudget ist überschritten: ${budget.genutzt} von ${budget.max} Zeichen. Kürze die Wissenstexte.` });
+    probleme.push({ feld: "budget", text: `Das Katalogbudget ist überschritten: ${budget.genutzt} von ${budget.max} Zeichen. Kürze die Wissenstexte.` });
+  }
+  if (budget.zuViele) {
+    probleme.push({ feld: "budget", text: `Der Katalog nimmt höchstens ${budget.eintraegeMax} Karten mit eigenem Wissenstext. Stelle eine andere Karte auf "keine" oder "Glossar".` });
   }
 
   if (probleme.length > 0) return { eingabe: null, probleme };

@@ -142,7 +142,7 @@ export function KartenZuordnung({ karten, termine }: { karten: readonly KarteTyp
           </div>
           <Abrufinhalt abruf={abruf} was="Die Zuordnung">
             {([plaetze, geladen]) => (
-              <Matrix key={`${terminId}-${JSON.stringify(geladen)}`} terminId={terminId} karten={karten} plaetze={plaetze} geladen={geladen} onGespeichert={abruf.neu} />
+              <Matrix key={terminId} terminId={terminId} karten={karten} plaetze={plaetze} geladen={geladen} onGespeichert={abruf.neu} />
             )}
           </Abrufinhalt>
         </>

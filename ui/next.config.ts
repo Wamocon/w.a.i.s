@@ -19,7 +19,7 @@ function sichereHerkunft(url: string | undefined): string {
   return o.startsWith("https://") ? o : "";
 }
 
-/** Standardadresse der Werkstatt (Dienst wamo-werkstatt, lib/werkstattApi.ts: WERKSTATT_STANDARD_URL); die Seite /werkstatt darf nur sie erreichen. */
+/** Standardadresse der Werkstatt (Dienst wamo-werkstatt, lib/werkstattApi.ts: WERKSTATT_STANDARD_URL); die Seite /werkstatt braucht sie. Die CSP gilt für alle Routen, die Herkunft steht deshalb im gemeinsamen connect-src. */
 const WERKSTATT_STANDARD = "https://192.168.178.136:55448";
 
 // Build für Sokrates-2 (infra/sokrates2/wamo-ui): kein lokaler Kern, nur Betriebsart Büro (lib/geraet.ts)

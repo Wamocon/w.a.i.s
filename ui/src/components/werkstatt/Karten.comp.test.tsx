@@ -54,7 +54,7 @@ const TERMIN = { id: "t1", tag: "2099-12-05", beginn: null, ende: null, einwilli
 const noop = () => undefined;
 
 beforeEach(() => {
-  vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("A2", { stand: "entwurf" })], version: 4, basisZeichen: null });
+  vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("A2", { stand: "entwurf" })], version: 4 });
   vi.mocked(versionenLaden).mockResolvedValue([]);
   vi.mocked(termineLaden).mockResolvedValue([TERMIN]);
   vi.mocked(plaetzeLaden).mockResolvedValue([
@@ -84,7 +84,7 @@ describe("Katalog und Editor", () => {
 
   it("von null: ohne Katalog eine neue Gruppe, Pflichtfelder werden geprüft, dann als Entwurf gespeichert", async () => {
     const user = userEvent.setup();
-    vi.mocked(kartenLaden).mockResolvedValue({ karten: [], version: null, basisZeichen: null });
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [], version: null });
     render(<Karten onFaktor={noop} />);
     expect(await screen.findByText("Noch keine veröffentlichte Version")).toBeTruthy();
     expect(screen.getByText(/Der Katalog ist noch leer/)).toBeTruthy();
@@ -121,25 +121,56 @@ describe("Katalog und Editor", () => {
     expect(screen.queryByRole("heading", { name: "Neuen Use Case aufbauen", level: 2 })).toBeNull();
   });
 
-  it("Zeichenbudget und Wissenstext: Eigener Text zählt, zu viel verhindert das Speichern", async () => {
+  it("Katalogbudget: Eigener Text zählt, zu viel verhindert das Speichern", async () => {
     const user = userEvent.setup();
     vi.mocked(kartenLaden).mockResolvedValue({
-      karten: [karte("A1", { wissen: "Eigener Text", wissenstext: "x".repeat(900) })], version: 1, basisZeichen: 5000,
+      karten: [
+        karte("A1", { wissen: "Eigener Text", wissenstext: "x".repeat(900) }),
+        karte("A2", { wissen: "Eigener Text", wissenstext: "x".repeat(900) }),
+      ],
+      version: 1,
     });
     render(<Karten onFaktor={noop} />);
     await user.click(await screen.findByRole("button", { name: "Neuen Use Case aufbauen" }));
-    expect(screen.getByText("5900 von 6000")).toBeTruthy();
+    expect(screen.getByText("1800 von 2000 Zeichen")).toBeTruthy();
+    expect(screen.getByText("2 von 20")).toBeTruthy();
     await user.type(screen.getByLabelText("Titel"), "T");
     await user.type(screen.getByLabelText(/Aufgabe für den Gast/), "A");
     await user.type(screen.getByLabelText("Erwartetes Ergebnis"), "E");
     await user.selectOptions(screen.getByLabelText(/Wissen für W.A.I.S./), "Eigener Text");
-    await user.type(screen.getByLabelText(/Eigener Wissenstext/), "y".repeat(200));
-    expect(screen.getByText("6100 von 6000")).toBeTruthy();
-    expect(screen.getByText(/Das Budget ist überschritten/)).toBeTruthy();
-    expect(screen.getByRole("img", { name: /Zeichenbudget: 6100 von 6000 Zeichen, überschritten/ })).toBeTruthy();
+    await user.click(screen.getByLabelText(/Eigener Wissenstext/));
+    await user.paste("y".repeat(300));
+    expect(screen.getByText("2100 von 2000 Zeichen")).toBeTruthy();
+    expect(screen.getByText("3 von 20")).toBeTruthy();
+    expect(screen.getByText(/Das Katalogbudget ist überschritten/)).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Katalog: 2100 von 2000 Zeichen, überschritten/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Als Entwurf speichern" }));
-    expect((await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ")).toMatch(/Zeichenbudget ist überschritten/);
+    expect((await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ")).toMatch(/Katalogbudget ist überschritten: 2100 von 2000 Zeichen/);
     expect(karteAnlegen).not.toHaveBeenCalled();
+  });
+
+  it("Wissenstext mit Markup wird vor dem Senden gemeldet; lehnt der Dienst ihn ab, steht ein klarer Satz da", async () => {
+    const user = userEvent.setup();
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1")], version: 1 });
+    render(<Karten onFaktor={noop} />);
+    await user.click(await screen.findByRole("button", { name: "Neuen Use Case aufbauen" }));
+    await user.selectOptions(screen.getByLabelText("Gruppe"), "A");
+    await user.type(screen.getByLabelText("Titel"), "T");
+    await user.type(screen.getByLabelText(/Aufgabe für den Gast/), "A");
+    await user.type(screen.getByLabelText("Erwartetes Ergebnis"), "E");
+    await user.selectOptions(screen.getByLabelText(/Wissen für W.A.I.S./), "Eigener Text");
+    await user.click(screen.getByLabelText(/Eigener Wissenstext/));
+    await user.paste("Text mit <b>Markup</b>");
+    await user.click(screen.getByRole("button", { name: "Als Entwurf speichern" }));
+    expect((await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ")).toMatch(/enthält Markup/);
+    expect(karteAnlegen).not.toHaveBeenCalled();
+    // ein Text, den nur der Dienst beanstandet (zum Beispiel eine Rollenzeile mitten im Text)
+    await user.clear(screen.getByLabelText(/Eigener Wissenstext/));
+    await user.paste("Ein erlaubter Satz.");
+    vi.mocked(karteAnlegen).mockRejectedValueOnce(new WerkstattFehler(fehlerBild(422, "ungueltig", "Der Wissenstext enthält eine Rollenzeile.")));
+    await user.click(screen.getByRole("button", { name: "Als Entwurf speichern" }));
+    expect((await screen.findAllByRole("alert")).map((a) => a.textContent).join(" ")).toMatch(/Der Wissenstext enthält eine Rollenzeile/);
+    expect(screen.getByText("Der Dienst hat den Text abgelehnt. Prüfe ihn auf Markup, Rollenzeilen und unsichtbare Zeichen.")).toBeTruthy();
   });
 
   it("Bearbeiten hält Kennung und Gruppe fest, Kopieren vergibt die nächste Kennung, Löschen fragt nach", async () => {
@@ -166,7 +197,7 @@ describe("Katalog und Editor", () => {
 
   it("der Gruppenfilter schränkt die Tabelle ein", async () => {
     const user = userEvent.setup();
-    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("B1")], version: 1, basisZeichen: null });
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1"), karte("B1")], version: 1 });
     render(<Karten onFaktor={noop} />);
     await screen.findByText("2 von 2 Karten");
     await user.selectOptions(screen.getByLabelText("Gruppe anzeigen"), "B");
@@ -195,7 +226,7 @@ describe("Zuordnung", () => {
 
   it("Zeiten über dem Richtwert werden als Wort gemeldet", async () => {
     vi.mocked(kartenLaden).mockResolvedValue({
-      karten: Array.from({ length: 3 }, (_, i) => karte(`A${i + 1}`, { dauerMin: 10 })), version: 1, basisZeichen: null,
+      karten: Array.from({ length: 3 }, (_, i) => karte(`A${i + 1}`, { dauerMin: 10 })), version: 1,
     });
     vi.mocked(zuordnungLaden).mockResolvedValue({ 1: ["A1", "A2", "A3"] });
     render(<Karten onFaktor={noop} />);
@@ -214,10 +245,10 @@ describe("Veröffentlichen in vier Schritten", () => {
   const frischeKarte = () => ({ id: "k1", giltBis: new Date(Date.now() + 300_000).toISOString(), aenderungen: 1, karten: ["A2"] });
 
   beforeEach(() => {
-    vi.mocked(kartenPruefen).mockResolvedValue({ ok: true, probleme: [], zeichen: 4300 });
+    vi.mocked(kartenPruefen).mockResolvedValue({ ok: true, probleme: [], zeichen: 1200 });
     vi.mocked(freigabeKarteAnlegen).mockImplementation(async () => frischeKarte());
     vi.mocked(codeBestaetigen).mockResolvedValue({ ok: true });
-    vi.mocked(freigabeAusfuehren).mockResolvedValue({ version: 5, zeichen: 4300 });
+    vi.mocked(freigabeAusfuehren).mockResolvedValue({ version: 5, zeichen: 1200 });
   });
 
   const schritt = (name: string) => within(screen.getByRole("heading", { name: new RegExp(`^${name}`), level: 3 }).closest("li") as HTMLElement);
@@ -229,7 +260,7 @@ describe("Veröffentlichen in vier Schritten", () => {
     expect(await screen.findByText(/1 Entwurf: A2/)).toBeTruthy();
     expect(schritt("Prüfung").getByText("jetzt dran")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Prüfen" }));
-    expect(await screen.findByText("Geprüft: 4300 Zeichen von 6000, keine Probleme.")).toBeTruthy();
+    expect(await screen.findByText("Geprüft: 1200 von 2000 Zeichen im Katalog, keine Probleme.")).toBeTruthy();
     expect(screen.getByText("Katalog Version 5 mit 1 Änderung: A2.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Karte anlegen" }));
     expect(await screen.findByText(/Gültig noch/)).toBeTruthy();
@@ -241,7 +272,7 @@ describe("Veröffentlichen in vier Schritten", () => {
     await user.click(veroeffentlichen);
     expect(codeBestaetigen).toHaveBeenCalledWith("123456");
     expect(freigabeAusfuehren).toHaveBeenCalledWith("k1");
-    expect(await screen.findByText(/Version 5 ist veröffentlicht, 4300 Zeichen/)).toBeTruthy();
+    expect(await screen.findByText(/Version 5 ist veröffentlicht, 1200 Zeichen/)).toBeTruthy();
     expect(schritt("Kern lädt nach").getByText("erledigt")).toBeTruthy();
     expect(onFaktor).toHaveBeenCalledTimes(1);
     expect(kartenLaden).toHaveBeenCalledTimes(2);
@@ -249,7 +280,7 @@ describe("Veröffentlichen in vier Schritten", () => {
   });
 
   it("ohne Entwürfe gibt es nichts zu prüfen", async () => {
-    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1")], version: 1, basisZeichen: null });
+    vi.mocked(kartenLaden).mockResolvedValue({ karten: [karte("A1")], version: 1 });
     render(<Karten onFaktor={noop} />);
     expect(await screen.findByText("Keine Entwürfe. Speichere zuerst einen Use Case.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Prüfen" })).toBeNull();
@@ -257,10 +288,10 @@ describe("Veröffentlichen in vier Schritten", () => {
 
   it("eine abgelehnte Prüfung nennt die Probleme und legt keine Karte an", async () => {
     const user = userEvent.setup();
-    vi.mocked(kartenPruefen).mockResolvedValue({ ok: false, probleme: ["Die Karte A2 enthält eine Anweisung."], zeichen: 6100 });
+    vi.mocked(kartenPruefen).mockResolvedValue({ ok: false, probleme: ["Die Karte A2 enthält eine Anweisung."], zeichen: 2100 });
     render(<Karten onFaktor={noop} />);
     await user.click(await screen.findByRole("button", { name: "Prüfen" }));
-    const alarm = await screen.findByText(/Die Prüfung lehnt die Karten ab \(6100 Zeichen\)/);
+    const alarm = await screen.findByText(/Die Prüfung lehnt die Karten ab \(2100 Zeichen\)/);
     expect(alarm.textContent).toMatch(/enthält eine Anweisung/);
     expect(screen.getByRole("button", { name: "Noch einmal prüfen" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Karte anlegen" })).toBeNull();

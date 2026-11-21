@@ -134,6 +134,7 @@ async function anfrage<T>(pfad: string, o: Optionen<T>): Promise<T> {
     if (o.signal?.aborted) throw fehler("abgebrochen");
     const token = versuch === 0 ? await accessToken() : await frischesToken();
     if (!token) break;
+    if (o.signal?.aborted) throw fehler("abgebrochen"); // während des Tokens abgebrochen
     const headers = new Headers({ Authorization: `Bearer ${token}`, Accept: "application/json" });
     const init: RequestInit = { method: o.methode ?? "GET", headers, cache: "no-store", credentials: "omit", redirect: "error" };
     if (o.body !== undefined) {

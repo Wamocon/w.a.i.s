@@ -132,7 +132,7 @@ export function LaborPlaetze({ terminId }: { terminId: string }) {
   return (
     <Karte titel="Plätze">
       <Abrufinhalt abruf={abruf} was="Die Plätze">
-        {(p) => <PlatzTabelle key={`${terminId}-${JSON.stringify(p)}`} terminId={terminId} plaetze={p} onGespeichert={abruf.neu} />}
+        {(p) => <PlatzTabelle key={terminId} terminId={terminId} plaetze={p} onGespeichert={abruf.neu} />}
       </Abrufinhalt>
     </Karte>
   );

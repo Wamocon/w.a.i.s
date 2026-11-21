@@ -35,6 +35,9 @@ import {
 
 export type Obj = Record<string, unknown>;
 
+/** Kennungen, die die Oberfläche in einen Pfad setzt (Termine): nur Buchstaben, Ziffern, Unterstrich und Bindestrich. */
+export const SICHERE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 export const istObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Text ohne Steuerzeichen, gekürzt; leer ergibt null. */
@@ -180,7 +183,7 @@ export function alsLaborStand(d: unknown): LaborProfil[] | null {
 
 export function alsTermin(z: unknown): Termin | null {
   if (!istObj(z)) return null;
-  const id = kurz(z.id, 64);
+  const id = typeof z.id === "string" && SICHERE_ID.test(z.id) ? z.id : null;
   const tag = tagAus(z.tag);
   const bis = tagAus(z.aufbewahrung_bis);
   const version = ganz(z.einwilligung_version);
@@ -246,8 +249,7 @@ export function alsKartenListe(d: unknown): KartenListe | null {
   if (!karten) return null;
   const o = istObj(d) ? d : {};
   const version = ganz(o.version);
-  const basis = ganz(o.basis_zeichen);
-  return { karten, version: version !== null && version > 0 ? version : null, basisZeichen: basis !== null && basis >= 0 ? basis : null };
+  return { karten, version: version !== null && version > 0 ? version : null };
 }
 
 export function alsZuordnung(d: unknown): Zuordnung | null {

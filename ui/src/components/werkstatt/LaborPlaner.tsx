@@ -35,9 +35,9 @@ function StandTabelle({ profile }: { profile: readonly LaborProfil[] }) {
           {profile.map((p, i) => (
             <tr key={`${p.art}-${p.platz ?? "x"}-${i}`}>
               <th scope="row">{p.kennung ?? p.art}</th>
-              <td>{p.platz ?? "–"}</td>
+              <td>{p.platz ?? "keine Angabe"}</td>
               <td><Pille art={p.aktiv ? "akzent" : "neutral"}>{p.aktiv ? "freigeschaltet" : "gesperrt"}</Pille></td>
-              <td className="num">{p.zeilen ?? "–"}</td>
+              <td className="num">{p.zeilen ?? "keine Angabe"}</td>
             </tr>
           ))}
         </tbody>
@@ -72,9 +72,11 @@ function StufenKarte() {
 
 function Plan({ termine, neuLaden }: { termine: readonly Termin[]; neuLaden: () => void }) {
   const [gewaehlt, setGewaehlt] = useState<string | null>(null);
+  const [meldung, setMeldung] = useState("");
   const [heute] = useState(() => heuteIso(new Date()));
   const vorgabe = standardTermin(termine, heute)?.id ?? NEUER_TERMIN;
-  const auswahl = gewaehlt !== null && (gewaehlt === NEUER_TERMIN || termine.some((t) => t.id === gewaehlt)) ? gewaehlt : vorgabe;
+  // Ein gerade angelegter Termin steht erst nach dem Neuladen in der Liste: bis dahin gilt die Wahl weiter, nie ein fremder Termin.
+  const auswahl = gewaehlt ?? vorgabe;
   const termin = termine.find((t) => t.id === auswahl) ?? null;
   return (
     <>
@@ -82,8 +84,13 @@ function Plan({ termine, neuLaden }: { termine: readonly Termin[]; neuLaden: () 
         <LaborTermin
           termine={termine}
           auswahl={auswahl}
-          onWaehlen={setGewaehlt}
-          onGeaendert={(id) => {
+          meldung={meldung}
+          onWaehlen={(id) => {
+            setMeldung("");
+            setGewaehlt(id);
+          }}
+          onGeaendert={(id, text) => {
+            setMeldung(text);
             setGewaehlt(id);
             neuLaden();
           }}

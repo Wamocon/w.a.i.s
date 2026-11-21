@@ -27,11 +27,13 @@ type Props = {
   /** Kennung des gewählten Termins oder NEUER_TERMIN */
   auswahl: string;
   onWaehlen: (auswahl: string) => void;
-  /** nach dem Speichern oder Löschen: die Liste neu laden, id = der gespeicherte Termin */
-  onGeaendert: (id: string | null) => void;
+  /** nach dem Speichern oder Löschen: die Liste neu laden, id = der gespeicherte Termin, text = die Meldung dazu */
+  onGeaendert: (id: string | null, text: string) => void;
+  /** Meldung zum letzten Speichern; sie steht beim Rahmen, damit sie den Wechsel zum gespeicherten Termin überlebt */
+  meldung: string;
 };
 
-export function LaborTermin({ termine, auswahl, onWaehlen, onGeaendert }: Props) {
+export function LaborTermin({ termine, auswahl, onWaehlen, onGeaendert, meldung }: Props) {
   const id = useId();
   const termin = termine.find((t) => t.id === auswahl) ?? null;
   return (
@@ -47,7 +49,7 @@ export function LaborTermin({ termine, auswahl, onWaehlen, onGeaendert }: Props)
           <option value={NEUER_TERMIN}>Neuer Termin</option>
         </select>
       </div>
-      <TerminFormularKarte key={termin?.id ?? NEUER_TERMIN} termin={termin} onGeaendert={onGeaendert} />
+      <TerminFormularKarte key={termin?.id ?? NEUER_TERMIN} termin={termin} onGeaendert={onGeaendert} meldung={meldung} />
     </Karte>
   );
 }
@@ -64,12 +66,11 @@ function FristenListe({ tag, bis }: { tag: string; bis: string }) {
   );
 }
 
-function TerminFormularKarte({ termin, onGeaendert }: { termin: Termin | null; onGeaendert: Props["onGeaendert"] }) {
+function TerminFormularKarte({ termin, onGeaendert, meldung }: { termin: Termin | null; onGeaendert: Props["onGeaendert"]; meldung: string }) {
   const id = useId();
   const [f, setF] = useState(() => (termin ? terminFormular(termin) : leererTermin()));
   const [probleme, setProbleme] = useState<LaborProblem[]>([]);
   const [fehler, setFehler] = useState<FehlerBild | null>(null);
-  const [meldung, setMeldung] = useState("");
   const [laeuft, setLaeuft] = useState(false);
   const [frage, setFrage] = useState(false);
   const problemRef = useRef<HTMLDivElement>(null);
@@ -80,7 +81,6 @@ function TerminFormularKarte({ termin, onGeaendert }: { termin: Termin | null; o
   const speichern = async (e: FormEvent) => {
     e.preventDefault();
     if (laeuft) return;
-    setMeldung("");
     setFehler(null);
     const r = terminPruefen(f);
     setProbleme(r.probleme);
@@ -91,8 +91,7 @@ function TerminFormularKarte({ termin, onGeaendert }: { termin: Termin | null; o
     setLaeuft(true);
     try {
       const ergebnis = termin ? await terminAendern(termin.id, r.eingabe) : await terminAnlegen(r.eingabe);
-      setMeldung(termin ? "Der Termin ist gespeichert." : "Der Termin ist angelegt.");
-      onGeaendert(ergebnis.termin?.id ?? termin?.id ?? null);
+      onGeaendert(ergebnis.termin?.id ?? termin?.id ?? null, termin ? "Der Termin ist gespeichert." : "Der Termin ist angelegt.");
     } catch (x) {
       setFehler(fehlerBildAus(x));
     } finally {
@@ -106,7 +105,7 @@ function TerminFormularKarte({ termin, onGeaendert }: { termin: Termin | null; o
     setFehler(null);
     try {
       await terminLoeschen(termin.id);
-      onGeaendert(null);
+      onGeaendert(null, "Der Termin ist gelöscht.");
     } catch (x) {
       setFehler(fehlerBildAus(x));
       setFrage(false);
@@ -174,7 +173,7 @@ function TerminFormularKarte({ termin, onGeaendert }: { termin: Termin | null; o
       </div>
       {frage && (
         <div className="ws-hinweis" role="group" aria-label="Termin löschen">
-          <p style={{ margin: "0 0 8px" }}>Wirklich löschen? Plätze, Checkliste und Zuordnung dieses Termins gehen mit.</p>
+          <p role="alert" style={{ margin: "0 0 8px" }}>Wirklich löschen? Plätze, Checkliste und Zuordnung dieses Termins gehen mit.</p>
           <div className="ws-aktionen">
             <button type="button" className="btn-primary" disabled={laeuft} onClick={() => void loeschen()}>Ja, löschen</button>
             <button type="button" className="btn-secondary" disabled={laeuft} onClick={() => setFrage(false)}>Abbrechen</button>

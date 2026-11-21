@@ -12,6 +12,7 @@ import {
   dauerText,
   msText,
   parseBereich,
+  stufeArt,
   zeitpunktText,
   zustand,
 } from "./werkstattAnsicht.ts";
@@ -55,9 +56,9 @@ test("Texte: Alter, Dauer, Millisekunden, Zeitpunkt, Anzahl", () => {
   assert.equal(dauerText(45), "45 s");
   assert.equal(dauerText(90), "1 min 30 s");
   assert.equal(dauerText(120), "2 min");
-  assert.equal(dauerText(null), "–");
+  assert.equal(dauerText(null), "keine Angabe");
   assert.equal(msText(1702.4), "1702 ms");
-  assert.equal(msText(null), "–");
+  assert.equal(msText(null), "keine Angabe");
   assert.equal(anzahlText(1, "Karte", "Karten"), "1 Karte");
   assert.equal(anzahlText(0, "Karte", "Karten"), "0 Karten");
   assert.match(zeitpunktText("2026-11-20T12:47:00"), /^20\.11\. 12:47$/);
@@ -70,6 +71,10 @@ test("Zustandswörter: bekannte Wörter mit Art, unbekannte neutral", () => {
   assert.deepEqual(zustand("zu"), { text: "zu", art: "warn" });
   assert.deepEqual(zustand("merkwürdig"), { text: "merkwürdig", art: "neutral" });
   assert.deepEqual(zustand(null), { text: "unbekannt", art: "neutral" });
+  assert.deepEqual(zustand("constructor"), { text: "constructor", art: "neutral" });
+  assert.equal(stufeArt("warnung"), "warn");
+  assert.equal(stufeArt("constructor"), "neutral");
+  assert.equal(stufeArt("kritisch"), "neutral");
   assert.deepEqual(STUFE_ART, { info: "ok", warnung: "warn", fehler: "fehler" });
 });
 

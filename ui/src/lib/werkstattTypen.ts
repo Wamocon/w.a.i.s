@@ -91,8 +91,6 @@ export type KartenListe = {
   karten: Karte[];
   /** Nummer der aktiven Version, null ohne veröffentlichte Version */
   version: number | null;
-  /** Grundmenge der Zeichen im Kern (ohne Wissenstexte der Karten), wenn der Dienst sie nennt */
-  basisZeichen: number | null;
 };
 export type KartenVersion = { version: number; erstelltAt: string | null; anzahlAenderungen: number; wissenZeichen: number; aktiv: boolean };
 

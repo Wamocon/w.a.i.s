@@ -210,13 +210,13 @@ describe("Aufrufe", () => {
   });
 
   it("Veröffentlichen: Prüfung, Karte und Ausführung", async () => {
-    fetchMock.mockResolvedValueOnce(antwort(200, { ok: true, probleme: [], zeichen: 4300 }));
-    expect(await kartenPruefen()).toEqual({ ok: true, probleme: [], zeichen: 4300 });
+    fetchMock.mockResolvedValueOnce(antwort(200, { ok: true, probleme: [], zeichen: 1200 }));
+    expect(await kartenPruefen()).toEqual({ ok: true, probleme: [], zeichen: 1200 });
     expect(aufruf(0).init.method).toBe("POST");
     fetchMock.mockResolvedValueOnce(antwort(201, { id: "k1", gilt_bis: "2026-11-20T10:05:00Z", ziel: { anzahl: 1, karten: ["W1"] } }));
     expect(await freigabeKarteAnlegen()).toMatchObject({ id: "k1", aenderungen: 1 });
-    fetchMock.mockResolvedValueOnce(antwort(200, { version: 5, zeichen: 4300 }));
-    expect(await freigabeAusfuehren("k1")).toEqual({ version: 5, zeichen: 4300 });
+    fetchMock.mockResolvedValueOnce(antwort(200, { version: 5, zeichen: 1200 }));
+    expect(await freigabeAusfuehren("k1")).toEqual({ version: 5, zeichen: 1200 });
     expect(aufruf(2).adresse).toMatch(/\/karten\/karte\/k1\/ausfuehren$/);
   });
 });

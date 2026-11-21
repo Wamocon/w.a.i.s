@@ -92,7 +92,6 @@ export function Karten({ onFaktor }: { onFaktor: () => void }) {
           key={editor.nr}
           start={editor.formular}
           karten={liste.karten}
-          basis={liste.basisZeichen}
           onSchliessen={() => setEditor(null)}
           onGespeichert={(id) => {
             setEditor(null);

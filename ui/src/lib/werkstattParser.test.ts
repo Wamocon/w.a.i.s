@@ -112,6 +112,7 @@ test("Termin und Plätze und Checkliste", () => {
   assert.deepEqual(alsTermin(TERMIN), { id: "t-1", tag: "2026-12-05", beginn: "09:00", ende: "17:00", einwilligungVersion: 1, status: "entwurf", aufbewahrungBis: "2026-12-18" });
   assert.equal(alsTermin({ ...TERMIN, status: "offen" }), null);
   assert.equal(alsTermin({ ...TERMIN, tag: "2026-02-31" }), null);
+  assert.equal(alsTermin({ ...TERMIN, id: "../x" }), null); // die Kennung kommt in einen Pfad
   assert.equal(alsTermine({ termine: [TERMIN, { ...TERMIN, id: "" }] }), null);
   assert.equal(alsTermine({ termine: [TERMIN] })?.length, 1);
   assert.deepEqual(alsPlaetze({ plaetze: [{ platz: 1, zweck: "besucher", kennung: "labor-01", gast: "Gast 1" }] }), [{ platz: 1, zweck: "besucher", kennung: "labor-01", gast: "Gast 1" }]);
@@ -130,9 +131,9 @@ test("Karte: Pflichtfelder streng, unbekannte Werkzeuge fallen weg", () => {
   assert.equal(alsKarte({ ...KARTE, wissen: "anderes" }), null);
   assert.equal(alsKarte({ ...KARTE, stand: "x" }), null);
   assert.equal(alsKarte({ ...KARTE, titel: "" }), null);
-  const l = alsKartenListe({ karten: [KARTE], version: 4, basis_zeichen: 4120 });
-  assert.deepEqual([l?.karten.length, l?.version, l?.basisZeichen], [1, 4, 4120]);
-  assert.deepEqual([alsKartenListe([KARTE])?.version, alsKartenListe({ karten: [] })?.basisZeichen], [null, null]);
+  const l = alsKartenListe({ karten: [KARTE], version: 4 });
+  assert.deepEqual([l?.karten.length, l?.version], [1, 4]);
+  assert.equal(alsKartenListe([KARTE])?.version, null);
   assert.equal(alsKartenListe({ karten: [{ ...KARTE, id: "x" }] }), null);
 });
 

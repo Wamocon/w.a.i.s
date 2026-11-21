@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { protokolleLaden } from "@/lib/werkstattApi";
-import { STUFEN, STUFE_ART, STUNDEN_OPTIONEN, anzahlText, zeitpunktText } from "@/lib/werkstattAnsicht";
+import { STUFEN, STUNDEN_OPTIONEN, anzahlText, stufeArt, zeitpunktText } from "@/lib/werkstattAnsicht";
 import type { ProtokollAntwort } from "@/lib/werkstattTypen";
 import { FehlerHinweis, Karte, Laedt, Pille } from "./Bausteine";
 import { useAbruf } from "./useAbruf";
@@ -20,7 +20,7 @@ function Tabelle({ antwort }: { antwort: ProtokollAntwort }) {
   return (
     <div className="ws-scroll">
       <table className="ws-tabelle">
-        <caption>
+        <caption role="status">
           {anzahlText(n, "Eintrag", "Einträge")}
           {n >= HOECHSTMENGE ? `, das ist die Höchstmenge. Wähle eine Quelle, eine Stufe oder einen kürzeren Zeitraum, um enger zu suchen.` : ""}
         </caption>
@@ -39,7 +39,7 @@ function Tabelle({ antwort }: { antwort: ProtokollAntwort }) {
               <td className="ws-mono">{zeitpunktText(z.zeit)}</td>
               <td className="ws-mono">{z.marke}</td>
               <td>
-                <Pille art={STUFE_ART[z.stufe] ?? "neutral"}>{z.stufe}</Pille>
+                <Pille art={stufeArt(z.stufe)}>{z.stufe}</Pille>
               </td>
               <td className="ws-mono">{z.code}</td>
               <td>{z.zahlen}</td>
@@ -109,7 +109,8 @@ export function Protokolle() {
           </div>
         </div>
         <div aria-busy={abruf.laedt || undefined}>
-          {abruf.fehler ? <FehlerHinweis fehler={abruf.fehler} onNeu={abruf.neu} /> : abruf.daten ? <Tabelle antwort={abruf.daten} /> : <Laedt was="Die Protokolle" />}
+          {abruf.fehler && <FehlerHinweis fehler={abruf.fehler} onNeu={abruf.neu} />}
+          {abruf.daten ? <Tabelle antwort={abruf.daten} /> : !abruf.fehler && <Laedt was="Die Protokolle" />}
         </div>
       </Karte>
     </div>

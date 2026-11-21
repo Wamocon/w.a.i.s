@@ -38,7 +38,7 @@ export function alterText(sekunden: number | null): string {
 
 /** Dauer in Sekunden als "1 min 30 s". */
 export function dauerText(sekunden: number | null): string {
-  if (sekunden === null || !Number.isFinite(sekunden) || sekunden < 0) return "–";
+  if (sekunden === null || !Number.isFinite(sekunden) || sekunden < 0) return "keine Angabe";
   const s = Math.round(sekunden);
   if (s < 60) return `${s} s`;
   const m = Math.floor(s / 60);
@@ -46,7 +46,7 @@ export function dauerText(sekunden: number | null): string {
 }
 
 export function msText(ms: number | null): string {
-  return ms === null || !Number.isFinite(ms) ? "–" : `${Math.round(ms)} ms`;
+  return ms === null || !Number.isFinite(ms) ? "keine Angabe" : `${Math.round(ms)} ms`;
 }
 
 /** "20.11. 14:47" in der Ortszeit; bei einem ungültigen Wert der Wert selbst. */
@@ -76,10 +76,16 @@ const ZUSTAENDE: Readonly<Record<string, { text: string; art: ZustandArt }>> = {
 /** Zustandswort der Betriebsansicht: ein bekanntes Wort bekommt Text und Art, alles andere erscheint gekürzt und neutral. */
 export function zustand(wert: string | null): { text: string; art: ZustandArt } {
   if (!wert) return { text: "unbekannt", art: "neutral" };
-  return ZUSTAENDE[wert.toLowerCase()] ?? { text: wert, art: "neutral" };
+  const schluessel = wert.toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ZUSTAENDE, schluessel) ? ZUSTAENDE[schluessel] : { text: wert, art: "neutral" };
 }
 
 export const STUFE_ART: Readonly<Record<string, ZustandArt>> = { info: "ok", warnung: "warn", fehler: "fehler" };
+
+/** Die Art zu einer Stufe; alles Unbekannte (auch Namen wie "constructor") ist neutral. */
+export function stufeArt(stufe: string): ZustandArt {
+  return Object.prototype.hasOwnProperty.call(STUFE_ART, stufe) ? STUFE_ART[stufe] : "neutral";
+}
 
 /** Ab diesem Alter der Betriebsdatei meldet die Ansicht, dass der Sammler nichts mehr liefert. */
 export const BETRIEB_ALT_S = 180;

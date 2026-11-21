@@ -16,7 +16,7 @@ export function WerkstattAbschnitt() {
       <p className="ez-klein">Sie ist nur aus dem Büronetz erreichbar und nur für Admins auf der Erlaubnisliste. Beim Veröffentlichen verlangt sie einen frischen Code deines zweiten Faktors.</p>
       <div>
         <a href="/werkstatt" target="_blank" rel="noopener noreferrer" className="btn-primary ws-link-knopf">
-          Werkstatt öffnen
+          Werkstatt öffnen <span className="sr-only">(öffnet in einem neuen Tab)</span>
         </a>
       </div>
     </Block>

@@ -73,6 +73,7 @@ export function KartenKatalog({ karten, gruppen, filter, onFilter, onBearbeiten,
                   <td>
                     {frage === k.id ? (
                       <div className="ws-aktionen" role="group" aria-label={`Karte ${k.id} löschen`}>
+                        <span className="sr-only" role="alert">Karte {k.id} wirklich löschen?</span>
                         <button type="button" className="btn-primary btn-small" disabled={beschaeftigt !== null} onClick={() => { setFrage(null); onLoeschen(k); }}>
                           Ja, {k.id} löschen
                         </button>

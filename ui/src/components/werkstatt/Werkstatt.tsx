@@ -96,7 +96,7 @@ export function Werkstatt({ sitzung }: { sitzung: Sitzung }) {
   }, [bereich]);
 
   if (labor) return <KeinZugriff text="Mit einem Laborprofil gibt es keinen Zugang zur Werkstatt." sitzung={sitzung} />;
-  if (ich.fehler) {
+  if (ich.fehler && !ich.daten) {
     if (ich.fehler.code === "nicht_berechtigt" || ich.fehler.code === "labor_profil") return <KeinZugriff text={TEXT_KEIN_ZUGRIFF} sitzung={sitzung} />;
     return (
       <Rahmen>
